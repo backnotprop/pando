@@ -1,0 +1,15 @@
+This folder contains a copy of the macOS FSKit mount app and extension from
+Oak (https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak),
+Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache
+License, Version 2.0 (see LICENSE-oak-Apache-2.0). Source: macos/OakFS at
+commit 8d35309d4187dfceefe03a74cf4612c179ab524e (2026-09-27).
+
+Modified for the Pando spike on 2026-10-02 (Apache 2.0 section 4(b)):
+- project.yml: DEVELOPMENT_TEAM set to the Pando owner's team; bundle id
+  prefix dev.pando; bundle ids dev.pando.mount and dev.pando.mount.Extension;
+  product name "Pando Mount"; FSShortName PandoFS; the mach-lookup exception
+  renamed to dev.pando.mount.
+- Extension/OakFS.entitlements: the mach-lookup name renamed to dev.pando.mount.
+- Extension/DaemonClient.swift: kMachService renamed to dev.pando.mount.
+- HostApp/OakMounterApp.swift: the extension bundle id renamed.
+No other source was changed.

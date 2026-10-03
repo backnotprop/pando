@@ -160,6 +160,30 @@ try {
   await sleep(3000);
   const d = [...sent].filter(([w]) => arrivals.has(w)).map(([w, t]) => arrivals.get(w) - t);
   say(`  event to the live socket (worktree report sent to frame received, ${d.length}/${LIVE})  ${d.length ? fmt(d) : "none"}`);
+  // A push goes through the branch-facts job first (commit count, head title), then the feed.
+  const pushArrivals = new Map();
+  ws.onmessage = (e) => {
+    try {
+      const f = JSON.parse(e.data);
+      if (f.type === "event" && f.event.kind === "branch.opened") pushArrivals.set(`${f.event.monorepo}/${f.event.branch}`, performance.now());
+    } catch {}
+  };
+  const pushSent = new Map();
+  for (let k = 0; k < Math.min(NEEDS, 5); k++) {
+    const m = made[k];
+    const src = join(work, m);
+    git(["checkout", "-q", "main"], src);
+    git(["checkout", "-qb", `p${k}`], src);
+    writeFileSync(join(src, `p${k}.txt`), "p\n");
+    git(["add", "-A"], src);
+    git(["commit", "-qm", `p${k}`], src);
+    const t = performance.now();
+    git(["push", "-q", clone[m], `p${k}`], src);
+    pushSent.set(`${m}/p${k}`, { t, git: performance.now() - t });
+    await sleep(4000); // git runs synchronously here: wait for the frame before the next push blocks the loop
+  }
+  const pd = [...pushSent].filter(([k]) => pushArrivals.has(k)).map(([k, v]) => pushArrivals.get(k) - v.t - v.git);
+  say(`  a push to the live socket (git push returned to frame received, ${pd.length}/${pushSent.size})  ${pd.length ? fmt(pd) : "none"}`);
   ws.close();
 
   // ── Past the window: trim the feed to nothing; pages read the monorepos' logs ──

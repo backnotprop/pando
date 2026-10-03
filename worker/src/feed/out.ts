@@ -429,12 +429,12 @@ export class FeedOut {
 
   // ── The summary line ─────────────────────────────────────────────────────
 
-  summary(): Summary {
+  summary(needs: NeedRow[] = this.needs()): Summary {
     let last = this.get("last_activity_at");
     if (!last) last = this.row<{ t: string | null }>("SELECT MAX(at) AS t FROM events WHERE feed IS NOT NULL")?.t ?? null;
     const p = this.presence();
     const counts = { ready: 0, conflicts: 0, failing: 0 };
-    for (const n of this.needs()) counts[n.state]++;
+    for (const n of needs) counts[n.state]++;
     return { last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts, members: this.memberCount(), large: this.isLarge(), at: now() };
   }
 
@@ -470,10 +470,11 @@ export class FeedOut {
     this.set("tick_due", null);
     this.set("tick_last", String(Date.now()));
     if (!this.monorepo()) return;
-    const s = this.summary();
+    const rows = this.needs();
+    const s = this.summary(rows);
     const { at: _at, ...same } = s;
     const needsNow: Record<string, NeedState> = {};
-    for (const n of this.needs()) needsNow[`${n.repo}\n${n.branch}`] = n.state;
+    for (const n of rows) needsNow[`${n.repo}\n${n.branch}`] = n.state;
     const needsBefore = JSON.parse(this.get("needs_last") ?? "{}") as Record<string, NeedState>;
     const changed: NeedChange[] = [];
     for (const k of new Set([...Object.keys(needsNow), ...Object.keys(needsBefore)])) {

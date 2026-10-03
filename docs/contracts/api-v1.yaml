@@ -7,7 +7,9 @@ info:
     Owner: the server-git lane. Others ask pando-ops for changes.
 
     Shape:
-    - Every route is under `/v1/monorepos/{monorepo}`. A monorepo holds
+    - Every route is under `/v1/monorepos/{monorepo}`, except the user's
+      own (`/v1/user`, `/v1/monorepos`) and the web home's, which span all of
+      the person's monorepos (`/v1/events`, `/v1/branches`). A monorepo holds
       repos. A plain git repo is a monorepo of kind `repo` holding exactly
       one repo, at path `.`, and no meta layer; it uses the same routes.
       The meta layer's routes (`/v1/monorepos/{monorepo}/meta/...`) are in
@@ -422,7 +424,18 @@ paths:
     get:
       operationId: listMonorepos
       summary: The monorepos this user belongs to
+      description: |
+        By name. With `?summary=1` (the web home): most recently active first,
+        each with its one line (`MonorepoSummary`), answered from the person's
+        feed in one call (no call per monorepo). The line is up to 10 s behind
+        (60 s for a monorepo of more than 100 members): each monorepo sends it
+        only when it changed, at most that often. A monorepo the feed has not
+        joined yet (seconds after it was made or joined) has nulls.
       tags: [monorepos]
+      parameters:
+        - name: summary
+          in: query
+          schema: { type: string, enum: ["1"] }
       responses:
         "200":
           description: OK
@@ -434,7 +447,147 @@ paths:
                 properties:
                   monorepos:
                     type: array
-                    items: { $ref: "#/components/schemas/Monorepo" }
+                    items:
+                      oneOf:
+                        - $ref: "#/components/schemas/Monorepo"
+                        - $ref: "#/components/schemas/MonorepoSummary"
+  /v1/events:
+    get:
+      operationId: listActivity
+      summary: The activity log across the person's monorepos (JSON pages, or the person's WebSocket)
+      description: |
+        The web home's log: what happened in every monorepo the person belongs
+        to, newest first, each line with its `monorepo`. People, machines and
+        worktrees only: no agent field (owner ruling).
+
+        Lines are the activity kinds: `push`, `branch.opened`,
+        `branch.deleted`, `merged`, `review`, `status` (only when a check's
+        state changes), `worktree.reported` (a new worktree only),
+        `worktree.removed`, `meta.saved` (not files a merge brought in). The
+        cache-sync kinds stay on the per-monorepo stream.
+
+        Order and cursor: every line has the display key `(at, monorepo, seq)`.
+        `next` is an opaque cursor, "older than this line"; pass it back as
+        `cursor`. It is stable while lines arrive: new lines are newer, and a
+        late or repeated delivery never moves a line already paged past.
+
+        Where lines come from: each person has a feed (a Durable Object). A
+        monorepo of 100 members or fewer copies its lines into its members'
+        feeds; a larger one is read from its own log on every page. A feed
+        keeps 7 days (at most 1,000,000 lines); older pages, and a monorepo
+        the feed joined with a partial history, are read from the monorepos'
+        own logs, which keep everything. At most 20 logs are read for one
+        page, most recently active first; the rest are named in `skipped`
+        (narrow with `in` to read one of them).
+
+        With `Upgrade: websocket`: one socket per person, for every small
+        monorepo. Send `{"type": "hello", "since": <landed>}` (since
+        optional): the feed replays the lines that landed after it (at most
+        500, else one `resync` frame: refetch the first page), then
+        `{"type": "caught_up", "landed"}`. `landed` is the feed's own arrival
+        number, not a time: keep the highest seen and send it on reconnect.
+        Live frames:
+        - `{"type": "event", "landed", "event": FeedEvent}`: place it by its
+          display key. The same line can arrive again with a fuller
+          `summary` (a push's commit count); replace by `(monorepo, seq)`.
+        - `{"type": "summary", "monorepo", "summary": FeedSummary}`.
+        - `{"type": "needs", "monorepo", "changed": [{repo, branch, state}], "more"}`:
+          branches that entered or left "needs you" (`state` null: left);
+          `more`: over 50 changed, refetch listNeeds.
+        - `{"type": "joined", "monorepo", "large"}`, `{"type": "left", "monorepo"}`:
+          refetch the first page and the list.
+        The text `ping` gets `pong`. Lines of large monorepos do not come
+        here: open their own event socket with `topics=feed` (the home opens
+        at most 5; it refreshes the others every 60 s).
+
+        Cookie or Bearer. With the cookie, the upgrade must carry Pando's own
+        `Origin` (403 `bad_origin`).
+      tags: [monorepos]
+      parameters:
+        - name: cursor
+          in: query
+          description: A `next` from an earlier page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: in
+          in: query
+          description: One monorepo's name. The home narrows by monorepo only.
+          schema: { $ref: "#/components/schemas/Name" }
+      responses:
+        "200":
+          description: A page, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, next, from_logs, skipped]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/FeedEvent" }
+                  next: { type: [string, "null"], description: The cursor for the next (older) page; null at the end. }
+                  from_logs: { type: boolean, description: "True when the page went past the feed's window and read monorepos' own logs." }
+                  skipped:
+                    type: array
+                    description: Monorepos not read for this page (over 20 logs); narrow with `in` to read one.
+                    items: { type: string }
+        "101": { description: The person's WebSocket. }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/branches:
+    get:
+      operationId: listNeeds
+      summary: '"Needs you": open branches that are ready, conflicting or failing, across the person''s monorepos'
+      description: |
+        From stored branch facts and statuses (no Artifacts call), asked only
+        of the monorepos whose counts in their summary line are not zero (up
+        to 10 s behind), most recently active first, at most 50 monorepos (the
+        rest in `skipped`). One state per branch, in this order:
+        - `conflicts`: the stored dry run for the branch's current head
+          conflicts with main;
+        - `failing`: a check on the head failed or errored;
+        - `ready`: facts for the current main and head say clean, and the
+          merge gate's checks pass.
+        Facts are computed for branches pushed in the last 7 days; an older
+        branch that is not re-pushed drops out of `ready` when main moves.
+        Rows are newest push first.
+      tags: [branches]
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [open], default: open }
+        - name: needs
+          in: query
+          description: Comma-separated, some of ready, conflicts, failing (default all three).
+          schema: { type: string, default: "ready,conflicts,failing" }
+        - name: in
+          in: query
+          schema: { $ref: "#/components/schemas/Name" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branches, truncated, skipped]
+                properties:
+                  branches:
+                    type: array
+                    items: { $ref: "#/components/schemas/NeedRow" }
+                  truncated: { type: boolean }
+                  skipped:
+                    type: array
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{monorepo}:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -539,8 +692,23 @@ paths:
 
         Topics (`?topics=`, comma-separated, at most 10): `all` (default),
         `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
-        `meta` (meta_files and presence), `kind:<kind>`. `pando worktree
-        follow` needs only `main:<repo>`.
+        `meta` (meta_files and presence), `kind:<kind>`, `feed` (the
+        activity lines as the person's feed shows them, as
+        `{"type": "feed", "event": FeedEvent}` frames: the home uses it for a
+        monorepo of more than 100 members). `pando worktree follow` needs
+        only `main:<repo>`.
+
+        Presence (the home's `machines_active` and `worktrees_active`): a
+        follower sends, after the socket opens and whenever a worktree is
+        added or removed on its machine,
+        `{"type": "hello", "machine": "<machine>", "worktrees": ["<worktree id>", ...]}`:
+        the ids it reported with putWorktree for its branch worktrees in this
+        monorepo (not read-only mains), at most 1,000, each 1 to 64 of
+        `A-Z a-z 0-9 _ -`. `machine` is optional (default: the credential's
+        name). Each hello replaces the last one of that socket; presence ends
+        when the socket closes. Answer: `{"type": "hello_ok", "machine",
+        "worktrees", "machines_active", "worktrees_active"}`, or an `error`
+        frame.
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
         latest `limit` with no `since`. With `Upgrade: websocket`: events after
@@ -1576,6 +1744,91 @@ components:
         agent: { type: [string, "null"] }
         row: { description: "The changed row in its REST shape; on a delete, the last row (or its key fields)." }
         partial: { type: boolean, description: "True on branch events: the row has the branch's stored fields only." }
+    FeedEvent:
+      type: object
+      description: One line of the activity log (listActivity, the person's socket, the `feed` topic).
+      required: [monorepo, seq, at, kind, repo, repo_path, branch, actor, machine, summary]
+      properties:
+        monorepo: { type: string }
+        seq: { type: integer, description: The monorepo's event seq. `(monorepo, seq)` is the line's identity. }
+        at: { type: string, format: date-time }
+        kind: { type: string, enum: [push, branch.opened, branch.deleted, merged, review, status, worktree.reported, worktree.removed, meta.saved] }
+        repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
+        repo_path: { type: [string, "null"], description: "`projects/web`; `.` for the meta layer and a plain repo." }
+        branch: { type: [string, "null"] }
+        actor: { type: [string, "null"], description: "The person (a login). For meta.saved, the author's name." }
+        machine: { type: [string, "null"], description: The credential's name (the machine or sandbox). }
+        summary:
+          type: [object, "null"]
+          description: |
+            Per kind:
+            - push, branch.opened: `commits` (new commits in this push; for a
+              new branch, those not on main), `head_title`, `head`, `before`.
+              `commits` and `head_title` arrive a moment after the push (the
+              branch-facts job adds them); null when they could not be read.
+              `commits_more`: true when a first push of main had more than 250.
+            - branch.deleted: `before`.
+            - merged: `merge_commit`, `forced`, `title` (the branch's), `head`.
+            - review: `verdict`, `comments` (a count), `head`.
+            - status: `context`, `state`, `description`, `target_url`, `sha`,
+              `duration_s` (from the run's first `pending` to this state; null
+              without one).
+            - worktree.reported, worktree.removed: `path`, `worktree` (its id).
+            - meta.saved: `path`, `version`, `deleted`.
+    FeedSummary:
+      type: object
+      description: A monorepo's one line on the home.
+      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, at]
+      properties:
+        last_activity_at: { type: [string, "null"], format: date-time, description: Its newest activity line. }
+        worktrees_active: { type: integer, description: Worktrees named in the hellos of open follower sockets. }
+        machines_active: { type: integer, description: Machines with an open follower socket that said hello. }
+        needs:
+          type: object
+          required: [ready, conflicts, failing]
+          properties:
+            ready: { type: integer }
+            conflicts: { type: integer }
+            failing: { type: integer }
+        members: { type: integer }
+        large: { type: boolean, description: "More than 100 members: its lines are read on demand, not copied to feeds." }
+        at: { type: string, format: date-time, description: When the monorepo computed it. }
+    MonorepoSummary:
+      allOf:
+        - $ref: "#/components/schemas/Monorepo"
+        - type: object
+          description: "listMonorepos with ?summary=1. Nulls until the person's feed has the monorepo's line."
+          properties:
+            last_activity_at: { type: [string, "null"], format: date-time }
+            worktrees_active: { type: [integer, "null"] }
+            machines_active: { type: [integer, "null"] }
+            needs:
+              type: [object, "null"]
+              properties:
+                ready: { type: integer }
+                conflicts: { type: integer }
+                failing: { type: integer }
+            members: { type: [integer, "null"] }
+            large: { type: [boolean, "null"] }
+    NeedRow:
+      type: object
+      required: [monorepo, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]
+      properties:
+        monorepo: { type: string }
+        repo: { type: string }
+        repo_path: { type: string }
+        branch: { type: string }
+        title: { type: [string, "null"] }
+        head: { type: string }
+        author: { type: [string, "null"], description: The user whose first push made the branch. }
+        pushed_machine: { type: [string, "null"], description: The credential that last pushed it. }
+        state: { type: string, enum: [ready, conflicts, failing] }
+        checks:
+          type: object
+          properties:
+            state: { type: string }
+            failing: { type: array, items: { type: string }, description: Contexts that failed or errored. }
+        updated_at: { type: [string, "null"], format: date-time, description: The last push. }
     Commit:
       type: object
       required: [sha, parents, title, message, author, committer, trailers]
@@ -1605,6 +1858,15 @@ components:
             agent: { type: [string, "null"] }
             worktree: { type: [string, "null"] }
             machine: { type: [string, "null"] }
+        co_authors:
+          type: array
+          description: "`Co-authored-by: Name <email>` lines from the message's trailers (its last paragraph), each once, as git and GitHub read them."
+          items:
+            type: object
+            required: [name, email]
+            properties:
+              name: { type: string }
+              email: { type: [string, "null"] }
     Member:
       type: object
       required: [login, name, role, added_at]
@@ -1669,6 +1931,7 @@ components:
         merged_at: { type: [string, "null"], format: date-time }
         merged_machine: { type: [string, "null"], description: "The name of the credential used to merge: the machine or sandbox." }
         merged_agent: { type: [string, "null"], description: "The agent that merged, from X-Pando-Agent, if one said so." }
+        pushed_machine: { type: [string, "null"], description: "The name of the credential that last pushed the branch: the machine or sandbox." }
         forced: { type: [boolean, "null"], description: "True when the merge went past red or missing checks with force=1." }
         created_at: { type: [string, "null"], format: date-time }
         updated_at: { type: [string, "null"], format: date-time }

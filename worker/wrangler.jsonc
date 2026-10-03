@@ -1,0 +1,19 @@
+// The Pando Worker. Development deploys as pando-dev on the owner's account.
+// Pando keeps to its own resources: Workers named pando-*, the Artifacts
+// namespace pando-dev, and never anything named workspaces-*.
+// Artifacts and R2 bindings are added by the server-git lane from the docs.
+{
+  "name": "pando-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MONOREPO", "class_name": "MonorepoObject" },
+      { "name": "META", "class_name": "MetaLayerObject" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MonorepoObject", "MetaLayerObject"] }
+  ]
+}

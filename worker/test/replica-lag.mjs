@@ -9,6 +9,14 @@
 // replica that answered had not seen the revoke yet. DELAYS and TRIALS set
 // the grid. Credentials stay in memory and are never printed; each one is
 // revoked by the trial itself.
+//
+// Run it far from the primary (ENAM). Near it, D1 serves reads from the
+// primary and this always reads 0. On 2026-10-03, the requests from this Mac
+// arrived through JAX and every read went to the primary. The far-region
+// numbers came from a throwaway Worker: a Durable Object placed with
+// locationHint (wnam, weur, apac, oc) called pando-dev through a service
+// binding, so pando-dev ran there. It found 0 of 160 revoked credentials
+// still working, even 0 ms after the revoke.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

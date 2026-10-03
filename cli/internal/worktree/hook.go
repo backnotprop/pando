@@ -54,6 +54,10 @@ type Identity struct {
 	Machine  string
 	Agent    string // optional
 	Kind     string // fuse, sparse
+
+	// The signed-in person (pando login): commits are authored as them.
+	UserName  string
+	UserEmail string
 }
 
 // InstallHook writes the hooks into gitDir/hooks, points core.hooksPath at
@@ -79,6 +83,12 @@ func InstallHook(ctx context.Context, gitDir string, id Identity) error {
 	}
 	if id.Agent != "" {
 		set = append(set, [2]string{"pando.agent", id.Agent})
+	}
+	if id.UserName != "" {
+		set = append(set, [2]string{"user.name", id.UserName})
+	}
+	if id.UserEmail != "" {
+		set = append(set, [2]string{"user.email", id.UserEmail})
 	}
 	for _, kv := range set {
 		if _, err := g.Run(ctx, "config", kv[0], kv[1]); err != nil {

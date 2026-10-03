@@ -146,9 +146,9 @@ func CredentialEnv(cloneURL string) []string {
 	return env
 }
 
-// writeCredentialConfig stores credentialConfig in a git folder's config so
+// WriteCredentialConfig stores credentialConfig in a git folder's config so
 // git inside the worktree (push, fetch, lazy blob fetches) finds the token.
-func writeCredentialConfig(ctx context.Context, gitDir, cloneURL string) error {
+func WriteCredentialConfig(ctx context.Context, gitDir, cloneURL string) error {
 	kv := credentialConfig(cloneURL)
 	if len(kv) == 0 {
 		return nil

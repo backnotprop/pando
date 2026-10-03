@@ -407,3 +407,13 @@ func localOnly(patterns []string, rel string) bool {
 	}
 	return false
 }
+
+// ProjectAt reads one git checkout as a project, for answers that turn a
+// folder into a repo.
+func ProjectAt(ctx context.Context, rel, checkout string) (*Project, error) {
+	pr, q, _ := project(ctx, rel, checkout)
+	if q != nil {
+		return nil, fmt.Errorf("%s %s", rel, q.Problem)
+	}
+	return pr, nil
+}

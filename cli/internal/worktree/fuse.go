@@ -124,7 +124,7 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 			return err
 		}
 	} else {
-		if err := writeCredentialConfig(ctx, gd, s.CloneURL); err != nil {
+		if err := WriteCredentialConfig(ctx, gd, s.CloneURL); err != nil {
 			return err
 		}
 		if err := InstallHook(ctx, gd, s.Identity); err != nil {

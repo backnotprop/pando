@@ -58,7 +58,7 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 		}
 		return setWritable(dst, false)
 	}
-	if err := writeCredentialConfig(ctx, gitDir, s.CloneURL); err != nil {
+	if err := WriteCredentialConfig(ctx, gitDir, s.CloneURL); err != nil {
 		return err
 	}
 	if err := InstallHook(ctx, gitDir, s.Identity); err != nil {

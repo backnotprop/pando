@@ -18,9 +18,17 @@ import (
 
 // Home is the machine's own config: ~/.pando/ or $PANDO_HOME.
 type Home struct {
-	Dir     string
-	Server  string `toml:"server"`
-	Machine string `toml:"machine"`
+	Dir      string             `toml:"-"`
+	Server   string             `toml:"server"`
+	Machine  string             `toml:"machine,omitempty"`
+	Accounts map[string]Account `toml:"accounts,omitempty"`
+}
+
+// Account is who this machine is signed in as on one server host. The
+// secret credential is kept apart, in ~/.pando/credentials/<host>.
+type Account struct {
+	Name  string `toml:"name"`
+	Email string `toml:"email,omitempty"`
 }
 
 // HomeDir is ~/.pando unless PANDO_HOME says otherwise.
@@ -73,43 +81,115 @@ func defaultMachine() string {
 	return strings.ToLower(name)
 }
 
-// SaveServer writes server (and keeps machine) to ~/.pando/config.toml.
-func (h *Home) SaveServer(server string) error {
+// Save writes ~/.pando/config.toml (never a secret).
+func (h *Home) Save() error {
 	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
 		return err
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "server = %q\n", strings.TrimRight(server, "/"))
-	if m := os.Getenv("PANDO_MACHINE"); m == "" && h.Machine != "" && h.Machine != defaultMachine() {
-		fmt.Fprintf(&b, "machine = %q\n", h.Machine)
+	out := *h
+	if out.Machine == defaultMachine() || os.Getenv("PANDO_MACHINE") != "" {
+		out.Machine = ""
 	}
-	h.Server = strings.TrimRight(server, "/")
+	var b strings.Builder
+	b.WriteString("# Pando on this machine (docs/contracts/formats.md, section 7). No secrets here.\n")
+	if err := toml.NewEncoder(&b).Encode(out); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(h.Dir, "config.toml"), []byte(b.String()), 0o644)
 }
 
-// ErrNoToken means no token is set for a monorepo.
-var ErrNoToken = errors.New("no Pando token for this monorepo: run `pando login <monorepo>` (or set PANDO_TOKEN)")
-
-// tokenPath is ~/.pando/tokens/<server host>/<monorepo>.
-func (h *Home) tokenPath(server, mono string) string {
-	host := server
-	if u, err := url.Parse(server); err == nil && u.Host != "" {
-		host = u.Host
-	} else if strings.HasPrefix(server, "file://") {
-		host = "file"
+// Host is the host part of a server URL ("file" for file:// servers).
+func Host(server string) string {
+	if strings.HasPrefix(server, "file://") {
+		return "file"
 	}
-	host = strings.NewReplacer("/", "_", ":", "_").Replace(host)
-	return filepath.Join(h.Dir, "tokens", host, mono)
+	if u, err := url.Parse(server); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return strings.NewReplacer("/", "_", ":", "_").Replace(server)
 }
 
-// Token returns the API token for a monorepo on a server. Tokens are per
-// monorepo (api-v1.yaml). Order: PANDO_TOKEN, ~/.pando/tokens/<host>/<mono>,
-// ~/.pando/token. The token is never printed or logged by any caller.
+func safeHost(server string) string { return strings.NewReplacer("/", "_", ":", "_").Replace(Host(server)) }
+
+// CredentialPath is ~/.pando/credentials/<host>: this machine's credential
+// for one server, mode 600.
+func (h *Home) CredentialPath(server string) string {
+	return filepath.Join(h.Dir, "credentials", safeHost(server))
+}
+
+// Account returns who this machine is signed in as on a server.
+func (h *Home) Account(server string) (Account, bool) {
+	a, ok := h.Accounts[Host(server)]
+	return a, ok
+}
+
+// SaveCredential stores the machine credential for a server (mode 600, in
+// a folder of mode 700) and who it signs in as.
+func (h *Home) SaveCredential(server, credential string, acct Account) error {
+	p := h.CredentialPath(server)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, []byte(credential+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		return err
+	}
+	if h.Accounts == nil {
+		h.Accounts = map[string]Account{}
+	}
+	h.Accounts[Host(server)] = acct
+	return h.Save()
+}
+
+// Logout deletes the machine credential for a server.
+func (h *Home) Logout(server string) (bool, error) {
+	removed := false
+	if err := os.Remove(h.CredentialPath(server)); err == nil {
+		removed = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if legacy := filepath.Join(h.Dir, "tokens", safeHost(server)); dirExists(legacy) {
+		if err := os.RemoveAll(legacy); err != nil {
+			return removed, err
+		}
+		removed = true
+	}
+	if _, ok := h.Accounts[Host(server)]; ok {
+		delete(h.Accounts, Host(server))
+		return true, h.Save()
+	}
+	return removed, nil
+}
+
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// ErrNoToken means this machine is not signed in to a server.
+var ErrNoToken = errors.New("this machine is not signed in: run `pando login` (or set PANDO_TOKEN)")
+
+// Token returns the credential to use against a server, for a monorepo.
+// Order: PANDO_TOKEN; a monorepo token from the first API version,
+// ~/.pando/tokens/<host>/<monorepo>; the machine credential
+// ~/.pando/credentials/<host> (pando login). It is never printed or logged.
 func (h *Home) Token(server, mono string) (string, error) {
 	if v := os.Getenv("PANDO_TOKEN"); v != "" {
 		return strings.TrimSpace(v), nil
 	}
-	for _, p := range []string{h.tokenPath(server, mono), filepath.Join(h.Dir, "token")} {
+	var paths []string
+	if mono != "" {
+		paths = append(paths, filepath.Join(h.Dir, "tokens", safeHost(server), mono))
+	}
+	paths = append(paths, h.CredentialPath(server))
+	for _, p := range paths {
 		b, err := os.ReadFile(p)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -140,7 +220,7 @@ func ReadToken(r io.Reader) (string, error) {
 // SaveToken writes a monorepo's token to ~/.pando/tokens/<host>/<mono>,
 // mode 600, in folders of mode 700.
 func (h *Home) SaveToken(server, mono, token string) error {
-	p := h.tokenPath(server, mono)
+	p := filepath.Join(h.Dir, "tokens", safeHost(server), mono)
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}

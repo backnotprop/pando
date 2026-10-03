@@ -1,6 +1,7 @@
 // A Worker with only the meta layer routes, for testing the live lane with
 // `wrangler dev` before it is wired into src/index.ts. Never deployed.
 //
+// POST /test/destroy calls the object's destroy() for an e2e-* monorepo.
 // With the Artifacts binding (wrangler.artifacts.jsonc), POST /test/meta-repo
 // makes, reads and deletes the meta layer repo of a test monorepo. It only
 // touches repos named e2e-*--meta.
@@ -73,6 +74,12 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/healthz") return new Response("ok\n");
     if (path === "/test/meta-repo" && request.method === "POST") return testRoute(request, env);
+    if (path === "/test/destroy" && request.method === "POST") {
+      // What DELETE /v1/monorepos/{m} does to the meta layer object.
+      const { monorepo } = (await request.json()) as { monorepo: string };
+      if (!/^e2e-[a-z0-9-]+$/.test(monorepo)) return Response.json({ error: "test monorepos are e2e-*" }, { status: 400 });
+      return Response.json(await env.META.get(env.META.idFromName(monorepo)).destroy());
+    }
     return (await routeMeta(request, env)) ?? new Response("not found\n", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

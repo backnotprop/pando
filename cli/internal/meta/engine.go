@@ -56,6 +56,8 @@ type Engine struct {
 	dlFails   map[string]int        // failed downloads in a row, by path
 	transfers chan struct{}         // at most 2 uploads or downloads at a time
 
+	fatal error // set when the monorepo is gone: Run and CatchUp return it
+
 	untilSynced bool // return from Run once everything here is sent
 	textOnly    bool // CatchUp for a --text-only clone (saved in the state)
 	hooks       Hooks
@@ -86,6 +88,11 @@ func (c *seen) key() string {
 	}
 	return c.sha
 }
+
+// closeDeleted is the close code the object sends when its monorepo is deleted.
+const closeDeleted websocket.StatusCode = 4404
+
+var errDeleted = errors.New("the monorepo was deleted on the server")
 
 type event struct {
 	gen      int
@@ -164,6 +171,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			return nil
 		case ev := <-e.events:
 			e.handle(ctx, ev)
+			if e.fatal != nil {
+				return e.fatal
+			}
 			if e.untilSynced && !e.live && e.attempt >= 3 {
 				return fmt.Errorf("could not reach %s (%d tries); changes wait in the outbox for the next sync", e.cfg.Server, e.attempt)
 			}
@@ -217,6 +227,9 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 			return errors.New("the download did not finish in 10 minutes")
 		case ev := <-e.events:
 			if ev.err != nil && ev.gen == e.gen {
+				if websocket.CloseStatus(ev.err) == closeDeleted {
+					return errDeleted
+				}
 				return fmt.Errorf("download: %w", ev.err)
 			}
 			e.handle(ctx, ev)
@@ -415,6 +428,9 @@ func (e *Engine) handle(ctx context.Context, ev event) {
 		e.conn = ev.conn
 		e.live = false
 		e.hello(ctx)
+	case ev.err != nil && websocket.CloseStatus(ev.err) == closeDeleted:
+		e.fatal = errDeleted
+		e.cfg.Log.Printf("%v; this folder keeps its files and stops syncing", errDeleted)
 	case ev.err != nil:
 		wasUp := e.conn != nil
 		e.dialing = false

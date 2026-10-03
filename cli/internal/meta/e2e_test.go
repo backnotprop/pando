@@ -7,8 +7,9 @@ package meta
 //	PANDO_META_TEST_URL=https://pando-dev.plannotator.workers.dev go test ./internal/meta -run E2E -v
 //
 // Against wrangler dev each test has its own monorepo, so its own object.
-// Against a deployed Worker (https) a run makes one monorepo, e2e-live-<time>
-// (there is no delete), and each test works in its own folder in it; the
+// Against a deployed Worker (https) a run makes one monorepo, e2e-live-<time>,
+// and each test works in its own folder in it (the init test makes
+// e2e-live-<time>-init); both are deleted when the run ends. The
 // credential is this machine's pando login (config.Credential), passed
 // to the engines as PANDO_TOKEN and never printed.
 
@@ -18,6 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -46,9 +48,32 @@ type testEnv struct {
 
 var remote struct {
 	sync.Mutex
-	token string
-	mono  string
-	err   error
+	server  string
+	token   string
+	mono    string
+	err     error
+	created []string // deleted when the run ends (TestMain)
+}
+
+// TestMain deletes the monorepos a run made on a deployed Worker
+// (DELETE /v1/monorepos/{m}?confirm={m}, owner only).
+func TestMain(m *testing.M) {
+	code := m.Run()
+	remote.Lock()
+	for _, name := range remote.created {
+		u := remote.server + "/v1/monorepos/" + url.PathEscape(name) + "?confirm=" + url.QueryEscape(name)
+		req, _ := http.NewRequest(http.MethodDelete, u, nil)
+		req.Header.Set("Authorization", "Bearer "+remote.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "deleting monorepo %s: %v\n", name, err)
+			continue
+		}
+		resp.Body.Close()
+		fmt.Fprintf(os.Stderr, "deleted monorepo %s: %d\n", name, resp.StatusCode)
+	}
+	remote.Unlock()
+	os.Exit(code)
 }
 
 func remoteToken(t *testing.T, server string) string {
@@ -79,6 +104,8 @@ func createMonorepo(t *testing.T, server, token, name string) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("creating monorepo %s: %d %s", name, resp.StatusCode, out)
 	}
+	remote.server = server
+	remote.created = append(remote.created, name)
 	t.Logf("made monorepo %s on %s", name, server)
 }
 
@@ -119,6 +146,8 @@ func newEnv(t *testing.T) *testEnv {
 // own gives the test a monorepo of its own, also on a deployed Worker.
 func (env *testEnv) own(t *testing.T, suffix string) {
 	if env.shared {
+		remote.Lock()
+		defer remote.Unlock()
 		env.mono = remote.mono + "-" + suffix
 		if strings.HasPrefix(env.server, "https://") {
 			createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), env.mono)
@@ -1204,4 +1233,71 @@ func TestE2ECommitsOnDeployed(t *testing.T) {
 	}
 	st, _ := env.client().Status(context.Background())
 	t.Fatalf("no commit after 60 s; status %v", st)
+}
+
+// DELETE /v1/monorepos/{m} calls the object's destroy(): sockets close with
+// 4404 and engines stop, and a monorepo made again with the same name is empty.
+func TestE2EDestroy(t *testing.T) {
+	env := newEnv(t)
+	if env.shared || strings.HasPrefix(env.server, "https://") {
+		t.Skip("uses the local test Worker's /test/destroy")
+	}
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
+	a.write("doomed.md", "soon gone\n")
+	big := randomBinary(20 << 10)
+	a.write("doomed.bin", big)
+	waitContent(t, b, "doomed.md", "soon gone\n")
+	waitContent(t, b, "doomed.bin", big)
+
+	body, _ := json.Marshal(map[string]string{"monorepo": env.mono})
+	resp, err := http.Post(env.server+"/test/destroy", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(out), `"closed":2`) {
+		t.Fatalf("destroy: %d %s", resp.StatusCode, out)
+	}
+	t.Logf("destroy: %s", strings.TrimSpace(string(out)))
+	for _, m := range []*machine{a, b} {
+		select {
+		case err := <-m.done:
+			if !errors.Is(err, errDeleted) {
+				t.Errorf("%s stopped with %v, want errDeleted", m.name, err)
+			}
+			m.cancel = nil
+			m.logw.mu.Lock()
+			m.logw.done = true
+			m.logw.mu.Unlock()
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s's engine kept running after the monorepo was deleted", m.name)
+		}
+	}
+	if got, _ := b.read("doomed.md"); got != "soon gone\n" {
+		t.Error("a deleted monorepo removed files on a machine")
+	}
+
+	// Same name, fresh object: nothing in it, and it works.
+	st, err := env.client().Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st["head"].(float64) != 0 || st["files"].(float64) != 0 || st["uncommitted"].(float64) != 0 {
+		t.Errorf("after destroy: %v", st)
+	}
+	h, err := env.client().History(context.Background(), "doomed.md", 10)
+	if err != nil || len(h.Versions) != 0 {
+		t.Errorf("history after destroy: %+v %v", h, err)
+	}
+	carl := env.machine(t, "carl")
+	carl.write("fresh.md", "a new start\n")
+	waitFor(t, "a save into the emptied object", func() bool {
+		h, err := env.client().History(context.Background(), "fresh.md", 1)
+		return err == nil && len(h.Versions) == 1 && h.Versions[0].Version == 1
+	})
+	if _, ok := carl.read("doomed.md"); ok {
+		t.Error("a new machine received a file from before the delete")
+	}
 }

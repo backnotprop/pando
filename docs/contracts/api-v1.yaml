@@ -15,7 +15,12 @@ info:
     - A repo has a `path` (as in `formats.md`: `projects/web`, or `.` in a
       plain repo) and a `name`, its id in URLs: the path with each `/`
       turned into `-` (`projects-web`). A plain repo's name is the
-      monorepo's name. Names are unique in a monorepo; `meta` is reserved.
+      monorepo's name. Names are unique in a monorepo.
+    - In a monorepo, the repo named `meta` (path `.`, clone_url
+      `<host>/<monorepo>/meta.git`) is the meta layer's own git history. It
+      takes branches, diffs, reviews and merges like any repo, and it is how
+      `.pando/**` changes: after a merge into it, the merged files go to the
+      live meta layer on every machine. It is not in listRepos.
     - Git goes through the git door at the repo's `clone_url`,
       `https://<host>/<monorepo>/<name>.git` (smart HTTP; see the `git`
       tag). Pushes to the default branch are refused, except the first push

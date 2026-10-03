@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 
 retryResetFetch();
 
@@ -44,6 +44,7 @@ const id = Date.now().toString(36);
 const M = `fo-${id}`;
 let O = null;
 let made = false;
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`)).status);
 try {
   if (HOME_CRED) {
     S = readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim();
@@ -54,6 +55,7 @@ try {
   }
   const r = await call("POST", "/v1/monorepos", { name: M, kind: "repo" });
   made = r.status === 201;
+  if (made) tw.add(`${O}/${M}`);
   const MID = r.json?.monorepo?.id;
   const url = r.json?.repos?.[0]?.clone_url;
   const base = `/v1/monorepos/${O}/${M}/repos/${M}`;
@@ -125,10 +127,7 @@ try {
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {
-  if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`);
-    check(`delete ${O}/${M}`, r.status === 204, `${r.status}`);
-  }
+  if (made) check(`delete ${O}/${M}`, await tw.cleanup());
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

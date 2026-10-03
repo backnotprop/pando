@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 
 retryResetFetch();
 
@@ -55,6 +55,7 @@ let O = `files-${id}`;
 const A = `fa-${id}`;
 const B = `fb-${id}`;
 const made = [];
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`)).status);
 try {
   if (HOME_CRED) {
     S = readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim();
@@ -62,7 +63,10 @@ try {
   } else S = (await call("POST", "/v1/users", { login: O }, { authorization: `Bearer ${BOOT}` })).json?.credential?.secret;
   for (const m of [A, B]) {
     const r = await call("POST", "/v1/monorepos", { name: m, kind: "repo" });
-    if (r.status === 201) made.push(m);
+    if (r.status === 201) {
+      made.push(m);
+      tw.add(`${O}/${m}`);
+    }
   }
   check("two plain repos", made.length === 2);
   const urlOf = (m) => `${URL_}/${O}/${m}.git`;
@@ -217,10 +221,7 @@ try {
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {
-  for (const m of made) {
-    const r = await call("DELETE", `/v1/monorepos/${O}/${m}?confirm=${O}/${m}`);
-    check(`delete ${O}/${m}`, r.status === 204, `${r.status}`);
-  }
+  if (made.length) check(`delete ${made.map((m) => `${O}/${m}`).join(", ")}`, await tw.cleanup());
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

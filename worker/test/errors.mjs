@@ -40,3 +40,47 @@ export function retryResetFetch() {
     }
   };
 }
+
+/**
+ * A run's throwaway monorepos (pando-ops, 2026-10-03). Each is named on stdout
+ * when made, so a run killed outright (kill -9) leaves a name to find.
+ * `cleanup()` deletes them all, 5 at a time, trying a failed delete again (1 s, 2 s, 3 s),
+ * and also runs on Ctrl-C and kill. `del(full)` answers the DELETE's status.
+ * Resolves true when nothing is left behind.
+ */
+export function throwaways(del) {
+  const names = new Set();
+  let done = null;
+  const cleanup = () =>
+    (done ??= (async () => {
+      const queue = [...names];
+      const one = async (full) => {
+        let status = 0;
+        for (let i = 0; i < 4; i++) {
+          status = await del(full).catch(() => 0);
+          if (status === 204 || status === 404) break;
+          await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+        }
+        if (status === 204 || status === 404) names.delete(full);
+        else console.log(`cleanup: delete ${full} answered ${status}`);
+      };
+      await Promise.all(Array.from({ length: 5 }, async () => {
+        while (queue.length) await one(queue.shift());
+      }));
+      if (names.size) console.log(`cleanup: LEFT BEHIND ${[...names].join(", ")}; delete by hand`);
+      return names.size === 0;
+    })());
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.once(sig, () => {
+      console.log(`\n${sig}: deleting this run's monorepos first`);
+      cleanup().finally(() => process.exit(130));
+    });
+  }
+  return {
+    add(full) {
+      names.add(full);
+      console.log(`monorepo ${full} (this run deletes it; if the run is killed outright, delete it by hand)`);
+    },
+    cleanup,
+  };
+}

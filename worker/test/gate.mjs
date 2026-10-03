@@ -12,7 +12,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 
 retryResetFetch();
 
@@ -61,10 +61,12 @@ const tally = (rs, ok) => {
 const M = `gate-${id}`;
 let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, S)).status);
 try {
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
   O = r.json?.monorepo?.owner ?? null;
+  if (made) tw.add(`${O}/${M}`);
   const url = r.json?.repos?.[0]?.clone_url;
   const src = join(work, "src");
   mkdirSync(src);
@@ -144,10 +146,7 @@ try {
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {
-  if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
-    check(`delete ${M}`, r.status === 204, `${r.status}`);
-  }
+  if (made) check(`delete ${M}`, await tw.cleanup());
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

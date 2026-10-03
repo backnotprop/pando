@@ -131,6 +131,11 @@ func (h *HTTP) CreateUser(ctx context.Context, bootstrap, login, name, email, cr
 	return out, err
 }
 
+func (h *HTTP) DeleteMonorepo(ctx context.Context, m string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m), query: url.Values{"confirm": {m}}}, nil)
+	return err
+}
+
 func (h *HTTP) ListMembers(ctx context.Context, m string) ([]Member, error) {
 	var out struct {
 		Members []Member `json:"members"`

@@ -205,6 +205,8 @@ type Server interface {
 	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
 	ListMonorepos(ctx context.Context) ([]Monorepo, error)
 	GetMonorepo(ctx context.Context, mono string) (*Monorepo, error)
+	// DeleteMonorepo deletes it, its repos and their history (owners).
+	DeleteMonorepo(ctx context.Context, mono string) error
 
 	ListMembers(ctx context.Context, mono string) ([]Member, error)
 	RemoveMember(ctx context.Context, mono, login string) error

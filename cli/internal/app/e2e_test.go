@@ -61,7 +61,7 @@ func (h *harness) pando(dir, stdin string, args ...string) (string, error) {
 	e.Cwd = dir
 	cmds := map[string]func(*Env, []string) error{
 		"login": Login, "init": Init, "clone": Clone, "worktree": Worktree, "branch": Branch,
-		"diff": Diff, "review": Review, "merge": Merge, "status": Status, "reference": Reference, "members": Members,
+		"diff": Diff, "review": Review, "merge": Merge, "status": Status, "reference": Reference, "members": Members, "monorepo": Monorepo,
 	}
 	err = cmds[args[0]](e, args[1:])
 	return out.String(), err
@@ -244,6 +244,16 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	out = h.ok(clone, "status")
 	if !strings.Contains(out, "projects/app/worktrees/agent-1-oauth") {
 		t.Fatalf("status:\n%s", out)
+	}
+	if _, err := h.pando(clone, "", "monorepo", "delete", "ws"); err == nil {
+		t.Fatal("delete without --yes and without a terminal must refuse")
+	}
+	if out = h.ok(clone, "monorepo", "list"); !strings.Contains(out, "ws") {
+		t.Fatalf("monorepo list:\n%s", out)
+	}
+	h.ok(clone, "monorepo", "delete", "ws", "--yes")
+	if out = h.ok(clone, "monorepo", "list"); strings.Contains(out, "ws ") {
+		t.Fatalf("ws is still listed:\n%s", out)
 	}
 }
 

@@ -11,7 +11,7 @@ import { ZERO } from "./names";
 import { drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
 import { LEASE_MS } from "./gate";
 import type { Identity, RepoEvent, RepoRecord } from "./types";
-import { monorepoStub } from "./session";
+import { cachedRepo, monorepoStub } from "./session";
 import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
 import { authenticate, identityOf } from "../accounts/auth";
 
@@ -68,17 +68,18 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   // A hook delivery's read token: clone and fetch only, checked by Artifacts.
   if (/^art_v\d+_/.test(secret)) {
     if (service !== "git-upload-pack") return unauthorized();
-    const repo = await stub.getRepo(repoName);
+    const repo = await cachedRepo(env, monorepo, repoName);
     if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
     return relay(await toArtifacts(req, repo, action, url.search, { authorization: req.headers.get("authorization")! }));
   }
 
   const auth = await authenticate(env, secret, monorepo);
-  if (!auth) return unauthorized();
+  // A browser session never works at the git door (it only travels as the /v1 cookie).
+  if (!auth || auth.credential.kind === "browser") return unauthorized();
   if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${monorepo}`);
   if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${monorepo}`);
   const identity = { ...identityOf(auth), agent: agentHeader(req) };
-  const repo = await stub.getRepo(repoName);
+  const repo = await cachedRepo(env, monorepo, repoName);
   if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
 
   const v2 = /version=2/.test(req.headers.get("git-protocol") ?? "");

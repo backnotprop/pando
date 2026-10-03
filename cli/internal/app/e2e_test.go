@@ -405,3 +405,23 @@ func TestAgentFor(t *testing.T) {
 		t.Fatalf("outside any worktree, no agent: %q", got)
 	}
 }
+
+func TestMergeWord(t *testing.T) {
+	for _, c := range []struct {
+		b    server.Branch
+		want string
+	}{
+		{server.Branch{Mergeable: "clean"}, "clean"},
+		{server.Branch{Mergeable: "pending", Stale: true, LastMergeable: "conflicts"}, "pending (was conflicts)"},
+		{server.Branch{Mergeable: "pending", Stale: true}, "pending"},
+		{server.Branch{}, "-"},
+	} {
+		if got := mergeWord(c.b); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.b, got, c.want)
+		}
+	}
+	zero := 0
+	if count(server.Branch{Stale: true}, &zero) != "?" || count(server.Branch{}, &zero) != "0" || count(server.Branch{}, nil) != "-" {
+		t.Error("count: stale shows ?, known shows the number, unknown shows -")
+	}
+}

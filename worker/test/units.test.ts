@@ -280,3 +280,21 @@ describe("ERR answers from receive-pack", () => {
     expect(r.error).toBe("artifacts_git_receive_pack_busy");
   });
 });
+
+describe("browser sign-in helpers", () => {
+  it("returns only to a path on this host", async () => {
+    const { safeReturnTo } = await import("../src/accounts/signin");
+    expect(safeReturnTo("/pando/projects/web")).toBe("/pando/projects/web");
+    expect(safeReturnTo("//evil.example/x")).toBe("/");
+    expect(safeReturnTo("https://evil.example/")).toBe("/");
+    expect(safeReturnTo("/\\evil.example")).toBe("/");
+    expect(safeReturnTo("/a\nb")).toBe("/");
+    expect(safeReturnTo(null)).toBe("/");
+  });
+  it("names a session by browser and system", async () => {
+    const { browserName } = await import("../src/accounts/signin");
+    expect(browserName("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15")).toBe("browser: Safari on macOS");
+    expect(browserName("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 Edg/130.0")).toBe("browser: Edge on Windows");
+    expect(browserName(null)).toBe("browser: a browser");
+  });
+});

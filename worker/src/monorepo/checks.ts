@@ -43,3 +43,17 @@ export function combine(sha: string | null, required: string[], all: StatusRecor
   else if (considered.some((s) => s.state === "pending")) state = "pending";
   return { sha, state, required, missing, statuses };
 }
+
+/**
+ * Required checks as the monorepo object keeps them (C3): read from
+ * pando.toml only when the object has none, which is after a merge or main's
+ * first push in the repo that holds the file.
+ */
+export async function requiredKept(env: Env, monorepo: { name: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
+  const stub = env.MONOREPO.getByName(monorepo.name);
+  const kept = await stub.storedRequired(repo.name);
+  if (kept) return kept;
+  const list = await requiredChecks(env, monorepo, repo);
+  await stub.setRequiredChecks(repo.name, list);
+  return list;
+}

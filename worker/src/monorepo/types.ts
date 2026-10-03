@@ -49,6 +49,14 @@ export interface BranchRecord {
   merge_forced?: number | null;
   merge_machine?: string | null;
   merge_agent?: string | null;
+  /** Stored branch facts (facts.ts), for (facts_main, facts_head). */
+  ahead?: number | null;
+  behind?: number | null;
+  merge_base?: string | null;
+  mergeable?: string | null;
+  facts_main?: string | null;
+  facts_head?: string | null;
+  facts_at?: string | null;
 }
 
 export type HookEvent = "push" | "branch.opened" | "merged";

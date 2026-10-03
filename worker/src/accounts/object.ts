@@ -12,7 +12,15 @@ import { HttpError, now } from "../http";
 import type { Outcome } from "../monorepo/types";
 
 export type MemberRole = "owner" | "member";
-export type CredentialKind = "machine" | "sandbox" | "bootstrap";
+export type CredentialKind = "machine" | "sandbox" | "bootstrap" | "browser";
+
+/**
+ * A browser session lives while it is used: it ends after this many days
+ * without use (a number for the owner), on sign-out, or when revoked. Each
+ * use pushes the end back, at most one write a day.
+ */
+export const SESSION_IDLE_DAYS = 30;
+const DAY_MS = 86_400_000;
 
 export interface User {
   login: string;
@@ -27,6 +35,16 @@ export interface Credential {
   kind: CredentialKind;
   created_at: string;
   last_used_at: string | null;
+  /** Browser sessions only: when it ends unless used before then. */
+  expires_at?: string | null;
+}
+
+export interface NewCredentialRow {
+  hash: string;
+  name: string;
+  kind: CredentialKind;
+  /** Browser sessions: the WorkOS session, ended on sign-out. */
+  workos_sid?: string | null;
 }
 
 export interface Member {
@@ -106,6 +124,10 @@ export class AccountsObject extends DurableObject<Env> {
     const cols = this.rows<{ name: string }>("PRAGMA table_info(users)").map((c) => c.name);
     if (!cols.includes("workos_id")) this.sql.exec("ALTER TABLE users ADD COLUMN workos_id TEXT");
     this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_workos ON users (workos_id)");
+    // Added with browser sign-in: a session's end, and its WorkOS session.
+    const ccols = this.rows<{ name: string }>("PRAGMA table_info(credentials)").map((c) => c.name);
+    if (!ccols.includes("expires_at")) this.sql.exec("ALTER TABLE credentials ADD COLUMN expires_at TEXT");
+    if (!ccols.includes("workos_sid")) this.sql.exec("ALTER TABLE credentials ADD COLUMN workos_sid TEXT");
   }
 
   private rows<T>(query: string, ...args: unknown[]): T[] {
@@ -140,24 +162,36 @@ export class AccountsObject extends DurableObject<Env> {
     return this.row<User>("SELECT login, name, email, created_at FROM users WHERE login = ?", login);
   }
 
-  private insertCredential(login: string, c: { hash: string; name: string; kind: CredentialKind }): Credential {
+  private insertCredential(login: string, c: NewCredentialRow): Credential {
     const id = randomId("cred_");
     const at = now();
+    const expires = c.kind === "browser" ? new Date(Date.now() + SESSION_IDLE_DAYS * DAY_MS).toISOString() : null;
     this.sql.exec(
-      "INSERT INTO credentials (id, hash, login, name, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      id, c.hash, login, c.name, c.kind, at,
+      "INSERT INTO credentials (id, hash, login, name, kind, created_at, expires_at, workos_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      id, c.hash, login, c.name, c.kind, at, expires, c.workos_sid ?? null,
     );
-    return { id, name: c.name, kind: c.kind, created_at: at, last_used_at: null };
+    return { id, name: c.name, kind: c.kind, created_at: at, last_used_at: null, expires_at: expires };
   }
 
-  addCredential(login: string, c: { hash: string; name: string; kind: CredentialKind }): Credential {
+  /** Sign-out: revoke the browser session with this hash; its WorkOS session id, to end that too. */
+  endBrowserSession(hash: string): { revoked: boolean; workos_sid: string | null } {
+    const c = this.row<{ id: string; workos_sid: string | null }>(
+      "SELECT id, workos_sid FROM credentials WHERE hash = ? AND kind = 'browser' AND revoked_at IS NULL",
+      hash,
+    );
+    if (!c) return { revoked: false, workos_sid: null };
+    this.sql.exec("UPDATE credentials SET revoked_at = ? WHERE id = ?", now(), c.id);
+    return { revoked: true, workos_sid: c.workos_sid };
+  }
+
+  addCredential(login: string, c: NewCredentialRow): Credential {
     return this.insertCredential(login, c);
   }
 
   listCredentials(login: string): Credential[] {
     return this.rows<Credential>(
-      "SELECT id, name, kind, created_at, last_used_at FROM credentials WHERE login = ? AND revoked_at IS NULL ORDER BY created_at",
-      login,
+      "SELECT id, name, kind, created_at, last_used_at, expires_at FROM credentials WHERE login = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at",
+      login, now(),
     );
   }
 
@@ -168,14 +202,21 @@ export class AccountsObject extends DurableObject<Env> {
   /** Who a credential belongs to, and their role in `monorepo` if one is named. */
   authenticate(hash: string, monorepo: string | null): Auth | null {
     const c = this.row<Credential & { login: string }>(
-      "SELECT id, login, name, kind, created_at, last_used_at FROM credentials WHERE hash = ? AND revoked_at IS NULL",
+      "SELECT id, login, name, kind, created_at, last_used_at, expires_at FROM credentials WHERE hash = ? AND revoked_at IS NULL",
       hash,
     );
     if (!c) return null;
+    const t = Date.now();
+    if (c.expires_at && Date.parse(c.expires_at) <= t) return null; // a browser session unused for too long
     const user = this.getUser(c.login);
     if (!user) return null;
-    if (!c.last_used_at || Date.now() - Date.parse(c.last_used_at) > 60_000) {
+    if (!c.last_used_at || t - Date.parse(c.last_used_at) > 60_000) {
       this.sql.exec("UPDATE credentials SET last_used_at = ? WHERE id = ?", now(), c.id);
+    }
+    // Sliding: each use pushes a session's end back (at most one write a day).
+    if (c.kind === "browser" && c.expires_at && Date.parse(c.expires_at) - t < (SESSION_IDLE_DAYS - 1) * DAY_MS) {
+      c.expires_at = new Date(t + SESSION_IDLE_DAYS * DAY_MS).toISOString();
+      this.sql.exec("UPDATE credentials SET expires_at = ? WHERE id = ?", c.expires_at, c.id);
     }
     const role = monorepo
       ? (this.row<{ role: MemberRole }>("SELECT role FROM members WHERE monorepo = ? AND login = ?", monorepo, c.login)?.role ?? null)
@@ -254,7 +295,7 @@ export class AccountsObject extends DurableObject<Env> {
    * After WorkOS proved who signed in: find or make the Pando user, accept any
    * invites for a verified email, and give the machine a credential.
    */
-  signIn(who: SignedIn, cred: { hash: string; name: string; kind: CredentialKind }): { user: User; credential: Credential; joined: string[] } {
+  signIn(who: SignedIn, cred: NewCredentialRow): { user: User; credential: Credential; joined: string[] } {
     const email = who.email.toLowerCase();
     let login = this.row<{ login: string }>("SELECT login FROM users WHERE workos_id = ?", who.workos_id)?.login;
     if (!login && who.email_verified) {

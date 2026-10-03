@@ -119,10 +119,12 @@ try {
   const mainOnly = openEvents(M, A, null, "main");
   sockets.push(mainOnly);
   const caught = STREAM ? await waitFor(() => ev.frames.find((f) => f.type === "caught_up")) : null;
-  checkS("the owner opens the event socket and is caught up", !!caught, JSON.stringify(caught));
+  checkS("the owner opens the event socket and is caught up (caught_up carries seq, a number)", !!caught && typeof caught.seq === "number", JSON.stringify(caught));
   if (STREAM) ev.ws.readyState === 1 && ev.ws.send("ping");
   checkS("ping gets pong", STREAM && !!(await waitFor(() => ev.frames.find((f) => f.type === "pong"), 5000)));
 
+  r = await call("GET", `/v1/monorepos/${M}/heads`, A);
+  check("GET heads: an empty repo's main is null", r.status === 200 && r.json?.heads?.length === 1 && r.json.heads[0].repo === repo && r.json.heads[0].head === null, JSON.stringify(r.json));
   // ── push main, then a branch ──
   const src = join(work, "src");
   mkdirSync(src);
@@ -132,6 +134,8 @@ try {
   git(["commit", "-qm", "first"], src);
   check("push main through the door", git(["push", "-q", url, "main"], src, A).ok);
   const mainHead = git(["rev-parse", "HEAD"], src).out.trim();
+  r = await call("GET", `/v1/monorepos/${M}/heads`, A);
+  check("GET heads: main after its first push, with no Artifacts read", r.json?.heads?.[0]?.head === mainHead && r.json.heads[0].path === "projects/web" && !!r.json.heads[0].updated_at);
   let e = await find(ev, (x) => x.collection === "default_heads" && x.row?.default_head === mainHead);
   checkS("event: push of main (default_heads upsert)", e?.kind === "push" && e?.key === repo && e?.machine === "ana-mbp" && e?.actor === `ana-${id}`, scrub(JSON.stringify(e)).slice(0, 200));
 
@@ -186,15 +190,34 @@ try {
   git(["commit", "-qm", "Add b"], src);
   git(["push", "-q", url, "feat/b"], src, A);
   await find(ev, (x) => x.kind === "branch.opened" && x.row?.name === "feat/b");
+  // feat/b's first facts (from its one-branch job) before the merge, so "last known" is defined.
+  {
+    const until = Date.now() + 30_000;
+    while (Date.now() < until) {
+      const b = (await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=open`, A)).json?.branches?.find((x) => x.name === "feat/b");
+      if (b && !b.stale) break;
+      await new Promise((res) => setTimeout(res, 300));
+    }
+  }
   r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, {}, { "x-pando-agent": "agent-1" });
   const mergeSha = r.json?.sha;
   check("merge feat/a (as agent-1)", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
   e = await find(ev, (x) => x.kind === "merged");
   checkS("event: merged, with merge facts on the Branch row", e?.row?.state === "merged" && e?.row?.merge_commit === mergeSha && e?.row?.merged_by === `ana-${id}` && e?.row?.merged_machine === "ana-mbp" && e?.row?.merged_agent === "agent-1" && e?.row?.forced === false && !!e?.row?.merged_at, scrub(JSON.stringify(e?.row)).slice(0, 260));
+  r = await call("GET", `/v1/monorepos/${M}/heads`, A);
+  check("GET heads: main is the merge commit after a merge", r.json?.heads?.[0]?.head === mergeSha);
+  if (STREAM) {
+    const latest = await call("GET", `/v1/monorepos/${M}/events?limit=1`, A);
+    checkS("GET heads carries the stream's seq to resume from", r.json?.seq === latest.json?.seq, `${r.json?.seq} vs ${latest.json?.seq}`);
+  }
   e = await find(ev, (x) => x.kind === "default_head.updated");
   checkS("event: default_head.updated to the merge commit", e?.row?.default_head === mergeSha);
-  await new Promise((res) => setTimeout(res, 1500));
-  checkS("no per-branch recompute after a merge (no branch.updated for feat/b)", STREAM && !eventsOf(ev).some((x) => x.kind === "branch.updated" && x.row?.name === "feat/b"));
+  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=open`, A);
+  const atOnce = r.json?.branches?.find((b) => b.name === "feat/b");
+  check("right after the merge, the list answers at once with feat/b pending (last answer kept)", atOnce?.stale === true && atOnce?.mergeable === "pending" && atOnce?.last_mergeable === "clean", JSON.stringify({ m: atOnce?.mergeable, last: atOnce?.last_mergeable, stale: atOnce?.stale }));
+  e = await find(ev, (x) => x.kind === "branch.updated" && x.row?.name === "feat/b" && x.partial === false && x.row?.behind === 3 && x.row?.stale === false);
+  checkS("the queue's sweep publishes feat/b's full row (behind 3, mergeable, checks)", !!e && !!e.row?.mergeable && !!e.row?.checks, e ? `mergeable ${e.row.mergeable}` : "no event");
+
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/commits`, A);
   check("a merged branch still lists its 2 commits", r.json?.commits?.length === 2 && r.json.commits[0].sha === headA, `${r.json?.commits?.length}`);
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=merged`, A);
@@ -257,7 +280,7 @@ try {
   r = await call("GET", `/v1/monorepos/${M}/events?since=0&limit=500`, A);
   const all = r.json?.events ?? [];
   const seqsOk = all.every((x, i) => i === 0 || x.seq > all[i - 1].seq);
-  checkS("GET events?since=0 returns every event in order", r.status === 200 && all.length >= 12 && seqsOk && r.json?.head === all[all.length - 1]?.seq, `${all.length} events, head ${r.json?.head}`);
+  checkS("GET events?since=0 returns every event in order", r.status === 200 && all.length >= 12 && seqsOk && r.json?.seq === all[all.length - 1]?.seq && r.json?.oldest_seq === all[0]?.seq, `${all.length} events, seq ${r.json?.seq}`);
   const live = eventsOf(ev);
   checkS("the socket got the same events as the JSON page", live.length === all.length && live.every((x, i) => x.seq === all[i].seq), `${live.length} vs ${all.length}`);
   r = await call("GET", `/v1/monorepos/${M}/events?limit=1`, A);
@@ -276,7 +299,7 @@ try {
   const future = openEvents(M, A, all[all.length - 1].seq + 1000);
   sockets.push(future);
   const rs = await waitFor(() => future.frames.find((f) => f.type === "resync"));
-  checkS("a ?since= ahead of the stream gets resync", rs?.head === all[all.length - 1].seq);
+  checkS("a ?since= ahead of the stream gets resync, with the stream's seq", rs?.seq === all[all.length - 1].seq && typeof rs?.oldest_seq === "number");
   for (const s of [ev, again, future, mainOnly]) s.ws.close();
   }
 } catch (err) {

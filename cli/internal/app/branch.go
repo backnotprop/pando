@@ -78,8 +78,8 @@ func Branch(e *Env, args []string) error {
 		tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(tw, "  BRANCH\tAHEAD\tBEHIND\tAUTHOR\tCHECKS\tMERGE\tSTATE\tHEAD")
 		for _, b := range bl.Branches {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", b.Name, num(b.Ahead), num(b.Behind), dash(b.Author),
-				dash(b.Checks.State), dash(b.Mergeable), dash(b.State), short(b.Head))
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", b.Name, count(b, b.Ahead), count(b, b.Behind), dash(b.Author),
+				dash(b.Checks.State), mergeWord(b), dash(b.State), short(b.Head))
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -370,4 +370,26 @@ func Merge(e *Env, args []string) error {
 	e.printf("Merged %s into main of %s: %s (merge commit%s, by %s)\n", branch, label(root, repo), short(res.SHA), forced, dash(res.MergedBy))
 	refreshMain(e, root, repo)
 	return nil
+}
+
+// mergeWord is a branch's mergeable answer for people. "pending" means not
+// known yet for the current main and head (the server is computing it); the
+// last known answer is shown beside it.
+func mergeWord(b server.Branch) string {
+	if b.Mergeable == "pending" || (b.Stale && b.Mergeable == "") {
+		if b.LastMergeable != "" && b.LastMergeable != "pending" {
+			return "pending (was " + b.LastMergeable + ")"
+		}
+		return "pending"
+	}
+	return dash(b.Mergeable)
+}
+
+// count is a branch's ahead or behind for people: "?" while the server has
+// not yet computed it for the current main and head.
+func count(b server.Branch, n *int) string {
+	if b.Stale {
+		return "?"
+	}
+	return num(n)
 }

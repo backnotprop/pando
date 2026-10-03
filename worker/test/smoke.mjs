@@ -97,9 +97,16 @@ try {
   g = git(["clone", "-q", url, clone], work);
   check("clone through the door", g.ok, g.out.slice(-200));
   const repo = r.json?.repos?.[0]?.name;
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches`);
-  const b = r.json?.branches?.[0];
-  check("branch list", b?.name === "smoke/branch" && b?.ahead === 1 && b?.mergeable === "clean", JSON.stringify({ ahead: b?.ahead, mergeable: b?.mergeable }));
+  // The list answers at once; its facts land when the queue has computed them.
+  let b = null;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 30_000) {
+    r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches`);
+    b = r.json?.branches?.[0];
+    if (b && !b.stale) break;
+    await new Promise((res) => setTimeout(res, 300));
+  }
+  check("branch list, facts fresh", b?.name === "smoke/branch" && b?.ahead === 1 && b?.mergeable === "clean" && b?.stale === false, `${JSON.stringify({ ahead: b?.ahead, mergeable: b?.mergeable })} after ${Date.now() - t0} ms`);
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/smoke%2Fbranch/diff?format=patch`);
   writeFileSync(join(work, "p.patch"), r.text);
   git(["checkout", "-q", r.headers.get("x-pando-merge-base") ?? "main"], clone);

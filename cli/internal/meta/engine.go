@@ -53,6 +53,7 @@ type Engine struct {
 	runCtx    context.Context
 	downloads map[string]*serverMsg // large files being downloaded, by path
 	dlRetry   map[string]time.Time  // when a failed download may try again
+	dlFails   map[string]int        // failed downloads in a row, by path
 	transfers chan struct{}         // at most 2 uploads or downloads at a time
 
 	untilSynced bool // return from Run once everything here is sent
@@ -141,6 +142,7 @@ func New(cfg Config) (*Engine, error) {
 		runCtx:      context.Background(),
 		downloads:   map[string]*serverMsg{},
 		dlRetry:     map[string]time.Time{},
+		dlFails:     map[string]int{},
 		transfers:   make(chan struct{}, 2),
 	}, nil
 }
@@ -225,9 +227,12 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 	return nil
 }
 
+// retryingDownloads reports whether a clone should still wait for a failed
+// download. After 3 failures it stops waiting; the change stays held, so the
+// daemon asks for it again.
 func (e *Engine) retryingDownloads() bool {
 	for p := range e.dlRetry {
-		if e.held[p] != nil {
+		if e.held[p] != nil && e.dlFails[p] < 3 {
 			return true
 		}
 	}
@@ -1125,6 +1130,10 @@ func (e *Engine) clean(rel string) bool {
 	if info.Size() == f.Size && info.ModTime().UnixNano() == f.Mtime {
 		return true
 	}
+	// The scan already hashed these bytes: no need to read them again.
+	if c := e.cache[rel]; c != nil && c.size == info.Size() && c.mtime == info.ModTime().UnixNano() && (c.sha != "" || c.oid != "") {
+		return (c.sha != "" && c.sha == f.SHA) || (c.oid != "" && c.oid == f.Oid)
+	}
 	if f.Oid != "" {
 		if oid, _, err := sha256File(e.abs(rel)); err == nil && oid == f.Oid {
 			return true
@@ -1267,11 +1276,13 @@ func (e *Engine) downloaded(r *downloadResult) {
 	delete(e.downloads, p)
 	if r.err != nil {
 		e.cfg.Log.Printf("could not download %s: %v; trying again soon", p, r.err)
-		e.dlRetry[p] = time.Now().Add(10 * time.Second)
+		e.dlFails[p]++
+		e.dlRetry[p] = time.Now().Add(time.Duration(min(e.dlFails[p], 6)) * 10 * time.Second)
 		e.held[p] = r.m
 		return
 	}
 	delete(e.dlRetry, p)
+	delete(e.dlFails, p)
 	if f := e.st.Files[p]; f != nil && r.m.Version <= f.Version {
 		os.Remove(r.tmp)
 		return

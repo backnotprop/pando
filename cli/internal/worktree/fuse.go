@@ -140,7 +140,10 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 		return fmt.Errorf("%w (daemon log: %s)", err, filepath.Join(state, "daemon.log"))
 	}
 	if s.Commit != "" {
-		if _, err := gitx.In(mp).Run(ctx, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", s.Commit); err != nil {
+		// Pin through the git folder, never by a checkout through the
+		// mount: that would leave copies in the edit layer that later
+		// shadow the published tree.
+		if err := f.Refresh(ctx, s); err != nil {
 			return err
 		}
 	}

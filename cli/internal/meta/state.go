@@ -24,6 +24,7 @@ func stateDir(root string) string { return filepath.Join(root, ".pando", "local"
 type FileState struct {
 	Version int64  `json:"v"`
 	SHA     string `json:"sha,omitempty"` // "" when the path is deleted
+	Oid     string `json:"oid,omitempty"` // a large file's SHA-256: SHA is then its pointer's
 	Size    int64  `json:"size,omitempty"`
 	Mtime   int64  `json:"mtime,omitempty"` // of the local file, in ns, when synced
 }
@@ -42,8 +43,15 @@ type Op struct {
 	// In flight on the current connection (not saved).
 	id       string
 	sentSHA  string
+	sentOid  string
 	sentSize int64
 	sentMt   int64
+
+	// A large file's upload to R2 (not saved; a restart uploads again, and the
+	// server skips bytes it has).
+	uploading bool
+	uploaded  *uploadResult
+	retryAt   time.Time
 }
 
 type state struct {
@@ -54,6 +62,7 @@ type state struct {
 	Outbox   map[string]*Op        `json:"outbox"`  // by Path
 	Refused  map[string]string     `json:"refused"` // path -> sha the server refused
 	NextSeq  int64                 `json:"next_seq"`
+	TextOnly bool                  `json:"text_only,omitempty"` // pando clone --text-only: large files stay pointers
 }
 
 func loadState(root, monorepo string) (*state, error) {

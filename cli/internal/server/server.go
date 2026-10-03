@@ -53,6 +53,28 @@ type Credential struct {
 	Secret string `json:"secret,omitempty"`
 }
 
+type Member struct {
+	Login   string `json:"login"`
+	Role    string `json:"role"` // owner or member
+	AddedAt string `json:"added_at"`
+	AddedBy string `json:"added_by"`
+}
+
+type Invite struct {
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	InvitedBy string `json:"invited_by"`
+	CreatedAt string `json:"created_at"`
+}
+
+// InviteResult is the answer to an invite: "added" (that email has signed
+// in before) or "invited" (waiting for that email's first sign-in).
+type InviteResult struct {
+	Status string  `json:"status"`
+	Member *Member `json:"member"`
+	Invite *Invite `json:"invite"`
+}
+
 // Me is GET /v1/user: the user and the credential in use.
 type Me struct {
 	User
@@ -183,6 +205,12 @@ type Server interface {
 	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
 	ListMonorepos(ctx context.Context) ([]Monorepo, error)
 	GetMonorepo(ctx context.Context, mono string) (*Monorepo, error)
+
+	ListMembers(ctx context.Context, mono string) ([]Member, error)
+	RemoveMember(ctx context.Context, mono, login string) error
+	Invite(ctx context.Context, mono, email, role string) (*InviteResult, error)
+	ListInvites(ctx context.Context, mono string) ([]Invite, error)
+	RevokeInvite(ctx context.Context, mono, email string) error
 
 	ListRepos(ctx context.Context, mono string) ([]Repo, error)
 	GetRepo(ctx context.Context, mono, repo string) (*Repo, error)

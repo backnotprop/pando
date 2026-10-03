@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"pando/internal/config"
 	"pando/internal/detect"
 	"pando/internal/gitx"
+	"pando/internal/meta"
 	"pando/internal/refs"
 	"pando/internal/server"
 	"pando/internal/worktree"
@@ -143,7 +145,7 @@ func Init(e *Env, args []string) error {
 		return fmt.Errorf("%q cannot be a monorepo name (lower-case letters, digits, '.', '_', '-'; no '--'; at most 39); pass --name", mono)
 	}
 
-	srvc, repos, err := ensureMonorepo(e, serverURL, mono, plan.Kind)
+	srvc, repos, made, err := ensureMonorepo(e, serverURL, mono, plan.Kind)
 	if err != nil {
 		return err
 	}
@@ -212,11 +214,24 @@ func Init(e *Env, args []string) error {
 			e.warnf("could not update .git/info/exclude: %v", err)
 		}
 	}
+	if plan.Kind == config.KindMonorepo {
+		switch {
+		case strings.HasPrefix(serverURL, "file://"):
+			e.printf("meta layer: none on a file:// server\n")
+		case !made:
+			e.printf("meta layer: already started; keep it live with pando meta sync\n")
+		default:
+			start := time.Now()
+			if err := meta.Init(e.Ctx, plan.Root); err != nil {
+				e.warnf("meta layer: the first upload did not finish: %v", err)
+				failed++
+			} else {
+				e.printf("meta layer: uploaded in %.1fs; keep it live with pando meta sync\n", time.Since(start).Seconds())
+			}
+		}
+	}
 
 	e.printf("\nPando %s %s is set up at %s (server %s).\n", plan.Kind, mono, plan.Root, serverURL)
-	if plan.Kind == config.KindMonorepo {
-		e.printf("The meta layer (the files outside projects/ and references) syncs through the Pando daemon.\n")
-	}
 	e.printf("Next: pando worktree add %s <branch>    or, on another machine: pando clone %s\n", firstRepo(root), mono)
 	if failed > 0 {
 		return fmt.Errorf("%d item(s) failed; fix them and run pando init again (it skips what is done)", failed)
@@ -266,41 +281,41 @@ func printPlan(e *Env, p *detect.Plan) {
 
 // ensureMonorepo finds the monorepo, or makes it with this machine's
 // credential; the signed-in user becomes its owner.
-func ensureMonorepo(e *Env, serverURL, mono, kind string) (server.Server, []server.Repo, error) {
-	tok, err := e.Home.Token(serverURL)
-	if err != nil && !strings.HasPrefix(serverURL, "file://") {
-		return nil, nil, err
+func ensureMonorepo(e *Env, serverURL, mono, kind string) (srv server.Server, repos []server.Repo, made bool, err error) {
+	tok, terr := e.Home.Token(serverURL)
+	if terr != nil && !strings.HasPrefix(serverURL, "file://") {
+		return nil, nil, false, terr
 	}
 	s, err := server.Open(serverURL, tok)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	m, err := s.GetMonorepo(e.Ctx, mono)
 	switch {
 	case err == nil:
 		if m.Kind != kind {
-			return nil, nil, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
+			return nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
 		}
 		repos, err := s.ListRepos(e.Ctx, mono)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", mono, config.Host(serverURL), dash(m.Role))
-		return s, repos, nil
+		return s, repos, false, nil
 	case server.StatusOf(err) == 403:
-		return nil, nil, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", mono, config.Host(serverURL))
+		return nil, nil, false, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", mono, config.Host(serverURL))
 	case !errors.Is(err, server.ErrNotFound):
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
 	if err != nil {
 		if server.StatusOf(err) == 409 {
-			return nil, nil, fmt.Errorf("monorepo %s already exists on %s; ask an owner to add you", mono, config.Host(serverURL))
+			return nil, nil, false, fmt.Errorf("monorepo %s already exists on %s; ask an owner to add you", mono, config.Host(serverURL))
 		}
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
-	return s, created.Repos, nil
+	return s, created.Repos, true, nil
 }
 
 // pushMain pushes a project's main branch through the git door, and adds a

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -117,42 +118,112 @@ func moveLocalReference(e *Env, root *config.Root, p refs.Pointer, old, kind str
 	return nil
 }
 
-// SyncReferences makes this machine's reference folders match their
-// pointers: it mounts the ones not here and moves mounted ones to their
-// pointer's commit. The meta layer's sync calls it when a pointer changes.
+// SyncReferences makes this machine's reference folders match every
+// pointer: it mounts the ones not here and moves mounted ones to their
+// pointer's commit.
 func SyncReferences(e *Env, root *config.Root, kind string) error {
 	ptrs, err := refs.List(root.Dir)
 	if err != nil {
 		return err
 	}
 	for _, p := range ptrs {
-		dir := root.Abs(p.Path)
-		if _, err := os.Stat(filepath.Join(dir, "PANDO-UNAVAILABLE.txt")); err == nil {
-			_ = os.Chmod(filepath.Join(dir, "PANDO-UNAVAILABLE.txt"), 0o644)
-			_ = os.Remove(filepath.Join(dir, "PANDO-UNAVAILABLE.txt"))
-		}
-		if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
-			if err := mountReference(e, root, p, kind); err != nil {
-				e.warnf("%s: %v", p.Path, err)
-			}
-			continue
-		}
-		g := gitx.In(dir)
-		if v, _ := g.Run(e.Ctx, "config", "--get", "pando.reference"); v != "true" {
-			continue // the original repo; left as it is
-		}
-		if head, _ := g.Run(e.Ctx, "rev-parse", "HEAD"); head == p.Commit {
-			continue
-		}
-		drv, err := worktree.Pick(kind, e.Home.Dir)
-		if err != nil {
-			return err
-		}
-		if err := drv.Refresh(e.Ctx, referenceSpec(root, p)); err != nil {
-			e.warnf("%s: %v", p.Path, err)
-			continue
-		}
-		e.printf("%s: moved to %s\n", p.Path, short(p.Commit))
+		syncReference(e, root, p, kind)
 	}
 	return nil
+}
+
+// ReferencesHook is the meta layer's hook (meta.Hooks.References): another
+// machine's change wrote or removed these pointers (root-relative
+// .pando/references/<path>.toml), so this machine's folders follow. The
+// meta layer calls it from its own goroutine, one call at a time.
+func ReferencesHook(rootDir string, pointers []string) {
+	e, err := NewEnv(context.Background(), strings.NewReader(""), os.Stdout, os.Stderr)
+	if err != nil {
+		return
+	}
+	root, err := config.LoadRoot(rootDir)
+	if err != nil {
+		e.warnf("references: %v", err)
+		return
+	}
+	kind := os.Getenv("PANDO_WORKTREE_KIND")
+	for _, ptr := range pointers {
+		if !strings.HasPrefix(ptr, ".pando/references/") || !strings.HasSuffix(ptr, ".toml") {
+			continue
+		}
+		path := strings.TrimSuffix(strings.TrimPrefix(ptr, ".pando/references/"), ".toml")
+		p, err := refs.Read(root.Dir, path)
+		if os.IsNotExist(err) || os.IsNotExist(errors.Unwrap(err)) {
+			removeReference(e, root, path)
+			continue
+		}
+		if err != nil {
+			e.warnf("%s: %v", path, err)
+			continue
+		}
+		syncReference(e, root, p, kind)
+	}
+}
+
+// syncReference mounts one reference, or moves this machine's mount of it.
+func syncReference(e *Env, root *config.Root, p refs.Pointer, kind string) {
+	dir := root.Abs(p.Path)
+	unavailable := filepath.Join(dir, "PANDO-UNAVAILABLE.txt")
+	if _, err := os.Stat(unavailable); err == nil {
+		_ = os.Chmod(unavailable, 0o644)
+		_ = os.Remove(unavailable)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+		if err := mountReference(e, root, p, kind); err != nil {
+			e.warnf("%s: %v", p.Path, err)
+		}
+		return
+	}
+	g := gitx.In(dir)
+	if v, _ := g.Run(e.Ctx, "config", "--get", "pando.reference"); v != "true" {
+		return // the original repo on the machine that has it; left as it is
+	}
+	if head, _ := g.Run(e.Ctx, "rev-parse", "HEAD"); head == p.Commit {
+		return
+	}
+	mounted, _ := g.Run(e.Ctx, "config", "--get", "pando.kind")
+	drv, err := worktree.Pick(mounted, e.Home.Dir)
+	if err != nil {
+		e.warnf("%s: %v", p.Path, err)
+		return
+	}
+	if err := drv.Refresh(e.Ctx, referenceSpec(root, p)); err != nil {
+		e.warnf("%s: %v", p.Path, err)
+		return
+	}
+	e.printf("%s: moved to %s\n", p.Path, short(p.Commit))
+}
+
+// removeReference takes away a reference folder this machine mounted, after
+// its pointer was removed. The original repo is never touched.
+func removeReference(e *Env, root *config.Root, path string) {
+	dir := root.Abs(path)
+	unavailable := filepath.Join(dir, "PANDO-UNAVAILABLE.txt")
+	if _, err := os.Stat(unavailable); err == nil {
+		_ = os.Chmod(unavailable, 0o644)
+		_ = os.Remove(unavailable)
+		_ = os.Remove(dir)
+		return
+	}
+	g := gitx.In(dir)
+	if v, _ := g.Run(e.Ctx, "config", "--get", "pando.reference"); v != "true" {
+		return
+	}
+	mounted, _ := g.Run(e.Ctx, "config", "--get", "pando.kind")
+	drv, err := worktree.Pick(mounted, e.Home.Dir)
+	if err != nil {
+		e.warnf("%s: %v", path, err)
+		return
+	}
+	spec := worktree.Spec{Root: root.Dir, Repo: path, Path: path, Reference: true, ReadOnly: true}
+	if err := drv.Remove(e.Ctx, spec); err != nil {
+		e.warnf("%s: %v", path, err)
+		return
+	}
+	e.printf("%s: reference removed\n", path)
 }

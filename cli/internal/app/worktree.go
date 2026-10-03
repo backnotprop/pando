@@ -20,7 +20,7 @@ import (
 // Worktree is `pando worktree add | list | remove`.
 func Worktree(e *Env, args []string) error {
 	if len(args) == 0 {
-		return UsageError{"pando worktree add | list | remove"}
+		return UsageError{"pando worktree add | list | remove | follow"}
 	}
 	switch args[0] {
 	case "add":
@@ -29,6 +29,8 @@ func Worktree(e *Env, args []string) error {
 		return worktreeList(e, args[1:])
 	case "remove", "rm":
 		return worktreeRemove(e, args[1:])
+	case "follow":
+		return Follow(e, args[1:])
 	}
 	return UsageError{"unknown worktree command " + args[0]}
 }

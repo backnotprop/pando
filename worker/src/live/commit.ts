@@ -11,6 +11,7 @@ export interface GitWriter {
 
 export interface CommitEnv {
   ARTIFACTS?: Artifacts;
+  BLOBS?: R2Bucket;
 }
 
 // gitWriter is null when the Worker has no Artifacts binding (a local test

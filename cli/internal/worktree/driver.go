@@ -106,15 +106,23 @@ func credentialScope(cloneURL string) string {
 // keeps a copy of the token. The token itself never appears in config,
 // arguments or environment.
 func credentialConfig(cloneURL string) [][2]string {
-	scope := credentialScope(cloneURL)
-	if scope == "" {
-		return nil
-	}
 	exe, err := os.Executable()
 	if err != nil {
 		exe = "pando"
 	} else if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
+	}
+	return credentialConfigFor(cloneURL, exe)
+}
+
+// credentialConfigFor is credentialConfig with the pando binary named. The
+// empty value comes first: it clears every helper git inherited for this
+// host (Apple's git has osxkeychain in its system config), so git neither
+// asks nor stores anywhere else. git adds "get", "store" or "erase".
+func credentialConfigFor(cloneURL, exe string) [][2]string {
+	scope := credentialScope(cloneURL)
+	if scope == "" {
+		return nil
 	}
 	return [][2]string{
 		{"credential." + scope + ".helper", ""},

@@ -4,6 +4,7 @@
 // Owned by the live lane. The wire is docs/contracts/meta-sync.md.
 import { DurableObject } from "cloudflare:workers";
 import { checkBytes, checkPath, MAX_BYTES, type Refusal } from "./rules";
+import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
 
@@ -78,6 +79,12 @@ export interface MainChange {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
+}
+
+// A name from the client (author, machine, agent), kept short: it lives in
+// the socket's attachment, which holds at most 2 KB.
+function name(v: unknown): string {
+  return str(v).slice(0, 200);
 }
 
 function int(v: unknown, fallback = 0): number {
@@ -211,7 +218,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   private historyEntry(r: VersionRow) {
+    // A large file's version is its pointer: show the file's own size and hash.
+    const ptr = r.sha && !r.deleted && (r.size ?? 0) < 1024 ? parsePointer(new Uint8Array(this.blob(r.sha))) : null;
     return {
+      large: ptr ? { oid: ptr.oid, size: ptr.size } : null,
       version: r.version,
       path: r.path,
       op: r.op,
@@ -270,9 +280,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!target) return fail(404, "not_found", `${path} has no version at or before ${body?.version}`);
 
     // From here to the broadcast nothing awaits, so no other change interleaves.
-    const author = request.headers.get("x-pando-author") ?? (str(body?.author) || "unknown");
-    const agent = str(body?.agent) || null;
-    const machine = str(body?.machine) || "unknown";
+    const author = request.headers.get("x-pando-author") ?? (name(body?.author) || "unknown");
+    const agent = name(body?.agent) || null;
+    const machine = name(body?.machine) || "unknown";
     const cur = this.current(path);
     const same = target.deleted ? !cur || cur.deleted : !!cur && !cur.deleted && cur.sha === target.sha;
     if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 });
@@ -367,6 +377,15 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
           if (bytes) {
             msg.decoded = bytes;
             msg.computedSha = await gitBlobSha(bytes);
+            // A large file arrives as a pointer: its bytes must be in R2 first.
+            const ptr = parsePointer(bytes);
+            const monorepo = this.kv("monorepo");
+            if (ptr && monorepo) {
+              const head = await this.env.BLOBS?.head(blobKey(monorepo, ptr.oid));
+              msg.blobMissing = !head || head.size !== ptr.size;
+            } else if (ptr) {
+              msg.blobMissing = true;
+            }
           }
         }
         if (this.change(ws, att, msg)) await this.scheduleCommit();
@@ -407,9 +426,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   private hello(ws: WebSocket, att: Attachment, msg: any): void {
-    if (!att.fixed) att.author = str(msg.author) || "unknown";
-    att.machine = str(msg.machine) || "unknown";
-    att.agent = str(msg.agent) || null; // agents act as their user; the trailers name them
+    if (!att.fixed) att.author = name(msg.author) || "unknown";
+    att.machine = name(msg.machine) || "unknown";
+    att.agent = name(msg.agent) || null; // agents act as their user; the trailers name them
     att.hello = true;
     const head = this.head();
     let since = int(msg.since);
@@ -471,6 +490,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       if (badBytes) return refuse(path, badBytes);
       const sha = msg.computedSha as string;
       if (msg.sha !== sha) return refuse(path, { reason: "bad_sha", status: 400, message: "sha does not match bytes" });
+      if (msg.blobMissing) {
+        return refuse(path, { reason: "missing_blob", status: 400, message: "upload the file's bytes to meta/blobs first" });
+      }
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
       if (!this.baseMatches(cur, base)) return this.stale(ws, id, path, base, cur);

@@ -120,8 +120,10 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	}
 	gd := f.gitDir(s)
 	if s.Reference {
-		if _, err := (gitx.Cmd{Env: []string{"GIT_DIR=" + gd}}).Run(ctx, "config", "pando.reference", "true"); err != nil {
-			return err
+		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", "fuse"}} {
+			if _, err := (gitx.Cmd{Env: []string{"GIT_DIR=" + gd}}).Run(ctx, "config", kv[0], kv[1]); err != nil {
+				return err
+			}
 		}
 	} else {
 		if err := WriteCredentialConfig(ctx, gd, s.CloneURL); err != nil {
@@ -138,7 +140,10 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 		return fmt.Errorf("%w (daemon log: %s)", err, filepath.Join(state, "daemon.log"))
 	}
 	if s.Commit != "" {
-		if _, err := gitx.In(mp).Run(ctx, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", s.Commit); err != nil {
+		// Pin through the git folder, never by a checkout through the
+		// mount: that would leave copies in the edit layer that later
+		// shadow the published tree.
+		if err := f.Refresh(ctx, s); err != nil {
 			return err
 		}
 	}
@@ -156,19 +161,69 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	return nil
 }
 
-// Refresh fast-forwards main through the writable mount; ArtifactFS sees
-// HEAD move and publishes the new tree, and the read-only view follows.
+// Refresh moves a read-only main to the server's main, or a reference to
+// its pointer's commit, without writing through the mount: it fetches into
+// the worktree's git folder, moves the ref, updates the index with a
+// two-tree read-tree (cached stat data stays for unchanged files, so
+// git status downloads nothing new), and waits for ArtifactFS to publish
+// the new tree. It works the same once the mount itself is read-only.
 func (f *Fuse) Refresh(ctx context.Context, s Spec) error {
-	g := gitx.In(f.mountPath(s))
-	if s.Commit != "" {
-		if _, err := g.Run(ctx, "fetch", "--quiet", "origin"); err != nil {
-			return err
-		}
-		_, err := g.Run(ctx, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", s.Commit)
+	gd := f.gitDir(s)
+	g := gitx.Cmd{Env: append([]string{"GIT_DIR=" + gd}, f.envGit(s)...)}
+	old, err := g.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
 		return err
 	}
-	_, err := g.Run(ctx, "pull", "--quiet", "--ff-only")
-	return err
+	target := s.Commit
+	if target != "" {
+		if _, err := g.Run(ctx, "cat-file", "-e", target+"^{commit}"); err != nil {
+			if _, err := g.Run(ctx, "fetch", "--quiet", "origin"); err != nil {
+				return err
+			}
+		}
+	} else {
+		if _, err := g.Run(ctx, "fetch", "--quiet", "origin", s.Branch); err != nil {
+			return err
+		}
+		if target, err = g.Run(ctx, "rev-parse", "refs/remotes/origin/"+s.Branch); err != nil {
+			return err
+		}
+		if _, err := g.Run(ctx, "merge-base", "--is-ancestor", old, target); err != nil {
+			return fmt.Errorf("%s: the server's %s is not a fast-forward of %s", s.Path, s.Branch, old[:7])
+		}
+	}
+	if target == old {
+		return nil
+	}
+	if _, err := g.Run(ctx, "read-tree", "-m", old, target); err != nil {
+		return err
+	}
+	if s.Commit != "" {
+		_, err = g.Run(ctx, "update-ref", "--no-deref", "HEAD", target, old)
+	} else {
+		_, err = g.Run(ctx, "update-ref", "refs/heads/"+s.Branch, target, old)
+	}
+	if err != nil {
+		return err
+	}
+	// The daemon's watcher sees HEAD move within a second and publishes.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if out, err := f.run(ctx, s, "status", "--name", f.name(s)); err == nil && strings.Contains(out, "head="+target) {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("%s: ArtifactFS did not publish %s in time", s.Path, target[:7])
+}
+
+// envGit is the credential environment for git run on a worktree's git
+// folder (none for references, which use the machine's own access).
+func (f *Fuse) envGit(s Spec) []string {
+	if s.Reference {
+		return nil
+	}
+	return CredentialEnv(s.CloneURL)
 }
 
 func (f *Fuse) Remove(ctx context.Context, s Spec) error {

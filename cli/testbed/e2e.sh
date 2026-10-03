@@ -101,11 +101,46 @@ pando diff feat-x | sed 's/^/  /'
 pando merge feat-x | sed 's/^/  /'
 grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main shows the merged change" || fail "main did not follow the merge"
 [ -f worktrees/main/notes.txt ] && ok "worktrees/main has the merged notes.txt" || fail "notes.txt missing in main"
+[ -z "$(git -C worktrees/main status --porcelain)" ] && ok "git status in worktrees/main is clean after the merge" || fail "main status: $(git -C worktrees/main status --porcelain | head -3)"
+# Known (fork): the first git status in any fresh ArtifactFS mount reads
+# every file, because its index has no stat data. Reported, not failed.
+echo "  note worktrees/main has downloaded $(hydrated main) of $total files after git status"
 
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
 pando worktree remove worktrees/feat-x | sed 's/^/  /'
 if mountpoint -q "$wt" 2>/dev/null; then fail "feat-x still mounted"; else ok "feat-x is unmounted and gone"; fi
+
+step "a monorepo with a reference, mounted read-only through ArtifactFS"
+mkdir -p /work/ws/projects/web/worktrees /work/ws/research/infra/cloudflare
+echo "notes" > /work/ws/AGENTS.md
+git init -q -b main /work/ws/projects/web/worktrees/main
+(cd /work/ws/projects/web/worktrees/main && echo web > index.html && git add -A && git commit -q -m web)
+ref=research/infra/cloudflare/workers-oauth-provider
+git clone -q --filter=blob:none https://github.com/cloudflare/workers-oauth-provider.git "/work/ws/$ref"
+newest=$(git -C "/work/ws/$ref" rev-parse HEAD)
+git -C "/work/ws/$ref" checkout -q --detach HEAD~1
+older=$(git -C "/work/ws/$ref" rev-parse HEAD)
+wsname="ws-$(date +%s)"
+pando init /work/ws --yes --name "$wsname" --server "$SERVER" | grep -E "pushed|reference pointer" | sed 's/^/  /'
+grep -q "commit = \"$newest\"" "/work/ws/.pando/references/$ref.toml" || grep -q "commit = \"$older\"" "/work/ws/.pando/references/$ref.toml" \
+  && ok "init wrote the reference pointer" || fail "no pointer"
+# The pointer at the older commit, so update has somewhere to go.
+sed -i "s/^commit = .*/commit = \"$older\"/" "/work/ws/.pando/references/$ref.toml"
+pando clone "$wsname" /work/ws2 --server "$SERVER" | sed 's/^/  /'
+# The meta layer would carry the pointer; copy it in its place.
+mkdir -p "/work/ws2/.pando/references/$(dirname "$ref")"
+cp "/work/ws/.pando/references/$ref.toml" "/work/ws2/.pando/references/$ref.toml"
+cd /work/ws2
+pando reference sync | sed 's/^/  /'
+mountpoint -q "$ref" && ok "the reference is a mount ($(findmnt -no FSTYPE "$ref"), $(findmnt -no OPTIONS "$ref" | cut -d, -f1))" || fail "reference not mounted"
+[ "$(git -C "$ref" rev-parse HEAD)" = "$older" ] && ok "it shows the pointer's commit ${older:0:7}" || fail "HEAD $(git -C "$ref" rev-parse HEAD)"
+[ -f "$ref/package.json" ] && ok "its files are listed (package.json, $(find "$ref" -path "$ref/.git" -prune -o -type f -print | wc -l) files)" || fail "no files"
+if (echo x > "$ref/package.json") 2>/dev/null; then fail "wrote into a reference"; else ok "a reference takes no writes"; fi
+pando reference update "$ref" | sed 's/^/  /'
+[ "$(git -C "$ref" rev-parse HEAD)" = "$newest" ] && ok "reference update moved it to ${newest:0:7}" || fail "still at $(git -C "$ref" rev-parse --short HEAD)"
+grep -q "commit = \"$newest\"" ".pando/references/$ref.toml" && ok "and rewrote the pointer" || fail "pointer not rewritten"
+[ -z "$(git -C "$ref" status --porcelain)" ] && ok "git status in the reference is clean after the move" || fail "reference status: $(git -C "$ref" status --porcelain | head -3)"
 
 echo
 echo "PASS: $pass checks"

@@ -6,22 +6,69 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/user"
 	"regexp"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 
 	"pando/internal/config"
 	"pando/internal/gitx"
 	"pando/internal/server"
+	"pando/internal/signin"
 )
 
-// obtainCredential is the one sign-in step. How people sign in is not
-// decided (an emailed code, passkeys or WorkOS; RULINGS.md). Until it is,
-// it takes a credential made on a signed-in machine with
-// `pando credential create`, typed with no echo or piped in. A real sign-in
-// flow replaces this function and nothing else.
-func obtainCredential(e *Env, serverURL string) (string, error) {
+// obtainCredential is the one sign-in step: WorkOS CLI Auth run through the
+// Pando Worker (internal/signin). It shows a code and a URL, opens the
+// browser when there is one, and waits for the person to confirm. It returns
+// the user and a new machine credential, whose secret is never shown.
+func obtainCredential(e *Env, serverURL, kind string) (*server.Me, string, []string, error) {
+	c := signin.New(serverURL)
+	d, err := c.Start(e.Ctx)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	e.printf("To sign in to %s, open\n\n    %s\n\nand confirm the code  %s\n\n", config.Host(serverURL), d.VerificationURI, d.UserCode)
+	if openBrowser(e, d.VerificationURIComplete) {
+		e.printf("(Your browser is open at that page.)\n")
+	}
+	e.printf("Waiting for you to confirm...\n")
+	r, err := c.Wait(e.Ctx, d, e.Home.Machine, kind)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	me := &server.Me{
+		User:       server.User{Login: r.User.Login, Name: r.User.Name, Email: r.User.Email},
+		Credential: server.Credential{ID: r.Credential.ID, Name: r.Credential.Name, Kind: r.Credential.Kind},
+	}
+	return me, r.Credential.Secret, r.Joined, nil
+}
+
+// openBrowser opens url when a person is at a terminal on a machine with a
+// browser. PANDO_NO_BROWSER=1 turns it off.
+func openBrowser(e *Env, url string) bool {
+	if url == "" || !e.isTerminal() || os.Getenv("PANDO_NO_BROWSER") != "" {
+		return false
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+			return false
+		}
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return false
+	}
+	return cmd.Start() == nil
+}
+
+// readCredential reads a credential made with `pando credential create`,
+// typed with no echo or piped in (sandboxes, other machines).
+func readCredential(e *Env, serverURL string) (string, error) {
 	if !e.isTerminal() {
 		return config.ReadToken(e.Stdin)
 	}
@@ -55,7 +102,9 @@ func (e *Env) serverURL(flagValue string) string {
 func Login(e *Env, args []string) error {
 	fs := flags("login")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
-	bootstrap := fs.Bool("bootstrap", false, "make your user with the server's bootstrap secret (asked for with no echo)")
+	bootstrap := fs.Bool("bootstrap", false, "self-hosted: make your user with the server's bootstrap secret (asked for with no echo)")
+	withCred := fs.Bool("with-credential", false, "sign in with a credential from pando credential create (typed with no echo, or piped)")
+	kind := fs.String("kind", "machine", "with the browser sign-in: machine or sandbox")
 	login := fs.String("login", "", "with --bootstrap: the login to make (default: your login name)")
 	name := fs.String("name", "", "your name on commits (default: the account's, else git config user.name)")
 	email := fs.String("email", "", "your email on commits (default: the account's, else git config user.email)")
@@ -71,7 +120,9 @@ func Login(e *Env, args []string) error {
 		secret string
 		err    error
 	)
-	if *bootstrap {
+	var joined []string
+	switch {
+	case *bootstrap:
 		b, err := readBootstrap(e, serverURL)
 		if err != nil {
 			return err
@@ -79,8 +130,8 @@ func Login(e *Env, args []string) error {
 		if me, secret, err = makeUser(e, serverURL, b, *login, *name, *email); err != nil {
 			return err
 		}
-	} else {
-		if secret, err = obtainCredential(e, serverURL); err != nil {
+	case *withCred:
+		if secret, err = readCredential(e, serverURL); err != nil {
 			return err
 		}
 		s, err := server.Open(serverURL, secret)
@@ -89,12 +140,22 @@ func Login(e *Env, args []string) error {
 		}
 		me, err = s.Me(e.Ctx)
 		if st := server.StatusOf(err); st == 401 || st == 403 {
-			return errors.New("the server did not take that credential (to make your user on a new server: pando login --bootstrap)")
+			return errors.New("the server did not take that credential")
 		} else if err != nil {
 			return err
 		}
+	default:
+		if me, secret, joined, err = obtainCredential(e, serverURL, *kind); err != nil {
+			return err
+		}
 	}
-	return finishLogin(e, serverURL, *srv, secret, me, *name, *email)
+	if err := finishLogin(e, serverURL, *srv, secret, me, *name, *email); err != nil {
+		return err
+	}
+	if len(joined) > 0 {
+		e.printf("You were added to: %s\n", strings.Join(joined, ", "))
+	}
+	return nil
 }
 
 // finishLogin stores the credential and who it signs in as.
@@ -202,9 +263,14 @@ func Logout(e *Env, args []string) error {
 // Auth is `pando auth status`.
 func Auth(e *Env, args []string) error {
 	if len(args) == 0 || args[0] != "status" {
-		return UsageError{"pando auth status"}
+		return UsageError{"pando auth status [--server <url>]"}
 	}
-	serverURL := e.serverURL("")
+	fs := flags("auth status")
+	srv := fs.String("server", "", "the server (default: the configured one)")
+	if _, err := parse(fs, args[1:]); err != nil {
+		return err
+	}
+	serverURL := e.serverURL(*srv)
 	if serverURL == "" {
 		e.printf("No server configured. Run pando login --server <url>.\n")
 		return nil

@@ -1,9 +1,12 @@
 package worktree
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -127,7 +130,7 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	}
 	gd := f.gitDir(s)
 	if s.Reference {
-		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", "fuse"}} {
+		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", f.Kind()}} {
 			if _, err := (gitx.Cmd{Env: []string{"GIT_DIR=" + gd}}).Run(ctx, "config", kv[0], kv[1]); err != nil {
 				return err
 			}
@@ -140,11 +143,16 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 			return err
 		}
 	}
+	logPath := filepath.Join(state, "daemon.log")
+	var logStart int64
+	if st, err := os.Stat(logPath); err == nil {
+		logStart = st.Size()
+	}
 	if err := f.ensureDaemon(s); err != nil {
 		return err
 	}
-	if err := waitMount(mp, true, 90*time.Second); err != nil {
-		return fmt.Errorf("%w (daemon log: %s)", err, filepath.Join(state, "daemon.log"))
+	if err := waitAdded(mp, logPath, logStart, f.name(s), 90*time.Second); err != nil {
+		return fmt.Errorf("%w (daemon log: %s)", err, logPath)
 	}
 	if s.Commit != "" {
 		// Pin through the git folder, never by a checkout through the
@@ -282,6 +290,53 @@ func (f *Fuse) ensureDaemon(s Spec) error {
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// waitAdded waits for a new worktree's mount. When the daemon logs that
+// mounting failed (it retries with a back-off), it stops waiting and returns
+// the daemon's reason, which says what to do (the Mac's FSKit messages do).
+func waitAdded(mp, logPath string, logStart int64, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if isMounted(mp) {
+			return nil
+		}
+		if why := mountFailure(logPath, logStart, name); why != "" {
+			return fmt.Errorf("%s did not mount: %s", mp, why)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("the mount did not appear at %s", mp)
+}
+
+// mountFailure is the error of the first "mount failed" line the daemon
+// logged for repo name after offset start, or "".
+func mountFailure(logPath string, start int64, name string) string {
+	fh, err := os.Open(logPath)
+	if err != nil {
+		return ""
+	}
+	defer fh.Close()
+	if _, err := fh.Seek(start, io.SeekStart); err != nil {
+		return ""
+	}
+	sc := bufio.NewScanner(fh)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if !bytes.Contains(line, []byte("mount failed")) {
+			continue
+		}
+		var rec struct {
+			Msg   string `json:"msg"`
+			Repo  string `json:"repo"`
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(line, &rec) == nil && rec.Repo == name && rec.Error != "" {
+			return gitx.RedactURL(rec.Error)
+		}
+	}
+	return ""
 }
 
 func waitMount(p string, want bool, timeout time.Duration) error {

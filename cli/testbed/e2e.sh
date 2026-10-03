@@ -190,13 +190,20 @@ pando init --yes --name acme --server file:///home/dev/srv >/dev/null && pando c
 echo "uid=$(id -u) main=$(findmnt -no OPTIONS worktrees/main | cut -d, -f1)"
 (echo y > worktrees/main/a.txt) 2>/dev/null && echo "main=writable" || echo "main=refused"
 pando worktree add . feat >/dev/null && echo "feat=$(findmnt -no OPTIONS worktrees/feat | cut -d, -f1)"
-cd worktrees/feat && echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
+cd worktrees/feat
+# A file created 0444 and written through its open descriptor, as git writes
+# its packs: a daemon that is not root must still write its backing file.
+(umask 0222 && printf "ro-data\n" > ro.txt) && echo "ro0444=$(stat -c %a ro.txt):$(cat ro.txt)" && rm -f ro.txt
+git clone -q --no-local "file://$HOME/src" clone-in && git -C clone-in fsck --no-progress && echo "clone-in=ok" && rm -rf clone-in
+echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
 echo "main-content=$(tr "\n" " " < worktrees/main/a.txt)"
 pando worktree remove worktrees/feat >/dev/null && echo "removed=yes"
-' 2>&1)
+' 2>&1) || true
 echo "$out" | grep -q "uid=1000 main=ro" && ok "uid 1000: worktrees/main mounts ro with no root" || fail "non-root: $out"
 echo "$out" | grep -q "main=refused" && ok "uid 1000: writing into main is refused" || fail "non-root: $out"
 echo "$out" | grep -q "feat=rw" && ok "uid 1000: a branch worktree mounts rw" || fail "non-root: $out"
+echo "$out" | grep -q "ro0444=444:ro-data" && ok "uid 1000: a file created 0444 is written through its open descriptor" || fail "non-root: $out"
+echo "$out" | grep -q "clone-in=ok" && ok "uid 1000: git clone into a worktree (packs written 0444), fsck clean" || fail "non-root: $out"
 echo "$out" | grep -q "main-content=hi two" && ok "uid 1000: main follows the merge" || fail "non-root: $out"
 echo "$out" | grep -q "removed=yes" && ok "uid 1000: worktree remove unmounts" || fail "non-root: $out"
 

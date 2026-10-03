@@ -1,0 +1,415 @@
+// The home's activity feed (C25), end to end: real git through the door, real
+// Artifacts, the pando-feed queue, per-person feeds. Against wrangler dev
+// started with the test overrides (the split at 2 members instead of 100, a
+// 0.5 s summary tick, and the test route):
+//
+//   npx wrangler dev --port 8811 --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1
+//   PANDO_URL=http://localhost:8811 node test/feed.mjs
+//
+// Credentials stay in memory and are never printed. Git never reaches the
+// macOS keychain. It deletes every monorepo it made.
+import { spawnSync } from "node:child_process";
+import http from "node:http";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const URL_ = (process.env.PANDO_URL ?? "http://localhost:8811").replace(/\/$/, "");
+const WS_ = URL_.replace(/^http/, "ws");
+const BOOT = process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+const scrub = (s) => String(s).replace(/pando_[a-f0-9]{20,}/g, "<credential>").replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>");
+const results = [];
+const check = (name, ok, detail = "") => {
+  results.push(!!ok);
+  console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`));
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const call = async (method, path, secret, body, headers = {}) => {
+  const res = await fetch(URL_ + path, {
+    method,
+    headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {}
+  return { status: res.status, json, text };
+};
+async function waitFor(pred, ms = 30_000, every = 200) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const v = await pred();
+    if (v) return v;
+    await sleep(every);
+  }
+  return null;
+}
+const work = mkdtempSync(join(tmpdir(), "pando-feed-"));
+const gitAs = (secret) => (args, cwd, extraEnv = {}) => {
+  const r = spawnSync("git", ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", ...args], {
+    cwd, encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: secret ?? "", GIT_AUTHOR_NAME: "Ana", GIT_AUTHOR_EMAIL: "ana@pando.invalid", GIT_COMMITTER_NAME: "Ana", GIT_COMMITTER_EMAIL: "ana@pando.invalid", ...extraEnv },
+  });
+  return { ok: r.status === 0, out: scrub((r.stdout || "") + (r.stderr || "")) };
+};
+
+/** A socket that collects JSON frames. */
+function openSocket(path, secret) {
+  const frames = [];
+  const ws = new WebSocket(WS_ + path, { headers: { authorization: `Bearer ${secret}` } });
+  const s = { ws, frames, open: false, closed: null };
+  ws.onopen = () => (s.open = true);
+  ws.onmessage = (e) => {
+    if (e.data === "pong") return frames.push({ type: "pong" });
+    try {
+      frames.push(JSON.parse(e.data));
+    } catch {
+      frames.push({ type: "unparsed" });
+    }
+  };
+  ws.onclose = (e) => (s.closed = e.code);
+  s.send = (o) => ws.send(typeof o === "string" ? o : JSON.stringify(o));
+  return s;
+}
+/** A raw upgrade, to read the HTTP status of a refused socket. */
+function rawUpgrade(path, headers) {
+  return new Promise((resolve) => {
+    const u = new URL(URL_ + path);
+    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, headers: { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==", ...headers } });
+    req.on("response", (res) => {
+      let b = "";
+      res.on("data", (d) => (b += d));
+      res.on("end", () => resolve({ status: res.statusCode, body: b }));
+    });
+    req.on("upgrade", (res, sock) => {
+      sock.destroy();
+      resolve({ status: 101, body: "" });
+    });
+    req.on("error", (e) => resolve({ status: 0, body: String(e) }));
+    req.end();
+  });
+}
+const debugFeed = async (login) => (await call("GET", `/v1/_feed/test?login=${login}`, BOOT)).json;
+const deliver = async (...messages) => (await call("POST", "/v1/_feed/test", BOOT, { deliver: messages })).json;
+const pageAll = async (secret, q = "", limit = 200) => (await call("GET", `/v1/events?limit=${limit}${q}`, secret)).json;
+const joinedAll = (login, names) => waitFor(async () => {
+  const d = await debugFeed(login);
+  return names.every((n) => d?.index?.some((r) => r.name === n && !r.pending)) ? d : null;
+});
+const keyDesc = (a, b) => (a.at !== b.at ? (a.at < b.at ? 1 : -1) : a.monorepo !== b.monorepo ? (a.monorepo < b.monorepo ? 1 : -1) : b.seq - a.seq);
+
+const id = Date.now().toString(36);
+const [S, L, T, J, O] = ["fs", "fl", "ft", "fj", "fo"].map((p) => `${p}-${id}`);
+const made = [];
+const sockets = [];
+const login = { ana: `ana-${id}`, bo: `bo-${id}`, cy: `cy-${id}` };
+let A, B, C;
+try {
+  // ── Setup: three people; S small (2 members), L large (3 > the split of 2), T, J and O small ──
+  A = (await call("POST", "/v1/users", BOOT, { login: login.ana, name: "Ana Lima", credential_name: "ana-mbp" })).json?.credential?.secret;
+  B = (await call("POST", "/v1/users", BOOT, { login: login.bo, credential_name: "bo-mbp" })).json?.credential?.secret;
+  C = (await call("POST", "/v1/users", BOOT, { login: login.cy, credential_name: "cy-mbp" })).json?.credential?.secret;
+  check("three users", !!A && !!B && !!C);
+  const clone = {};
+  for (const m of [S, L, T, J, O]) {
+    const r = await call("POST", "/v1/monorepos", A, { name: m, kind: "repo" });
+    if (r.status === 201) made.push(m);
+    clone[m] = r.json?.repos?.[0]?.clone_url;
+  }
+  check("five plain repos made", made.length === 5);
+  for (const [m, who] of [[S, "bo"], [L, "bo"], [L, "cy"]]) await call("PUT", `/v1/monorepos/${m}/members/${login[who]}`, A, { role: "member" });
+  let d = await joinedAll(login.ana, [S, L, T, J, O]);
+  check("the creator's feed joins each new monorepo (a member message on create)", !!d, JSON.stringify(d?.index?.map((r) => [r.name.slice(0, 2), r.pending, r.large])));
+  d = await waitFor(async () => {
+    const x = await debugFeed(login.ana);
+    return x?.index?.find((r) => r.name === L)?.large === true ? x : null;
+  }, 15_000);
+  check("the split: L (3 members, over 2) is large in its owner's feed; S (2) is not", d?.index?.find((r) => r.name === L)?.large === true && d?.index?.find((r) => r.name === S)?.large === false);
+
+  // ── The person's live socket ──
+  const live = openSocket("/v1/events", A);
+  sockets.push(live);
+  await waitFor(() => live.open, 10_000);
+  live.send({ type: "hello", since: 0 });
+  const caught = await waitFor(() => live.frames.find((f) => f.type === "caught_up"), 10_000);
+  check("the live socket answers hello with caught_up and the landed number", typeof caught?.landed === "number", JSON.stringify(caught));
+  live.send("ping");
+  check("ping gets pong", !!(await waitFor(() => live.frames.find((f) => f.type === "pong"), 5000)));
+
+  // Cookie sockets: the Origin rule applies (403 bad_origin before the cookie is even read).
+  let u = await rawUpgrade("/v1/events", { cookie: "__Host-pando_session=pando_" + "0".repeat(40), origin: "https://evil.example" });
+  check("a cookie socket from another origin is refused (403 bad_origin)", u.status === 403 && /bad_origin/.test(u.body), `${u.status}`);
+  u = await rawUpgrade("/v1/events", { cookie: "__Host-pando_session=pando_" + "0".repeat(40), origin: URL_ });
+  check("a cookie socket from Pando's origin reaches the credential check (401 for an unknown session)", u.status === 401, `${u.status}`);
+  u = await rawUpgrade("/v1/events", {});
+  check("no credential: 401", u.status === 401, `${u.status}`);
+
+  // ── A push in S: commit count, head title, pushed_machine, co_authors ──
+  const git = gitAs(A);
+  const src = join(work, "s");
+  mkdirSync(src);
+  git(["init", "-q"], src);
+  writeFileSync(join(src, "README.md"), "# s\n");
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "first"], src);
+  check("push S main", git(["push", "-q", clone[S], "main"], src).ok);
+  let e = await waitFor(() => live.frames.find((f) => f.type === "event" && f.event?.monorepo === S && f.event.kind === "push"), 30_000);
+  check("main's first push reaches the live socket with its commit count (1) and title", e?.event?.summary?.commits === 1 && e.event.summary.head_title === "first" && e.event.branch === "main" && e.event.machine === "ana-mbp" && e.event.actor === login.ana, JSON.stringify(e?.event?.summary));
+  git(["checkout", "-qb", "feat/x"], src);
+  writeFileSync(join(src, "x.txt"), "x\n");
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "Add x"], src);
+  writeFileSync(join(src, "x.txt"), "x\ny\n");
+  git(["commit", "-qam", "More x\n\nWhy it matters.\n\nCo-authored-by: Claude <noreply@anthropic.com>\nPando-Machine: ana-mbp"], src);
+  check("push S feat/x (2 commits)", git(["push", "-q", clone[S], "feat/x"], src).ok);
+  const headX = git(["rev-parse", "HEAD"], src).out.trim();
+  e = await waitFor(() => live.frames.find((f) => f.type === "event" && f.event?.monorepo === S && f.event.kind === "branch.opened"), 30_000);
+  check("branch.opened carries commits 2 and the head commit's title (from the facts job)", e?.event?.summary?.commits === 2 && e.event.summary.head_title === "More x" && e.event.branch === "feat/x" && e.event.repo === S && e.event.repo_path === ".", JSON.stringify(e?.event));
+  check("feed lines carry no agent field", e && !("agent" in e.event));
+  let r = await call("GET", `/v1/monorepos/${S}/repos/${S}/branches/feat%2Fx`, A);
+  check("Branch.pushed_machine is the pushing credential's name", r.json?.pushed_machine === "ana-mbp", JSON.stringify(r.json?.pushed_machine));
+  r = await call("GET", `/v1/monorepos/${S}/repos/${S}/branches/feat%2Fx/commits`, A);
+  check("Commit.co_authors from Co-authored-by", JSON.stringify(r.json?.commits?.[0]?.co_authors) === JSON.stringify([{ name: "Claude", email: "noreply@anthropic.com" }]) && JSON.stringify(r.json?.commits?.[1]?.co_authors) === "[]", JSON.stringify(r.json?.commits?.map((c) => c.co_authors)));
+  d = await waitFor(async () => {
+    const x = await debugFeed(login.bo);
+    return (x?.pointers?.[S] ?? 0) >= 2 ? x : null;
+  });
+  check("fan-out: S (2 members) is copied into bo's feed", !!d, JSON.stringify(d?.pointers));
+
+  // ── T: a second monorepo on the same socket ──
+  await call("PUT", `/v1/monorepos/${T}/worktrees/wt_t1_${id}`, A, { repo: ".", branch: "feat/t", path: "worktrees/feat-t", machine: "ana-mbp", kind: "sparse" });
+  e = await waitFor(() => live.frames.find((f) => f.type === "event" && f.event?.monorepo === T && f.event.kind === "worktree.reported"), 20_000);
+  check("one live socket gets events from two monorepos (S and T)", !!e && live.frames.some((f) => f.event?.monorepo === S), JSON.stringify(e?.event?.summary));
+  await call("PUT", `/v1/monorepos/${T}/worktrees/wt_t1_${id}`, A, { repo: ".", branch: "feat/t", path: "worktrees/feat-t", machine: "ana-mbp", kind: "sparse" });
+  await sleep(1500);
+  check("a repeated worktree report is not a second line", live.frames.filter((f) => f.event?.monorepo === T && f.event.kind === "worktree.reported").length === 1);
+
+  // ── L (large): fan-in on read, its own socket for live ──
+  const lsock = openSocket(`/v1/monorepos/${L}/events?topics=feed`, A);
+  sockets.push(lsock);
+  await waitFor(() => lsock.open, 10_000);
+  await call("PUT", `/v1/monorepos/${L}/worktrees/wt_l1_${id}`, A, { repo: ".", branch: "feat/l", path: "worktrees/feat-l", machine: "ana-mbp", kind: "sparse" });
+  e = await waitFor(() => lsock.frames.find((f) => f.type === "feed" && f.event?.kind === "worktree.reported"), 10_000);
+  check("a large monorepo's socket with topics=feed gets feed lines", !!e, JSON.stringify(e?.event?.monorepo));
+  await sleep(1500);
+  check("a large monorepo's lines do not reach the person's socket", !live.frames.some((f) => f.type === "event" && f.event?.monorepo === L));
+  const dA = await debugFeed(login.ana);
+  check("no feed holds L's lines (no fan-out above the split)", !dA.pointers[L] && !(await debugFeed(login.bo)).pointers[L], JSON.stringify(dA.pointers));
+  let p = await pageAll(A);
+  check("fan-in: GET /v1/events includes L's line, read from L's log", p?.events?.some((x) => x.monorepo === L && x.kind === "worktree.reported") && p.from_logs === false, JSON.stringify(p?.events?.map((x) => x.monorepo.slice(0, 2) + ":" + x.kind)));
+  p = await pageAll(A, `&in=${L}`);
+  check("in=<large monorepo> reads its log", p?.events?.length === 1 && p.events[0].monorepo === L);
+
+  // ── Pages: the cursor is stable, newest first, no repeats ──
+  for (let i = 0; i < 3; i++) await call("PUT", `/v1/monorepos/${J}/worktrees/wt_j${i}_${id}`, A, { repo: ".", branch: `feat/j${i}`, path: `worktrees/j${i}`, machine: "ana-mbp", kind: "sparse" });
+  await waitFor(async () => (await debugFeed(login.ana)).pointers[J] === 3);
+  const full = (await pageAll(A)).events;
+  const walked = [];
+  let cursor = null;
+  for (let i = 0; i < 20; i++) {
+    const pg = (await call("GET", `/v1/events?limit=2${cursor ? `&cursor=${cursor}` : ""}`, A)).json;
+    walked.push(...pg.events);
+    cursor = pg.next;
+    if (!cursor) break;
+  }
+  const sorted = [...full].sort(keyDesc);
+  check("pages of 2 walk the same lines as one page, newest first, each once", walked.length === full.length && walked.every((x, i) => x.monorepo === full[i].monorepo && x.seq === full[i].seq) && JSON.stringify(full) === JSON.stringify(sorted), `${walked.length} vs ${full.length}`);
+  r = await call("GET", "/v1/events?cursor=nope", A);
+  check("a bad cursor is a 400", r.status === 400);
+  r = await call("GET", `/v1/events?in=${T}:meta`, A);
+  check("in= takes one monorepo only (the home narrows by monorepo)", r.status === 400);
+  r = await call("GET", `/v1/events?in=${T}`, B);
+  check("in=<a monorepo that is not yours> is a 404", r.status === 404, `${r.status}`);
+  r = await call("GET", `/v1/events?in=${T}`, A);
+  check("in=<monorepo> narrows the log", r.json?.events?.length >= 1 && r.json.events.every((x) => x.monorepo === T));
+
+  // ── Join backfill: bo joins J, which already has 3 lines ──
+  await call("PUT", `/v1/monorepos/${J}/members/${login.bo}`, A, { role: "member" });
+  d = await waitFor(async () => {
+    const x = await debugFeed(login.bo);
+    return x?.index?.some((i) => i.name === J && !i.pending) && x.pointers[J] === 3 ? x : null;
+  });
+  check("join: bo's feed gets J's 3 earlier lines (backfill)", !!d, JSON.stringify(d?.pointers));
+  r = await call("GET", `/v1/events?in=${J}`, B);
+  check("join: bo's log shows them", r.json?.events?.length === 3 && r.json.from_logs === false, JSON.stringify(r.json?.events?.map((x) => x.summary?.path)));
+  // ── Leave ──
+  await call("DELETE", `/v1/monorepos/${J}/members/${login.bo}`, A);
+  d = await waitFor(async () => {
+    const x = await debugFeed(login.bo);
+    return !x?.index?.some((i) => i.name === J) && !x.pointers[J] ? x : null;
+  });
+  check("leave: bo's index row and J's lines are gone", !!d);
+  r = await call("GET", `/v1/events?in=${J}`, B);
+  check("leave: bo cannot read J's log any more", r.status === 404, `${r.status}`);
+  r = await call("GET", "/v1/monorepos?summary=1", B);
+  check("leave: J is not on bo's home", r.status === 200 && !r.json?.monorepos?.some((m) => m.name === J) && r.json.monorepos.some((m) => m.name === S));
+
+  // ── Out-of-order and repeated queue deliveries (run in a chosen order through the test route) ──
+  const base = Date.now() - 3_600_000;
+  const at = (s) => new Date(base + s * 1000).toISOString();
+  const line = (seq, s, title) => ({ monorepo: O, seq, at: at(s), kind: "push", repo: O, repo_path: ".", branch: "ooo", actor: login.ana, machine: "ana-mbp", summary: { commits: 1, head_title: title } });
+  const before = live.frames.length;
+  await deliver(
+    { type: "events", monorepo: O, members: [login.ana], events: [line(100003, 3, "three")] },
+    { type: "events", monorepo: O, members: [login.ana], events: [line(100001, 1, "one")] },
+    { type: "events", monorepo: O, members: [login.ana], events: [line(100002, 2, "two"), line(100003, 3, "three again")] },
+    { type: "events", monorepo: O, members: [login.ana], events: [line(100002, 2, "two")] },
+  );
+  p = await pageAll(A, `&in=${O}`);
+  const ooo = p.events.filter((x) => x.seq > 100000);
+  check("out of order: lines delivered 3, 1, (2, 3), 2 read 3, 2, 1, each once, the later copy winning", ooo.map((x) => x.seq).join(",") === "100003,100002,100001" && ooo[0].summary.head_title === "three again", ooo.map((x) => `${x.seq}:${x.summary.head_title}`).join(" "));
+  const landedFrames = live.frames.slice(before).filter((f) => f.type === "event" && f.event.seq > 100000);
+  check("live frames keep each line's landed number when a copy repeats", landedFrames.length >= 3 && new Set(landedFrames.map((f) => `${f.event.seq}:${f.landed}`)).size === 3, landedFrames.map((f) => `${f.event.seq}@${f.landed}`).join(" "));
+  const sumAt = (ms, w) => ({ type: "summary", monorepo: O, members: [login.ana], summary: { last_activity_at: at(3), worktrees_active: w, machines_active: 1, needs: { ready: 0, conflicts: 0, failing: 0 }, members: 1, large: false, at: new Date(Date.now() + ms).toISOString() }, needs_changed: [], needs_more: false });
+  await deliver(sumAt(3_600_000, 7), sumAt(-60_000, 3));
+  r = await call("GET", "/v1/monorepos?summary=1", A);
+  check("out of order: an older summary arriving late is dropped", r.json?.monorepos?.find((m) => m.name === O)?.worktrees_active === 7, JSON.stringify(r.json?.monorepos?.find((m) => m.name === O)));
+  await deliver({ type: "member", monorepo: O, login: login.cy });
+  check("a member message for a non-member (a stale join) leaves cy's feed without O", !(await debugFeed(login.cy)).index.some((i) => i.name === O));
+  await deliver({ type: "events", monorepo: T, members: [login.cy], events: [{ ...line(100009, 9, "x"), monorepo: T }] });
+  check("lines for a monorepo not in the person's index are dropped", !(await debugFeed(login.cy)).pointers[T]);
+  const n0 = (await debugFeed(login.ana)).pointers[O];
+  await deliver({ type: "member", monorepo: O, login: login.ana });
+  check("a repeated join keeps the lines it has", (await debugFeed(login.ana)).pointers[O] === n0, `${n0}`);
+
+  // ── Presence: the follower socket's hello ──
+  const f1 = openSocket(`/v1/monorepos/${S}/events?topics=main`, A);
+  const f2 = openSocket(`/v1/monorepos/${S}/events?topics=main`, B);
+  sockets.push(f1, f2);
+  await waitFor(() => f1.open && f2.open, 10_000);
+  f1.send({ type: "hello", machine: "m1", worktrees: ["w1", "w2"] });
+  f2.send({ type: "hello", machine: "m2", worktrees: ["w3"] });
+  const ok1 = await waitFor(() => f1.frames.find((f) => f.type === "hello_ok"), 5000);
+  check("hello gets hello_ok with counts", ok1?.machine === "m1" && ok1?.worktrees === 2, JSON.stringify(ok1));
+  f1.send({ type: "hello", worktrees: ["bad id!"] });
+  check("a bad hello gets an error frame", !!(await waitFor(() => f1.frames.find((f) => f.type === "error"), 5000)));
+  const presence = async (want) => waitFor(async () => {
+    const m = (await call("GET", "/v1/monorepos?summary=1", A)).json?.monorepos?.find((x) => x.name === S);
+    return m && m.machines_active === want[0] && m.worktrees_active === want[1] ? m : null;
+  }, 15_000);
+  check("presence: 2 machines and 3 worktrees with open follower sockets", !!(await presence([2, 3])));
+  f1.send({ type: "hello", machine: "m1", worktrees: ["w1", "w2", "w4"] });
+  check("presence: a hello update (a worktree added) counts", !!(await presence([2, 4])));
+  f2.ws.close();
+  check("presence: a closed socket stops counting", !!(await presence([1, 3])));
+  check("the person's socket gets summary frames", live.frames.some((f) => f.type === "summary" && f.monorepo === S));
+
+  // ── Needs you, from stored facts ──
+  let n = await waitFor(async () => {
+    const x = (await call("GET", "/v1/branches?state=open&needs=ready", A)).json;
+    return x?.branches?.some((b) => b.monorepo === S && b.branch === "feat/x") ? x : null;
+  });
+  const bx = n?.branches?.find((b) => b.branch === "feat/x");
+  check("needs you: feat/x is ready (clean against main, checks pass), with its machine", bx?.state === "ready" && bx.pushed_machine === "ana-mbp" && bx.author === login.ana && bx.repo_path === ".", JSON.stringify(bx));
+  await call("POST", `/v1/monorepos/${S}/repos/${S}/statuses/${headX}`, A, { state: "pending", context: "ci" });
+  await call("POST", `/v1/monorepos/${S}/repos/${S}/statuses/${headX}`, A, { state: "pending", context: "ci" });
+  await call("POST", `/v1/monorepos/${S}/repos/${S}/statuses/${headX}`, A, { state: "failure", context: "ci", description: "2 tests failed" });
+  n = await waitFor(async () => {
+    const x = (await call("GET", "/v1/branches?state=open&needs=failing", A)).json;
+    return x?.branches?.some((b) => b.branch === "feat/x") ? x : null;
+  });
+  check("needs you: a failed check moves feat/x to failing", n?.branches?.find((b) => b.branch === "feat/x")?.checks?.failing?.[0] === "ci");
+  const sm = await waitFor(async () => {
+    const m = (await call("GET", "/v1/monorepos?summary=1", A)).json?.monorepos?.find((x) => x.name === S);
+    return m?.needs?.failing === 1 && m.needs.ready === 0 ? m : null;
+  }, 15_000);
+  check("the summary line counts it (failing 1, ready 0)", !!sm, JSON.stringify(sm?.needs));
+  check("the person's socket gets a needs frame for feat/x", !!(await waitFor(() => live.frames.find((f) => f.type === "needs" && f.monorepo === S && f.changed?.some((c) => c.branch === "feat/x" && c.state === "failing")), 10_000)));
+  p = await pageAll(A, `&in=${S}`);
+  const st = p.events.filter((x) => x.kind === "status");
+  check("status lines: only changes of state (pending once, then failure with a duration)", st.length === 2 && st[0].summary.state === "failure" && typeof st[0].summary.duration_s === "number" && st[0].branch === "feat/x", st.map((x) => `${x.summary.state}:${x.summary.duration_s}`).join(" "));
+  // A conflict: c1 lands on main, c2 changed the same line differently.
+  git(["checkout", "-q", "main"], src);
+  git(["checkout", "-qb", "c1"], src);
+  writeFileSync(join(src, "README.md"), "# s, one\n");
+  git(["commit", "-qam", "c1"], src);
+  git(["checkout", "-q", "main"], src);
+  git(["checkout", "-qb", "c2"], src);
+  writeFileSync(join(src, "README.md"), "# s, two\n");
+  git(["commit", "-qam", "c2"], src);
+  git(["push", "-q", clone[S], "c1", "c2"], src);
+  r = await call("POST", `/v1/monorepos/${S}/repos/${S}/branches/c1/merge`, A, {});
+  check("merge c1", r.status === 200, `${r.status} ${r.json?.error?.code ?? ""}`);
+  n = await waitFor(async () => {
+    const x = (await call("GET", `/v1/branches?state=open&needs=conflicts&in=${S}`, A)).json;
+    return x?.branches?.some((b) => b.branch === "c2") ? x : null;
+  }, 45_000);
+  check("needs you: c2 conflicts with main", n?.branches?.find((b) => b.branch === "c2")?.state === "conflicts");
+  e = await waitFor(() => live.frames.find((f) => f.type === "event" && f.event?.monorepo === S && f.event.kind === "merged"), 10_000);
+  check("the merge is a line, with its merge commit", !!e?.event?.summary?.merge_commit && e.event.branch === "c1");
+  r = await call("GET", "/v1/branches?state=merged", A);
+  check("GET /v1/branches answers state=open only", r.status === 400);
+
+  // ── The split, crossing it: cy joins S (3 members, large), then leaves (small again) ──
+  await call("PUT", `/v1/monorepos/${S}/members/${login.cy}`, A, { role: "member" });
+  d = await waitFor(async () => {
+    const x = await debugFeed(login.ana);
+    return x.index.find((i) => i.name === S)?.large && !x.pointers[S] ? x : null;
+  }, 20_000);
+  check("S over the split: large in ana's feed, its copied lines dropped", !!d);
+  p = await pageAll(A, `&in=${S}`);
+  check("S's lines still read, from its log", p.events.some((x) => x.kind === "branch.opened" && x.branch === "feat/x"));
+  await call("DELETE", `/v1/monorepos/${S}/members/${login.cy}`, A);
+  d = await waitFor(async () => {
+    const x = await debugFeed(login.ana);
+    const row = x.index.find((i) => i.name === S);
+    return row && !row.large && row.covered_after ? x : null;
+  }, 20_000);
+  check("S under the split again: small, copied from now on (older lines from its log)", !!d);
+  p = await pageAll(A, `&in=${S}`);
+  check("S's history reads in full after the round trip", p.events.some((x) => x.kind === "branch.opened" && x.branch === "feat/x") && p.from_logs === true);
+
+  // ── Replay on reconnect: two lines land while a second socket is away ──
+  const h0 = Math.max(0, ...live.frames.filter((f) => f.landed).map((f) => f.landed));
+  for (const k of [1, 2]) await call("PUT", `/v1/monorepos/${T}/worktrees/wt_r${k}_${id}`, A, { repo: ".", branch: `feat/r${k}`, path: `worktrees/r${k}`, machine: "ana-mbp", kind: "sparse" });
+  await waitFor(() => live.frames.filter((f) => f.type === "event" && f.landed > h0).length >= 2, 15_000);
+  const again = openSocket("/v1/events", A);
+  sockets.push(again);
+  await waitFor(() => again.open, 10_000);
+  again.send({ type: "hello", since: h0 });
+  const cu = await waitFor(() => again.frames.find((f) => f.type === "caught_up"), 10_000);
+  const replayed = again.frames.filter((f) => f.type === "event");
+  check("hello {since} replays what landed after it, then caught_up", cu && replayed.length === 2 && replayed.every((f) => f.landed > h0 && f.event.monorepo === T), `${replayed.map((f) => f.landed).join(",")} then ${cu?.landed}`);
+  again.send({ type: "hello", since: 10 ** 9 });
+  check("hello with a since ahead of the feed gets resync", !!(await waitFor(() => again.frames.find((f) => f.type === "resync"), 5000)));
+
+  // ── Past the window: trim ana's feed to 0 days; pages read every monorepo's log ──
+  const beforeTrim = (await pageAll(A)).events.map((x) => `${x.monorepo}/${x.seq}`);
+  const tr = (await call("POST", "/v1/_feed/test", BOOT, { trim: { login: login.ana, days: 0 } })).json;
+  p = await pageAll(A);
+  const afterTrim = p.events.map((x) => `${x.monorepo}/${x.seq}`);
+  const realBefore = beforeTrim.filter((k) => !k.startsWith(`${O}/1000`));
+  check("past the window: the same lines, read from the monorepos' logs (from_logs)", tr.dropped > 0 && p.from_logs === true && realBefore.every((k) => afterTrim.includes(k)), `dropped ${tr.dropped}; ${realBefore.length} lines; missing ${realBefore.filter((k) => !afterTrim.includes(k)).length}`);
+
+  // ── The home's list ──
+  r = await call("GET", "/v1/monorepos?summary=1", A);
+  const ms = r.json?.monorepos ?? [];
+  const ordered = ms.every((m, i) => i === 0 || (ms[i - 1].last_activity_at ?? "") >= (m.last_activity_at ?? ""));
+  check("GET /v1/monorepos?summary=1: every monorepo, most recently active first, with its line", ms.length === 5 && ordered && ms.every((m) => m.role && "machines_active" in m && "needs" in m), ms.map((m) => `${m.name.slice(0, 2)}:${m.last_activity_at?.slice(11, 19)}`).join(" "));
+  r = await call("GET", "/v1/monorepos", A);
+  check("GET /v1/monorepos without summary is unchanged", r.json?.monorepos?.length === 5 && !("needs" in r.json.monorepos[0]));
+} catch (err) {
+  check("no exception", false, String(err?.stack ?? err));
+} finally {
+  for (const s of sockets) {
+    try {
+      s.ws.close();
+    } catch {}
+  }
+  for (const m of made) {
+    const r = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, A);
+    check(`delete ${m}`, r.status === 204, `${r.status}`);
+  }
+  if (made.length) {
+    const d = await waitFor(async () => {
+      const x = await debugFeed(login.ana);
+      return x && !x.index.length && !Object.keys(x.pointers).length ? x : null;
+    }, 30_000);
+    check("deleting the monorepos empties ana's feed (leave messages)", !!d);
+  }
+  rmSync(work, { recursive: true, force: true });
+  console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
+  process.exit(results.every(Boolean) ? 0 : 1);
+}

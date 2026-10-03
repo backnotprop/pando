@@ -35,7 +35,9 @@
     "producers": [
       { "binding": "BRANCH_FACTS", "queue": "pando-branch-facts" },
       // Hook deliveries (C9): message = {monorepo, delivery_id}; the row is in the monorepo object.
-      { "binding": "HOOKS", "queue": "pando-hooks" }
+      { "binding": "HOOKS", "queue": "pando-hooks" },
+      // The home's activity feed (C25): events and summary lines of monorepos, and membership changes.
+      { "binding": "FEED_QUEUE", "queue": "pando-feed" }
     ],
     "consumers": [
       {
@@ -55,6 +57,14 @@
         "max_retries": 3,
         "max_concurrency": 5,
         "dead_letter_queue": "pando-branch-facts-dlq"
+      },
+      {
+        "queue": "pando-feed",
+        "max_batch_size": 100,
+        "max_batch_timeout": 1,
+        "max_retries": 5,
+        "max_concurrency": 10,
+        "dead_letter_queue": "pando-feed-dlq"
       }
     ]
   },
@@ -63,12 +73,15 @@
       { "name": "MONOREPO", "class_name": "MonorepoObject" },
       { "name": "META", "class_name": "MetaLayerObject" },
       // Users, credentials and membership: one instance for the whole Worker.
-      { "name": "ACCOUNTS", "class_name": "AccountsObject" }
+      { "name": "ACCOUNTS", "class_name": "AccountsObject" },
+      // One per person: the home's activity feed (C25).
+      { "name": "FEED", "class_name": "FeedObject" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["MonorepoObject", "MetaLayerObject"] },
-    { "tag": "v2", "new_sqlite_classes": ["AccountsObject"] }
+    { "tag": "v2", "new_sqlite_classes": ["AccountsObject"] },
+    { "tag": "v3", "new_sqlite_classes": ["FeedObject"] }
   ],
   // The contract, served at /v1/openapi.yaml.
   "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }]

@@ -5,6 +5,7 @@ interface __BaseEnv_Env {
 	BLOBS: R2Bucket;
 	BRANCH_FACTS: Queue;
 	HOOKS: Queue;
+	FEED_QUEUE: Queue;
 	ARTIFACTS: Artifacts;
 	WORKOS_CLIENT_ID: "client_01M3ZW5WYKNDQZE358DYA7VHY5";
 	PANDO_BOOTSTRAP: string;
@@ -14,11 +15,12 @@ interface __BaseEnv_Env {
 	MONOREPO: DurableObjectNamespace<import("./src/index").MonorepoObject>;
 	META: DurableObjectNamespace<import("./src/index").MetaLayerObject>;
 	ACCOUNTS: DurableObjectNamespace<import("./src/index").AccountsObject>;
+	FEED: DurableObjectNamespace<import("./src/index").FeedObject>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "MonorepoObject" | "MetaLayerObject" | "AccountsObject";
+		durableNamespaces: "MonorepoObject" | "MetaLayerObject" | "AccountsObject" | "FeedObject";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

@@ -328,12 +328,19 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
       if (artifactsCode(err) !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
     }
   }
-  // The meta layer's large files in R2, and CI details cached there (ci/routes.ts).
-  for (const prefix of [`meta/${m}/`, `ci/${m}/`]) {
+  // The meta layer's large files (BLOBS); cached CI details (ci/routes.ts) and the
+  // file pages' answers and walk checkpoints (files.ts, keyed by <id>--<repo>) in CACHE.
+  const prefixes: [R2Bucket, string][] = [
+    [c.env.BLOBS, `meta/${m}/`],
+    [c.env.CACHE, `ci/${m}/`],
+    [c.env.CACHE, `answers/${m}--`],
+    [c.env.CACHE, `partial/${m}--`],
+  ];
+  for (const [bucket, prefix] of prefixes) {
     let more = true;
     while (more) {
-      const listed = await c.env.BLOBS.list({ prefix, limit: 1000 });
-      if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
+      const listed = await bucket.list({ prefix, limit: 1000 });
+      if (listed.objects.length) await bucket.delete(listed.objects.map((o) => o.key));
       more = listed.truncated;
     }
   }

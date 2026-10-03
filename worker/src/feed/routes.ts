@@ -183,7 +183,8 @@ async function needsPage(env: Env, login: string, url: URL) {
 //   POST {deliver: [FeedMessage...]}  run queue messages now, one at a time, in this order
 //   POST {trim: {login, days}}        trim a feed's window to `days`
 //   GET  ?login=<l>                    a feed's index and pointer counts
-//   GET  ?monorepo=<m>                 a monorepo's member list and summary line
+//   GET  ?monorepo=<m>                 a monorepo's member list, summary line and feed outbox
+//   POST {outbox: {monorepo, crash, fail}}  its next drain dies ("before" or "after" its call), or the next `fail` drains fail
 
 async function testRoute(request: Request, env: Env): Promise<Response> {
   if (env.FEED_TEST !== "1") throw new HttpError(404, "not_found", "no such route");
@@ -195,12 +196,20 @@ async function testRoute(request: Request, env: Env): Promise<Response> {
     const m = url.searchParams.get("monorepo");
     if (m) {
       const stub = monorepoStub(env, m);
-      return Response.json({ members: await stub.feedMembers(), summary: await stub.feedSummary() });
+      return Response.json({ members: await stub.feedMembers(), summary: await stub.feedSummary(), outbox: await stub.feedTestOutbox() });
     }
     bad("login or monorepo");
   }
-  const b = (await request.json()) as { deliver?: FeedMessage[]; trim?: { login: string; days: number } };
+  const b = (await request.json()) as {
+    deliver?: FeedMessage[];
+    trim?: { login: string; days: number };
+    outbox?: { monorepo: string; crash?: "before" | "after"; fail?: number };
+  };
   if (b.trim) return Response.json(await feedStub(env, b.trim.login).trim(b.trim.days));
+  if (b.outbox) {
+    const { monorepo, ...set } = b.outbox;
+    return Response.json(await monorepoStub(env, monorepo).feedTestOutbox(set));
+  }
   const out: string[] = [];
   for (const body of b.deliver ?? []) {
     let result = "ack";

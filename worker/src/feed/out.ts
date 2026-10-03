@@ -3,18 +3,22 @@
 // - marks activity events in the log as they are published (the `feed`
 //   column holds the event's feed line; an index on (at, seq) serves pages
 //   and backfills);
-// - copies them, through an outbox and the pando-feed queue, to members'
-//   feeds when the monorepo has FANOUT_MAX members or fewer (pushes wait for
-//   the branch-facts job, which adds the commit count and head title);
+// - copies them to members' feeds when the monorepo has FANOUT_MAX members
+//   or fewer (pushes wait for the branch-facts job, which adds the commit
+//   count and head title), through an outbox: the row is written in the same
+//   step as the event, drained at once by one RPC into the FeedDrain Worker
+//   entrypoint (ctx.exports), which writes the feeds; the alarm is only the
+//   retry timer (C25-LIVE-HOME.md);
 // - keeps the member list the queue consumer last read from the accounts;
 // - keeps presence from the follower sockets' hello;
 // - sends the monorepo's summary line, coalesced, at most every 10 s (60 s
 //   when large), only when it changed;
 // - answers needs-you from stored branch facts.
-// It never calls Artifacts or another object; sends go to the queue.
+// It never calls Artifacts or another object; the Worker does the fan-out.
 
 import type { Env } from "../env";
 import { now } from "../http";
+import { released } from "../timing";
 import { combine } from "../monorepo/checks";
 import { ZERO } from "../monorepo/names";
 import type { StatusRecord, StreamEvent } from "../monorepo/types";
@@ -33,6 +37,11 @@ CREATE TABLE IF NOT EXISTS feed_presence (sid TEXT PRIMARY KEY, login TEXT, mach
 `;
 
 const OUTBOX_BATCH = 100;
+/** A failed drain is tried again after these delays; after the last, the row is dead (kept DEAD_KEEP_MS). */
+const RETRY_MS = [1_000, 5_000, 30_000, 300_000];
+const DEAD_KEEP_MS = 7 * 86_400_000;
+/** Set with each outbox row, in the same step: if the object dies mid-drain, its alarm drains again this soon. */
+const SAFETY_MS = 5_000;
 const EVENTS_PER_MESSAGE = 50;
 const WORKTREE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -83,7 +92,16 @@ export class FeedOut {
     const bcols = this.rows<{ name: string }>("PRAGMA table_info(branches)").map((c) => c.name);
     // The credential (machine) that last pushed the branch (C25, item 4).
     if (!bcols.includes("pushed_machine")) this.sql.exec("ALTER TABLE branches ADD COLUMN pushed_machine TEXT");
+    const ocols = this.rows<{ name: string }>("PRAGMA table_info(feed_outbox)").map((c) => c.name);
+    for (const [col, type] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["next_at", "INTEGER"], ["dead_at", "INTEGER"], ["error", "TEXT"]]) {
+      if (!ocols.includes(col)) this.sql.exec(`ALTER TABLE feed_outbox ADD COLUMN ${col} ${type}`);
+    }
     if (!this.get("marked")) this.markOld();
+  }
+
+  private retryMs(): number[] {
+    const t = (this.env.FEED_RETRY_MS ?? "").split(",").map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    return t.length ? t : RETRY_MS;
   }
 
   /** Once: give events logged before the feed existed their feed lines (no push summaries, every status counted). */
@@ -181,10 +199,19 @@ export class FeedOut {
     this.queue({ t: "event", event });
   }
 
-  /** Add to the outbox. `send`: start a flush after this turn (a burst goes out together); the alarm flushes itself. */
+  /**
+   * Add to the outbox, in the same step as the change, with the alarm that
+   * drains it if this object dies before it does. `send`: drain after this
+   * turn (a burst goes out together); the alarm drains on its own.
+   */
   private queue(o: Outgoing, send = true): void {
     this.sql.exec("INSERT INTO feed_outbox (body) VALUES (?)", JSON.stringify(o));
+    this.armAt(Date.now() + SAFETY_MS);
     if (send && !this.flushing) this.ctx.waitUntil(Promise.resolve().then(() => this.flush()));
+  }
+
+  private dueRows(limit: number): { id: number; body: string; attempts: number }[] {
+    return this.rows("SELECT id, body, attempts FROM feed_outbox WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?", Date.now(), limit);
   }
 
   /** Send the outbox; one flush at a time. Never rejects. */
@@ -197,52 +224,137 @@ export class FeedOut {
         })
         .then((ok) => {
           this.flushing = null;
-          // A row added while the last round was sending goes now (a failed send waits for the alarm).
-          if (ok && this.monorepo() && this.row("SELECT id FROM feed_outbox LIMIT 1")) this.ctx.waitUntil(this.flush());
+          // A row added while the last round was draining goes now (a failed drain waits for the alarm).
+          if (ok && this.monorepo() && this.dueRows(1).length) this.ctx.waitUntil(this.flush());
         });
     }
     return this.flushing;
   }
 
-  /** Send the outbox to pando-feed: events in messages of 50 with the member list, summaries one each. False when a send failed. */
+  /**
+   * Drain the outbox: up to 100 due rows at a time, as messages (events in
+   * groups of 50 with the member list, summaries one each), in one RPC to the
+   * FeedDrain entrypoint. Delivered rows are deleted; failed ones are tried
+   * again on RETRY_MS, then kept as dead. False when a drain failed.
+   */
   private async flushNow(): Promise<boolean> {
     const name = this.monorepo();
-    if (!name || !this.env.FEED_QUEUE) {
+    if (!name) {
       this.sql.exec("DELETE FROM feed_outbox");
       return true;
     }
     for (let round = 0; round < 50; round++) {
-      const rows = this.rows<{ id: number; body: string }>("SELECT id, body FROM feed_outbox ORDER BY id LIMIT ?", OUTBOX_BATCH);
+      const rows = this.dueRows(OUTBOX_BATCH);
       if (!rows.length) return true;
       const members = this.members();
       const large = this.isLarge();
       const msgs: FeedMessage[] = [];
+      const ids: number[][] = [];
+      const drop: number[] = [];
       let events: FeedEvent[] = [];
+      let eventIds: number[] = [];
       const cut = () => {
-        if (events.length && !large) msgs.push({ type: "events", monorepo: name, members, events });
+        if (events.length && !large) {
+          msgs.push({ type: "events", monorepo: name, members, events });
+          ids.push(eventIds);
+        } else drop.push(...eventIds); // large now: read on demand, nothing to copy
         events = [];
+        eventIds = [];
       };
       for (const r of rows) {
         const o = JSON.parse(r.body) as Outgoing;
         if (o.t === "event") {
           events.push(o.event);
+          eventIds.push(r.id);
           if (events.length >= EVENTS_PER_MESSAGE) cut();
         } else {
           cut();
           msgs.push({ type: "summary", monorepo: name, members: members.length <= MEMBERS_INLINE_MAX ? members : null, summary: o.summary, needs_changed: o.needs_changed, needs_more: o.needs_more });
+          ids.push([r.id]);
         }
       }
       cut();
+      this.deleteRows(drop);
+      if (!msgs.length) continue;
+      let ok: boolean[];
+      let error: string | null = null;
       try {
-        for (let i = 0; i < msgs.length; i += 10) await this.env.FEED_QUEUE.sendBatch(msgs.slice(i, i + 10).map((body) => ({ body })));
+        await this.testCrash("before");
+        if (this.testFail()) throw new Error("feed test: a failed drain");
+        const out = released(await this.ctx.exports.FeedDrain.deliver(msgs));
+        ok = out.ok;
+        error = out.error;
+        await this.testCrash("after");
       } catch (err) {
-        console.error("feed: sending to pando-feed failed; the alarm retries:", err instanceof Error ? err.message : String(err));
-        this.armAt(Date.now() + 30_000);
+        ok = msgs.map(() => false);
+        error = err instanceof Error ? err.message : String(err);
+      }
+      const done = ids.filter((_, i) => ok[i]).flat();
+      const failed = ids.filter((_, i) => !ok[i]).flat();
+      this.deleteRows(done);
+      if (failed.length) {
+        this.retryRows(failed, error ?? "not delivered");
         return false;
       }
-      this.sql.exec("DELETE FROM feed_outbox WHERE id <= ?", rows[rows.length - 1].id);
     }
     return true; // 50 rounds of 100; the rest goes on the next flush
+  }
+
+  private deleteRows(ids: number[]): void {
+    for (let i = 0; i < ids.length; i += 90) {
+      const chunk = ids.slice(i, i + 90);
+      this.sql.exec(`DELETE FROM feed_outbox WHERE id IN (${chunk.map(() => "?").join(",")})`, ...chunk);
+    }
+  }
+
+  /** Count a failed try on each row: due again after the next delay, or dead after the last. */
+  private retryRows(ids: number[], error: string): void {
+    const delays = this.retryMs();
+    const t = Date.now();
+    let next = Infinity;
+    for (const id of ids) {
+      const r = this.row<{ attempts: number }>("SELECT attempts FROM feed_outbox WHERE id = ?", id);
+      if (!r) continue;
+      const attempts = r.attempts + 1;
+      if (attempts > delays.length) {
+        this.sql.exec("UPDATE feed_outbox SET attempts = ?, dead_at = ?, next_at = NULL, error = ? WHERE id = ?", attempts, t, error.slice(0, 500), id);
+        console.error(`feed: an outbox row of ${this.monorepo()} is dead after ${attempts} tries: ${error}`);
+      } else {
+        const at = t + delays[attempts - 1];
+        next = Math.min(next, at);
+        this.sql.exec("UPDATE feed_outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts, at, error.slice(0, 500), id);
+      }
+    }
+    if (next < Infinity) this.armAt(next);
+  }
+
+  /** Tests only (FEED_TEST=1): the object dies before or after its drain call. */
+  private async testCrash(when: "before" | "after"): Promise<void> {
+    if (this.env.FEED_TEST !== "1" || this.get("test_crash") !== when) return;
+    this.set("test_crash", null);
+    await this.ctx.storage.sync();
+    // Let the change's own answer go out first: the crash is after the acknowledgement, mid-drain.
+    if (when === "before") await new Promise((r) => setTimeout(r, 200));
+    this.ctx.abort(`feed test: the object dies ${when} its drain`);
+  }
+
+  /** Tests only (FEED_TEST=1): the next n drains fail. */
+  private testFail(): boolean {
+    if (this.env.FEED_TEST !== "1") return false;
+    const n = Number(this.get("test_fail") ?? 0);
+    if (n <= 0) return false;
+    this.set("test_fail", String(n - 1));
+    return true;
+  }
+
+  /** Tests only: arm a crash or failures, and read the outbox. */
+  testOutbox(set: { crash?: "before" | "after"; fail?: number } = {}): { live: number; dead: number; rows: { id: number; attempts: number; next_at: number | null; dead_at: number | null; error: string | null }[] } {
+    if (set.crash) this.set("test_crash", set.crash);
+    if (set.fail !== undefined) this.set("test_fail", String(set.fail));
+    const rows = this.rows<{ id: number; attempts: number; next_at: number | null; dead_at: number | null; error: string | null }>(
+      "SELECT id, attempts, next_at, dead_at, error FROM feed_outbox ORDER BY id",
+    );
+    return { live: rows.filter((r) => r.dead_at === null).length, dead: rows.filter((r) => r.dead_at !== null).length, rows };
   }
 
   /**
@@ -498,7 +610,10 @@ export class FeedOut {
     const due = Number(this.get("tick_due") ?? 0);
     if (due && due <= Date.now() + 50) this.tick();
     else if (due) this.armAt(due);
-    if (this.row("SELECT id FROM feed_outbox LIMIT 1")) await this.flush();
+    this.sql.exec("DELETE FROM feed_outbox WHERE dead_at IS NOT NULL AND dead_at < ?", Date.now() - DEAD_KEEP_MS);
+    if (this.dueRows(1).length) await this.flush();
+    const later = this.row<{ t: number | null }>("SELECT MIN(next_at) AS t FROM feed_outbox WHERE dead_at IS NULL AND next_at > ?", Date.now())?.t;
+    if (later) this.armAt(later);
   }
 
   private tick(): void {

@@ -50,7 +50,7 @@ async function raw(request: Request, env: Env, ctx: ExecutionContext, url: URL, 
   const obj = objectsClient(ctx);
   const w = new Walker(obj, rec, requestBudget(env));
   const stub = monorepoStub(env, info.id);
-  const { commit, pinned } = await resolveCommit(env, w, (r) => stub.refHead(rec.name, r), url.searchParams.get("ref"));
+  const { commit, pinned } = await resolveCommit(env, w, (r) => stub.refHead(rec.name, r), url.searchParams.get("ref"), (sha) => stub.rememberHead(rec.name, sha));
   const entry = await w.entryAt(commit.treeHash, path);
   if (!entry) throw new HttpError(404, "not_found", `no ${path} at this ref`);
   if (entry.type === "tree") throw new HttpError(404, "not_a_file", `${path} is a folder`);

@@ -27,6 +27,7 @@ var commands = []app.Command{
 	{Name: "merge", Usage: "merge [<branch>] [--force]                                land a branch on main with a merge commit", Run: app.Merge},
 	{Name: "reference", Usage: "reference update <path> | sync                            move a reference to its newest commit", Run: app.Reference},
 	{Name: "status", Usage: "status                                                    this folder, its worktrees and references", Run: app.Status},
+	{Name: "mac", Usage: "mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)", Run: app.Mac},
 	{Name: "credential", Usage: "credential create --name <sandbox> | list | revoke <id>   credentials that act as you", Run: app.Credential},
 }
 

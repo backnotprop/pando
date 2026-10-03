@@ -36,7 +36,7 @@
       { "binding": "BRANCH_FACTS", "queue": "pando-branch-facts" },
       // Hook deliveries (C9): message = {monorepo, delivery_id}; the row is in the monorepo object.
       { "binding": "HOOKS", "queue": "pando-hooks" },
-      // The home's activity feed (C25): events and summary lines of monorepos, and membership changes.
+      // The home's activity feed (C25): membership changes. Lines and summaries drain by RPC (FeedDrain); kept until that is measured on pando-dev.
       { "binding": "FEED_QUEUE", "queue": "pando-feed" }
     ],
     "consumers": [

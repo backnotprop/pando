@@ -1,11 +1,13 @@
 // The account-wide activity feed (C25): the shapes and pure rules shared by
 // the monorepo object's side (out.ts), the per-person FeedObject (object.ts),
-// the pando-feed queue consumer (consumer.ts) and the routes (routes.ts).
+// the fan-out (consumer.ts: the FeedDrain entrypoint and the pando-feed queue
+// consumer) and the routes (routes.ts).
 //
 // The design is the addendum at the end of
-// research/plans/architecture-2026-10-03/ARCHITECTURE.md: a FeedObject per
-// person; fan-out on write through the pando-feed queue for monorepos of
-// FANOUT_MAX members or fewer; fan-in on read for larger ones; a coalesced
+// research/plans/architecture-2026-10-03/ARCHITECTURE.md, with the delivery
+// of C25-LIVE-HOME.md: a FeedObject per person; fan-out on write for
+// monorepos of FANOUT_MAX members or fewer (each monorepo object's outbox,
+// drained by RPC to FeedDrain); fan-in on read for larger ones; a coalesced
 // summary line per monorepo; the display key (at, monorepo_id, seq).
 //
 // Fields (one meaning across the API): `monorepo` is the owner/name label,
@@ -113,7 +115,7 @@ export interface NeedRow {
   updated_at: string | null;
 }
 
-/** pando-feed queue messages. `monorepo` is always the monorepo's id. */
+/** Messages to FeedDrain (events, summary) and on pando-feed (member). `monorepo` is always the monorepo's id. */
 export type FeedMessage =
   | { type: "events"; monorepo: string; members: string[]; events: FeedEvent[] }
   | { type: "summary"; monorepo: string; members: string[] | null; summary: Summary; needs_changed: NeedChange[]; needs_more: boolean }

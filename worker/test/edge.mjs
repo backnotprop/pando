@@ -8,6 +8,12 @@
 //    The machine's own credential is only used to make and revoke it.
 // 2. Large pushes through the git door: branches of 4 to 12 MiB of
 //    incompressible bytes, each timed, then the branch diff of the largest.
+//    Git runs with http.version=HTTP/1.1 and http.postBuffer at 100 MiB, the
+//    settings the CLI uses for Pando remotes. Measured on this Mac with Apple
+//    git (LibreSSL): a 12 MiB push over HTTP/2 fails about one time in four
+//    with "SSL_read: bad record mac", straight to Artifacts too (6 of 8), and
+//    a bigger postBuffer alone does not help (12 of 16); HTTP/1.1 with the
+//    pack in one sized request passed 24 of 24; HTTP/1.1 chunked hangs.
 //
 // Credentials stay in memory and are never printed. Git never reaches the
 // macOS keychain. Everything made is deleted at the end.
@@ -45,7 +51,7 @@ const git = (args, cwd, secret) => {
   const t = Date.now();
   const r = spawnSync(
     "git",
-    ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", ...args],
+    ["-c", "http.version=HTTP/1.1", "-c", "http.postBuffer=104857600", "-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", ...args],
     {
       cwd,
       encoding: "utf8",

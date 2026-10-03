@@ -123,18 +123,22 @@ async function walk(
   await Promise.all(jobs);
 }
 
-async function blobBytes(repo: ArtifactsRepo, e: Entry | null): Promise<Uint8Array | null> {
+interface BlobRead {
+  size: number;
+  /** The whole blob, only when it is at most MAX_TEXT_BYTES. */
+  bytes: Uint8Array | null;
+  binary: boolean;
+}
+
+/** Read a blob, but never more than its first 8,000 bytes when it is large. */
+async function readBlobFor(repo: ArtifactsRepo, e: Entry | null): Promise<BlobRead | null> {
   if (!e || e.type === "gitlink") return null;
   const blob = await repo.readBlob(e.sha);
   if (!blob) throw new Error(`blob ${e.sha} not found`);
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-function isBinary(b: Uint8Array | null): boolean {
-  if (!b) return false;
-  const n = Math.min(b.length, 8000);
-  for (let i = 0; i < n; i++) if (b[i] === 0) return true;
-  return false;
+  const head = new Uint8Array(await blob.slice(0, 8000).arrayBuffer());
+  const binary = head.includes(0);
+  const bytes = !binary && blob.size <= MAX_TEXT_BYTES ? new Uint8Array(await blob.arrayBuffer()) : null;
+  return { size: blob.size, bytes, binary };
 }
 
 const decoder = new TextDecoder();
@@ -213,19 +217,19 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
         f.additions = f.deletions = null;
         return;
       }
-      const [a, b] = await Promise.all([blobBytes(repo, p.old), blobBytes(repo, p.new)]);
-      if (isBinary(a) || isBinary(b)) {
+      const [a, b] = await Promise.all([readBlobFor(repo, p.old), readBlobFor(repo, p.new)]);
+      if (a?.binary || b?.binary) {
         f.binary = true;
         f.additions = f.deletions = null;
         f.patch_omitted = "binary";
         return;
       }
-      if ((a?.length ?? 0) > MAX_TEXT_BYTES || (b?.length ?? 0) > MAX_TEXT_BYTES) {
+      if ((a?.size ?? 0) > MAX_TEXT_BYTES || (b?.size ?? 0) > MAX_TEXT_BYTES) {
         f.additions = f.deletions = null;
         f.patch_omitted = "too_large";
         return;
       }
-      const hunks = lineDiff(a ? decoder.decode(a) : "", b ? decoder.decode(b) : "");
+      const hunks = lineDiff(a?.bytes ? decoder.decode(a.bytes) : "", b?.bytes ? decoder.decode(b.bytes) : "");
       if (!hunks) {
         f.additions = f.deletions = null;
         f.patch_omitted = "too_large";

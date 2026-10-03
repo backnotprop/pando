@@ -66,7 +66,10 @@ function git(args, cwd, secret, extra = {}) {
     GIT_COMMITTER_EMAIL: "e2e@pando.invalid",
     ...extra,
   };
-  const helper = secret ? ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f'] : [];
+  // Never let git hand a login to the macOS keychain (Apple's git has
+  // credential.helper=osxkeychain in its system config): skip the system
+  // config, clear the helper list, then add ours only when there is a secret.
+  const helper = ["-c", "credential.helper=", ...(secret ? ["-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f'] : [])];
   const r = spawnSync("git", [...helper, "-c", "init.defaultBranch=main", ...args], { cwd, env, encoding: "utf8" });
   return { ok: r.status === 0, out: (r.stdout || "") + (r.stderr || "") };
 }

@@ -166,7 +166,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
     const read = await token();
     const u = urls(p);
     if (hook.type === "web") {
-      const { origin: _origin, ...rest } = p;
+      const { origin: _origin, plain: _plain, ...rest } = p;
       const body = JSON.stringify({
         ...rest,
         delivery_id: deliveryId,

@@ -7,33 +7,48 @@ info:
     Owner: the server-git lane. Others ask pando-ops for changes.
 
     Shape:
-    - Every route is under `/v1/monorepos/{monorepo}`, except the user's
-      own (`/v1/user`, `/v1/monorepos`) and the web home's, which span all of
-      the person's monorepos (`/v1/events`, `/v1/branches`). A monorepo holds
-      repos. A plain git repo is a monorepo of kind `repo` holding exactly
-      one repo, at path `.`, and no meta layer; it uses the same routes.
-      The meta layer's routes (`/v1/monorepos/{monorepo}/meta/...`) are in
-      `meta-sync.md`.
+    - A monorepo is `owner/name`, like GitHub (NAMESPACES.md): the owner is
+      a namespace (a person's login; organizations later), the name is
+      unique within its owner, and a permanent `id` keys everything stored.
+      A rename or a transfer changes the label only; the old `owner/name`
+      keeps working (an alias) until its owner gives that name to another
+      monorepo, which the create or rename answer reports
+      (`replaced_alias`). Owners and names match without case and are
+      stored lower case.
+    - In payloads, `monorepo` is always the `owner/name` label and
+      `monorepo_id` always the id (repos, hook payloads, feed lines,
+      needs-you rows, socket frames). The Monorepo object itself has `id`,
+      `owner`, `name` and `full_name`.
+    - Every route is under `/v1/monorepos/{owner}/{monorepo}`, except the
+      user's own (`/v1/user`, `/v1/monorepos`) and the web home's, which
+      span all of the person's monorepos (`/v1/events`, `/v1/branches`). A
+      monorepo holds repos. A plain git repo is a monorepo of kind `repo`
+      holding exactly one repo, at path `.`, and no meta layer; it uses the
+      same routes. The meta layer's routes
+      (`/v1/monorepos/{owner}/{monorepo}/meta/...`) are in `meta-sync.md`.
     - A repo has a `path` (as in `formats.md`: `projects/web`, or `.` in a
       plain repo) and a `name`, its id in URLs: the path with each `/`
       turned into `-` (`projects-web`). A plain repo's name is the
-      monorepo's name. Names are unique in a monorepo.
+      monorepo's name when it was made (a rename does not change it).
+      Names are unique in a monorepo.
     - In a monorepo, the repo named `meta` (path `.`, clone_url
-      `<host>/<monorepo>/meta.git`) is the meta layer's own git history. It
+      `<host>/<owner>/<monorepo>/meta.git`) is the meta layer's own git history. It
       takes branches, diffs, reviews and merges like any repo, and it is how
       `.pando/**` changes: after a merge into it, the merged files go to the
       live meta layer on every machine. It is not in listRepos.
-    - Git goes through the git door at the repo's `clone_url`,
-      `https://<host>/<monorepo>/<name>.git` (smart HTTP; see the `git`
-      tag). Pushes to the default branch are refused, except the first push
+    - Git goes through the git door at the repo's `clone_url`:
+      `https://<host>/<owner>/<monorepo>/<name>.git` for a monorepo's repos,
+      `https://<host>/<owner>/<name>.git` for a plain repo (smart HTTP; see
+      the `git` tag). Pushes to the default branch are refused, except the first push
       that creates it. Every other push goes through.
     - Every other call is JSON with `Authorization: Bearer <credential>`.
 
-    Artifacts repos, in the namespace `pando-dev`: a project repo is
-    `<monorepo>--<name>` (`acme--projects-web`), a plain repo is
-    `<monorepo>--<monorepo>`, and the meta layer is `<monorepo>--meta`.
-    Artifacts allows letters, digits, `.`, `_` and `-`, starting with a
-    letter or digit. Pando names forbid `--`, so the split is never
+    Artifacts repos, in the namespace `pando-dev`, are named from the
+    monorepo's id and kept on each repo's record (Artifacts has no rename):
+    a project repo is `<id>--<name>` (`m_0123456789abcdef--projects-web`), a
+    plain repo `<id>--<name>`, and the meta layer `<id>--meta`. New ids are
+    `m_` and 16 hex characters; a monorepo made before namespaces kept its
+    old name as its id. Ids and names have no `--`, so the split is never
     ambiguous. These names are internal: clients use `clone_url`.
 
     Required checks: the server reads `required_checks` from
@@ -105,11 +120,15 @@ tags:
       The git door. Plain git clients use it; no Pando client is needed.
 
       ```
-      GET  /{monorepo}/{repo}.git/info/refs?service=git-upload-pack
-      GET  /{monorepo}/{repo}.git/info/refs?service=git-receive-pack
-      POST /{monorepo}/{repo}.git/git-upload-pack
-      POST /{monorepo}/{repo}.git/git-receive-pack
+      GET  /{owner}/{monorepo}/{repo}.git/info/refs?service=git-upload-pack
+      GET  /{owner}/{monorepo}/{repo}.git/info/refs?service=git-receive-pack
+      POST /{owner}/{monorepo}/{repo}.git/git-upload-pack
+      POST /{owner}/{monorepo}/{repo}.git/git-receive-pack
       ```
+
+      A plain repo drops the repo segment: `/{owner}/{name}.git/...`. The
+      other shape answers 404 saying which one fits. An old `owner/name`
+      (after a rename or a transfer) still works.
 
       Credentials: HTTP Basic with the user's credential as the password
       (any username; this is what `pando credential`, the git credential
@@ -164,7 +183,7 @@ paths:
               type: object
               required: [login]
               properties:
-                login: { $ref: "#/components/schemas/Login" }
+                login: { $ref: "#/components/schemas/Login", description: "Lowered first. 400 `reserved_name` for a reserved one; 409 `namespace_taken` when a person or an organization has it." }
                 name: { type: string, description: A display name. }
                 email: { type: string, description: Used on merge commits. }
                 credential_name: { type: string, description: "A name for the first credential, for example the machine name. Default `bootstrap`." }
@@ -225,7 +244,7 @@ paths:
         400 with `error.code` `authorization_pending` (keep polling) or
         `slow_down` (add 5 seconds to the interval). `access_denied`,
         `expired_token` and `invalid_grant` end the attempt. On success,
-        `joined` lists the monorepos whose email invites were accepted, and
+        `joined` lists the monorepos (`owner/name`) whose email invites were accepted, and
         the CLI stores `credential.secret` where formats.md says
         (`~/.pando/credentials/<host>`, mode 600).
       tags: [users]
@@ -396,13 +415,14 @@ paths:
               required: [name]
               properties:
                 name: { $ref: "#/components/schemas/Name" }
+                owner: { $ref: "#/components/schemas/Login", description: "The namespace; default and, for now, only your own (403 `not_your_namespace`; organizations later)." }
                 kind:
                   type: string
                   enum: [monorepo, repo]
                   default: monorepo
                   description: |
                     `monorepo`: Pando also makes the meta layer's Artifacts repo
-                    (`<name>--meta`, empty); add code repos with createRepo.
+                    (`<id>--meta`, empty); add code repos with createRepo.
                     `repo`: a plain git repo; Pando makes its one repo (path `.`,
                     name = the monorepo's name) and returns it in `repos`.
       responses:
@@ -412,20 +432,24 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [monorepo, repos]
+                required: [monorepo, repos, replaced_alias]
                 properties:
                   monorepo: { $ref: "#/components/schemas/Monorepo" }
                   repos:
                     type: array
                     description: The plain repo for kind `repo`; empty for kind `monorepo`.
                     items: { $ref: "#/components/schemas/Repo" }
+                  replaced_alias: { $ref: "#/components/schemas/ReplacedAlias" }
         "401": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "`monorepo_exists`: the owner has a monorepo with that name.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
     get:
       operationId: listMonorepos
       summary: The monorepos this user belongs to
       description: |
-        By name. With `?summary=1` (the web home): most recently active first,
+        By owner, then name. With `?name=<name>`: only those named so, under
+        any owner (`pando clone <name>`: the cli prefers your own namespace,
+        else the only match, else it asks). With `?summary=1` (the web home): most recently active first,
         each with its one line (`MonorepoSummary`), answered from the person's
         feed in one call (no call per monorepo). The line is up to 10 s behind
         (60 s for a monorepo of more than 100 members): each monorepo sends it
@@ -436,6 +460,10 @@ paths:
         - name: summary
           in: query
           schema: { type: string, enum: ["1"] }
+        - name: name
+          in: query
+          description: A monorepo name (any case). No match is an empty list.
+          schema: { type: string }
       responses:
         "200":
           description: OK
@@ -489,13 +517,15 @@ paths:
         Live frames:
         - `{"type": "event", "landed", "event": FeedEvent}`: place it by its
           display key. The same line can arrive again with a fuller
-          `summary` (a push's commit count); replace by `(monorepo, seq)`.
-        - `{"type": "summary", "monorepo", "summary": FeedSummary}`.
-        - `{"type": "needs", "monorepo", "changed": [{repo, branch, state}], "more"}`:
+          `summary` (a push's commit count); replace by `(monorepo_id, seq)`.
+        - `{"type": "summary", "monorepo", "monorepo_id", "summary": FeedSummary}`.
+        - `{"type": "needs", "monorepo", "monorepo_id", "changed": [{repo, branch, state}], "more"}`:
           branches that entered or left "needs you" (`state` null: left);
           `more`: over 50 changed, refetch listNeeds.
-        - `{"type": "joined", "monorepo", "large"}`, `{"type": "left", "monorepo"}`:
+        - `{"type": "joined", "monorepo", "monorepo_id", "large"}`, `{"type": "left", "monorepo", "monorepo_id"}`:
           refetch the first page and the list.
+        Every frame's `monorepo` is the `owner/name` label (as the index last
+        heard it; a rename shows within a minute) and `monorepo_id` the id.
         The text `ping` gets `pong`. Lines of large monorepos do not come
         here: open their own event socket with `topics=feed` (the home opens
         at most 5; it refreshes the others every 60 s).
@@ -513,8 +543,8 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
         - name: in
           in: query
-          description: One monorepo's name. The home narrows by monorepo only.
-          schema: { $ref: "#/components/schemas/Name" }
+          description: "One monorepo's `owner/name` (an old name works too). The home narrows by monorepo only."
+          schema: { type: string }
       responses:
         "200":
           description: A page, newest first
@@ -531,7 +561,7 @@ paths:
                   from_logs: { type: boolean, description: "True when the page went past the feed's window and read monorepos' own logs." }
                   skipped:
                     type: array
-                    description: Monorepos not read for this page (over 20 logs); narrow with `in` to read one.
+                    description: Monorepos (`owner/name`) not read for this page (over 20 logs); narrow with `in` to read one.
                     items: { type: string }
         "101": { description: The person's WebSocket. }
         "400": { $ref: "#/components/responses/Error" }
@@ -566,7 +596,8 @@ paths:
           schema: { type: string, default: "ready,conflicts,failing" }
         - name: in
           in: query
-          schema: { $ref: "#/components/schemas/Name" }
+          description: "One monorepo's `owner/name`."
+          schema: { type: string }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
@@ -585,15 +616,17 @@ paths:
                   truncated: { type: boolean }
                   skipped:
                     type: array
+                    description: Monorepos (`owner/name`) not asked (over 50).
                     items: { type: string }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}:
+  /v1/monorepos/{owner}/{monorepo}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: getMonorepo
-      summary: Get a monorepo (members)
+      summary: Get a monorepo (members); an old name answers with the current one
       tags: [monorepos]
       responses:
         "200":
@@ -603,10 +636,46 @@ paths:
               schema: { $ref: "#/components/schemas/Monorepo" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: renameMonorepo
+      summary: Rename or transfer a monorepo (owners)
+      description: |
+        The label moves; the id, repos, history, members, Artifacts repos and
+        feeds stay. The old `owner/name` keeps working for the API and the git
+        door (an alias) until that owner gives the name to another monorepo.
+        A transfer goes, for now, to a person who is already an owner of it
+        (400 `bad_owner`; organizations later). 409 `monorepo_exists` when the
+        new name is taken. `replaced_alias` reports an old name of another
+        monorepo that this one took over.
+      tags: [monorepos]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { $ref: "#/components/schemas/Name" }
+                owner: { $ref: "#/components/schemas/Login" }
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Monorepo"
+                  - type: object
+                    required: [replaced_alias]
+                    properties:
+                      replaced_alias: { $ref: "#/components/schemas/ReplacedAlias" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteMonorepo
       summary: Delete a monorepo, its repos and their history (owners)
-      description: Deletes every Artifacts repo it owns (`<monorepo>--*`, the meta layer's too), the meta layer's large files in R2 (`meta/<monorepo>/`), its records, invites and memberships. No soft delete. Needs `?confirm=<monorepo>`.
+      description: Deletes every Artifacts repo it owns (`<id>--*`, the meta layer's too), the meta layer's large files in R2 (`meta/<id>/`), its records, invites, memberships and old names. No soft delete. Needs `?confirm=<owner>/<name>`, typed out in full.
       tags: [monorepos]
       parameters:
         - name: confirm
@@ -617,8 +686,9 @@ paths:
         "204": { description: Deleted }
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/heads:
+  /v1/monorepos/{owner}/{monorepo}/heads:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: heads
@@ -630,7 +700,7 @@ paths:
         null for an empty repo. The meta layer's repo is not listed.
 
         A follower (`pando worktree follow`) calls this on connect, then opens
-        `GET /v1/monorepos/{m}/events?topics=main&since=<seq>` (WebSocket) to
+        `GET /v1/monorepos/{owner}/{monorepo}/events?topics=main&since=<seq>` (WebSocket) to
         hear each move, and calls it again every few minutes as a safety net.
       tags: [repos]
       responses:
@@ -656,8 +726,9 @@ paths:
                   seq:
                     type: [integer, "null"]
                     description: The event stream's newest seq when this was read; resume the socket from it. Null when the stream is off.
-  /v1/monorepos/{monorepo}/events:
+  /v1/monorepos/{owner}/{monorepo}/events:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: events
@@ -754,8 +825,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}/members:
+  /v1/monorepos/{owner}/{monorepo}/members:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: listMembers
@@ -773,8 +845,9 @@ paths:
                   members:
                     type: array
                     items: { $ref: "#/components/schemas/Member" }
-  /v1/monorepos/{monorepo}/invites:
+  /v1/monorepos/{owner}/{monorepo}/invites:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     post:
       operationId: invite
@@ -831,8 +904,9 @@ paths:
                   invites:
                     type: array
                     items: { $ref: "#/components/schemas/Invite" }
-  /v1/monorepos/{monorepo}/invites/{email}:
+  /v1/monorepos/{owner}/{monorepo}/invites/{email}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - name: email
         in: path
@@ -845,8 +919,9 @@ paths:
       responses:
         "204": { description: Withdrawn }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/members/{login}:
+  /v1/monorepos/{owner}/{monorepo}/members/{login}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - name: login
         in: path
@@ -881,8 +956,9 @@ paths:
         "204": { description: Removed }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos:
+  /v1/monorepos/{owner}/{monorepo}/repos:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     post:
       operationId: createRepo
@@ -928,8 +1004,9 @@ paths:
                   repos:
                     type: array
                     items: { $ref: "#/components/schemas/Repo" }
-  /v1/monorepos/{monorepo}/repos/{repo}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
     get:
@@ -943,8 +1020,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Repo" }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
     get:
@@ -1025,8 +1103,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -1080,8 +1159,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/commits:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/commits:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -1119,8 +1199,9 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Commit" }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/diff:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/diff:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -1176,8 +1257,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/reviews:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/reviews:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -1225,8 +1307,9 @@ paths:
                   reviews:
                     type: array
                     items: { $ref: "#/components/schemas/Review" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/merge:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/merge:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -1288,8 +1371,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/files/{path}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/files/{path}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: path
@@ -1313,8 +1397,9 @@ paths:
             application/octet-stream:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/statuses/{sha}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/statuses/{sha}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: sha
@@ -1343,8 +1428,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Status" }
-  /v1/monorepos/{monorepo}/repos/{repo}/commits/{ref}/status:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/commits/{ref}/status:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: ref
@@ -1362,8 +1448,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Checks" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
     post:
@@ -1429,8 +1516,9 @@ paths:
                   hooks:
                     type: array
                     items: { $ref: "#/components/schemas/Hook" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/{hook_id}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: hook_id
@@ -1443,8 +1531,9 @@ paths:
       tags: [hooks]
       responses:
         "204": { description: Removed }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}/deliveries:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/{hook_id}/deliveries:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: hook_id
@@ -1467,8 +1556,9 @@ paths:
                   deliveries:
                     type: array
                     items: { $ref: "#/components/schemas/Delivery" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}/redeliver:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/{hook_id}/redeliver:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: hook_id
@@ -1498,8 +1588,9 @@ paths:
                     type: array
                     items: { type: string }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/deliveries/{delivery_id}/redeliver:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/deliveries/{delivery_id}/redeliver:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: delivery_id
@@ -1517,8 +1608,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Delivery" }
-  /v1/monorepos/{monorepo}/worktrees:
+  /v1/monorepos/{owner}/{monorepo}/worktrees:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: listWorktrees
@@ -1544,8 +1636,9 @@ paths:
                   worktrees:
                     type: array
                     items: { $ref: "#/components/schemas/Worktree" }
-  /v1/monorepos/{monorepo}/worktrees/{worktree_id}:
+  /v1/monorepos/{owner}/{monorepo}/worktrees/{worktree_id}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - name: worktree_id
         in: path
@@ -1636,10 +1729,17 @@ components:
       scheme: bearer
       description: The Worker secret PANDO_BOOTSTRAP.
   parameters:
+    owner:
+      name: owner
+      in: path
+      required: true
+      description: The monorepo's owner, a namespace (a person's login). Matched without case.
+      schema: { $ref: "#/components/schemas/Login" }
     monorepo:
       name: monorepo
       in: path
       required: true
+      description: The monorepo's name within its owner (or an old name). Matched without case.
       schema: { $ref: "#/components/schemas/Name" }
     repo:
       name: repo
@@ -1663,11 +1763,11 @@ components:
     Name:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Reserved for the Worker and the web app: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, favicon.ico, robots.txt, manifest.json, index.html."
+      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered."
     Login:
       type: string
-      pattern: "^[a-z0-9](?:[a-z0-9]|-(?!-)){0,38}$"
-      description: A user's login, GitHub's rules in lower case.
+      pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"
+      description: "A user's login, which is their namespace (organizations share the same space, later): 1 to 39 lower-case letters, digits and single hyphens, no hyphen at either end (input in any case is lowered). Reserved, because a namespace is the first URL segment: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, orgs, users. A login made at sign-in comes from the email's local part, skipping reserved and taken names (`base`, `base-2`, ... `base-999`, then a random tail)."
     MemberRole:
       type: string
       enum: [owner, member]
@@ -1687,12 +1787,22 @@ components:
             checks: { $ref: "#/components/schemas/Checks" }
     Monorepo:
       type: object
-      required: [name, kind, created_at]
+      required: [id, owner, name, full_name, kind, created_at]
       properties:
-        name: { type: string }
+        id: { type: string, description: "Permanent: `m_` and 16 hex characters, or, for a monorepo made before namespaces, its old name." }
+        owner: { $ref: "#/components/schemas/Login" }
+        name: { $ref: "#/components/schemas/Name" }
+        full_name: { type: string, description: "`owner/name`." }
         kind: { type: string, enum: [monorepo, repo] }
         role: { $ref: "#/components/schemas/MemberRole" }
         created_at: { type: string, format: date-time }
+    ReplacedAlias:
+      type: [object, "null"]
+      description: An old `owner/name` (from a rename or transfer) that led to another monorepo and now leads to this one. Null when nothing was taken over. Never silent.
+      required: [full_name, pointed_to]
+      properties:
+        full_name: { type: string, description: "The old name, now this monorepo's." }
+        pointed_to: { type: [string, "null"], description: "The `owner/name` it led to before." }
     User:
       type: object
       required: [login, picture_url, created_at]
@@ -1755,10 +1865,11 @@ components:
     FeedEvent:
       type: object
       description: One line of the activity log (listActivity, the person's socket, the `feed` topic).
-      required: [monorepo, seq, at, kind, repo, repo_path, branch, actor, machine, summary]
+      required: [monorepo, monorepo_id, seq, at, kind, repo, repo_path, branch, actor, machine, summary]
       properties:
-        monorepo: { type: string }
-        seq: { type: integer, description: "The monorepo's event seq. `(monorepo, seq)` is the line's identity." }
+        monorepo: { type: string, description: "`owner/name`, as it is when the line is read." }
+        monorepo_id: { type: string, description: "The monorepo's id. Pages sort by (at, monorepo_id, seq)." }
+        seq: { type: integer, description: "The monorepo's event seq. `(monorepo_id, seq)` is the line's identity." }
         at: { type: string, format: date-time }
         kind: { type: string, enum: [push, branch.opened, branch.deleted, merged, review, status, worktree.reported, worktree.removed, meta.saved] }
         repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
@@ -1820,9 +1931,10 @@ components:
             large: { type: [boolean, "null"] }
     NeedRow:
       type: object
-      required: [monorepo, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]
+      required: [monorepo, monorepo_id, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]
       properties:
-        monorepo: { type: string }
+        monorepo: { type: string, description: "`owner/name`." }
+        monorepo_id: { type: string }
         repo: { type: string }
         repo_path: { type: string }
         branch: { type: string }
@@ -1895,14 +2007,14 @@ components:
       type: object
       required: [monorepo, name, path, default_branch, clone_url, created_at]
       properties:
-        monorepo: { type: string }
+        monorepo: { type: string, description: "The monorepo's `owner/name`." }
         name: { type: string, description: The repo's id in URLs (its path with `/` turned into `-`). }
         path: { type: string, description: "`projects/web`, or `.` for a plain repo." }
         description: { type: [string, "null"] }
         default_branch: { type: string, description: Always `main` for now. }
         clone_url:
           type: string
-          description: The git door URL, `https://<host>/<monorepo>/<name>.git`.
+          description: "The git door URL: `https://<host>/<owner>/<monorepo>/<name>.git`, or `https://<host>/<owner>/<name>.git` for a plain repo."
         required_checks:
           type: array
           description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists.
@@ -2142,12 +2254,13 @@ components:
         last_seen_at: { type: string, format: date-time }
     HookPayload:
       type: object
-      required: [event, delivery_id, occurred_at, monorepo, repo, ref, clone_url]
+      required: [event, delivery_id, occurred_at, monorepo, monorepo_id, repo, ref, clone_url]
       properties:
         event: { $ref: "#/components/schemas/HookEvent" }
         delivery_id: { type: string }
         occurred_at: { type: string, format: date-time }
-        monorepo: { type: string }
+        monorepo: { type: string, description: "`owner/name` when the delivery was made." }
+        monorepo_id: { type: string, description: "The monorepo's permanent id: a stable key across renames." }
         repo: { type: string }
         branch: { type: string }
         ref: { type: string, description: "`refs/heads/<branch>`" }

@@ -43,6 +43,10 @@ export const FeedSummary = Schema.Struct({
   members: Count,
   /** More than 100 members: its lines are read on demand, not copied to feeds. */
   large: Schema.Boolean,
+  /** Its projects (code repos; the meta layer's own repo is not counted). A plain repo has 1. */
+  repos: Count,
+  /** Open branches across those projects (not merged, not deleted, main not counted). */
+  open_branches: Count,
   at: Timestamp,
 });
 
@@ -57,6 +61,8 @@ export const MonorepoSummary = MonorepoEntry.pipe(
     needs: Schema.NullOr(NeedCounts),
     members: Schema.NullOr(Count),
     large: Schema.NullOr(Schema.Boolean),
+    repos: Schema.NullOr(Count),
+    open_branches: Schema.NullOr(Count),
   }),
 );
 

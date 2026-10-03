@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import { flow } from "effect/Function";
 import * as Result from "effect/Result";
 
-import { ActivityFrame, decodeStrict, ErrorBody, EventsPage, Me, MetaFileHeaders, MetaHistory, MetaTree, MonorepoList, MonorepoSummaryList, NeedsPage } from "../src/index.ts";
+import { ActivityFrame, decodeStrict, MonorepoFeedFrame, ErrorBody, EventsPage, Me, MetaFileHeaders, MetaHistory, MetaTree, MonorepoList, MonorepoSummaryList, NeedsPage } from "../src/index.ts";
 
 const Recording = Schema.Struct({
   schema: Schema.String,
@@ -29,12 +29,13 @@ const decoders = {
   EventsPage: refuses(EventsPage),
   NeedsPage: refuses(NeedsPage),
   "ActivityFrame[]": refuses(Schema.Array(ActivityFrame)),
+  "MonorepoFeedFrame[]": refuses(Schema.Array(MonorepoFeedFrame)),
   MetaTree: refuses(MetaTree),
   MetaHistory: refuses(MetaHistory),
   MetaFileHeaders: refuses(MetaFileHeaders),
 };
 
-const isDecoderName = Schema.is(Schema.Literals(["Me", "ErrorBody", "MonorepoList", "MonorepoSummaryList", "EventsPage", "NeedsPage", "ActivityFrame[]", "MetaTree", "MetaHistory", "MetaFileHeaders"]));
+const isDecoderName = Schema.is(Schema.Literals(["Me", "ErrorBody", "MonorepoList", "MonorepoSummaryList", "EventsPage", "NeedsPage", "ActivityFrame[]", "MonorepoFeedFrame[]", "MetaTree", "MetaHistory", "MetaFileHeaders"]));
 
 const folder = new URL("../recorded/", import.meta.url);
 

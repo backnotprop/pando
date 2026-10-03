@@ -1,0 +1,62 @@
+Pando.app (this folder) is part of Pando, licensed under the Apache License,
+Version 2.0 (see ../LICENSE).
+
+It is derived from Oak's macOS FSKit mount app and extension
+(https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak),
+Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache
+License, Version 2.0 (see LICENSE-oak-Apache-2.0). Source: macos/OakFS at
+commit 8d35309d4187dfceefe03a74cf4612c179ab524e (2026-09-27). Oak's licence
+covers its code; Oak's name and logo are not used here.
+
+Changes to Oak's files (Apache 2.0, section 4(b)):
+
+2026-10-02, the build spike:
+- project.yml: DEVELOPMENT_TEAM set to the Pando owner's team; bundle ids and
+  product name changed; FSShortName changed; the mach-lookup exception renamed.
+- The extension's entitlements and DaemonClient.swift: the mach service renamed.
+- OakMounterApp.swift: the extension bundle id renamed.
+
+2026-10-02, mac-app lane (moved from spikes/oakfs to mac/):
+- Files renamed: OakFS/project.yml to project.yml; HostApp/OakMounterApp.swift
+  to HostApp/PandoApp.swift; Extension/OakFSItem.swift to
+  Extension/PandoItem.swift; Extension/OakFSUnaryFileSystem.swift to
+  Extension/PandoFileSystem.swift; Extension/OakFSVolume.swift to
+  Extension/PandoVolume.swift; Extension/DaemonClient.swift to
+  Extension/WireClient.swift; Extension/OakFS.entitlements to
+  Extension/Extension.entitlements; OakFS/README.md to README.md (rewritten).
+- Removed: Oak's logo (HostApp/Assets.xcassets/oak-dark.png) and Oak's app
+  icon PNGs. The app icon and the window's lockup are rendered from the
+  Pando mark (Icon/).
+- project.yml: product "Pando" (Pando.app); bundle ids derived from one
+  setting, PANDO_BUNDLE_PREFIX (ai.plannotator.pando, .extension, .broker);
+  the extension's display name "Pando" and FSShortName "pando"; the broker's
+  mach service ai.plannotator.pando.broker in the sandbox exception and the
+  extension's Info.plist; profile names "Pando Developer ID" and
+  "Pando Extension Developer ID"; version keys from MARKETING_VERSION.
+- HostApp/PandoApp.swift: rewritten copy (the one switch, round 3 section 1b),
+  Pando's Night palette, the Pando lockup in place of Oak's mark, and the
+  extension bundle id read from the embedded .appex.
+- Extension sources: types, log subsystems, volume and file system names
+  renamed from Oak's to Pando's.
+
+2026-10-02, mac-app lane, wire version 3 (docs/pando-fskit-wire-v3.md in
+the ArtifactFS fork):
+- Extension/Wire.swift: rewritten for version 3: internally tagged JSON
+  headers with request ids, a raw payload for file bytes, 15 operations
+  (setattr replaces truncate; symlink and forget added), paged readdir,
+  the root as ino 2.
+- Extension/WireClient.swift (was DaemonClient.swift): asynchronous XPC
+  sends with request ids, a cap of 64 requests in flight, deadlines; the
+  mount id instead of a socket path; the broker's mach service read from
+  Info.plist.
+- Extension/PandoVolume.swift: no FSKit callback blocks; reads and writes
+  split at the daemon's limits; readdir passes cookies and the verifier
+  through and pages; the item kind is remembered so removes need no
+  getattr; createSymbolicLink and setAttributes (size, mode, times) added;
+  consumedAttributes set; reclaimItem batches forget;
+  supportsPersistentObjectIDs false; maximumFileSize; a nominal capacity.
+- Extension/PandoItem.swift: linkCount 1, uid and gid, birthTime, rounded
+  allocSize, parentID when known, integer time conversion.
+- Extension/PandoFileSystem.swift: the hello handshake is asynchronous and
+  checks for version 3; the volume name falls back to "Pando".
+- New, not derived from Oak: Broker/ (pando-broker), Tests/, Icon/.

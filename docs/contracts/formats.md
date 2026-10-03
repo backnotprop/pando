@@ -1,7 +1,7 @@
 # Formats: layout, `.pando/pando.toml`, reference pointers, large-file pointers
 
 Owner: the cli lane. Other lanes read this file and ask pando-ops for changes.
-Version 1, 2026-10-03.
+Version 2, 2026-10-03 (version 1 had per-monorepo tokens; identity is now per user, RULINGS.md).
 
 This file fixes the shapes on disk that more than one lane reads: where repos
 and worktrees sit, the one config file, the pointer a reference leaves in the
@@ -118,13 +118,14 @@ two files.
   "name": "workspaces",
   "server": "https://pando-dev.example.workers.dev",
   "repos": [
-    { "path": "projects/workspaces", "git_url": "https://pando-dev.example.workers.dev/git/workspaces/projects/workspaces.git" }
+    { "path": "projects/workspaces", "name": "projects-workspaces", "clone_url": "https://pando-dev.example.workers.dev/workspaces/projects-workspaces.git" }
   ]
 }
 ```
 
 `kind` is `monorepo` or `repo`. `server` is the Pando server this root belongs
-to. `repos` is a cache of the server's list (the server is the truth).
+to. `repos` is a cache of the server's list (the server is the truth); `name`
+and `clone_url` are the API's (`api-v1.yaml`), never built by the client.
 
 `.pando/local/worktrees.json`: the worktrees this machine has made under this
 root.
@@ -140,6 +141,7 @@ root.
       "path": "projects/workspaces/worktrees/decision-chips",
       "kind": "fuse",
       "agent": "agent-1",
+      "read_only": false,
       "created_at": "2026-10-03T18:20:00Z"
     }
   ]
@@ -206,11 +208,12 @@ size 12345
   `meta-sync.md`. Because the format is Git LFS's own, `git lfs` and other git
   tools recognise these files.
 
-## 6. Who made a commit: trailers
+## 6. Who made a commit: author and trailers
 
-Every Pando worktree has a `prepare-commit-msg` hook that adds these lines to
-the end of each commit message, as git trailers. Meta layer saves carry the
-same lines.
+A commit in a Pando worktree is authored as the signed-in person: `pando
+worktree add` sets the worktree's `user.name` and `user.email` from the
+account `pando login` stored. Pando then adds who made it as git trailers at
+the end of the message. Meta layer saves carry the same lines.
 
 ```
 Pando-Agent: agent-3
@@ -220,25 +223,34 @@ Pando-Machine: ramos-mbp
 
 | Trailer | Value | When |
 | --- | --- | --- |
-| `Pando-Agent` | `PANDO_AGENT` from the environment at commit time, else the `--agent` given to `pando worktree add` | only when one of them is set |
+| `Pando-Agent` | `PANDO_AGENT` from the environment at commit time, else the agent given to `pando worktree add` (`--agent`, or `PANDO_AGENT` then) | only when one of them is set |
 | `Pando-Worktree` | the worktree path from the root (section 1) | always |
 | `Pando-Machine` | the machine name (section 7) | always |
 
-The hook uses `git interpret-trailers --if-exists replace`: it never changes
-the lines the author wrote, and on `--amend` or a rebase it replaces its own
-lines instead of adding them twice.
+One script is installed as two hooks. As `prepare-commit-msg` it acts on a
+message given with `-m` or `-F`; as `commit-msg` it acts on the final message
+after any editor. It uses `git interpret-trailers --if-exists replace
+--no-divider`: it never changes the lines the author wrote, a `---` line in
+the message stays text, and an `--amend`, a rebase or the second hook replace
+Pando's lines instead of adding them twice. A message the author empties in
+the editor stays empty, so git still aborts the commit. The worktree's
+`core.hooksPath` points at these hooks, so a global hooks folder does not hide
+them.
 
 The worktree's git config holds the values the hook reads: `pando.worktree`,
 `pando.machine`, `pando.agent` (optional), plus `pando.root` (the root's
-absolute path) and `pando.kind` (`fuse`, `sparse`).
+absolute path) and `pando.kind` (`fuse`, `sparse`). A reference folder this
+machine mounted has `pando.reference = true` instead.
 
 ## 7. `~/.pando/`: the machine's config
 
 | Path | What |
 | --- | --- |
-| `~/.pando/config.toml` | `server = "https://..."` (the default server for `pando init` and `pando clone`), `machine = "..."` (optional; default: the host name up to its first dot) |
-| `~/.pando/token` | the API token, mode 600. Written by `pando login` from standard input; never printed, logged, or passed on a command line. Git gets it through `pando credential`, a git credential helper. |
-| `~/.pando/afs/` | ArtifactFS state on Linux: one folder per repo, each with its own daemon |
+| `~/.pando/config.toml` | `server = "https://..."` (the default server), `machine = "..."` (optional; default: the host name up to its first dot), and `[accounts."<host>"]` with `login`, `name`, `email`: who this machine is signed in as. No secrets. |
+| `~/.pando/credentials/<host>` | the machine credential for that server, mode 600 in a folder of mode 700. Written by `pando login`; never printed, logged, or passed on a command line. git gets it through `pando credential`, a git credential helper set in each worktree for that host only. |
+| `~/.pando/afs/<repo folder>-<hash>/` | ArtifactFS state on Linux, one per repo folder, each with its own daemon (`daemon.pid`, `daemon.log`) |
 
-Environment overrides, for sandboxes: `PANDO_HOME` (instead of `~/.pando`),
-`PANDO_SERVER`, `PANDO_TOKEN` (never printed), `PANDO_MACHINE`, `PANDO_AGENT`.
+Environment, for sandboxes and tests: `PANDO_HOME` (instead of `~/.pando`),
+`PANDO_SERVER`, `PANDO_TOKEN` (a credential from `pando credential create`;
+never printed), `PANDO_MACHINE`, `PANDO_AGENT`, `PANDO_WORKTREE_KIND`
+(`fuse` or `sparse`), `PANDO_ARTIFACT_FS` (the `artifact-fs` binary).

@@ -1,6 +1,6 @@
 // Monorepos and their one line on the home: GET /v1/monorepos (operationId
 // `listMonorepos`), with and without `?summary=1`.
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 import { Count, FullName, Login, MonorepoId, MonorepoName, Timestamp } from "./ids.ts";
 

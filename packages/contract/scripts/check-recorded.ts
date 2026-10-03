@@ -4,7 +4,9 @@
 // Run: npm run check -w @pando/contract
 import { readdirSync, readFileSync } from "node:fs";
 
-import { Option, Result, Schema } from "effect";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { flow } from "effect/Function";
 
 import { ActivityFrame, ErrorBody, EventsPage, Me, MetaFileHeaders, MetaHistory, MetaTree, MonorepoList, MonorepoSummaryList, NeedsPage } from "../src/index.ts";

@@ -14,8 +14,10 @@ import type { Env } from "../env";
 import { HttpError } from "../http";
 
 export const STATUS_TOKEN_PREFIX = "pst1.";
+
 /** How long a status token lives (owner limit: builds run long). */
 export const STATUS_TOKEN_TTL_S = 24 * 3600;
+
 /** An app slug: what Status.app holds and the web maps to a mark. */
 export const APP_SLUG = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
@@ -45,14 +47,18 @@ const enc = new TextEncoder();
 
 function b64url(bytes: Uint8Array): string {
   let s = "";
+
   for (const b of bytes) s += String.fromCharCode(b);
+
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function unb64url(s: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(s)) return null;
+
   try {
     const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
+
     return Uint8Array.from(bin, (c) => c.charCodeAt(0));
   } catch {
     return null;
@@ -65,6 +71,7 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
   if (keyCache?.secret === secret) return keyCache.key;
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
   keyCache = { secret, key };
+
   return key;
 }
 
@@ -88,6 +95,7 @@ export async function mintStatusToken(
   const payload = b64url(enc.encode(JSON.stringify({ m: c.m, r: c.r, s: c.s, a: c.a, h: c.h, x })));
   const signed = STATUS_TOKEN_PREFIX + payload;
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(secret), enc.encode(signed)));
+
   return { token: `${signed}.${b64url(sig)}`, expires_at: new Date(x * 1000).toISOString() };
 }
 
@@ -97,24 +105,32 @@ export type Verified = { ok: true; claims: StatusClaims } | { ok: false; reason:
 export async function verifyStatusToken(secret: string, token: string, nowMs = Date.now()): Promise<Verified> {
   if (!isStatusToken(token) || token.length > 2048) return { ok: false, reason: "malformed" };
   const parts = token.split(".");
+
   if (parts.length !== 3) return { ok: false, reason: "malformed" };
   const payload = unb64url(parts[1]);
   const sig = unb64url(parts[2]);
+
   if (!payload || !sig || sig.length !== 32) return { ok: false, reason: "malformed" };
   // crypto.subtle.verify compares in constant time.
   const good = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, enc.encode(`${parts[0]}.${parts[1]}`));
+
   if (!good) return { ok: false, reason: "bad_signature" };
   let c: StatusClaims;
+
   try {
     c = JSON.parse(new TextDecoder().decode(payload)) as StatusClaims;
   } catch {
     return { ok: false, reason: "malformed" };
   }
+
   if (typeof c.m !== "string" || typeof c.r !== "string" || typeof c.s !== "string" || typeof c.h !== "string" || !Number.isSafeInteger(c.x)) {
     return { ok: false, reason: "malformed" };
   }
+
   if (c.a !== null && (typeof c.a !== "string" || !APP_SLUG.test(c.a))) return { ok: false, reason: "malformed" };
+
   if (c.x * 1000 <= nowMs) return { ok: false, reason: "expired" };
+
   return { ok: true, claims: c };
 }
 
@@ -127,19 +143,25 @@ const STATUS_ROUTE = /^\/v1\/monorepos\/[^/]+\/[^/]+\/repos\/([^/]+)\/statuses\/
  */
 export async function authorizeStatusToken(env: Env, req: Request, token: string, monorepoId: string): Promise<StatusStamp> {
   const m = STATUS_ROUTE.exec(new URL(req.url).pathname);
+
   if (req.method !== "POST" || !m) {
     throw new HttpError(403, "status_token_route", "a status token works only on POST /v1/monorepos/{owner}/{monorepo}/repos/{repo}/statuses/{sha}");
   }
+
   if (!env.PANDO_STATUS_SECRET) throw new HttpError(401, "status_tokens_off", "status tokens are off: the Worker secret PANDO_STATUS_SECRET is not set");
   const v = await verifyStatusToken(env.PANDO_STATUS_SECRET, token);
+
   if (!v.ok) {
     if (v.reason === "expired") throw new HttpError(401, "status_token_expired", "the status token has expired (they live 24 hours); a new delivery brings a new one");
     throw new HttpError(401, "unauthorized", "the status token is not valid");
   }
+
   const repo = decodeURIComponent(m[1]);
   const sha = decodeURIComponent(m[2]).toLowerCase();
+
   if (v.claims.m !== monorepoId || v.claims.r !== repo || v.claims.s !== sha) {
     throw new HttpError(403, "status_token_scope", "this status token is for another commit or repo: it posts statuses for one commit in one repo");
   }
+
   return stampOf(v.claims);
 }

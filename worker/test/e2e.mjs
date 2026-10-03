@@ -22,21 +22,28 @@ import { describeError, retryResetFetch } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const HOOKS = process.env.PANDO_HOOKS !== "0" && /localhost|127\.0\.0\.1/.test(URL_);
+
 let BOOT = process.env.PANDO_BOOTSTRAP;
+
 if (!BOOT) {
   try {
     BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
   } catch {}
 }
+
 if (!BOOT) {
   console.error("Set PANDO_BOOTSTRAP (or worker/.dev.vars).");
   process.exit(2);
 }
 
 const scrub = (s) => String(s).replace(/pando_[a-f0-9]{20,}/g, "<credential>").replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>");
+
 const say = (s) => console.log(scrub(s));
+
 const results = [];
+
 function check(name, pass, detail = "") {
   results.push([name, !!pass]);
   say(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`);
@@ -48,15 +55,19 @@ async function call(method, path, secret, body) {
     headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
   const text = await res.text();
   let json = null;
+
   try {
     json = JSON.parse(text);
   } catch {}
+
   return { status: res.status, json, text, headers: res.headers };
 }
 
 const work = mkdtempSync(join(tmpdir(), "pando-e2e-"));
+
 function git(args, cwd, secret, extra = {}) {
   const env = {
     ...process.env,
@@ -70,13 +81,16 @@ function git(args, cwd, secret, extra = {}) {
     GIT_COMMITTER_EMAIL: "e2e@pando.invalid",
     ...extra,
   };
+
   // Never let git hand a login to the macOS keychain (Apple's git has
   // credential.helper=osxkeychain in its system config): skip the system
   // config, clear the helper list, then add ours only when there is a secret.
   const helper = ["-c", "credential.helper=", ...(secret ? ["-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f'] : [])];
   const r = spawnSync("git", [...helper, "-c", "init.defaultBranch=main", ...args], { cwd, env, encoding: "utf8" });
+
   return { ok: r.status === 0, out: (r.stdout || "") + (r.stderr || "") };
 }
+
 const write = (dir, path, text) => {
   mkdirSync(join(dir, path, ".."), { recursive: true });
   writeFileSync(join(dir, path), text);
@@ -84,10 +98,15 @@ const write = (dir, path, text) => {
 
 // A hook receiver that checks the signature.
 const HOOK_SECRET = "e2e-hook-secret";
+
 const received = [];
+
 const buildkite = [];
+
 let server;
+
 let hookPort = 0;
+
 if (HOOKS) {
   server = createServer((req, res) => {
     let raw = "";
@@ -95,20 +114,26 @@ if (HOOKS) {
     req.on("end", () => {
       if (req.url.startsWith("/buildkite/")) {
         let body = null;
+
         try {
           body = JSON.parse(raw);
         } catch {}
+
         buildkite.push({ path: req.url, bearer: /^Bearer \S+$/.test(String(req.headers.authorization ?? "")), body });
         res.writeHead(201, { "content-type": "application/json" }).end("{}");
+
         return;
       }
+
       const sig = String(req.headers["x-pando-signature-256"] ?? "");
       const want = "sha256=" + createHmac("sha256", HOOK_SECRET).update(raw).digest("hex");
       const valid = sig.length === want.length && timingSafeEqual(Buffer.from(sig), Buffer.from(want));
       let payload = null;
+
       try {
         payload = JSON.parse(raw);
       } catch {}
+
       received.push({ valid, event: req.headers["x-pando-event"], delivery: req.headers["x-pando-delivery"], payload });
       res.writeHead(valid ? 200 : 401).end();
     });
@@ -116,20 +141,28 @@ if (HOOKS) {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   hookPort = server.address().port;
 }
+
 const waitFor = async (pred, ms = 20_000) => {
   const end = Date.now() + ms;
+
   while (Date.now() < end) {
     const v = pred();
+
     if (v) return v;
     await new Promise((r) => setTimeout(r, 250));
   }
+
   return null;
 };
 
 const id = Date.now().toString(36);
+
 const M = `e2e-${id}`;
+
 const MM = `e2emono-${id}`;
+
 const O = `ana-${id}`; // the owner of both (namespaces: owner/name)
+
 const made = [];
 
 try {
@@ -197,11 +230,13 @@ try {
       JSON.stringify({ ana: ana && { name: ana.name, last_active_at: ana.last_active_at }, bo: bo && { name: bo.name, last_active_at: bo.last_active_at } }),
     );
   }
+
   g = git(["clone", "-q", cloneUrl, boDir], work, B);
   check("bo clones through the door (Basic, credential helper)", g.ok, g.ok ? "" : g.out.slice(-300));
 
   // ── Hooks ──
   let hookId = null;
+
   if (HOOKS) {
     r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks`, B, { type: "web", url: `http://127.0.0.1:${hookPort}/hook`, secret: HOOK_SECRET });
     check("a member cannot register a hook", r.status === 403, `${r.status}`);
@@ -248,6 +283,7 @@ try {
       !!bk && bk.bearer && bk.body.commit === p.head && e.PANDO_CLONE_URL === cloneUrl && /^art_v\d+_/.test(e.PANDO_READ_TOKEN ?? "") && e.PANDO_STATUS_URL === p.status_url,
       bk ? `commit=${bk.body?.commit?.slice(0, 8)} env=${Object.keys(e).join(",")}` : "nothing arrived",
     );
+
     if (p.read_token) {
       const ci = join(work, "ci");
       g = git(["-c", `http.extraHeader=Authorization: Bearer ${p.read_token}`, "clone", "-q", "-b", B1, cloneUrl, ci], work, null);
@@ -263,12 +299,15 @@ try {
   // The list answers at once; ahead, behind and mergeable land when the queue computes them.
   let br = null;
   const factsBy = Date.now() + 30_000;
+
   while (Date.now() < factsBy) {
     r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches`, B);
     br = r.json?.branches?.find((b) => b.name === B1);
+
     if (br && !br.stale) break;
     await new Promise((res) => setTimeout(res, 300));
   }
+
   check("the branch list shows the branch, its facts fresh", r.status === 200 && !!br && br.stale === false, `${r.status} stale=${br?.stale}`);
   check("its author is bo, ahead 1, behind 0", br?.author === `bo-${id}` && br?.ahead === 1 && br?.behind === 0, JSON.stringify({ a: br?.author, ahead: br?.ahead, behind: br?.behind }));
   check("mergeable is clean (gitwrite dry run)", br?.mergeable === "clean", br?.mergeable);
@@ -329,10 +368,12 @@ try {
   check("main is the merge commit, with two parents (main, branch)", parents[0] === mergeSha && parents.length === 3 && parents[2] === head, parents.join(" ").slice(0, 130));
   const msg = git(["log", "-1", "--format=%an|%s", "origin/main"], boDir).out.trim();
   check("the merge commit is authored as the user, titled from the branch", msg.startsWith(`bo-${id}|Feature`) || msg.startsWith("bo-") , msg);
+
   if (HOOKS) {
     const m = await waitFor(() => received.find((x) => x.event === "merged"));
     check("the merged hook arrives", !!m && m.payload?.merge_commit === mergeSha);
   }
+
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches?state=merged`, B);
   check("the branch shows as merged", r.json?.branches?.some((b) => b.name === B1 && b.state === "merged"));
 
@@ -355,12 +396,15 @@ try {
   // Branch facts are computed on change (a queue): the list says "pending" until they land.
   let listed = null;
   const until = Date.now() + 30_000;
+
   while (Date.now() < until) {
     r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches`, B);
     listed = r.json?.branches?.find((b) => b.name === "agent-2/conflict");
+
     if (listed && !listed.stale) break;
     await new Promise((res) => setTimeout(res, 500));
   }
+
   check("the list says conflicts once the facts land", listed?.mergeable === "conflicts" && listed?.stale === false, `${listed?.mergeable} stale=${listed?.stale}`);
 
   // ── Worktrees ──
@@ -448,12 +492,14 @@ try {
   check("no exception", false, scrub(describeError(err)));
 } finally {
   server?.close();
+
   if (process.env.PANDO_KEEP !== "1") {
     for (const [m, secret] of [[M, globalThis.__A], [MM, globalThis.__A]]) {
       if (!secret) continue;
       const r = await call("DELETE", `/v1/monorepos/${O}/${m}?confirm=${O}/${m}`, secret);
       const after = await call("GET", `/v1/monorepos/${O}/${m}`, secret);
       check(`DELETE /v1/monorepos/${O}/${m} removes it`, r.status === 204 && after.status === 404, `${r.status}, then ${after.status}`);
+
       if (r.status === 204) {
         // The same name can be made again, and starts empty.
         const kind = m === M ? "repo" : "monorepo";
@@ -461,25 +507,30 @@ try {
         const repos = await call("GET", `/v1/monorepos/${O}/${m}/repos`, secret);
         const fresh = kind === "repo" ? repos.json?.repos?.length === 1 : repos.json?.repos?.length === 0;
         let branchesEmpty = true;
+
         if (kind === "repo") {
           const b = await call("GET", `/v1/monorepos/${O}/${m}/repos/${m}/branches?state=all`, secret);
           branchesEmpty = b.status === 200 && b.json?.branches?.length === 0 && b.json?.default_head === null;
         }
+
         check(`${m} can be made again after the delete, and starts empty`, again.status === 201 && fresh && branchesEmpty, `${again.status} ${scrub(JSON.stringify(again.json)).slice(0, 120)}`);
         const r2 = await call("DELETE", `/v1/monorepos/${O}/${m}?confirm=${O}/${m}`, secret);
         check(`and deleted again`, r2.status === 204, `${r2.status}`);
       }
     }
+
     for (const name of made) {
       const r = spawnSync("npx", ["wrangler", "artifacts", "repos", "delete", name, "--namespace", "pando-dev", "--force"], {
         cwd: new URL("..", import.meta.url).pathname,
         encoding: "utf8",
         input: "y\n",
       });
+
       // After DELETE /v1/monorepos, each repo should already be gone.
       say(`cleanup ${name}: ${r.status === 0 ? "deleted by wrangler (the API delete may still be finishing)" : "already gone"}`);
     }
   }
+
   rmSync(work, { recursive: true, force: true });
   const failed = results.filter(([, ok]) => !ok).length;
   say(`\n${results.length - failed} of ${results.length} checks passed`);

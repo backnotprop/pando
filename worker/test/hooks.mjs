@@ -24,68 +24,98 @@ import { describeError, retryResetFetch } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+
 const SECRET = "hooks-test-secret";
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`.replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<token>"));
 };
+
 const call = async (method, path, secret, body) => {
   const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+
   return { status: res.status, json: await res.json().catch(() => null) };
 };
+
 const waitFor = async (pred, ms = 30_000) => {
   const end = Date.now() + ms;
+
   while (Date.now() < end) {
     const v = await pred();
+
     if (v) return v;
     await new Promise((r) => setTimeout(r, 250));
   }
+
   return null;
 };
 
 // ── the receiver ──
 const got = { flaky: [], dead: [], ok: [], buildkite: [], slow: [] };
+
 const tries = new Map();
+
 const server = createServer((req, res) => {
   let raw = "";
   req.on("data", (d) => (raw += d));
   req.on("end", () => {
     const route = req.url.slice(1);
     let body = null;
+
     try {
       body = JSON.parse(raw);
     } catch {}
+
     if (route === "buildkite") {
       got.buildkite.push(body);
+
       return res.writeHead(201).end("{}");
     }
+
     const want = "sha256=" + createHmac("sha256", SECRET).update(raw).digest("hex");
     const sig = String(req.headers["x-pando-signature-256"] ?? "");
     const valid = sig.length === want.length && timingSafeEqual(Buffer.from(sig), Buffer.from(want));
     const entry = { valid, delivery: req.headers["x-pando-delivery"], event: req.headers["x-pando-event"], body, at: Date.now() };
     (got[route] ?? []).push(entry);
+
     if (route === "dead") return res.writeHead(500).end("down");
+
     if (route === "slow") return setTimeout(() => res.writeHead(200).end(), 4_000);
+
     if (route === "flaky") {
       const n = (tries.get(entry.delivery) ?? 0) + 1;
       tries.set(entry.delivery, n);
+
       return res.writeHead(n <= 2 ? 503 : 200).end();
     }
+
     res.writeHead(200).end();
   });
 });
+
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
+
 const port = server.address().port;
 
 const id = Date.now().toString(36);
+
 const work = mkdtempSync(join(tmpdir(), "pando-hooks-"));
+
 const M = `hk-${id}`;
+
 let O = null; // the owner (namespaces: owner/name), from the create answer
+
 let S = null;
+
 let MID = null;
+
 let made = false;
+
 try {
   S = (await call("POST", "/v1/users", BOOT, { login: `hk-${id}` })).json?.credential?.secret;
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
@@ -124,8 +154,10 @@ try {
   const deliveredFlaky = await waitFor(async () => {
     const ds = (await call("GET", `${base}/hooks/${flaky}/deliveries`, S)).json?.deliveries ?? [];
     const d = ds.find((x) => x.event === "push" && x.seq === pushSeq);
+
     return d?.status === "delivered" ? d : null;
   }, 60_000);
+
   const flakyGot = got.flaky.filter((x) => x.body?.head === head && x.event === "push");
   check("the flaky receiver fails twice, then the third try is delivered", !!deliveredFlaky && deliveredFlaky.attempts === 3 && flakyGot.length === 3, `${flakyGot.length} POSTs, ${deliveredFlaky?.attempts} attempts in ${Date.now() - t0} ms`);
   check("every try is the same delivery, signed, with the event's seq", new Set(flakyGot.map((x) => x.delivery)).size === 1 && flakyGot.every((x) => x.valid && x.body.seq === pushSeq), `seq ${pushSeq}`);
@@ -136,8 +168,10 @@ try {
   const deadD = await waitFor(async () => {
     const ds = (await call("GET", `${base}/hooks/${dead}/deliveries`, S)).json?.deliveries ?? [];
     const d = ds.find((x) => x.seq === pushSeq);
+
     return d?.status === "dead" ? d : null;
   }, 90_000);
+
   check("a dead receiver: 5 tries, then status dead", !!deadD && deadD.attempts === 5 && got.dead.filter((x) => x.body?.head === head).length === 5, `${deadD?.status}, ${deadD?.attempts} attempts, last ${deadD?.response_code}`);
   const slowGot = got.slow.find((x) => x.body?.head === head);
   const firstFlaky = flakyGot[0];
@@ -167,10 +201,12 @@ try {
 
   // ── the object dies after a delivery was sent, before its answer is recorded ──
   const arm = await call("POST", "/v1/_hooks/test", BOOT, { monorepo: MID, crash: true });
+
   if (arm.status === 404) {
     console.log("SKIP  the crash checks (start wrangler dev with --var HOOKS_TEST:1)");
   } else {
     const lease = arm.json?.lease_ms ?? 0;
+
     for (const h of [flaky, dead, slow, bk]) await call("DELETE", `${base}/hooks/${h}`, S);
     const once = await hook({ type: "web", url: `http://127.0.0.1:${port}/ok`, secret: SECRET, events: ["push"] });
     git(["checkout", "-qb", "crash"], src);
@@ -188,11 +224,14 @@ try {
       !!two && two[0].delivery === two[1].delivery && two[0].body.seq === two[1].body.seq && typeof two[0].body.seq === "number" && two.every((x) => x.valid) && gap >= lease - 1_000,
       two ? `${gap} ms apart, seq ${two[0].body.seq}` : `${sent().length} POSTs`,
     );
+
     const row = await waitFor(async () => {
       const ds = (await call("GET", `${base}/hooks/${once}/deliveries`, S)).json?.deliveries ?? [];
       const d = ds.find((x) => x.id === two?.[0]?.delivery);
+
       return d?.status === "delivered" ? d : null;
     }, 20_000);
+
     await new Promise((r) => setTimeout(r, lease + 2_000));
     check(
       "the row ends delivered once in the records: one try recorded, 200, no third POST",
@@ -207,6 +246,7 @@ try {
     const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
     check(`delete ${M}`, r.status === 204);
   }
+
   server.close();
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);

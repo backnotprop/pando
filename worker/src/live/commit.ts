@@ -28,7 +28,9 @@ export interface CommitEnv {
 // Worker without one): versions are then kept but not committed.
 export function gitWriter(env: CommitEnv): GitWriter | null {
   const artifacts = env.ARTIFACTS;
+
   if (!artifacts) return null;
+
   return {
     commit: (name, branch, opts) =>
       commitChanges(

@@ -1,6 +1,7 @@
 // Records the monorepo object keeps, as the API returns them.
 
 export type Kind = "monorepo" | "repo";
+
 export type MemberRole = "owner" | "member";
 
 /** The caller: a user, through one of their credentials, and their role in the monorepo. */

@@ -31,6 +31,8 @@ export interface Credential {
 
 export interface Member {
   login: string;
+  /** The user's display name, if known. */
+  name: string | null;
   role: MemberRole;
   added_at: string;
   added_by: string | null;
@@ -212,7 +214,10 @@ export class AccountsObject extends DurableObject<Env> {
   }
 
   members(monorepo: string): Member[] {
-    return this.rows<Member>("SELECT login, role, added_at, added_by FROM members WHERE monorepo = ? ORDER BY login", monorepo);
+    return this.rows<Member>(
+      "SELECT m.login, u.name, m.role, m.added_at, m.added_by FROM members m LEFT JOIN users u ON u.login = m.login WHERE m.monorepo = ? ORDER BY m.login",
+      monorepo,
+    );
   }
 
   putMember(monorepo: string, login: string, role: MemberRole, by: string): Outcome<Member> {
@@ -226,7 +231,10 @@ export class AccountsObject extends DurableObject<Env> {
          ON CONFLICT (monorepo, login) DO UPDATE SET role = excluded.role`,
         monorepo, login, role, at, by,
       );
-      return this.row<Member>("SELECT login, role, added_at, added_by FROM members WHERE monorepo = ? AND login = ?", monorepo, login)!;
+      return this.row<Member>(
+        "SELECT m.login, u.name, m.role, m.added_at, m.added_by FROM members m LEFT JOIN users u ON u.login = m.login WHERE m.monorepo = ? AND m.login = ?",
+        monorepo, login,
+      )!;
     });
   }
 

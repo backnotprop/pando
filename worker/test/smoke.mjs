@@ -90,7 +90,7 @@ try {
   writeFileSync(join(src, "README.md"), "# smoke\none\nTWO\nthree\n");
   writeFileSync(join(src, "big.bin"), Buffer.alloc(3 << 20, 1)); // 3 MiB: git sends a probe, then a chunked body
   git(["add", "-A"], src);
-  git(["commit", "-qm", "branch"], src);
+  git(["commit", "-qm", "branch\n\nPando-Agent: smoke-agent\nPando-Machine: smoke-box"], src);
   g = git(["push", "-q", url, "smoke/branch"], src);
   check("push a branch (3 MiB, chunked through the door)", g.ok, g.out.slice(-200));
   const clone = join(work, "clone");
@@ -114,6 +114,14 @@ try {
   git(["fetch", "-q", "origin"], clone);
   const parents = git(["rev-list", "--parents", "-n1", "origin/main"], clone).out.trim().split(" ");
   check("main is a two-parent merge commit", parents.length === 3 && parents[0] === r.json?.sha);
+  const me = (await call("GET", "/v1/user")).json;
+  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=merged`);
+  const mb = r.json?.branches?.[0];
+  check("merge facts on the branch (merged_by, merged_machine, forced)", mb?.merged_by === me?.login && mb?.merged_machine === me?.credential?.name && mb?.forced === false && !!mb?.merged_at, JSON.stringify({ by: mb?.merged_by, forced: mb?.forced }));
+  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/smoke%2Fbranch/commits`);
+  check("the branch's commits with trailers", r.status === 200 && r.json?.commits?.[0]?.trailers?.agent === "smoke-agent" && r.json.commits[0].trailers.machine === "smoke-box", `${r.status}`);
+  r = await call("GET", `/v1/monorepos/${M}/members`);
+  check("members carry names", r.status === 200 && r.json?.members?.[0]?.login === me?.login && "name" in (r.json?.members?.[0] ?? {}));
 } catch (err) {
   check("no exception", false, String(err?.stack ?? err));
 } finally {

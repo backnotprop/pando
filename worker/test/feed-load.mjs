@@ -4,13 +4,15 @@
 // and how long an event takes to reach the person's live socket.
 //
 //   PANDO_URL=http://localhost:8811 N=10 node test/feed-load.mjs     (wrangler dev with FEED_TEST=1)
+//   PANDO_URL=https://pando-dev... USE_HOME_CRED=1 FEED_TEST_ROUTE=0 N=10 node test/feed-load.mjs
+//     (as the signed-in person of ~/.pando/credentials/<host>; their other monorepos count too)
 //
 // Each monorepo is a plain repo with 3 worktree reports and a status; NEEDS of
 // them also get a pushed branch (ready; one failing). Credentials stay in
 // memory; git never reaches the keychain; it deletes every monorepo it made.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8811").replace(/\/$/, "");
@@ -19,7 +21,8 @@ const N = Number(process.env.N ?? 10);
 const NEEDS = Math.min(N, Number(process.env.NEEDS ?? 5));
 const RUNS = Number(process.env.RUNS ?? 20);
 const LIVE = Number(process.env.LIVE ?? 20);
-const BOOT = process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+const HOME_CRED = !!process.env.USE_HOME_CRED;
+const BOOT = HOME_CRED ? null : (process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1]);
 const TEST_ROUTE = process.env.FEED_TEST_ROUTE !== "0";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // wrangler dev reloads now and then (its remote-binding session), resetting connections: retry once.
@@ -63,7 +66,10 @@ const say = (s) => {
   console.log(s);
 };
 try {
-  S = (await call("POST", "/v1/users", BOOT, { login: `hl-${id}`, credential_name: "hl-mbp" })).json?.credential?.secret;
+  S = HOME_CRED
+    ? readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim()
+    : (await call("POST", "/v1/users", BOOT, { login: `hl-${id}`, credential_name: "hl-mbp" })).json?.credential?.secret;
+  const me = (await call("GET", "/v1/user", S)).json?.login;
   const names = Array.from({ length: N }, (_, i) => `hl${i}-${id}`);
   const clone = {};
   let t0 = performance.now();
@@ -108,7 +114,8 @@ try {
     const r = await call("GET", "/v1/monorepos?summary=1", S);
     const ms = r.json?.monorepos ?? [];
     const needs = ms.reduce((a, m) => a + (m.needs ? m.needs.ready + m.needs.failing : 0), 0);
-    settled = ms.length === made.length && ms.every((m) => m.last_activity_at) && needs >= NEEDS;
+    const mine = ms.filter((m) => made.includes(m.name));
+    settled = mine.length === made.length && mine.every((m) => m.last_activity_at) && needs >= NEEDS;
     if (!settled) await sleep(1000);
   }
   say(`settled (joins, summaries, needs) in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${settled}`);
@@ -188,7 +195,7 @@ try {
 
   // ── Past the window: trim the feed to nothing; pages read the monorepos' logs ──
   if (TEST_ROUTE) {
-    await call("POST", "/v1/_feed/test", BOOT, { trim: { login: `hl-${id}`, days: 0 } });
+    await call("POST", "/v1/_feed/test", BOOT, { trim: { login: me, days: 0 } });
     const past = [];
     let info = null;
     for (let i = 0; i < RUNS; i++) {

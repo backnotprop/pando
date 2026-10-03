@@ -220,6 +220,8 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** Make the monorepo, keyed by its id and labelled owner/name. False if it exists already. */
   init(id: string, label: string, kind: Kind): boolean {
+    // After a delete (deleteAll), make sure the tables are back before the first read.
+    this.ensureSchema();
     if (this.info()) return false;
     const at = now();
     for (const [k, v] of [["name", id], ["label", label], ["kind", kind], ["created_at", at]]) this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?)", k, v);
@@ -309,9 +311,11 @@ export class MonorepoObject extends DurableObject<Env> {
    * minutes. Handed to the Worker's isolates, which never log it. `fresh`
    * mints anew (Artifacts refused the cached one).
    */
-  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number }> {
+  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number } | null> {
     const m = this.info()?.id;
-    if (!m || !name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
+    // Gone (deleted, while another isolate still had it cached for up to 15 s): the Worker answers 404.
+    if (!m) return null;
+    if (!name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
     const t0 = Date.now();
     const e = await repoTokenEntry(this.env, name, scope, generation, "local", fresh);
     // mint_ms: how long this took when it minted (0 when it was cached), for the caller's timing line.

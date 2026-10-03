@@ -7,8 +7,9 @@ package meta
 //	PANDO_META_TEST_URL=https://pando-dev.plannotator.workers.dev go test ./internal/meta -run E2E -v
 //
 // Against wrangler dev each test has its own monorepo, so its own object.
-// Against a deployed Worker (https) a run makes one monorepo, e2e-live-<time>
-// (there is no delete), and each test works in its own folder in it; the
+// Against a deployed Worker (https) a run makes one monorepo, e2e-live-<time>,
+// and each test works in its own folder in it (the init test makes
+// e2e-live-<time>-init); both are deleted when the run ends. The
 // credential is this machine's pando login (config.Credential), passed
 // to the engines as PANDO_TOKEN and never printed.
 
@@ -47,9 +48,32 @@ type testEnv struct {
 
 var remote struct {
 	sync.Mutex
-	token string
-	mono  string
-	err   error
+	server  string
+	token   string
+	mono    string
+	err     error
+	created []string // deleted when the run ends (TestMain)
+}
+
+// TestMain deletes the monorepos a run made on a deployed Worker
+// (DELETE /v1/monorepos/{m}?confirm={m}, owner only).
+func TestMain(m *testing.M) {
+	code := m.Run()
+	remote.Lock()
+	for _, name := range remote.created {
+		u := remote.server + "/v1/monorepos/" + url.PathEscape(name) + "?confirm=" + url.QueryEscape(name)
+		req, _ := http.NewRequest(http.MethodDelete, u, nil)
+		req.Header.Set("Authorization", "Bearer "+remote.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "deleting monorepo %s: %v\n", name, err)
+			continue
+		}
+		resp.Body.Close()
+		fmt.Fprintf(os.Stderr, "deleted monorepo %s: %d\n", name, resp.StatusCode)
+	}
+	remote.Unlock()
+	os.Exit(code)
 }
 
 func remoteToken(t *testing.T, server string) string {
@@ -80,6 +104,8 @@ func createMonorepo(t *testing.T, server, token, name string) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("creating monorepo %s: %d %s", name, resp.StatusCode, out)
 	}
+	remote.server = server
+	remote.created = append(remote.created, name)
 	t.Logf("made monorepo %s on %s", name, server)
 }
 
@@ -120,6 +146,8 @@ func newEnv(t *testing.T) *testEnv {
 // own gives the test a monorepo of its own, also on a deployed Worker.
 func (env *testEnv) own(t *testing.T, suffix string) {
 	if env.shared {
+		remote.Lock()
+		defer remote.Unlock()
 		env.mono = remote.mono + "-" + suffix
 		if strings.HasPrefix(env.server, "https://") {
 			createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), env.mono)

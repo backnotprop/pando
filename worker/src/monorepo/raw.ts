@@ -1,5 +1,5 @@
 // Raw files (FILES.md section 3): GET or HEAD
-//   /{owner}/{monorepo}/projects/{repo}/raw/{path}?ref=   a monorepo's project repo
+//   /{owner}/{monorepo}/projects/{project}/raw/{path}?ref=   a monorepo's project: the repo at projects/{project}
 //   /{owner}/{name}/raw/{path}?ref=                       a plain repo
 //   /{owner}/{monorepo}/raw/{path}?v=                     a monorepo's own files (the meta layer), now or at a version
 // The cookie (same origin; a read needs no Origin check) or a Bearer
@@ -14,7 +14,7 @@ import { authenticateRequest } from "../accounts/auth";
 import { objectsClient } from "../objects";
 import { finishTiming, runTimed, startTiming } from "../timing";
 import { cleanPath, matchesEtag, rawResponse, requestBudget, resolveCommit, Walker } from "./files";
-import { monorepoRef } from "./names";
+import { monorepoRef, repoNameFor } from "./names";
 import { cachedRepo, monorepoStub } from "./session";
 
 export const RAW_RE = /^\/([^/]+)\/([^/]+)\/(?:projects\/([^/]+)\/)?raw\/(.+)$/;
@@ -49,7 +49,11 @@ async function raw(request: Request, env: Env, ctx: ExecutionContext, url: URL, 
 
   if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${auth.monorepo.full_name}`);
   const info = auth.monorepo;
-  const repoName = m[3]?.toLowerCase() ?? null;
+  // The web app's address names the project's folder; its repo is named by the one rule (repoNameFor: projects/web is projects-web).
+  const project = m[3] ?? null;
+  const repoName = project === null ? null : repoNameFor(info.name, `projects/${project}`);
+
+  if (project !== null && repoName === null) throw new HttpError(404, "not_found", `no project ${project}`);
 
   if (info.kind === "monorepo" && !repoName) return metaRaw(request, env, url, info.id, m[4]);
 

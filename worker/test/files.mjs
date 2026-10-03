@@ -233,6 +233,30 @@ try {
   r = await fetch(URL_ + rawUrl(A, "README.md"));
   check("raw needs a credential", r.status === 401, `${r.status}`);
 
+  // ── Raw on a monorepo's project: the web's address names the folder (projects/web is the repo projects-web) ──
+  const P = `fp-${id}`;
+  r = await call("POST", "/v1/monorepos", { name: P });
+
+  if (r.status === 201) {
+    made.push(P);
+    tw.add(`${O}/${P}`);
+  }
+
+  r = await call("POST", `/v1/monorepos/${O}/${P}/repos`, { path: "projects/web" });
+  const webUrl = r.json?.clone_url;
+  const psrc = join(work, "p");
+  mkdirSync(psrc);
+  git(["init", "-q"], psrc);
+  write(psrc, "src/a.ts", "export const a = 1;\n");
+  git(["add", "-A"], psrc);
+  git(["commit", "-qm", "web"], psrc);
+  const pushedWeb = git(["push", "-q", webUrl, "main"], psrc).ok;
+  r = await call("GET", `/${O}/${P}/projects/web/raw/src/a.ts`);
+  const webEtag = r.headers.get("etag");
+  check("raw on a monorepo project by its folder (/projects/web/raw/...): 200 with the bytes", pushedWeb && r.status === 200 && r.text === "export const a = 1;\n", `${r.status} ${r.json?.error?.message ?? ""}`);
+  r = await call("GET", `/${O}/${P}/projects/web/raw/src/a.ts`, null, { "if-none-match": webEtag });
+  check("the project file's ETag again is a 304", r.status === 304, `${r.status}`);
+
   // ── The cache keeps repos apart: B's commit asked through A ──
   const bsrc = join(work, "b");
   mkdirSync(bsrc);

@@ -61,7 +61,7 @@
       {
         "queue": "pando-feed",
         "max_batch_size": 100,
-        // No wait: a line reaches the home one hop sooner (owner ruling, 2026-10-03; about $4.56 a month at 1,000 agents).
+        // No wait: a line reaches the home one hop sooner (pando-ops ruling, 2026-10-03; about $4.56 a month at 1,000 agents).
         "max_batch_timeout": 0,
         "max_retries": 5,
         "max_concurrency": 10,

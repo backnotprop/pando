@@ -49,7 +49,7 @@ async function readToken(env: Env, artifactsName: string): Promise<{ token: stri
 export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
   const delays = retryDelays(env);
   await pool([...batch.messages], 6, (msg) =>
-    timed("queue", { route: "hooks.delivery", monorepo: msg.body.monorepo, delivery: msg.body.delivery_id, attempt: msg.attempts }, () => deliverOne(env, msg, delays)),
+    timed("queue", { route: "hooks.delivery", monorepo: msg.body.monorepo, delivery: msg.body.delivery_id, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () => deliverOne(env, msg, delays)),
   );
 }
 

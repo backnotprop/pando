@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "e2e": "npm run build && playwright test --project=e2e",
-    "shots": "PANDO_SF_FONTS=1 npm run build && playwright test --project=shots"
+    "e2e": "playwright test --project=e2e",
+    "shots": "PANDO_SF_FONTS=1 playwright test --project=shots"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",

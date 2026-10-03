@@ -97,9 +97,14 @@ function pushBranch(m: Machine, repo: string, url: string, branch: string, files
   return m.git(dir, "rev-parse", "HEAD").trim();
 }
 
+/** A branch's title, as `pando` sets it (the pull request's title). */
+async function title(m: Machine, full: string, repo: string, branch: string, text: string) {
+  await m.api("PATCH", `/v1/monorepos/${full}/repos/${repo}/branches/${branch}`, { title: text });
+}
+
 async function seed(page: Page): Promise<Showcase> {
-  const machine = await Machine.make(page, "ramos-mbp");
-  const sandbox = await Machine.make(page, "sandbox-1");
+  const machine = await Machine.make(page, "ramos-mbp", "ramos");
+  const sandbox = await Machine.make(page, "sandbox-1", "ramos");
   await remake(page, machine, "pando-brand", "repo");
   await remake(page, machine, "workspaces", "monorepo");
   await remake(page, machine, "pando", "monorepo");
@@ -110,7 +115,11 @@ async function seed(page: Page): Promise<Showcase> {
   const ws = await project(page, "workspaces", "projects/workspaces");
   await saveRootFiles(page, "ramos/workspaces", "ramos-mbp", { "AGENTS.md": "# Workspaces\n\nThe monorepo for Workspaces.\n" });
   pushBranch(machine, "workspaces", ws, "main", { "README.md": "# workspaces\n" }, "Merge callout-seam: callouts keep their seam on narrow cards");
-  const failing = pushBranch(sandbox, "workspaces", ws, "search-index", { "search.ts": "export {};\n" }, "search: index customer-docs on every save");
+  pushBranch(sandbox, "workspaces", ws, "search-index", { "search.ts": "export {};\n" }, "search: index customer-docs on every save\n\nCo-authored-by: Claude <noreply@anthropic.com>");
+  const failing = pushBranch(sandbox, "workspaces", ws, "search-index", { "rank.test.ts": "export {};\n" }, "search: a ranking test for exact names");
+
+  await title(machine, "ramos/workspaces", "projects-workspaces", "search-index", "Index customer docs for search");
+  await ciStatus(machine, "ramos/workspaces", "projects-workspaces", failing, "ci", "success");
   await ciStatus(machine, "ramos/workspaces", "projects-workspaces", failing, "e2e", "failure");
 
   const pando = await project(page, "pando", "projects/pando");
@@ -125,38 +134,80 @@ async function seed(page: Page): Promise<Showcase> {
     ["AGENTS.md", AGENTS],
     ["research/plans/architecture-2026-10-03/NAMESPACES.md", "# Namespaces\n"],
   ]);
-  pushBranch(machine, "pando", pando, "main", { "README.md": "# pando\n\nThe Worker, the CLI and the Mac app.\n" }, "Merge web-api at 540e076: merges use the recorded heads");
+  pushBranch(
+    machine,
+    "pando",
+    pando,
+    "main",
+    {
+      "README.md": "# Pando\n\nA git platform for monorepos, built on Cloudflare Workers and Artifacts, for many agents working at once.\n",
+      ".gitignore": "node_modules/\n",
+      LICENSE: "Apache License 2.0\n",
+      "REFERENCES.md": "# References\n",
+      "cli/main.go": "package main\n",
+      "docs/contracts/README.md": "# Contracts\n",
+      "mac/README.md": "# Pando.app\n",
+      "worker/src/index.ts": "// The Pando Worker: the one way in.\nexport default {};\n",
+    },
+    "Merge web-api at 540e076: merges use the recorded heads",
+  );
   pushBranch(machine, "artifact-fs", fs, "main", { "README.md": "# artifact-fs\n" }, "Merge index-stat: a fresh mount's first git status downloads nothing");
-  pushBranch(machine, "pando", pando, "live", { "README.md": "# pando\n\nLarge files through R2.\n" }, "live: large files go to R2 by their sha256");
-  pushBranch(machine, "pando", pando, "docs", { "README.md": "# pando\n\nThe Worker and the CLI.\n" }, "docs: the README names the parts");
+  pushBranch(machine, "pando", pando, "live", { "README.md": "# Pando\n\nLarge files through R2.\n" }, "live: large files go to R2 by their sha256\n\nCo-authored-by: Codex <codex@openai.invalid>");
+  pushBranch(machine, "pando", pando, "docs", { "README.md": "# Pando\n\nA git platform for monorepos.\n" }, "docs: the README names the parts");
   await machine.api("POST", "/v1/monorepos/ramos/pando/repos/projects-pando/branches/docs/merge");
-  const webApi = pushBranch(sandbox, "pando", pando, "web-api", { "worker/src/gitwrite.ts": "export {};\n" }, "gitwrite pushes with the object's cached write token");
+  pushBranch(sandbox, "pando", pando, "web-api", { "worker/src/main.ts": "export {};\n" }, "Merge branch 'main' into web-api");
+
+  const webApi = pushBranch(
+    sandbox,
+    "pando",
+    pando,
+    "web-api",
+    { "worker/src/gitwrite.ts": "export {};\n" },
+    "gitwrite pushes with the object's cached write token: no mint, info or revoke per push\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+  );
 
   await ciStatus(machine, "ramos/pando", "projects-pando", webApi, "ci", "success");
-  pushBranch(machine, "pando", pando, "cli", { "cli/main.go": "package main\n" }, "cli: pando worktree add mounts through Pando.app");
+  await title(machine, "ramos/pando", "projects-pando", "web-api", "Push with the object's cached write token");
+  await title(machine, "ramos/pando", "projects-pando", "live", "Large files through R2");
+  await sandbox.api("PUT", "/v1/monorepos/ramos/pando/worktrees/wt-web-api", {
+    repo: "projects/pando",
+    branch: "web-api",
+    path: "projects/pando/worktrees/web-api",
+    machine: "sandbox-1",
+    kind: "fuse",
+  });
+  const cli = pushBranch(machine, "pando", pando, "cli", { "cli/mount.go": "package main\n" }, "cli: pando worktree add mounts through Pando.app when the switch is on");
+
+  await title(machine, "ramos/pando", "projects-pando", "cli", "Mount worktrees through Pando.app when FSKit is on");
+  await ciStatus(machine, "ramos/pando", "projects-pando", cli, "ci", "pending");
   pushBranch(sandbox, "artifact-fs", fs, "mac-mount", { "overlay.go": "package overlay\n" }, "overlay: backing files keep owner read and write");
 
   return { machine, sandbox };
 }
 
 const settle = async (page: Page) => {
+  // Rows fill in after the page shows (last commits, counts): wait until the network is quiet.
+  await page.waitForLoadState("networkidle");
+  // Load both faces before the shot: fonts.ready alone can resolve before a face is first used.
+  await page.evaluate(() => Promise.all([document.fonts.load('14px "SF Mono"'), document.fonts.load('14px "SF Pro Text"'), document.fonts.load('600 14px "SF Pro Text"')]));
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(1500);
 };
 
 /** The app's screen and the prototype's, same size, same settings. */
-async function pair(page: Page, proto: Page, name: string, route: string, opts: { query?: string; click?: string; protoClick?: string } = {}) {
+/** `proto` is the prototype's route when its data differs (its workspaces belongs to plannotator). */
+async function pair(page: Page, proto: Page, name: string, route: string, opts: { query?: string; click?: string; protoClick?: string; proto?: string } = {}) {
   await page.goto(`${route}${opts.query ? `?${opts.query}` : ""}`);
   await settle(page);
 
   if (opts.click) {
-    await page.getByRole("button", { name: opts.click, exact: true }).click();
+    await page.getByRole("button", { name: opts.click, exact: true }).first().click();
     await page.waitForTimeout(400);
   }
 
   const width = page.viewportSize()?.width ?? 1440;
   await page.screenshot({ path: `${SHOTS}${name}-${width}-real.png` });
-  await proto.goto(`${PROTOTYPE}${opts.query ? `?${opts.query}` : ""}#${route}`);
+  await proto.goto(`${PROTOTYPE}${opts.query ? `?${opts.query}` : ""}#${opts.proto ?? route}`);
   await settle(proto);
 
   if (opts.protoClick) {
@@ -208,6 +259,20 @@ test("fidelity shots of slice 1 beside the prototype", async ({ page, browser })
       await pair(page, proto, "file-light", "/ramos/pando/blob/decisions/RULINGS.md", { query: "theme=iris-light" });
       await page.goto("/?theme=pando");
       await proto.goto(`${PROTOTYPE}?theme=pando#/`);
+      // Slice 2
+      await pair(page, proto, "branches", "/ramos/pando/projects/pando/branches");
+      await pair(page, proto, "branches-merged", "/ramos/pando/projects/pando/branches?tab=merged");
+      await pair(page, proto, "branch", "/ramos/pando/projects/pando/branches/web-api");
+      await pair(page, proto, "branch-checks", "/ramos/workspaces/projects/workspaces/branches/search-index", { proto: "/plannotator/workspaces/projects/workspaces/branches/search-index" });
+      await pair(page, proto, "branch-waiting", "/ramos/pando/projects/pando/branches/cli");
+      await pair(page, proto, "branch-conflicts", "/ramos/pando/projects/pando/branches/live");
+      await pair(page, proto, "branch-picker", "/ramos/pando/projects/pando", { click: "main", protoClick: "#bpb" });
+      await pair(page, proto, "code-branch-ref", "/ramos/pando/projects/pando?ref=web-api");
+      await pair(page, proto, "code-file", "/ramos/pando/projects/pando/blob/worker/src/index.ts");
+      await pair(page, proto, "code-history", "/ramos/pando/projects/pando/history/worker/src/index.ts");
+      await pair(page, proto, "activity", "/ramos/pando/activity");
+    } else {
+      await pair(page, proto, "branch", "/ramos/pando/projects/pando/branches/web-api");
     }
 
     await proto.close();

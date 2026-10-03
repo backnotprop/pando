@@ -33,9 +33,9 @@ export function Who({ person, machine }: { person: string | null; machine: strin
   if (!person) return <span />;
 
   return (
-    <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[13px] whitespace-nowrap text-bark-dim">
+    <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[13px] whitespace-nowrap text-bark-dim phone:whitespace-normal">
       <Avatar name={person} size={18} />
-      <span className="min-w-0 overflow-hidden text-ellipsis">
+      <span className="min-w-0 overflow-hidden text-ellipsis phone:overflow-visible">
         {person}
         {machine ? <span className="text-ash"> on {machine}</span> : null}
       </span>
@@ -59,7 +59,8 @@ function Open({ repo }: { repo: Repo }) {
   const clock = useNow();
   const list = useSuspenseInfiniteQuery(branchesQuery(monorepo, repo.name, "open"));
   const branches = list.data.pages.flatMap((p) => p.branches);
-  const cols = "grid-cols-[minmax(0,1fr)_230px_150px_64px] narrow:grid-cols-[minmax(0,1fr)_150px_64px] phone:grid-cols-[minmax(0,1fr)_52px]";
+  // On a phone: the branch and its title, then a second line with who pushed it (in full) and when.
+  const cols = "grid-cols-[minmax(0,1fr)_230px_150px_64px] narrow:grid-cols-[minmax(0,1fr)_150px_64px] phone:grid-cols-[minmax(0,1fr)_auto]";
 
   if (!branches.length) return <Empty>No open branches.</Empty>;
 
@@ -75,11 +76,11 @@ function Open({ repo }: { repo: Repo }) {
         {branches.map((b) => (
           <li key={b.name} className="border-t border-rule-faint">
             <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air focus-visible:bg-air`}>
-              <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
+              <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap phone:col-span-2">
                 <span className="font-mono text-[13.5px] leading-[16px] text-bark">{b.name}</span>
                 {b.title ? <span className="text-[13px] text-ash">{b.title}</span> : null}
               </span>
-              <span className="narrow:hidden">
+              <span className="min-w-0 narrow:hidden phone:block">
                 <Who person={b.author} machine={b.pushed_machine} />
               </span>
               <StateWord b={b} mark={false} className="phone:hidden" />

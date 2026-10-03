@@ -46,11 +46,11 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
   if (kind === "projects" && !plain) {
     const [, sub = "", ...path] = parts;
-    const project: Crumb = { label: repoPath, link: path.length || sub ? codeLink(full, repoPath, "") : undefined, project: repoPath };
+    const deeper = sub === "branches" ? [{ label: path.length ? path.join("/") : "branches" }] : codeCrumbs(full, repoPath, sub, path);
+    // On a phone the project crumb drops out whenever a deeper crumb follows, so the breadcrumb never overlaps.
+    const project: Crumb = { label: repoPath, link: deeper.length ? codeLink(full, repoPath, "") : undefined, project: repoPath, wide: deeper.length > 0 };
 
-    if (sub === "branches") return path.length ? [{ ...project, wide: true }, { label: path.join("/") }] : [project, { label: "branches" }];
-
-    return [project, ...codeCrumbs(full, repoPath, sub, path)];
+    return [project, ...deeper];
   }
 
   if (plain && kind === "branches") return parts.length ? [{ label: parts.join("/") }] : [{ label: "branches" }];

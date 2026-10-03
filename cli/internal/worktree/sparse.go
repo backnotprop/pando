@@ -53,8 +53,10 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 	}
 	gitDir := filepath.Join(dst, ".git")
 	if s.Reference {
-		if _, err := g.Run(ctx, "config", "pando.reference", "true"); err != nil {
-			return err
+		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", "sparse"}} {
+			if _, err := g.Run(ctx, "config", kv[0], kv[1]); err != nil {
+				return err
+			}
 		}
 		return setWritable(dst, false)
 	}

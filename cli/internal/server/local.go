@@ -534,3 +534,84 @@ func writeJSONFile(p string, v any) error {
 	}
 	return os.Rename(tmp, p)
 }
+
+// Members and invites on a file:// server: the one user is the owner, and
+// invites are kept in invites.json.
+
+func (l *Local) ListMembers(_ context.Context, m string) ([]Member, error) {
+	lm, err := l.load(m)
+	if err != nil {
+		return nil, err
+	}
+	return []Member{{Login: l.login(), Role: "owner", AddedAt: lm.CreatedAt}}, nil
+}
+
+func (l *Local) RemoveMember(_ context.Context, m, login string) error {
+	if login == l.login() {
+		return apiErr(409, "last_owner", "the last owner stays")
+	}
+	return notFound(login + " as a member")
+}
+
+func (l *Local) invitesPath(m string) string { return filepath.Join(l.monoDir(m), "invites.json") }
+
+func (l *Local) ListInvites(_ context.Context, m string) ([]Invite, error) {
+	if _, err := l.load(m); err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(l.invitesPath(m))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []Invite
+	return out, json.Unmarshal(b, &out)
+}
+
+func (l *Local) Invite(ctx context.Context, m, email, role string) (*InviteResult, error) {
+	if role == "" {
+		role = "member"
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	invs, err := l.ListInvites(ctx, m)
+	if err != nil {
+		return nil, err
+	}
+	inv := Invite{Email: strings.ToLower(email), Role: role, InvitedBy: l.login(), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	out := invs[:0]
+	for _, i := range invs {
+		if i.Email != inv.Email {
+			out = append(out, i)
+		}
+	}
+	out = append(out, inv)
+	if err := writeJSONFile(l.invitesPath(m), out); err != nil {
+		return nil, err
+	}
+	return &InviteResult{Status: "invited", Invite: &inv}, nil
+}
+
+func (l *Local) RevokeInvite(ctx context.Context, m, email string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	invs, err := l.ListInvites(ctx, m)
+	if err != nil {
+		return err
+	}
+	out := invs[:0]
+	found := false
+	for _, i := range invs {
+		if i.Email == strings.ToLower(email) {
+			found = true
+			continue
+		}
+		out = append(out, i)
+	}
+	if !found {
+		return notFound("invite for " + email)
+	}
+	return writeJSONFile(l.invitesPath(m), out)
+}

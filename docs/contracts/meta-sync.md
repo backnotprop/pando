@@ -41,6 +41,7 @@ The object refuses, and the client never sends:
 | Too large | more than 1.5 MiB (1,572,864 bytes) inline: send a pointer (below) | `too_large` | 413 |
 | Binary | a NUL byte in the first 8,000 bytes (git's test) inline: send a pointer | `binary` | 415 |
 | Missing blob | a Git LFS pointer whose bytes are not in R2 | `missing_blob` | 400 |
+| Credentials | a reference pointer (`.pando/references/**.toml`) whose `url` carries a user or password | `credentials` | 400 |
 | Bad path | empty, absolute, `\`, NUL, `.` or `..` segments, empty segments, longer than 1,024 bytes | `bad_path` | 400 |
 | Bad sha | `sha` does not match `bytes` | `bad_sha` | 400 |
 

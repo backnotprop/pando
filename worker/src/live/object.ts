@@ -3,7 +3,7 @@
 // WebSocket, and commits changes to the meta layer's main after 10 s of quiet.
 // Owned by the live lane. The wire is docs/contracts/meta-sync.md.
 import { DurableObject } from "cloudflare:workers";
-import { checkBytes, checkPath, MAX_BYTES, type Refusal } from "./rules";
+import { checkBytes, checkPath, checkPointer, MAX_BYTES, type Refusal } from "./rules";
 import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
@@ -49,6 +49,8 @@ interface VersionRow {
   source: Source;
   restored_from: number | null;
   commit_sha: string | null;
+  lfs_oid: string | null; // a large file's SHA-256 when the version is its pointer
+  lfs_size: number | null; // and the large file's own size
 }
 
 interface Current {
@@ -71,6 +73,7 @@ interface NewVersion {
   source: Source;
   restored_from?: number | null;
   commit_sha?: string | null;
+  lfs?: { oid: string; size: number } | null; // read from bytes when not given
 }
 
 export interface MainChange {
@@ -118,7 +121,24 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.createSchema();
+    this.migrate();
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  // Objects made before the lfs_* columns existed: add them, and fill them
+  // from the stored pointers once.
+  private migrate(): void {
+    const cols = this.sql.exec<any>("PRAGMA table_info(versions)").toArray().map((c) => c.name as string);
+    if (cols.includes("lfs_oid")) return;
+    this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_oid TEXT");
+    this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_size INTEGER");
+    const small = this.sql
+      .exec<any>("SELECT version, sha FROM versions WHERE sha IS NOT NULL AND deleted = 0 AND size < 1024")
+      .toArray() as { version: number; sha: string }[];
+    for (const r of small) {
+      const ptr = parsePointer(new Uint8Array(this.blob(r.sha)));
+      if (ptr) this.sql.exec("UPDATE versions SET lfs_oid = ?, lfs_size = ? WHERE version = ?", ptr.oid, ptr.size, r.version);
+    }
   }
 
   private createSchema(): void {
@@ -138,7 +158,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at INTEGER NOT NULL,
         source TEXT NOT NULL,
         restored_from INTEGER,
-        commit_sha TEXT
+        commit_sha TEXT,
+        lfs_oid TEXT,
+        lfs_size INTEGER
       );
       CREATE INDEX IF NOT EXISTS versions_by_path ON versions(path, version);
       CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, version INTEGER NOT NULL, sha TEXT, deleted INTEGER NOT NULL);
@@ -245,9 +267,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private historyEntry(r: VersionRow) {
     // A large file's version is its pointer: show the file's own size and hash.
-    const ptr = r.sha && !r.deleted && (r.size ?? 0) < 1024 ? parsePointer(new Uint8Array(this.blob(r.sha))) : null;
     return {
-      large: ptr ? { oid: ptr.oid, size: ptr.size } : null,
+      large: r.lfs_oid ? { oid: r.lfs_oid, size: r.lfs_size } : null,
       version: r.version,
       path: r.path,
       op: r.op,
@@ -324,6 +345,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       agent,
       source: "restore",
       restored_from: target.version,
+      lfs: target.lfs_oid ? { oid: target.lfs_oid, size: target.lfs_size ?? 0 } : null,
     });
     this.broadcast(this.changeMessage(this.row(version)));
     await this.scheduleCommit();
@@ -519,6 +541,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       if (msg.blobMissing) {
         return refuse(path, { reason: "missing_blob", status: 400, message: "upload the file's bytes to meta/blobs first" });
       }
+      const badPointer = checkPointer(path, bytes);
+      if (badPointer) return refuse(path, badPointer);
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
       if (!this.baseMatches(cur, base)) return this.stale(ws, id, path, base, cur);
@@ -566,11 +590,16 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const curTo = this.current(path);
     if (!this.baseMatches(curTo, toBase)) return this.stale(ws, id, path, toBase, curTo);
     const fromRow = this.row(curFrom.version);
+    const badPointer = fromRow.sha ? checkPointer(path, new Uint8Array(this.blob(fromRow.sha))) : null;
+    if (badPointer) return refuse(path, badPointer);
     let fromVersion = 0;
     let version = 0;
     this.ctx.storage.transactionSync(() => {
       fromVersion = this.insert({ path: from, op: "rename", sha: null, size: null, deleted: true, moved: path, ...who, source: "live" });
-      version = this.insert({ path, op: "rename", sha: fromRow.sha, size: fromRow.size, deleted: false, moved: from, ...who, source: "live" });
+      version = this.insert({
+        path, op: "rename", sha: fromRow.sha, size: fromRow.size, deleted: false, moved: from, ...who, source: "live",
+        lfs: fromRow.lfs_oid ? { oid: fromRow.lfs_oid, size: fromRow.lfs_size ?? 0 } : null,
+      });
     });
     this.send(ws, { type: "accepted", id, path, version, sha: fromRow.sha, from, from_version: fromVersion });
     this.broadcast(this.changeMessage(this.row(version)), att.id);
@@ -640,10 +669,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       );
     }
     const at = Date.now();
+    const lfs = n.lfs !== undefined ? n.lfs : n.bytes && n.bytes.length < 1024 ? parsePointer(n.bytes) : null;
     const version = this.sql
       .exec<any>(
-        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
+        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha, lfs_oid, lfs_size)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
         n.path,
         n.op,
         n.sha,
@@ -657,6 +687,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         n.source,
         n.restored_from ?? null,
         n.commit_sha ?? null,
+        lfs?.oid ?? null,
+        lfs?.size ?? null,
       )
       .one().version as number;
     this.sql.exec(

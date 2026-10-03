@@ -1350,3 +1350,39 @@ func TestE2EDestroy(t *testing.T) {
 		t.Error("a new machine received a file from before the delete")
 	}
 }
+
+// A reference pointer never carries a user or password in its url.
+func TestE2EReferenceCredentialsRefused(t *testing.T) {
+	env := newEnv(t)
+	send, next := rawSocket(t, env.server, env.mono)
+	cases := []struct {
+		url, reason string
+	}{
+		{"https://user:not-a-real-token@example.com/lib.git", "credentials"},
+		{"https://token@example.com/lib.git", "credentials"},
+		{"https://example.com/lib.git", ""},
+		{"git@github.com:org/lib.git", ""},
+	}
+	for i, c := range cases {
+		body := []byte(fmt.Sprintf("url = %q\nref = \"refs/heads/main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n", c.url))
+		p := ".pando/references/" + env.p(fmt.Sprintf("ref%d.toml", i))
+		send(saveMsg{Type: "save", ID: strconv.Itoa(i), Path: p, SHA: gitSHA(body), Bytes: body})
+		m := next("")
+		if c.reason == "" && m.Type != "accepted" {
+			t.Errorf("%s: got %s %s, want accepted", c.url, m.Type, m.Reason)
+		}
+		if c.reason != "" && (m.Type != "refused" || m.Reason != c.reason) {
+			t.Errorf("%s: got %s %s, want refused %s", c.url, m.Type, m.Reason, c.reason)
+		}
+	}
+	// Through an engine: the pointer stays on the machine that wrote it.
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
+	bad := ".pando/references/" + env.p("leaky.toml")
+	a.writeRoot(bad, "url = \"https://user:not-a-real-token@example.com/x.git\"\n")
+	a.write("after.md", "after\n")
+	waitContent(t, b, "after.md", "after\n")
+	if _, ok := b.readRoot(bad); ok {
+		t.Error("a pointer with credentials reached ben")
+	}
+}

@@ -226,7 +226,7 @@ async function receivePack(
     bytes = new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => res.arrayBuffer()));
   } finally {
     clearInterval(renew);
-    await stub.releaseWrite(repo.artifacts_name, lease).catch(() => false);
+    await stub.releaseWrite(repo.artifacts_name, lease, false).catch(() => false);
   }
   const headers = { "content-type": res.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
   if (!res.ok) return new Response(bytes, { status: res.status, headers });

@@ -1,7 +1,7 @@
 // The Worker's environment: bindings from wrangler.jsonc plus the secrets the
 // owner sets with `wrangler secret put` (never in the repo). Secrets are
 // optional here: the Worker answers clearly when one is not set.
-type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS";
+type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS";
 
 export interface Env extends Omit<Cloudflare.Env, Secrets> {
   /** Makes users (POST /v1/users) until a sign-in method exists. */
@@ -16,4 +16,6 @@ export interface Env extends Omit<Cloudflare.Env, Secrets> {
   WORKOS_API_BASE?: string;
   /** Tests only: hook retry delays in seconds, comma-separated (default 10,60,300,1800). */
   HOOK_RETRY_DELAYS?: string;
+  /** The write gate's release delay in ms (default gate.ts RELEASE_DELAY_MS). */
+  GATE_RELEASE_MS?: string;
 }

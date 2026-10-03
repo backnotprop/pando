@@ -156,6 +156,29 @@ export async function timed<T>(kind: string, fields: Record<string, unknown>, fn
 
 // ── Wrappers ────────────────────────────────────────────────────────────────
 
+const DISPOSE = (Symbol as unknown as { dispose: symbol }).dispose;
+
+/**
+ * Release an RPC result as soon as it arrives. Workers gives every object an
+ * RPC call returns its own Symbol.dispose, and Artifacts' results (log,
+ * readTree, createToken...) are plain data. Left to the garbage collector,
+ * they log "An RPC result was not disposed properly". The data stays usable;
+ * the disposer is also dropped, so an object method that hands the result on
+ * does not pass the duty to its own caller.
+ */
+export function released<T>(v: T): T {
+  if (!v || typeof v !== "object") return v;
+  const d = (v as Record<symbol, unknown>)[DISPOSE];
+  if (typeof d !== "function") return v;
+  try {
+    Reflect.apply(d as () => void, v, []);
+  } catch {
+    // already released
+  }
+  Reflect.deleteProperty(v as object, DISPOSE);
+  return v;
+}
+
 /** An Artifacts repo handle whose calls are timed (readTree, readBlob, log, createToken...). */
 export function timedRepo(repo: ArtifactsRepo, name: string): ArtifactsRepo {
   return new Proxy(repo, {
@@ -163,8 +186,11 @@ export function timedRepo(repo: ArtifactsRepo, name: string): ArtifactsRepo {
       const v = Reflect.get(target, prop);
       // RPC stubs answer any property name with a remote method, so never call
       // .apply or .bind on one: Reflect.apply invokes it directly.
-      if (typeof v !== "function" || typeof prop === "symbol") return v;
-      return (...args: unknown[]) => timeArtifacts(String(prop), name, () => Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args));
+      if (typeof v !== "function") return v;
+      // Symbol methods (Symbol.dispose) run on the real handle, untimed.
+      if (typeof prop === "symbol") return (...args: unknown[]) => Reflect.apply(v as (...a: unknown[]) => unknown, target, args);
+      return (...args: unknown[]) =>
+        timeArtifacts(String(prop), name, async () => released(await Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args)));
     },
   }) as ArtifactsRepo;
 }
@@ -179,7 +205,9 @@ export function timedArtifacts(ns: Artifacts): Artifacts {
         return async (name: string) => timedRepo(await timeArtifacts("get", name, () => target.get(name)), name);
       }
       return (...args: unknown[]) =>
-        timeArtifacts(String(prop), typeof args[0] === "string" ? args[0] : null, () => Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args));
+        timeArtifacts(String(prop), typeof args[0] === "string" ? args[0] : null, async () =>
+          released(await Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args)),
+        );
     },
   }) as Artifacts;
 }
@@ -194,7 +222,7 @@ export function timedStub<S extends object>(stub: S): S {
         const t = als.getStore();
         const s = Date.now();
         try {
-          return await Reflect.apply(v as (...a: unknown[]) => unknown, target, args);
+          return released(await Reflect.apply(v as (...a: unknown[]) => unknown, target, args));
         } finally {
           record(t, "objects", s, Date.now());
         }

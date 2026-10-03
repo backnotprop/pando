@@ -10,8 +10,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
-import { branchesOf, listRefs, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
-import { GateBusy, isBusy, LEASE_MS, retryBusy, WriteGate } from "./gate";
+import { branchesOf, listRefs, repoToken, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
+import { GateBusy, isBusy, LEASE_MS, releaseDelay, retryBusy, WAIT_MS, WRITE_SLOTS, WriteGate } from "./gate";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
 import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
@@ -135,7 +135,7 @@ export class MonorepoObject extends DurableObject<Env> {
   private sql: SqlStorage;
   private locks = new Map<string, Promise<unknown>>();
   /** At most two writes at once per Artifacts repo (gate.ts). In memory: leases end when the object restarts. */
-  private gate = new WriteGate();
+  private gate = new WriteGate(WRITE_SLOTS, LEASE_MS, WAIT_MS, releaseDelay(this.env));
   /** Ref-only writes waiting for a slot, per Artifacts repo; sent together as one receive-pack. */
   private refQueues = new Map<string, { cmd: RefCommand; done: (reason: string | null) => void; fail: (err: unknown) => void }[]>();
   private refRunners = new Set<string>();
@@ -574,7 +574,12 @@ export class MonorepoObject extends DurableObject<Env> {
         retryBusy(
           () =>
             engine.mergeCommit(
-              { artifacts: timedArtifacts(this.env.ARTIFACTS), name: r.artifacts_name },
+              {
+                artifacts: timedArtifacts(this.env.ARTIFACTS),
+                name: r.artifacts_name,
+                // The object's cached write token for this one repo (C3), not one minted per push.
+                write: { remote: r.remote, token: (fresh) => repoToken(this.env, r.artifacts_name, "write", r.created_at, "local", fresh) },
+              },
               {
                 base: r.default_branch, head: h, baseSha, message,
                 author: { name: a.identity.name ?? a.identity.login, email },
@@ -1176,8 +1181,9 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.gate.renew(key, lease);
   }
 
-  releaseWrite(key: string, lease: string): boolean {
-    return this.gate.release(key, lease);
+  /** hold: false lets the next writer in at once (door pushes); else after the release delay. */
+  releaseWrite(key: string, lease: string, hold = true): boolean {
+    return hold ? this.gate.release(key, lease) : this.gate.release(key, lease, 0);
   }
 
   gateStats(key: string): { held: number; waiting: number } {

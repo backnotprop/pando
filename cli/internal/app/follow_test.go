@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,6 +41,15 @@ type fakeStream struct {
 	closes   atomic.Int32
 	live     atomic.Int32 // socket handlers running
 	opened   atomic.Int32 // socket handlers started, ever (counted after live)
+	// The next refuseLeft upgrades are answered refuseStatus, as the Worker
+	// answers for a deleted monorepo (404) or a removed member (403).
+	refuseStatus, refuseLeft int
+}
+
+func (f *fakeStream) refuse(status, times int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refuseStatus, f.refuseLeft = status, times
 }
 
 func (f *fakeStream) head() string {
@@ -73,7 +83,22 @@ func (f *fakeStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.mu.Lock()
 		f.queries = append(f.queries, r.URL.RawQuery)
+		status := 0
+		if f.refuseLeft > 0 {
+			f.refuseLeft--
+			status = f.refuseStatus
+		}
 		f.mu.Unlock()
+		switch status {
+		case 404:
+			w.WriteHeader(404)
+			io.WriteString(w, `{"error":{"code":"not_found","message":"no monorepo pat/acme"}}`)
+			return
+		case 403:
+			w.WriteHeader(403)
+			io.WriteString(w, `{"error":{"code":"not_a_member","message":"pat is not a member of pat/acme"}}`)
+			return
+		}
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
@@ -460,5 +485,65 @@ func TestFollowerStopsOnAnEarly4404(t *testing.T) {
 			cancel()
 			t.Fatalf("try %d: the follower did not stop on a 4404 sent as the socket opened", try)
 		}
+	}
+}
+
+// The monorepo deleted, or this user removed from it, while the follower
+// was between sockets: the Worker answers the reconnect 404 not_found or
+// 403 not_a_member, and the follower stops instead of backing off for good.
+// One such answer alone (a replica behind a new monorepo) is retried.
+func TestFollowerStopsWhenRefusedAsGone(t *testing.T) {
+	prev := followBackoff
+	followBackoff = []time.Duration{50 * time.Millisecond, 100 * time.Millisecond}
+	defer func() { followBackoff = prev }()
+	for status, says := range map[int]string{
+		404: "the monorepo pat/acme was deleted on the server; stopped following",
+		403: "pat is not a member of pat/acme; stopped following",
+	} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			h := newHarness(t)
+			t.Setenv("PANDO_TOKEN", "tok")
+			bare := filepath.Join(h.base, "acme.git")
+			h.git(h.base, "init", "-q", "--bare", "-b", "main", bare)
+			fs := &fakeStream{t: t, bare: bare, hasHeads: true, send: make(chan string, 4), hangUp: make(chan struct{}, 1), deleted: make(chan struct{}, 1)}
+			srv := httptest.NewServer(fs)
+			defer srv.Close()
+			root := newFollowRoot(t, h, fs, srv.URL, []config.Worktree{
+				{ID: "wt_a", Repo: ".", Branch: "feat-a", Path: "worktrees/feat-a", Kind: "sparse"},
+			})
+			root.Owner = "pat"
+			root.Save()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var stderr bytes.Buffer
+			e, _ := NewEnv(ctx, strings.NewReader(""), io.Discard, &stderr)
+			e.Cwd = root.Dir
+			stopped := make(chan struct{})
+			go func() { (&follower{e: e, root: root}).run(ctx, time.Hour); close(stopped) }()
+			waitUntil(t, "the first hello", func() bool { return len(fs.helloList()) == 1 })
+
+			// One refusal, then the socket opens again: still following.
+			fs.refuse(status, 1)
+			fs.hangUp <- struct{}{}
+			waitUntil(t, "a hello after one refusal", func() bool { return len(fs.helloList()) == 2 })
+
+			// Refused from now on: the follower stops at the second.
+			fs.refuse(status, 1000)
+			fs.hangUp <- struct{}{}
+			select {
+			case <-stopped:
+			case <-time.After(15 * time.Second):
+				t.Fatalf("the follower kept trying after HTTP %d", status)
+			}
+			fs.mu.Lock()
+			n := len(fs.queries)
+			fs.mu.Unlock()
+			if n != 5 {
+				t.Fatalf("%d sockets asked for, want 5 (open, refused, open, refused twice)", n)
+			}
+			if !strings.Contains(stderr.String(), says) {
+				t.Fatalf("stderr does not say %q:\n%s", says, stderr.String())
+			}
+		})
 	}
 }

@@ -1,12 +1,12 @@
 package worktree
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +16,12 @@ import (
 	"time"
 
 	"pando/internal/gitx"
+	"pando/internal/macbroker"
 )
 
-// Fuse drives the ArtifactFS fork (projects/artifact-fs) on Linux. Each repo
+// Fuse drives the ArtifactFS fork (projects/artifact-fs): through FUSE on
+// Linux, and on a Mac (FSKit set) through Pando.app's FSKit extension, which
+// the fork's darwin build mounts with /sbin/mount -F -t pando. Each repo
 // folder gets its own ArtifactFS state root and daemon, so worktree names
 // only need to be unique within a repo and every mount lands exactly at
 // <repo>/worktrees/<name>. Each worktree has its own blobless git folder,
@@ -28,11 +31,18 @@ import (
 // the fork): writes fail with EROFS, no root needed. They move only through
 // their git folder (Refresh), never through the mount.
 type Fuse struct {
-	Bin  string // the artifact-fs binary
-	Home string // ~/.pando
+	Bin   string // the artifact-fs binary
+	Home  string // ~/.pando
+	FSKit bool   // a Mac: the volume is Pando.app's FSKit extension
+	App   string // FSKit: the installed Pando.app ("" finds it through pluginkit)
 }
 
-func (f *Fuse) Kind() string { return "fuse" }
+func (f *Fuse) Kind() string {
+	if f.FSKit {
+		return "fskit"
+	}
+	return "fuse"
+}
 
 // stateDir is ~/.pando/afs/<repo folder>-<hash>: ARTIFACT_FS_ROOT for one repo.
 func (f *Fuse) stateDir(s Spec) string {
@@ -83,6 +93,17 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	for _, d := range []string{state, filepath.Dir(mp), mp} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
+		}
+	}
+	if f.FSKit {
+		// The extension reaches the daemon through Pando.app's broker,
+		// which launchd starts on demand once its LaunchAgent is loaded.
+		app := f.App
+		if app == "" {
+			app = macbroker.AppPath(ctx)
+		}
+		if err := macbroker.Ensure(ctx, app, false, io.Discard); err != nil {
+			return fmt.Errorf("Pando.app's broker: %w", err)
 		}
 	}
 	// A worktree removed earlier under the same name may have left a
@@ -209,11 +230,7 @@ func (f *Fuse) Remove(ctx context.Context, s Spec) error {
 	}
 	// The daemon notices the removal within a few seconds and unmounts.
 	if err := waitMount(mp, false, 20*time.Second); err != nil {
-		for _, c := range [][]string{{"fusermount3", "-u", mp}, {"fusermount", "-u", mp}, {"umount", mp}} {
-			if exec.CommandContext(ctx, c[0], c[1:]...).Run() == nil {
-				break
-			}
-		}
+		forceUnmount(ctx, mp)
 		if isMounted(mp) {
 			return fmt.Errorf("%s is still mounted", mp)
 		}
@@ -265,50 +282,6 @@ func (f *Fuse) ensureDaemon(s Spec) error {
 		return err
 	}
 	return cmd.Process.Release()
-}
-
-func alive(pid int) bool {
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	return err != nil || strings.Contains(string(b), "artifact-fs")
-}
-
-// isMounted reads /proc/self/mountinfo (Linux).
-func isMounted(p string) bool {
-	fh, err := os.Open("/proc/self/mountinfo")
-	if err != nil {
-		return false
-	}
-	defer fh.Close()
-	sc := bufio.NewScanner(fh)
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) > 4 && unescapeMount(fields[4]) == p {
-			return true
-		}
-	}
-	return false
-}
-
-func unescapeMount(s string) string {
-	if !strings.Contains(s, `\`) {
-		return s
-	}
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+3 < len(s) {
-			if n, err := strconv.ParseUint(s[i+1:i+4], 8, 8); err == nil {
-				b.WriteByte(byte(n))
-				i += 3
-				continue
-			}
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
 }
 
 func waitMount(p string, want bool, timeout time.Duration) error {

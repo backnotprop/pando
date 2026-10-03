@@ -14,9 +14,20 @@ import (
 // lists, no file contents until checkout needs them), with
 // `git sparse-checkout` when only some folders are wanted. A read-only main
 // has its files and folders made read-only, and is refreshed after merges.
-type Sparse struct{}
+type Sparse struct {
+	// Why, on a Mac, is why worktrees are not mounted through Pando.app.
+	Why string
+}
 
 func (Sparse) Kind() string { return "sparse" }
+
+// Note is one line for the person when a Mac fell back to this driver.
+func (s Sparse) Note() string {
+	if s.Why == "" {
+		return ""
+	}
+	return "worktrees on this Mac use the sparse driver (a partial clone), not the Pando mount: " + s.Why
+}
 
 func (Sparse) Add(ctx context.Context, s Spec) error {
 	dst := s.Abs()

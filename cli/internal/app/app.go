@@ -17,6 +17,7 @@ import (
 
 	"pando/internal/config"
 	"pando/internal/server"
+	"pando/internal/worktree"
 )
 
 // Env is what every command gets.
@@ -28,7 +29,8 @@ type Env struct {
 	Cwd    string
 	Home   *config.Home
 
-	in *bufio.Reader
+	in    *bufio.Reader
+	noted bool
 }
 
 // NewEnv builds an Env for the current process.
@@ -133,6 +135,20 @@ func (e *Env) open(root *config.Root) (server.Server, error) {
 		return nil, err
 	}
 	return server.Open(root.Server, tok)
+}
+
+// pickNew picks the driver for a new worktree or reference, and says once
+// per command why a Mac is not using the Pando mount, when it is not.
+func (e *Env) pickNew(kind string) (worktree.Driver, error) {
+	drv, err := worktree.Pick(kind, e.Home.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" && !e.noted {
+		e.noted = true
+		e.warnf("%s", n.Note())
+	}
+	return drv, nil
 }
 
 // root finds the Pando root above the current folder.

@@ -38,7 +38,7 @@ func Worktree(e *Env, args []string) error {
 func worktreeAdd(e *Env, args []string) error {
 	fs := flags("worktree add")
 	agent := fs.String("agent", "", "the agent working in it (default: PANDO_AGENT); written as the Pando-Agent trailer")
-	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse (default: fuse on Linux with artifact-fs, else sparse)")
+	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse (default: fuse on Linux with artifact-fs, fskit on a Mac with Pando.app on, else sparse)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 		}
 	}
 
-	drv, err := worktree.Pick(kind, e.Home.Dir)
+	drv, err := e.pickNew(kind)
 	if err != nil {
 		return nil, err
 	}

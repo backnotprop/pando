@@ -1,8 +1,9 @@
 // Package worktree makes, refreshes and removes Pando worktrees: one branch
 // of one repo in its own folder, with its own git folder (formats.md,
-// section 1). Two drivers do the mounting: ArtifactFS on Linux (fuse) and a
-// blobless sparse clone everywhere else (sparse), until the Mac's FSKit
-// mount lands.
+// section 1). The ArtifactFS fork mounts them: through FUSE on Linux (fuse)
+// and through Pando.app's FSKit extension on a Mac (fskit). A blobless
+// sparse clone (sparse) is the fallback everywhere else, and on a Mac
+// without Pando.app or with its extension off.
 package worktree
 
 import (
@@ -15,8 +16,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"pando/internal/gitx"
+	"pando/internal/macbroker"
 )
 
 // Spec is one worktree to make or act on.
@@ -51,9 +54,10 @@ type Driver interface {
 	Remove(ctx context.Context, s Spec) error
 }
 
-// Pick chooses a driver. kind is "", "fuse" or "sparse". With "", Linux
-// with /dev/fuse and an artifact-fs binary gets fuse; everything else gets
-// sparse.
+// Pick chooses a driver. kind is "", "fuse", "fskit" or "sparse". With "",
+// Linux with /dev/fuse and an artifact-fs binary gets fuse; a Mac with
+// Pando.app's file system extension turned on and an artifact-fs binary gets
+// fskit; everything else gets sparse, whose Note says why.
 func Pick(kind, pandoHome string) (Driver, error) {
 	switch kind {
 	case "sparse":
@@ -64,29 +68,69 @@ func Pick(kind, pandoHome string) (Driver, error) {
 			return nil, err
 		}
 		if runtime.GOOS != "linux" {
-			return nil, errors.New("the fuse driver runs on Linux; on a Mac Pando uses the sparse driver until the FSKit mount lands")
+			return nil, errors.New("the fuse driver runs on Linux; on a Mac Pando mounts through Pando.app (the fskit driver)")
 		}
 		return &Fuse{Bin: bin, Home: pandoHome}, nil
+	case "fskit":
+		// An existing fskit worktree is removed or refreshed with this,
+		// so it does not ask whether the extension is still on.
+		if runtime.GOOS != "darwin" {
+			return nil, errors.New("the fskit driver runs on macOS")
+		}
+		bin, err := artifactFSBinary()
+		if err != nil {
+			return nil, err
+		}
+		return &Fuse{Bin: bin, Home: pandoHome, FSKit: true}, nil
 	case "":
-		if runtime.GOOS == "linux" {
+		switch runtime.GOOS {
+		case "linux":
 			if _, err := os.Stat("/dev/fuse"); err == nil {
 				if bin, err := artifactFSBinary(); err == nil {
 					return &Fuse{Bin: bin, Home: pandoHome}, nil
 				}
 			}
+		case "darwin":
+			st := macState()
+			if !st.Enabled {
+				return Sparse{Why: st.Why}, nil
+			}
+			bin, err := artifactFSBinary()
+			if err != nil {
+				return Sparse{Why: err.Error()}, nil
+			}
+			return &Fuse{Bin: bin, Home: pandoHome, FSKit: true, App: st.App}, nil
 		}
 		return Sparse{}, nil
 	}
-	return nil, fmt.Errorf("unknown worktree kind %q (fuse or sparse)", kind)
+	return nil, fmt.Errorf("unknown worktree kind %q (fuse, fskit or sparse)", kind)
 }
 
+// macState asks macOS once per run whether the FSKit extension is on.
+var macState = sync.OnceValue(func() macbroker.State { return macbroker.Check(context.Background()) })
+
+// Noter is a driver with something to tell the person, such as why a Mac
+// fell back to the sparse driver.
+type Noter interface{ Note() string }
+
+// artifactFSBinary is PANDO_ARTIFACT_FS, else artifact-fs next to the pando
+// binary, else artifact-fs on PATH.
 func artifactFSBinary() (string, error) {
 	if p := os.Getenv("PANDO_ARTIFACT_FS"); p != "" {
 		return p, nil
 	}
+	if exe, err := os.Executable(); err == nil {
+		if r, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = r
+		}
+		p := filepath.Join(filepath.Dir(exe), "artifact-fs")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			return p, nil
+		}
+	}
 	p, err := exec.LookPath("artifact-fs")
 	if err != nil {
-		return "", errors.New("artifact-fs is not on PATH (build it from projects/artifact-fs, or set PANDO_ARTIFACT_FS)")
+		return "", errors.New("artifact-fs is not next to pando or on PATH (build it from projects/artifact-fs, or set PANDO_ARTIFACT_FS)")
 	}
 	return p, nil
 }

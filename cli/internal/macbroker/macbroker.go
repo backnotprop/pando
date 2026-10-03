@@ -1,7 +1,8 @@
 // Package macbroker writes and loads the LaunchAgent for pando-broker, the
 // relay inside Pando.app between the FSKit extension and the daemon
-// (mac/README.md on the mac-app branch). It runs only when Pando.app is
-// installed; without it, worktrees on a Mac use the sparse driver.
+// (mac/README.md), and checks whether the extension is on (Check). Without
+// Pando.app, or with the extension off, worktrees on a Mac use the sparse
+// driver.
 package macbroker
 
 import (
@@ -26,25 +27,12 @@ const (
 // AppPath finds the installed Pando.app through pluginkit, which lists the
 // FSKit extension with its path. It returns "" when the app is not there.
 func AppPath(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "pluginkit", "-m", "-v", "-i", ExtensionID).Output()
+	out, err := exec.CommandContext(ctx, "/usr/bin/pluginkit", "-m", "-v", "-i", ExtensionID).Output()
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.Contains(line, ExtensionID) {
-			continue
-		}
-		for _, f := range strings.Split(line, "\t") {
-			f = strings.TrimSpace(f)
-			if i := strings.Index(f, ".app/"); i > 0 && strings.HasPrefix(f, "/") {
-				return f[:i+4]
-			}
-		}
-		if _, err := os.Stat("/Applications/Pando.app"); err == nil {
-			return "/Applications/Pando.app"
-		}
-	}
-	return ""
+	_, app, _ := parsePluginkit(string(out), fileExists)
+	return app
 }
 
 // PlistPath is ~/Library/LaunchAgents/ai.plannotator.pando.broker.plist.

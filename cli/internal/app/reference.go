@@ -18,7 +18,7 @@ import (
 func Reference(e *Env, args []string) error {
 	if len(args) > 0 && args[0] == "sync" {
 		fs := flags("reference sync")
-		kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse")
+		kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse")
 		if _, err := parse(fs, args[1:]); err != nil {
 			return err
 		}
@@ -32,7 +32,7 @@ func Reference(e *Env, args []string) error {
 		return UsageError{"pando reference update <path> | sync"}
 	}
 	fs := flags("reference update")
-	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse, for a folder this machine mounts")
+	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse, for a folder this machine mounts")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err

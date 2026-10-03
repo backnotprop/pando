@@ -59,9 +59,10 @@ const REFUSED_EVERY_MS = 10_000;
 /** The app every Buildkite check carries. */
 const BUILDKITE = { app: "buildkite", creator: "app:buildkite" };
 
+/** A row as SQLite returns it; the row types below name its columns (SCHEMA). */
 type Row = Record<string, SqlStorageValue>;
 
-export interface ConnectionRow {
+export type ConnectionRow = {
   id: string;
   service: string;
   organization: string;
@@ -77,9 +78,9 @@ export interface ConnectionRow {
   last_result: string | null;
   last_refused_at: string | null;
   last_refused: string | null;
-}
+};
 
-export interface BuildRow {
+export type BuildRow = {
   id: string;
   connection_id: string;
   external_id: string;
@@ -102,9 +103,9 @@ export interface BuildRow {
   event_ms: number;
   first_seen_at: string;
   updated_at: string;
-}
+};
 
-export interface JobRow {
+export type JobRow = {
   build_id: string;
   external_id: string;
   name: string | null;
@@ -120,7 +121,7 @@ export interface JobRow {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
-}
+};
 
 /** What a route needs to call the service about one build (and job): never the webhook secret. */
 export interface CiRef {
@@ -203,8 +204,8 @@ export interface PipelineView {
   last_build: BuildView | null;
 }
 
-function fail(status: number, code: string, message: string, extra?: Record<string, unknown>): never {
-  throw new HttpError(status, code, message, extra);
+function fail(status: number, code: string, message: string): never {
+  throw new HttpError(status, code, message);
 }
 
 function hexId(prefix: string, bytes: number): string {
@@ -236,11 +237,12 @@ export class CiStore {
     private host: CiHost,
   ) {}
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  /** Rows of a query; T names its columns (the platform's typed exec). */
+  private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
-  private row<T>(q: string, ...args: unknown[]): T | null {
+  private row<T extends Row>(q: string, ...args: SqlStorageValue[]): T | null {
     return this.rows<T>(q, ...args)[0] ?? null;
   }
 
@@ -730,7 +732,7 @@ export class CiStore {
   builds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }): { builds: BuildView[]; next_cursor: string | null } {
     const limit = Math.min(Math.max(q.limit, 1), BUILDS_PAGE_MAX);
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SqlStorageValue[] = [];
 
     for (const [col, v] of [["repo", q.repo], ["branch", q.branch], ["sha", q.sha], ["pipeline", q.pipeline], ["connection_id", q.connection], ["state", q.state]] as const) {
       if (v) {

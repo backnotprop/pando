@@ -41,8 +41,8 @@ export const SIGNATURE_MAX_AGE_S = 300;
 /** Buildkite's REST page size, at most. */
 export const PAGE_MAX = 100;
 
-/** The env Pando gives a build it starts (hook deliveries and Rebuild). */
-export function pandoBuildEnv(v: {
+/** What Pando knows about a build it starts. */
+export interface BuildFacts {
   clone_url: string;
   read_token: string;
   status_url: string;
@@ -53,12 +53,28 @@ export function pandoBuildEnv(v: {
   head: string;
   delivery: string;
   seq: number | null;
-}): Record<string, string> {
-  return {
+}
+
+/** The env a build gets (api-v1.yaml, createHook). PANDO_STATUS_TOKEN only when PANDO_STATUS_SECRET is set. */
+export interface BuildEnv {
+  PANDO_CLONE_URL: string;
+  PANDO_READ_TOKEN: string;
+  PANDO_STATUS_URL: string;
+  PANDO_STATUS_TOKEN?: string;
+  PANDO_MONOREPO: string;
+  PANDO_REPO: string;
+  PANDO_BRANCH: string;
+  PANDO_HEAD: string;
+  PANDO_DELIVERY: string;
+  PANDO_SEQ: string;
+}
+
+/** The env Pando gives a build it starts (hook deliveries and Rebuild). */
+export function pandoBuildEnv(v: BuildFacts): BuildEnv {
+  const env: BuildEnv = {
     PANDO_CLONE_URL: v.clone_url,
     PANDO_READ_TOKEN: v.read_token,
     PANDO_STATUS_URL: v.status_url,
-    ...(v.status_token ? { PANDO_STATUS_TOKEN: v.status_token } : {}),
     PANDO_MONOREPO: v.monorepo,
     PANDO_REPO: v.repo,
     PANDO_BRANCH: v.branch,
@@ -66,6 +82,10 @@ export function pandoBuildEnv(v: {
     PANDO_DELIVERY: v.delivery,
     PANDO_SEQ: v.seq === null ? "" : String(v.seq),
   };
+
+  if (v.status_token) env.PANDO_STATUS_TOKEN = v.status_token;
+
+  return env;
 }
 
 // ── The abstract model's states ─────────────────────────────────────────────
@@ -300,7 +320,13 @@ export function humanDuration(s: number | null): string {
  * that chose not to run), a job that never ran because something before it
  * failed ("broken") or that no agent took ("expired") does not.
  */
-export function jobCheck(j: NormJob, buildNumber: number): { state: StatusRecord["state"]; description: string } {
+/** The status a job's check writes. */
+export interface JobCheck {
+  state: StatusRecord["state"];
+  description: string;
+}
+
+export function jobCheck(j: NormJob, buildNumber: number): JobCheck {
   const n = `#${buildNumber}`;
   const exit = j.exit_status === null ? "" : `, exit status ${j.exit_status}`;
   const took = humanDuration(duration(j.started_at, j.finished_at));
@@ -357,9 +383,17 @@ export type WebhookAuth = { ok: true; ts: number | null } | { ok: false; reason:
 /** X-Buildkite-Signature when present (and then required to be right), else X-Buildkite-Token. */
 export async function verifyWebhook(secret: string, h: { token: string | null; signature: string | null }, body: string, nowS: number): Promise<WebhookAuth> {
   if (h.signature) {
-    const parts = Object.fromEntries(h.signature.split(",").map((p) => p.trim().split("=", 2) as [string, string]));
-    const ts = Number(parts.timestamp);
-    const sig = parts.signature ?? "";
+    // "timestamp=<unix s>,signature=<hex>": each part is a name, "=", and a value.
+    const parts = new Map(
+      h.signature.split(",").map((part) => {
+        const i = part.indexOf("=");
+
+        return i < 0 ? [part.trim(), ""] : [part.slice(0, i).trim(), part.slice(i + 1).trim()];
+      }),
+    );
+
+    const ts = Number(parts.get("timestamp"));
+    const sig = parts.get("signature") ?? "";
 
     if (!Number.isSafeInteger(ts) || !/^[0-9a-f]{64}$/.test(sig)) return { ok: false, reason: "malformed X-Buildkite-Signature" };
 

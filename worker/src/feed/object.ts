@@ -290,7 +290,9 @@ export class FeedObject extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     this.trim();
-    await this.ctx.storage.setAlarm(Date.now() + TRIM_EVERY_MS);
+    // A feed with no lines needs no trimming until lines arrive (ensureAlarm sets it again).
+    if (this.row("SELECT 1 AS x FROM pointers LIMIT 1")) await this.ctx.storage.setAlarm(Date.now() + TRIM_EVERY_MS);
+    else this.alarmChecked = false;
   }
 
   /** Keep WINDOW_DAYS of pointers, at most WINDOW_MAX; `floor` remembers the newest `at` dropped. `days`: tests only. */

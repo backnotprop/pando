@@ -68,6 +68,14 @@ export const MetaHistory = Schema.Struct({
 
 export interface MetaHistory extends Schema.Schema.Type<typeof MetaHistory> {}
 
+/** POST .../meta/restore: the path written back as it was at a version, or unchanged when it already holds those bytes. */
+export const Restored = Schema.Union([
+  Schema.Struct({ path: Schema.String, version: Count, sha: Schema.NullOr(Sha), restored_from: Count }),
+  Schema.Struct({ path: Schema.String, unchanged: Schema.Literal(true), version: Count }),
+]);
+
+export type Restored = typeof Restored.Type;
+
 /** GET .../meta/file answers raw bytes; these headers say which version they are. */
 export const MetaFileHeaders = Schema.Struct({
   "x-pando-version": Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),

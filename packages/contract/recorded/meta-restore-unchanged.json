@@ -1,0 +1,10 @@
+{
+  "schema": "Restored",
+  "route": "POST .../meta/restore (already so)",
+  "status": 200,
+  "body": {
+    "path": "README.md",
+    "unchanged": true,
+    "version": 6
+  }
+}

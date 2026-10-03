@@ -1,0 +1,9 @@
+{
+  "schema": "SignedOut",
+  "route": "POST /v1/logout (Accept: application/json, no session)",
+  "status": 200,
+  "body": {
+    "signed_out": false,
+    "logout_url": "http://localhost:8843/"
+  }
+}

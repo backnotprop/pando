@@ -33,3 +33,8 @@ export interface Credential extends Schema.Schema.Type<typeof Credential> {}
 export const Me = User.pipe(Schema.fieldsAssign({ credential: Credential }));
 
 export interface Me extends Schema.Schema.Type<typeof Me> {}
+
+/** POST /v1/logout with `Accept: application/json`: open logout_url to end the WorkOS session too. */
+export const SignedOut = Schema.Struct({ signed_out: Schema.Boolean, logout_url: Schema.String });
+
+export interface SignedOut extends Schema.Schema.Type<typeof SignedOut> {}

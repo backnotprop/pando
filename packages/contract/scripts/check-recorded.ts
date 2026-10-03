@@ -9,7 +9,34 @@ import * as Schema from "effect/Schema";
 import { flow } from "effect/Function";
 import * as Result from "effect/Result";
 
-import { ActivityFrame, decodeStrict, MonorepoFeedFrame, ErrorBody, EventsPage, Me, MetaFileHeaders, MetaHistory, MetaTree, MonorepoList, MonorepoSummaryList, NeedsPage } from "../src/index.ts";
+import {
+  ActivityFrame,
+  Branch,
+  BranchCommits,
+  BranchList,
+  Checks,
+  CiBuildList,
+  decodeStrict,
+  ErrorBody,
+  EventsPage,
+  MachineList,
+  Me,
+  MemberList,
+  MergeResult,
+  MetaFileHeaders,
+  MetaHistory,
+  MetaTree,
+  MonorepoEntry,
+  MonorepoFeedFrame,
+  MonorepoList,
+  MonorepoSummaryList,
+  NeedsPage,
+  Repo,
+  RepoList,
+  Restored,
+  ReviewList,
+  SignedOut,
+} from "../src/index.ts";
 
 const Recording = Schema.Struct({
   schema: Schema.String,
@@ -33,9 +60,23 @@ const decoders = {
   MetaTree: refuses(MetaTree),
   MetaHistory: refuses(MetaHistory),
   MetaFileHeaders: refuses(MetaFileHeaders),
+  MonorepoEntry: refuses(MonorepoEntry),
+  RepoList: refuses(RepoList),
+  Repo: refuses(Repo),
+  MemberList: refuses(MemberList),
+  MachineList: refuses(MachineList),
+  BranchList: refuses(BranchList),
+  Branch: refuses(Branch),
+  BranchCommits: refuses(BranchCommits),
+  ReviewList: refuses(ReviewList),
+  Checks: refuses(Checks),
+  CiBuildList: refuses(CiBuildList),
+  MergeResult: refuses(MergeResult),
+  Restored: refuses(Restored),
+  SignedOut: refuses(SignedOut),
 };
 
-const isDecoderName = Schema.is(Schema.Literals(["Me", "ErrorBody", "MonorepoList", "MonorepoSummaryList", "EventsPage", "NeedsPage", "ActivityFrame[]", "MonorepoFeedFrame[]", "MetaTree", "MetaHistory", "MetaFileHeaders"]));
+const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);
 
 const folder = new URL("../recorded/", import.meta.url);
 

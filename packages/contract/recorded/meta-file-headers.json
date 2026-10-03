@@ -3,7 +3,7 @@
   "route": "GET .../meta/file?path=README.md",
   "status": 200,
   "body": {
-    "x-pando-version": "1",
+    "x-pando-version": "2",
     "x-pando-sha": "f6aa6dab1441ad947037cd34f6ddcf3a097d41df"
   }
 }

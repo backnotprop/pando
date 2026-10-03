@@ -1,0 +1,26 @@
+{
+  "schema": "ReviewList",
+  "route": "GET .../branches/{branch}/reviews",
+  "status": 200,
+  "body": {
+    "reviews": [
+      {
+        "id": "rv_c73f2f8032dce7d0",
+        "branch": "feat/ready",
+        "head": "4b51324ff026310024bef9cd9a0bae1a67ef25bb",
+        "verdict": "approve",
+        "body": "Looks right.",
+        "comments": [
+          {
+            "path": "ready.txt",
+            "line": 1,
+            "side": "new",
+            "body": "Good."
+          }
+        ],
+        "author": "rec-musyuiou",
+        "created_at": "2026-10-03T22:31:14.337Z"
+      }
+    ]
+  }
+}

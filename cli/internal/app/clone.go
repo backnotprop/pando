@@ -10,14 +10,10 @@ import (
 
 	"pando/internal/config"
 	"pando/internal/gitx"
+	"pando/internal/meta"
 	"pando/internal/refs"
 	"pando/internal/worktree"
 )
-
-// MetaClone downloads the meta layer into a new root. The live lane's
-// package (cli/internal/meta) provides it; until it is wired, clone says so
-// and goes on with the repos.
-var MetaClone func(e *Env, root *config.Root) error
 
 // Clone is `pando clone <name> [dir]`.
 func Clone(e *Env, args []string) error {
@@ -72,12 +68,16 @@ func Clone(e *Env, args []string) error {
 	e.printf("Cloning %s %s from %s into %s\n", m.Kind, mono, serverURL, dir)
 
 	if m.Kind == config.KindMonorepo {
-		if MetaClone != nil {
-			if err := MetaClone(e, root); err != nil {
+		switch {
+		case strings.HasPrefix(serverURL, "file://"):
+			e.printf("meta layer: none on a file:// server\n")
+		default:
+			start := time.Now()
+			if err := meta.Clone(e.Ctx, dir); err != nil {
 				e.warnf("meta layer: %v", err)
+			} else {
+				e.printf("meta layer: downloaded in %.1fs; keep it live with pando meta sync\n", time.Since(start).Seconds())
 			}
-		} else {
-			e.printf("meta layer: not downloaded yet (the live lane's sync is not wired into this build)\n")
 		}
 	}
 

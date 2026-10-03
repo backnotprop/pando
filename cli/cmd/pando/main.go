@@ -12,7 +12,33 @@ import (
 	"syscall"
 
 	"pando/internal/app"
+	"pando/internal/meta"
 )
+
+// metaCommands are the live lane's (internal/meta): they take the arguments
+// after their name and return an exit code.
+var metaCommands = map[string]func([]string) int{
+	"history": meta.CmdHistory,
+	"restore": meta.CmdRestore,
+	"resolve": meta.CmdResolve,
+	"meta": func(args []string) int {
+		if len(args) > 0 && args[0] == "sync" {
+			return meta.CmdSync(args[1:], meta.Hooks{References: app.ReferencesHook})
+		}
+		if len(args) > 0 && args[0] == "status" {
+			return meta.CmdStatus(args[1:])
+		}
+		fmt.Fprintln(os.Stderr, "usage: pando meta sync [--once] | status")
+		return 2
+	},
+}
+
+var metaUsage = []string{
+	"meta sync [--once]                                        keep the meta layer live (the daemon)",
+	"history <path> [--limit n] [--json]                       every saved version of a meta layer file",
+	"restore <path> --to <version | HH:MM>                     write an old version back, as a new save",
+	"resolve [<path>...]                                       unfreeze a file after a conflict",
+}
 
 var commands = []app.Command{
 	{Name: "login", Usage: "login [--server <url>] [--name <name>] [--email <email>]   sign this machine in", Run: app.Login},
@@ -37,6 +63,9 @@ func usage() {
 	for _, c := range commands {
 		fmt.Fprintln(os.Stderr, "  pando "+c.Usage)
 	}
+	for _, u := range metaUsage {
+		fmt.Fprintln(os.Stderr, "  pando "+u)
+	}
 }
 
 func main() {
@@ -46,6 +75,9 @@ func main() {
 			os.Exit(2)
 		}
 		return
+	}
+	if run, ok := metaCommands[os.Args[1]]; ok {
+		os.Exit(run(os.Args[2:]))
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

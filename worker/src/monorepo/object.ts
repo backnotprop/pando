@@ -1376,6 +1376,11 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.feed.summary();
   }
 
+  /** Tests only (the crash and failure switches act only with FEED_TEST=1): the feed outbox. */
+  feedTestOutbox(set: { crash?: "before" | "after"; fail?: number } = {}) {
+    return this.feed.testOutbox(set);
+  }
+
   // ── CI (ci/store.ts; routes in ci/routes.ts) ─────────────────────────────
 
   ciConnect(c: { service: "buildkite"; organization: string; api_base: string | null; webhook_token: string | null }, by: Identity) {

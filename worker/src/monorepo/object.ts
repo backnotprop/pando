@@ -25,6 +25,7 @@ import type { RefCommand } from "./pktline";
 import { FeedOut } from "../feed/out";
 import type { FeedEvent, Key, NeedRow, NeedState, Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
+import { CiStore, type CiRef, type IngestResult } from "../ci/store";
 import type {
   BranchRecord,
   Checks,
@@ -144,11 +145,18 @@ export class MonorepoObject extends DurableObject<Env> {
   private refRunners = new Set<string>();
   /** The home's activity feed (feed/out.ts, C25): activity marking, fan-out, presence, summary ticks. */
   private feed: FeedOut;
+  /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
+  private ci: CiStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
+    this.ci = new CiStore(ctx, env, this.sql, {
+      info: () => this.info(),
+      publish: (e) => this.publish(e),
+      addStatus: (repo, sha, st, identity, stamp) => this.addStatus(repo, sha, st, identity, stamp),
+    });
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
     const m = this.info();
@@ -185,6 +193,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!scols.includes("app")) this.sql.exec("ALTER TABLE statuses ADD COLUMN app TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.feed.ensureSchema();
+    this.ci.ensureSchema();
   }
 
   private rows<T>(query: string, ...args: unknown[]): T[] {
@@ -1365,6 +1374,61 @@ export class MonorepoObject extends DurableObject<Env> {
 
   feedSummary(): Summary {
     return this.feed.summary();
+  }
+
+  // ── CI (ci/store.ts; routes in ci/routes.ts) ─────────────────────────────
+
+  ciConnect(c: { service: "buildkite"; organization: string; api_base: string | null; webhook_token: string | null }, by: Identity) {
+    return this.guard(() => this.ci.connect(c, by));
+  }
+
+  ciDisconnect(id: string, by: Identity): boolean {
+    return this.ci.disconnect(id, by);
+  }
+
+  ciWebhook(id: string, h: { event: string | null; token: string | null; signature: string | null }, body: string, nowMs: number): Promise<Outcome<IngestResult>> {
+    return this.guard(() => this.ci.webhook(id, h, body, nowMs));
+  }
+
+  ciIngestBuild(connection: string, build: unknown): Promise<Outcome<IngestResult>> {
+    return this.guard(() => this.ci.ingestBuild(connection, build));
+  }
+
+  ciIngestJob(build: string, job: unknown) {
+    const j = this.ci.ingestJob(build, job);
+    return j ? this.ci.jobView(j) : null;
+  }
+
+  ciOverview() {
+    return this.ci.overview();
+  }
+
+  ciBuilds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }) {
+    return this.guard(() => this.ci.builds(q));
+  }
+
+  ciBuild(id: string) {
+    return this.ci.build(id);
+  }
+
+  ciRef(build: string, job: string | null): CiRef | null {
+    return this.ci.ref(build, job);
+  }
+
+  ciPipeline(slug: string, connection: string | null) {
+    return this.guard(() => this.ci.pipeline(slug, connection));
+  }
+
+  ciSavePipeline(connection: string, slug: string, repo: string | null, p: { configuration: string | null; name: string | null; web_url: string | null; default_branch: string | null }): void {
+    this.ci.savePipeline(connection, slug, repo, p);
+  }
+
+  ciPermit(connection: string) {
+    return this.ci.permit(connection);
+  }
+
+  ciRateWait(connection: string, ms: number): void {
+    this.ci.rateWait(connection, ms);
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

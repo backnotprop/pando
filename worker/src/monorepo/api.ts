@@ -4,6 +4,7 @@ import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
 import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
+import { ciRoutes } from "../ci/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredKept } from "./checks";
@@ -38,6 +39,7 @@ type Stub = DurableObjectStub<MonorepoObject>;
 // stamp: set only for a request carrying a status token (ci/statustoken.ts).
 type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string; full: string; stamp?: StatusStamp };
 type C = Context<{ Bindings: Env; Variables: Vars }>;
+export type ApiVars = Vars;
 
 export const api = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -324,12 +326,14 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
       if (artifactsCode(err) !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
     }
   }
-  // The meta layer's large files in R2.
-  let more = true;
-  while (more) {
-    const listed = await c.env.BLOBS.list({ prefix: `meta/${m}/`, limit: 1000 });
-    if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
-    more = listed.truncated;
+  // The meta layer's large files in R2, and CI details cached there (ci/routes.ts).
+  for (const prefix of [`meta/${m}/`, `ci/${m}/`]) {
+    let more = true;
+    while (more) {
+      const listed = await c.env.BLOBS.list({ prefix, limit: 1000 });
+      if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
+      more = listed.truncated;
+    }
   }
   // The live meta layer: closes its sockets and clears its storage, so the name starts clean.
   if (c.get("info").kind === "monorepo") await c.env.META.get(c.env.META.idFromName(m)).destroy();
@@ -878,6 +882,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
   const r = await repoOf(c);
   return c.json(unwrap(await c.get("stub").redeliver(r.name, c.req.param("id"))), 202);
 });
+
+// ── CI (ci/routes.ts): the CI tab's reads and actions, and connections ──
+
+ciRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

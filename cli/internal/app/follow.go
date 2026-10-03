@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -35,7 +36,8 @@ import (
 const (
 	followSafety   = 5 * time.Minute  // the slow poll, with the stream up
 	followFilePoll = 15 * time.Second // a file:// server has no stream
-	followPing     = 30 * time.Second // keep the socket open; recheck which mains are here
+	followPing     = 30 * time.Second // keep the socket open
+	followLook     = 2 * time.Second  // how often worktrees.json is checked for changes (hello)
 	followSilence  = 90 * time.Second // nothing heard for this long: reconnect
 	followTopicMax = 10               // the server's limit per socket
 )
@@ -83,7 +85,8 @@ func followMains(e *Env, root *config.Root) int64 {
 	return 0
 }
 
-// moveMain refreshes a repo's read-only main here when it is not at head.
+// moveMain asks for a repo's read-only main here to move, unless it is at
+// head already or past it (an older frame arriving late).
 func moveMain(e *Env, root *config.Root, repo, head string) {
 	if head == "" {
 		return
@@ -93,10 +96,16 @@ func moveMain(e *Env, root *config.Root, repo, head string) {
 		if w.Repo != repo || w.Branch != "main" || !w.ReadOnly {
 			continue
 		}
-		if local, err := gitx.In(root.Abs(w.Path)).Run(e.Ctx, "rev-parse", "HEAD"); err == nil && local != head {
-			refreshMain(e, root, repo)
+		g := gitx.Cmd{Dir: root.Abs(w.Path), Env: []string{"GIT_NO_LAZY_FETCH=1"}}
+		local, err := g.Run(e.Ctx, "rev-parse", "HEAD")
+		if err != nil || local == head {
 			return
 		}
+		if _, err := g.Run(e.Ctx, "merge-base", "--is-ancestor", head, local); err == nil {
+			return
+		}
+		requestMainRefresh(e, root, repo)
+		return
 	}
 }
 
@@ -113,10 +122,33 @@ func mainsHere(root *config.Root) map[string]string {
 	return out
 }
 
+// workedHere is mainsHere narrowed to the repos this machine works in: it
+// has a branch worktree there too. Only those follow each merge; the other
+// mains move on the safety-net read of heads (and when a worktree is added
+// there, which changes this set and so resubscribes, with a fresh read).
+// The socket itself is held whenever there is any branch worktree here,
+// for presence (C25), with topics=main when no main here is followed.
+func workedHere(root *config.Root) map[string]string {
+	ws, _ := root.LoadWorktrees()
+	branches := map[string]bool{}
+	for _, w := range ws {
+		if w.Branch != "main" {
+			branches[w.Repo] = true
+		}
+	}
+	out := map[string]string{}
+	for name, path := range mainsHere(root) {
+		if branches[path] {
+			out[name] = path
+		}
+	}
+	return out
+}
+
 // eventsURL is the stream's WebSocket URL for these repos.
 func eventsURL(root *config.Root, names []string, since int64) string {
 	topics := "main"
-	if len(names) <= followTopicMax {
+	if len(names) > 0 && len(names) <= followTopicMax {
 		ts := make([]string, len(names))
 		for i, n := range names {
 			ts[i] = "main:" + n
@@ -185,11 +217,20 @@ func (f *follower) run(ctx context.Context, safety time.Duration) {
 		return
 	}
 	fails := 0
+	f.catchUp()
+	lastSafety := time.Now()
 	for ctx.Err() == nil {
-		names := sortedKeys(mainsHere(f.root))
+		names := sortedKeys(workedHere(f.root))
 		var wait time.Duration
-		if len(names) == 0 {
-			wait = followPing // nothing to follow yet; look again soon
+		if !hasBranchWorktree(f.root) {
+			// No branch worktree here: no socket (and no presence); the
+			// mains here move on the safety-net read alone. Look again
+			// soon, for a worktree being added.
+			if time.Since(lastSafety) >= safety {
+				f.catchUp()
+				lastSafety = time.Now()
+			}
+			wait = followLook
 		} else {
 			f.catchUp() // on every (re)connect
 			up, err := f.subscribe(ctx, names, safety)
@@ -272,6 +313,18 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 		}
 	}()
 
+	// Presence (C25): say which branch worktrees this machine has here, now
+	// and whenever they change. Presence lives with the socket, so every
+	// new socket says it again.
+	ids := branchWorktreeIDs(f.root)
+	if err := f.hello(ctx, conn, ids); err != nil {
+		return time.Since(started), err
+	}
+	wtFile := filepath.Join(config.LocalDir(f.root.Dir), "worktrees.json")
+	wtStamp := fileStamp(wtFile)
+	look := time.NewTicker(followLook)
+	defer look.Stop()
+
 	ping := time.NewTicker(followPing)
 	defer ping.Stop()
 	heard, lastRead := time.Now(), time.Now()
@@ -319,13 +372,87 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 				f.catchUp()
 				lastRead = time.Now()
 			}
-			// A main added or removed here: subscribe again for the new set.
-			if now := sortedKeys(mainsHere(f.root)); strings.Join(now, ",") != strings.Join(names, ",") {
-				conn.Close(websocket.StatusNormalClosure, "")
-				return time.Since(started), nil
+		case <-look.C:
+			// A worktree added or removed here (worktrees.json changed).
+			if st := fileStamp(wtFile); st != wtStamp {
+				wtStamp = st
+				// The last branch worktree went: close, so this machine
+				// stops counting as present here.
+				if !hasBranchWorktree(f.root) {
+					conn.Close(websocket.StatusNormalClosure, "")
+					return time.Since(started), nil
+				}
+				// The repos followed changed: subscribe again (the new
+				// socket says hello).
+				if now := sortedKeys(workedHere(f.root)); strings.Join(now, ",") != strings.Join(names, ",") {
+					conn.Close(websocket.StatusNormalClosure, "")
+					return time.Since(started), nil
+				}
+				if now := branchWorktreeIDs(f.root); strings.Join(now, ",") != strings.Join(ids, ",") {
+					ids = now
+					if err := f.hello(ctx, conn, ids); err != nil {
+						return time.Since(started), err
+					}
+				}
 			}
 		}
 	}
+}
+
+// hello is the follower's presence frame on the event socket (C25): this
+// machine and the ids of its branch worktrees in this monorepo. Each hello
+// replaces the one before for this socket. The server answers hello_ok or
+// error; handle ignores both.
+func (f *follower) hello(ctx context.Context, conn *websocket.Conn, ids []string) error {
+	b, err := json.Marshal(map[string]any{"type": "hello", "machine": f.e.Home.Machine, "worktrees": ids})
+	if err != nil {
+		return err
+	}
+	f.debugf("hello %d worktree(s)", len(ids))
+	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return conn.Write(wctx, websocket.MessageText, b)
+}
+
+var worktreeIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// branchWorktreeIDs is the ids (as sent to PutWorktree) of this machine's
+// branch worktrees here, read-only mains left out, sorted, at most 1,000.
+func branchWorktreeIDs(root *config.Root) []string {
+	ws, _ := root.LoadWorktrees()
+	ids := []string{}
+	for _, w := range ws {
+		if w.ReadOnly || w.Branch == "main" || !worktreeIDRe.MatchString(w.ID) {
+			continue
+		}
+		ids = append(ids, w.ID)
+	}
+	sort.Strings(ids)
+	if len(ids) > 1000 {
+		ids = ids[:1000]
+	}
+	return ids
+}
+
+// hasBranchWorktree reports whether this machine has a branch worktree in
+// this monorepo: the follower holds the event socket only then (C25).
+func hasBranchWorktree(root *config.Root) bool {
+	ws, _ := root.LoadWorktrees()
+	for _, w := range ws {
+		if !w.ReadOnly && w.Branch != "main" {
+			return true
+		}
+	}
+	return false
+}
+
+// fileStamp changes when the file is written.
+func fileStamp(p string) string {
+	st, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprint(st.ModTime().UnixNano(), st.Size())
 }
 
 func (f *follower) handle(fr frame, want map[string]bool) {
@@ -344,8 +471,10 @@ func (f *follower) handle(fr frame, want map[string]bool) {
 		if !want[name] {
 			return
 		}
-		if path, ok := mainsHere(f.root)[name]; ok {
-			moveMain(f.e, f.root, path, fr.Row.DefaultHead)
+		if path, ok := workedHere(f.root)[name]; ok {
+			// In the background: frames keep coming while a refresh runs,
+			// and coalesce (coalesce.go).
+			go moveMain(f.e, f.root, path, fr.Row.DefaultHead)
 		}
 	case "caught_up":
 		seq := fr.Seq

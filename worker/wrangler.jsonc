@@ -68,11 +68,19 @@
       }
     ]
   },
+  // Accounts (C8): users, credentials, monorepos, members, invites. The
+  // primary is in ENAM; the owner turns on read replication in the dashboard
+  // (D1 > pando-accounts-dev > Settings > Enable Read Replication).
+  // Schema: worker/migrations; apply with
+  //   npx wrangler d1 migrations apply pando-accounts-dev --local | --remote
+  "d1_databases": [
+    { "binding": "ACCOUNTS_DB", "database_name": "pando-accounts-dev", "database_id": "94185f0e-92b8-427f-ab29-c080cd79ad10", "migrations_dir": "migrations" }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "MONOREPO", "class_name": "MonorepoObject" },
       { "name": "META", "class_name": "MetaLayerObject" },
-      // Users, credentials and membership: one instance for the whole Worker.
+      // Where accounts lived before D1 (C8); kept for the one-time copy, goes after launch.
       { "name": "ACCOUNTS", "class_name": "AccountsObject" },
       // One per person: the home's activity feed (C25).
       { "name": "FEED", "class_name": "FeedObject" }

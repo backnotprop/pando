@@ -1,6 +1,7 @@
 // End to end: real git and real Artifacts through the Pando Worker.
 //
-//   PANDO_URL=http://localhost:8797 node test/e2e.mjs      (wrangler dev)
+//   PANDO_URL=http://localhost:8797 node test/e2e.mjs      (wrangler dev; first
+//   `npm run db:local` once, for the accounts tables in the local D1)
 //   PANDO_URL=https://pando-dev.<subdomain>.workers.dev node test/e2e.mjs
 //
 // PANDO_BOOTSTRAP comes from the environment, or from worker/.dev.vars. No

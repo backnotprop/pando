@@ -1,5 +1,6 @@
 // Where a request's time goes: waiting on Artifacts, waiting for a repo's
-// write gate, waiting on Durable Objects, and the Worker's own time. One
+// write gate, waiting on Durable Objects, on D1 (accounts), and the Worker's
+// own time. One
 // structured log line per request (msg "pando.timing"), which Workers
 // observability indexes field by field. No storage.
 //
@@ -10,8 +11,8 @@
 //
 // Fields: kind (door, api, queue, object), route, method, monorepo, repo,
 // status, total_ms, artifacts_ms, artifacts_sum_ms, artifacts_calls,
-// gate_ms, objects_ms, worker_ms (total minus Artifacts, gate and objects,
-// each as wall time), slowest {op, repo, ms}, slow_calls (each Artifacts call
+// gate_ms, objects_ms, d1_ms, worker_ms (total minus Artifacts, gate,
+// objects and D1, each as wall time), slowest {op, repo, ms}, slow_calls (each Artifacts call
 // over SLOW_MS, at most 8), plus what the caller adds (bytes, refs, colo).
 // Never a token, a credential or a body.
 
@@ -20,7 +21,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 /** An Artifacts call this long is listed in slow_calls. */
 export const SLOW_MS = 1000;
 
-type Lane = "artifacts" | "gate" | "objects";
+type Lane = "artifacts" | "gate" | "objects" | "d1";
 
 export interface Timing {
   kind: string;
@@ -36,7 +37,7 @@ export interface Timing {
 const als = new AsyncLocalStorage<Timing>();
 
 export function startTiming(kind: string, fields: Record<string, unknown> = {}): Timing {
-  return { kind, fields, start: Date.now(), spans: { artifacts: [], gate: [], objects: [] }, calls: 0, slowest: null, slow: [], done: false };
+  return { kind, fields, start: Date.now(), spans: { artifacts: [], gate: [], objects: [], d1: [] }, calls: 0, slowest: null, slow: [], done: false };
 }
 
 export function runTimed<T>(t: Timing, fn: () => T): T {
@@ -90,6 +91,17 @@ export async function timeGate<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Time one D1 query or batch (accounts). */
+export async function timeD1<T>(fn: () => Promise<T>): Promise<T> {
+  const t = als.getStore();
+  const s = Date.now();
+  try {
+    return await fn();
+  } finally {
+    record(t, "d1", s, Date.now());
+  }
+}
+
 /** The gate's own wait, when the object reports it (the rest of the call is object time). */
 export function addGate(ms: number): void {
   const t = als.getStore();
@@ -121,8 +133,9 @@ export function finishTiming(t: Timing, fields: Record<string, unknown> = {}): v
   const gate = wall(t.spans.gate);
   // Object time is the part of object calls not spent waiting on Artifacts or
   // the gate (an object call can contain both: a token mint, a gate wait).
-  const all = wall([...t.spans.artifacts, ...t.spans.gate, ...t.spans.objects]);
-  const objects = Math.max(0, all - wall([...t.spans.artifacts, ...t.spans.gate]));
+  const outer = wall([...t.spans.artifacts, ...t.spans.gate, ...t.spans.objects]);
+  const objects = Math.max(0, outer - wall([...t.spans.artifacts, ...t.spans.gate]));
+  const all = wall([...t.spans.artifacts, ...t.spans.gate, ...t.spans.objects, ...t.spans.d1]);
   console.log({
     msg: "pando.timing",
     kind: t.kind,
@@ -134,6 +147,7 @@ export function finishTiming(t: Timing, fields: Record<string, unknown> = {}): v
     artifacts_calls: t.calls,
     gate_ms: gate,
     objects_ms: objects,
+    d1_ms: t.spans.d1.length ? wall(t.spans.d1) : undefined,
     worker_ms: Math.max(0, total - all),
     slowest: t.slowest,
     slow_calls: t.slow.length ? t.slow : undefined,

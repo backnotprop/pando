@@ -2,7 +2,7 @@
 // session cookie rides along), decode the body with its Schema from
 // @pando/contract, and turn a failure into the contract's tagged errors, which
 // TanStack Query hands to the screens. No Effect runtime: Result only.
-import { type ActivityFrame, type ApiFailure, BadResponse, decodeActivityFrame, decodeResponse, ErrorBody, failureOf, NotFound, Unauthorized } from "@pando/contract";
+import { type ActivityFrame, type ApiFailure, type MonorepoFeedFrame, BadResponse, decodeActivityFrame, decodeMonorepoFeedFrame, decodeResponse, ErrorBody, failureOf, NotFound, Unauthorized } from "@pando/contract";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
@@ -24,12 +24,18 @@ export const isOutdated = (error: ApiFailure | Error): boolean => error instance
 
 const decodeError = decodeResponse(ErrorBody);
 
+async function failure(res: Response, path: string): Promise<ApiFailure> {
+  const body = decodeError(await res.json().catch(() => null));
+
+  return failureOf(res.status, path, Result.isSuccess(body) ? body.success : null);
+}
+
 async function send(path: string, init: RequestInit): Promise<Response> {
   const res = await fetch(path, { credentials: "same-origin", ...init });
 
   if (res.ok) return res;
-  const body = decodeError(await res.json().catch(() => null));
-  throw failureOf(res.status, path, Result.isSuccess(body) ? body.success : null);
+
+  throw await failure(res, path);
 }
 
 async function decoded<A, I>(schema: Schema.Codec<A, I>, res: Response, path: string): Promise<A> {
@@ -56,6 +62,28 @@ export async function post<A, I>(schema: Schema.Codec<A, I>, path: string, body:
   return decoded(schema, res, path);
 }
 
+/** POST JSON where some refusals are answers, not failures (a merge's 409 and 412): either decoded body. */
+export async function postOrRefused<A, I, B, J>(
+  ok: Schema.Codec<A, I>,
+  refused: Schema.Codec<B, J>,
+  path: string,
+  body: Record<string, string>,
+  refusals: readonly number[],
+): Promise<{ ok: A; refused: null } | { ok: null; refused: B }> {
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (refusals.includes(res.status)) return { ok: null, refused: await decoded(refused, res, path) };
+
+  if (!res.ok) throw await failure(res, path);
+
+  return { ok: await decoded(ok, res, path), refused: null };
+}
+
 /** A file's bytes as text, or null when they are binary (a NUL in the first 8,000 bytes, git's test). */
 export interface FileText {
   text: string | null;
@@ -69,3 +97,6 @@ export async function getText(path: string): Promise<FileText> {
 
 /** A frame from the person's socket, or null for the text `pong`, a frame this build does not know, or anything malformed. */
 export const decodeFrame = (data: string): ActivityFrame | null => Option.getOrNull(decodeActivityFrame(data));
+
+/** A frame from a monorepo's own socket, or null for `pong` and anything this build does not read. */
+export const decodeMonorepoFrame = (data: string): MonorepoFeedFrame | null => Option.getOrNull(decodeMonorepoFeedFrame(data));

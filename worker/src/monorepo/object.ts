@@ -1093,6 +1093,28 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Main's head as recorded (null when unknown or the repo is empty). */
+  /** A branch's head from the stored rows (main from the repo's record), or null when unknown here (FILES.md). */
+  refHead(repo: string, ref: string): string | null {
+    const r = this.row<{ default_branch: string; default_head: string | null }>("SELECT default_branch, default_head FROM repos WHERE name = ?", repo);
+    if (!r) return null;
+    if (ref === r.default_branch) return r.default_head;
+    return this.row<{ head: string | null }>("SELECT head FROM branches WHERE repo = ? AND name = ? AND deleted_at IS NULL", repo, ref)?.head ?? null;
+  }
+
+  /** For merge commits: the branch each merged and its title (the file pages' history). */
+  mergedBranches(repo: string, shas: string[]): Record<string, { branch: string; title: string | null }> {
+    const out: Record<string, { branch: string; title: string | null }> = {};
+    for (let i = 0; i < shas.length; i += 100) {
+      const chunk = shas.slice(i, i + 100);
+      for (const r of this.rows<{ merge_commit: string; branch: string; title: string | null }>(
+        `SELECT m.merge_commit, m.branch, b.title FROM merges m LEFT JOIN branches b ON b.repo = m.repo AND b.name = m.branch
+         WHERE m.repo = ? AND m.merge_commit IN (${chunk.map(() => "?").join(",")})`,
+        repo, ...chunk,
+      )) out[r.merge_commit] = { branch: r.branch, title: r.title };
+    }
+    return out;
+  }
+
   currentMain(repo: string): string | null {
     return this.row<{ default_head: string | null }>("SELECT default_head FROM repos WHERE name = ?", repo)?.default_head ?? null;
   }

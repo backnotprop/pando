@@ -14,6 +14,10 @@ import { finishTiming, note, runTimed, startTiming } from "./timing";
 import { metaRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath } from "./monorepo/door";
+import { handleRaw, RAW_RE } from "./monorepo/raw";
+import { handleHistoryBatch, type HistoryMessage } from "./monorepo/files";
+import { objectsClient } from "./objects";
+import { monorepoStub } from "./monorepo/session";
 import { signin } from "./accounts/signin";
 import { handleFactsBatch, type FactsMessage } from "./monorepo/facts";
 import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./monorepo/hooks";
@@ -22,6 +26,7 @@ import { handleFeed, isFeedPath } from "./feed/routes";
 import type { FeedMessage } from "./feed/shape";
 
 export { MonorepoObject } from "./monorepo/object";
+export { Objects } from "./objects";
 export { AccountsObject } from "./accounts/object";
 export { MetaLayerObject } from "./live/object";
 export { FeedObject } from "./feed/object";
@@ -62,7 +67,13 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
 
 export default {
   /** The queues: branch facts (monorepo/facts.ts), hook deliveries and their dead letters (monorepo/hooks.ts). */
-  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+  async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (batch.queue === "pando-history") {
+      return handleHistoryBatch(batch as MessageBatch<HistoryMessage>, env, ctx, {
+        objects: objectsClient,
+        mergesFor: (id, repo) => (shas) => monorepoStub(env, id).mergedBranches(repo, shas),
+      });
+    }
     if (batch.queue === "pando-hooks") return handleDeliveries(batch as MessageBatch<DeliveryMessage>, env);
     if (batch.queue === "pando-hooks-dlq") return handleDeadDeliveries(batch as MessageBatch<DeliveryMessage>, env);
     if (batch.queue === "pando-feed") return handleFeedBatch(batch as MessageBatch<FeedMessage>, env);
@@ -74,6 +85,11 @@ export default {
     if (url.pathname === "/healthz") return new Response("ok\n");
     if (url.pathname === "/v1/openapi.yaml") return new Response(contract, { headers: { "content-type": "application/yaml; charset=utf-8" } });
     if (isDoorPath(url.pathname)) return handleDoor(request, env, ctx);
+    if ((request.method === "GET" || request.method === "HEAD") && RAW_RE.test(url.pathname)) return handleRaw(request, env, ctx);
+    // A guard for FILES.md: this entrypoint is never cached, even when an answer says it may be.
+    if (url.pathname === "/v1/_probe/uncached") {
+      return new Response(JSON.stringify({ id: crypto.randomUUID() }), { headers: { "content-type": "application/json", "cache-control": "public, max-age=3600" } });
+    }
     if (url.pathname === "/v1/users" || url.pathname === "/v1/logout" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
     if (META_RE.test(url.pathname)) return meta(request, env);
     if (isFeedPath(url.pathname)) return handleFeed(request, env);

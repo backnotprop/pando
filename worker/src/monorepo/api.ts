@@ -11,6 +11,8 @@ import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
 import type { BranchList } from "./views";
 import { computeFacts, INLINE_MAX, SWEEP_PARALLEL } from "./facts";
+import * as files from "./files";
+import { objectsClient } from "../objects";
 import { EVENT_STREAM, parseTopics } from "./stream";
 import {
   artifactsRepoName,
@@ -745,6 +747,76 @@ async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
 }
 
 // ── Files ─────────────────────────────────────────────────────────────────
+
+// ── A project's files at any ref (FILES.md): folders, last commits, history ──
+
+function intParam(v: string | undefined, dflt: number, max: number, name: string): number {
+  if (v === undefined || v === "") return dflt;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > max) bad(`${name} is 1 to ${max}`);
+  return n;
+}
+
+function walkerOf(c: C, r: RepoRecord): { w: files.Walker; obj: ReturnType<typeof objectsClient> } {
+  const obj = objectsClient(c.executionCtx);
+  return { w: new files.Walker(obj, r, files.requestBudget(c.env)), obj };
+}
+
+function refOf(c: C, r: RepoRecord, w: files.Walker) {
+  const stub = c.get("stub");
+  return files.resolveCommit(c.env, w, (ref) => stub.refHead(r.name, ref), c.req.query("ref"));
+}
+
+api.get("/v1/monorepos/:o/:m/repos/:r/tree", async (c) => {
+  const r = await repoOf(c);
+  const { w } = walkerOf(c, r);
+  const { ref, commit } = await refOf(c, r, w);
+  const path = files.cleanPath(c.req.query("path"));
+  const limit = intParam(c.req.query("limit"), files.TREE_PAGE, files.TREE_PAGE, "limit");
+  const out = await files.listFolder(w, commit, path, limit, c.req.query("cursor") ?? null);
+  return c.json({ ref, commit: commit.hash, path, ...out });
+});
+
+api.get("/v1/monorepos/:o/:m/repos/:r/tree/last-commits", async (c) => {
+  const r = await repoOf(c);
+  const { w, obj } = walkerOf(c, r);
+  const { ref, commit } = await refOf(c, r, w);
+  const path = files.cleanPath(c.req.query("path"));
+  const stub = c.get("stub");
+  const out = await files.lastCommits(c.env, w, obj, commit, path, (shas) => stub.mergedBranches(r.name, shas));
+  const names = c.req.query("names")?.split(",").filter(Boolean).slice(0, files.TREE_PAGE);
+  const entries = names ? Object.fromEntries(names.filter((n) => n in out.entries).map((n) => [n, out.entries[n]])) : out.entries;
+  return c.json({ ref, commit: commit.hash, path, complete: out.complete, entries, older: out.older, retry_after_ms: out.complete ? null : 2000 });
+});
+
+api.get("/v1/monorepos/:o/:m/repos/:r/history", async (c) => {
+  const r = await repoOf(c);
+  const { w, obj } = walkerOf(c, r);
+  const path = files.cleanPath(c.req.query("path"));
+  const limit = intParam(c.req.query("limit"), files.HISTORY_PAGE, 100, "limit");
+  const cursor = c.req.query("cursor");
+  let start: string;
+  let walked = 0;
+  let ref: string | null = null;
+  if (cursor) {
+    const m = /^([0-9a-f]{40})\.(\d+)$/.exec(cursor);
+    if (!m) bad("cursor: pass back a `next` from an earlier page");
+    [start, walked] = [m[1], Number(m[2])];
+  } else {
+    const at = await refOf(c, r, w);
+    [start, ref] = [at.commit.hash, at.ref];
+  }
+  const key = files.answerKey("hist", start, await files.sha1Hex(`${limit}\n${walked}\n${path}`));
+  type Page = { commits: files.CommitLine[]; next: string | null; capped: boolean };
+  const stored = await obj.json<Page>(`/answer/${r.artifacts_name}/${key}`);
+  if (stored) return c.json({ ref, path, ...stored, complete_page: true });
+  const stub = c.get("stub");
+  const p = await files.walkHistory(w, start, path, limit, walked, (shas) => stub.mergedBranches(r.name, shas));
+  const page: Page = { commits: p.changes, next: p.next ? `${p.next}.${p.walked}` : null, capped: p.capped };
+  // A page cut short by the budget is not kept: the next ask walks further.
+  if (!p.budgetCut) await files.storeAnswer(c.env, r.artifacts_name, key, page);
+  return c.json({ ref, path, ...page, complete_page: !p.budgetCut });
+});
 
 api.get("/v1/monorepos/:o/:m/repos/:r/files/*", async (c) => {
   const r = await repoOf(c);

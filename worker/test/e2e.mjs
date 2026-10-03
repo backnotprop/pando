@@ -363,7 +363,14 @@ try {
   }
 
   // ── A monorepo with a project repo ──
+  // Asking about a name before it exists must not make it look missing afterwards.
+  for (let i = 0; i < 3; i++) await call("GET", `/v1/monorepos/${MM}`, A);
+  r = await call("GET", `/v1/monorepos/${MM}`, A);
+  check("a monorepo that does not exist yet is 404", r.status === 404);
+  git(["ls-remote", `${URL_}/${MM}/meta.git`], work, A);
   r = await call("POST", "/v1/monorepos", A, { name: MM });
+  const now1 = await call("GET", `/v1/monorepos/${MM}`, A);
+  check("right after creating it, the same name answers 200 (no cached 404)", now1.status === 200, `${now1.status}`);
   check("ana makes a monorepo (kind monorepo)", r.status === 201 && r.json?.repos?.length === 0, `${r.status}`);
   made.push(`${MM}--meta`);
   r = await call("POST", `/v1/monorepos/${MM}/repos`, A, { path: "projects/web" });
@@ -413,6 +420,21 @@ try {
       const r = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, secret);
       const after = await call("GET", `/v1/monorepos/${m}`, secret);
       check(`DELETE /v1/monorepos/${m} removes it`, r.status === 204 && after.status === 404, `${r.status}, then ${after.status}`);
+      if (r.status === 204) {
+        // The same name can be made again, and starts empty.
+        const kind = m === M ? "repo" : "monorepo";
+        const again = await call("POST", "/v1/monorepos", secret, { name: m, kind });
+        const repos = await call("GET", `/v1/monorepos/${m}/repos`, secret);
+        const fresh = kind === "repo" ? repos.json?.repos?.length === 1 : repos.json?.repos?.length === 0;
+        let branchesEmpty = true;
+        if (kind === "repo") {
+          const b = await call("GET", `/v1/monorepos/${m}/repos/${m}/branches?state=all`, secret);
+          branchesEmpty = b.status === 200 && b.json?.branches?.length === 0 && b.json?.default_head === null;
+        }
+        check(`${m} can be made again after the delete, and starts empty`, again.status === 201 && fresh && branchesEmpty, `${again.status} ${scrub(JSON.stringify(again.json)).slice(0, 120)}`);
+        const r2 = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, secret);
+        check(`and deleted again`, r2.status === 204, `${r2.status}`);
+      }
     }
     for (const name of made) {
       const r = spawnSync("npx", ["wrangler", "artifacts", "repos", "delete", name, "--namespace", "pando-dev", "--force"], {

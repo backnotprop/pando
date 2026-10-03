@@ -3,7 +3,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { HttpError, toErrorResponse } from "../http";
-import { artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
+import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
@@ -94,15 +94,24 @@ async function repoOf(c: C): Promise<RepoRecord> {
   return r;
 }
 
-/** Make an empty Artifacts repo; drop the token it comes with. */
+/**
+ * Make an empty Artifacts repo; drop the token it comes with. Artifacts
+ * deletes repos in the background, so a name deleted moments ago (a monorepo
+ * deleted and made again) can still read as taken: wait for it, up to about
+ * 15 s. A repo that stays (a retry of a half-made monorepo) is reused.
+ */
 async function createArtifactsRepo(env: Env, name: string, description: string): Promise<string> {
   let created: ArtifactsCreateRepoResult | null = null;
-  try {
-    created = await env.ARTIFACTS.create(name, { setDefaultBranch: DEFAULT_BRANCH, description });
-  } catch (err) {
-    const code = (err as { code?: string })?.code;
-    if (code === "INVALID_REPO_NAME") throw new HttpError(400, "bad_name", `Artifacts refused the repo name ${name}`);
-    if (code !== "ALREADY_EXISTS") throw artifactsError(err, `creating ${name}`);
+  for (const wait of [500, 1000, 2000, 4000, 8000, 0]) {
+    try {
+      created = await env.ARTIFACTS.create(name, { setDefaultBranch: DEFAULT_BRANCH, description });
+      break;
+    } catch (err) {
+      const code = artifactsCode(err);
+      if (code === "INVALID_REPO_NAME") throw new HttpError(400, "bad_name", `Artifacts refused the repo name ${name}`);
+      if (code !== "ALREADY_EXISTS") throw artifactsError(err, `creating ${name}`);
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+    }
   }
   return withRepo(env, name, async (repo) => {
     if (created) await repo.revokeToken(created.token).catch(() => false);
@@ -233,7 +242,7 @@ api.delete("/v1/monorepos/:m", async (c) => {
     try {
       await c.env.ARTIFACTS.delete(name);
     } catch (err) {
-      if ((err as { code?: string })?.code !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
+      if (artifactsCode(err) !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
     }
   }
   // The meta layer's large files in R2.

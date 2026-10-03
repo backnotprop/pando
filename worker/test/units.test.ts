@@ -1,6 +1,8 @@
 // Unit tests for the pure parts. The git paths themselves are tested end to
 // end by test/e2e.mjs with real git and real Artifacts.
 import { describe, expect, it } from "vitest";
+import { cacheable } from "../src/accounts/auth";
+import type { Auth } from "../src/accounts/object";
 import { combine } from "../src/monorepo/checks";
 import { compareWith, type CommitInfo } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
@@ -165,5 +167,29 @@ describe("names", () => {
     expect(validBranchName("a..b")).toBe(false);
     expect(validBranchName("x.lock")).toBe(false);
     expect(validBranchName("has space")).toBe(false);
+  });
+});
+
+describe("the auth cache keeps successes only", () => {
+  const user = { login: "ana", name: null, email: null, created_at: "" };
+  const credential = { id: "c", name: "m", kind: "machine" as const, created_at: "", last_used_at: null };
+  const mono = { name: "acme", kind: "monorepo" as const, created_at: "" };
+  const auth = (over: Partial<Auth>): Auth => ({ user, credential, role: "member", monorepo: mono, ...over });
+
+  it("caches a member of an existing monorepo", () => {
+    expect(cacheable(auth({}), "acme")).toBe(true);
+  });
+  it("caches a known credential when no monorepo is asked", () => {
+    expect(cacheable(auth({ role: null, monorepo: null }), null)).toBe(true);
+  });
+  it("never caches an unknown credential", () => {
+    expect(cacheable(null, "acme")).toBe(false);
+    expect(cacheable(null, null)).toBe(false);
+  });
+  it("never caches a monorepo that does not exist yet", () => {
+    expect(cacheable(auth({ monorepo: null, role: null }), "acme")).toBe(false);
+  });
+  it("never caches a caller who is not a member yet", () => {
+    expect(cacheable(auth({ role: null }), "acme")).toBe(false);
   });
 });

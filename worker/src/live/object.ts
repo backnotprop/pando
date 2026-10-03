@@ -12,6 +12,7 @@ import type { MonorepoObject } from "../monorepo/object";
 import type { StreamEvent } from "../monorepo/types";
 import { EVENT_STREAM } from "../monorepo/stream";
 import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
+import { addGate, timed } from "../timing";
 
 // MONOREPO: the monorepo object, whose event stream gets meta.saved and
 // machine.connected / machine.disconnected (absent in the live lane's test Worker).
@@ -764,7 +765,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const monorepo = this.kv("monorepo");
     if (!monorepo || !this.env.MONOREPO) return fn(); // the live lane's test Worker has no gate
     const stub = this.env.MONOREPO.getByName(monorepo);
+    const g0 = Date.now();
     const slot = await stub.acquireWrite(key);
+    addGate(slot.ok ? slot.value.waited_ms : Date.now() - g0);
     if (!slot.ok) throw new Error((slot as { message?: string }).message ?? "the repo is busy");
     const lease = slot.value.lease;
     const renew = setInterval(() => {
@@ -1026,7 +1029,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       bytes += r.size ?? 0;
     }
     try {
-      await this.commitRows(writer, rows, this.kv("init_commit") === "1");
+      await timed(
+        "object",
+        { route: "meta.commit", monorepo: this.kv("monorepo"), repo: "meta", files: rows.length },
+        () => this.commitRows(writer, rows, this.kv("init_commit") === "1"),
+      );
     } catch (e) {
       this.setKv("commit_error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
       const retry = Math.min(int(this.kv("retry_ms"), RETRY_MIN_MS) * (this.kv("retry_ms") ? 2 : 1), RETRY_MAX_MS);

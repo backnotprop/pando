@@ -5,6 +5,7 @@
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { isBusy } from "./gate";
+import { addArtifacts, currentTiming, timeArtifacts, timed, timedRepo, timedStub } from "../timing";
 import { parseAdvertisement, parseReport, updateRefsRequest, type RefCommand } from "./pktline";
 
 export interface ArtifactsRef {
@@ -50,10 +51,15 @@ export async function repoTokenEntry(
   if (!fresh && hit && hit.expiresAt - Date.now() > TOKEN_REUSE_MS) return hit;
   let entry: { token: string; expiresAt: number };
   if (source === "local") {
-    const t = await withRepo(env, name, (repo) => repo.createToken(scope, TOKEN_TTL_SECONDS));
+    const mint = () => withRepo(env, name, (repo) => repo.createToken(scope, TOKEN_TTL_SECONDS));
+    // Inside the monorepo object there is no request: a mint gets its own line.
+    const t = currentTiming() ? await mint() : await timed("object", { route: "token.mint", repo: name, scope }, mint);
     entry = { token: t.plaintext, expiresAt: Date.parse(t.expiresAt) || Date.now() + TOKEN_TTL_SECONDS * 1000 };
   } else {
-    entry = await env.MONOREPO.getByName(monorepoOf(name)).artifactsToken(name, scope, generation, fresh);
+    const got = await timedStub(env.MONOREPO.getByName(monorepoOf(name))).artifactsToken(name, scope, generation, fresh);
+    // A mint inside the object is Artifacts time on this request's line.
+    if (got.mint_ms) addArtifacts("createToken (in the object)", name, Date.now() - got.mint_ms, Date.now());
+    entry = { token: got.token, expiresAt: got.expiresAt };
   }
   tokenCache.set(key, entry);
   return entry;
@@ -72,12 +78,13 @@ export async function deliveryReadToken(env: Env, name: string): Promise<{ token
 export async function withRepo<T>(env: Env, name: string, fn: (repo: ArtifactsRepo) => Promise<T>): Promise<T> {
   let repo: ArtifactsRepo;
   try {
-    repo = await env.ARTIFACTS.get(name);
+    repo = await timeArtifacts("get", name, () => env.ARTIFACTS.get(name));
   } catch (err) {
     throw artifactsError(err, `Artifacts repo ${name}`);
   }
   try {
-    return await fn(repo);
+    // Every call on the handle is timed for the request's pando.timing line.
+    return await fn(timedRepo(repo, name));
   } finally {
     repo[Symbol.dispose]();
   }
@@ -118,11 +125,14 @@ export async function gitRequest(
   init: RequestInit & { headers?: Record<string, string> },
   source: TokenSource = "object",
 ): Promise<Response> {
-  const send = async (fresh: boolean) =>
-    fetch(`${repo.remote}${path}`, {
-      ...init,
-      headers: { ...init.headers, authorization: `Bearer ${await repoToken(env, repo.artifacts_name, scope, repo.created_at, source, fresh)}` },
-    });
+  const op = `http ${init.method ?? "GET"} ${path.split("?")[0].replace(/^\//, "")}`;
+  const send = async (fresh: boolean) => {
+    const token = await repoToken(env, repo.artifacts_name, scope, repo.created_at, source, fresh);
+    // Until the response headers; a body read after is timed by its reader.
+    return timeArtifacts(op, repo.artifacts_name, () =>
+      fetch(`${repo.remote}${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }),
+    );
+  };
   const res = await send(false);
   // A cached token Artifacts no longer accepts: mint a new one and retry once,
   // when the request body can be sent again (not a stream).
@@ -137,7 +147,8 @@ export async function gitRequest(
 export async function listRefs(env: Env, repo: ArtifactsRef, source: TokenSource = "object"): Promise<Map<string, string>> {
   const res = await gitRequest(env, repo, "/info/refs?service=git-upload-pack", "read", { method: "GET" }, source);
   if (!res.ok) throw new HttpError(502, "artifacts", `Artifacts answered ${res.status} listing refs`);
-  return parseAdvertisement(new Uint8Array(await res.arrayBuffer()));
+  const bytes = await timeArtifacts("http GET info/refs (body)", repo.artifacts_name, () => res.arrayBuffer());
+  return parseAdvertisement(new Uint8Array(bytes));
 }
 
 export function branchesOf(refs: Map<string, string>): Map<string, string> {
@@ -166,7 +177,10 @@ export async function updateRefs(env: Env, repo: ArtifactsRef, commands: RefComm
     source,
   );
   if (!res.ok) throw new HttpError(502, "artifacts", `Artifacts answered ${res.status} to a ref update`);
-  const report = parseReport(new Uint8Array(await res.arrayBuffer()), new Set(caps));
+  const report = parseReport(
+    new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => res.arrayBuffer())),
+    new Set(caps),
+  );
   if (report.error) {
     const busy = isBusy(report.error);
     throw new HttpError(busy ? 503 : 502, busy ? "repo_busy" : "artifacts", `Artifacts refused the write: ${report.error}`);

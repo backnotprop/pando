@@ -216,7 +216,8 @@ try {
   if (HOOKS) {
     const got = await waitFor(() => received.find((x) => x.event === "push" && x.payload?.branch === B1));
     check("the push hook arrives, signed", !!got && got.valid, got ? `valid=${got.valid}` : "nothing arrived");
-    const opened = received.find((x) => x.event === "branch.opened" && x.payload?.branch === B1);
+    // Deliveries are unordered (a queue): branch.opened may come after push.
+    const opened = await waitFor(() => received.find((x) => x.event === "branch.opened" && x.payload?.branch === B1));
     check("branch.opened arrives too", !!opened);
     const p = got?.payload ?? {};
     check(

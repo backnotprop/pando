@@ -3,6 +3,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { agentHeader, HttpError, toErrorResponse } from "../http";
+import { finishTiming, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredKept } from "./checks";
 import { toPatch, treeDiff } from "./diff";
@@ -35,6 +36,24 @@ type C = Context<{ Bindings: Env; Variables: Vars }>;
 export const api = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 api.onError((err) => toErrorResponse(err));
+
+// One pando.timing line per request (timing.ts): where its time went.
+api.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  const m = path.match(/^\/v1\/monorepos\/([^/]+)(?:\/repos\/([^/]+))?/);
+  const t = startTiming("api", {
+    method: c.req.method,
+    path,
+    monorepo: m?.[1] ?? null,
+    repo: m?.[2] ?? null,
+    colo: (c.req.raw as Request & { cf?: { colo?: string } }).cf?.colo,
+  });
+  try {
+    await runTimed(t, () => next());
+  } finally {
+    finishTiming(t, { status: c.res?.status });
+  }
+});
 api.notFound(() => toErrorResponse(new HttpError(404, "not_found", "no such route")));
 
 function unwrap<T>(o: Outcome<T>): T {
@@ -107,7 +126,7 @@ async function createArtifactsRepo(env: Env, name: string, description: string):
   let created: ArtifactsCreateRepoResult | null = null;
   for (const wait of [500, 1000, 2000, 4000, 8000, 0]) {
     try {
-      created = await env.ARTIFACTS.create(name, { setDefaultBranch: DEFAULT_BRANCH, description });
+      created = await timedArtifacts(env.ARTIFACTS).create(name, { setDefaultBranch: DEFAULT_BRANCH, description });
       break;
     } catch (err) {
       const code = artifactsCode(err);
@@ -237,13 +256,13 @@ api.delete("/v1/monorepos/:m", async (c) => {
   const names = new Set(await stub.artifactsRepos());
   let cursor: string | undefined;
   do {
-    const page = await c.env.ARTIFACTS.list({ limit: 200, cursor });
+    const page = await timedArtifacts(c.env.ARTIFACTS).list({ limit: 200, cursor });
     for (const r of page.repos) if (r.name.startsWith(`${m}--`)) names.add(r.name);
     cursor = page.repos.length ? page.cursor : undefined;
   } while (cursor);
   for (const name of names) {
     try {
-      await c.env.ARTIFACTS.delete(name);
+      await timedArtifacts(c.env.ARTIFACTS).delete(name);
     } catch (err) {
       if (artifactsCode(err) !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
     }
@@ -465,7 +484,8 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
   await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
-  const view = (await branchViews(c, r, [b.name], "all", { inline: 1, graceMs: 0 })).branches[0];
+  // Its facts come from the queue (a branch.updated event); the answer says stale until then.
+  const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
   return c.json(view, 201);
 });
 
@@ -497,7 +517,9 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
   const r = await repoOf(c);
   const method = c.req.method;
   if (rest === "" && method === "GET") {
-    const v = (await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0];
+    // Stored facts at once; computed here only when stale for over 30 s, or with ?fresh=1.
+    const fresh = c.req.query("fresh") === "1";
+    const v = (await branchViews(c, r, [branch], "all", fresh ? { inline: 1, graceMs: 0 } : { inline: 1 })).branches[0];
     if (!v) throw new HttpError(404, "not_found", `no branch ${branch}`);
     return c.json(v);
   }
@@ -510,7 +532,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
     unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head, c.get("identity")));
-    return c.json((await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0]);
+    return c.json((await branchViews(c, r, [branch], "all", { inline: 0 })).branches[0]);
   }
   if (rest === "" && method === "DELETE") return deleteBranch(c, r, branch);
   if (rest === "diff" && method === "GET") return diff(c, r, branch);

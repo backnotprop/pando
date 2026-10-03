@@ -10,6 +10,24 @@ import { compare } from "./graph";
 import { ZERO } from "./names";
 import { drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
 import { LEASE_MS } from "./gate";
+import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
+
+/** Count the pack bytes git sends (push_bytes on the timing line). */
+function countBytes(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const t = currentTiming(); // the stream's callbacks may run outside the request's context
+  let n = 0;
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, ctl) {
+        n += chunk.byteLength;
+        ctl.enqueue(chunk);
+      },
+      flush() {
+        if (t) t.fields.push_bytes = n;
+      },
+    }),
+  );
+}
 import type { Identity, RepoEvent, RepoRecord } from "./types";
 import { cachedRepo, monorepoStub } from "./session";
 import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
@@ -44,12 +62,37 @@ function relay(res: Response, body: ReadableStream | null = res.body): Response 
   return new Response(body, { status: res.status, headers });
 }
 
+/** Relay Artifacts' answer; its body counts as Artifacts time until its last byte (pando.timing). */
+function relayFrom(res: Response, op: string, repo: string | null, since: number): Response {
+  const out = relay(res);
+  const t = currentTiming();
+  if (!t || !out.body) return out;
+  t.fields.stream = "sending";
+  return relayTimed(out, t, op, repo, since);
+}
+
 export async function handleDoor(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  try {
-    return await door(req, env, ctx);
-  } catch (err) {
-    return toErrorResponse(err);
-  }
+  const m = new URL(req.url).pathname.match(DOOR_RE);
+  const t = startTiming("door", {
+    route: m ? m[3] : "door",
+    method: req.method,
+    monorepo: m?.[1] ?? null,
+    repo: m?.[2] ?? null,
+    service: new URL(req.url).searchParams.get("service") ?? undefined,
+    protocol: /version=2/.test(req.headers.get("git-protocol") ?? "") ? "v2" : "v0",
+    colo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
+  });
+  return runTimed(t, async () => {
+    let res: Response;
+    try {
+      res = await door(req, env, ctx);
+    } catch (err) {
+      res = toErrorResponse(err);
+    }
+    // A relayed body writes its line when it has been sent.
+    if (t.fields.stream === undefined) finishTiming(t, { status: res.status });
+    return res;
+  });
 }
 
 async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -70,7 +113,12 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
     if (service !== "git-upload-pack") return unauthorized();
     const repo = await cachedRepo(env, monorepo, repoName);
     if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
-    return relay(await toArtifacts(req, repo, action, url.search, { authorization: req.headers.get("authorization")! }));
+    const s0 = Date.now();
+    const res = await timeArtifacts(`http ${req.method} ${action}`, repo.artifacts_name, () =>
+      toArtifacts(req, repo, action, url.search, { authorization: req.headers.get("authorization")! }),
+    );
+    note({ credential: "hook_read_token" });
+    return relayFrom(res, `http ${req.method} ${action}`, repo.artifacts_name, s0);
   }
 
   const auth = await authenticate(env, secret, monorepo);
@@ -87,7 +135,7 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
     // Artifacts' v2 advertisement, plus object-info, which the door answers itself.
     const res = await gitRequest(env, repo, `/info/refs${url.search}`, "read", { method: "GET", headers: passHeaders(req, ["accept", "git-protocol"]) });
     if (!res.ok) return relay(res);
-    const body = withObjectInfo(new Uint8Array(await res.arrayBuffer()));
+    const body = withObjectInfo(new Uint8Array(await timeArtifacts("http GET info/refs (body)", repo.artifacts_name, () => res.arrayBuffer())));
     return new Response(body, { headers: { "content-type": res.headers.get("content-type") ?? "application/x-git-upload-pack-advertisement", "cache-control": "no-cache" } });
   }
   let uploadBody: ReadableStream<Uint8Array> | null = req.body;
@@ -104,12 +152,13 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
 
   if (service === "git-upload-pack" || action === "info/refs") {
     const scope = service === "git-upload-pack" ? "read" : "write";
+    const s0 = Date.now();
     const res = await gitRequest(env, repo, action === "info/refs" ? `/info/refs${url.search}` : `/${action}`, scope, {
       method: req.method,
       headers: passHeaders(req, ["content-type", "content-encoding", "accept", "git-protocol"]),
       body: req.method === "POST" ? uploadBody : undefined,
     });
-    return relay(res);
+    return relayFrom(res, `http ${req.method} ${action}`, repo.artifacts_name, s0);
   }
 
   return receivePack(req, env, ctx, monorepo, repo, identity, url.origin);
@@ -150,7 +199,10 @@ async function receivePack(
   }
 
   // One of the repo's two write slots (gate.ts). git waits here while the slot is taken.
+  const g0 = Date.now();
   const slot = await stub.acquireWrite(repo.artifacts_name);
+  addGate(slot.ok ? slot.value.waited_ms : Date.now() - g0);
+  note({ refs: section.commands.length });
   if (!slot.ok) {
     await drain(section.rest);
     return gitError(`Pando: ${repo.name} is busy with other writes; try the push again`);
@@ -168,13 +220,13 @@ async function receivePack(
         "content-type": "application/x-git-receive-pack-request",
         accept: "application/x-git-receive-pack-result",
       },
-      body: prepend(section.head, section.rest),
+      body: countBytes(prepend(section.head, section.rest)),
     });
     // The whole report, before git sees it: the push is recorded first (it is small).
-    bytes = new Uint8Array(await res.arrayBuffer());
+    bytes = new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => res.arrayBuffer()));
   } finally {
     clearInterval(renew);
-    await stub.releaseWrite(repo.artifacts_name, lease).catch(() => false);
+    await stub.releaseWrite(repo.artifacts_name, lease, false).catch(() => false);
   }
   const headers = { "content-type": res.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
   if (!res.ok) return new Response(bytes, { status: res.status, headers });

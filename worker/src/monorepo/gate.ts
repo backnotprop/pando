@@ -14,6 +14,19 @@ export const WRITE_SLOTS = 2;
 export const LEASE_MS = 60_000;
 /** The longest a writer waits in the queue. */
 export const WAIT_MS = 120_000;
+/**
+ * After the Worker's own writes (coalesced ref writes, merges, meta commits),
+ * a released slot is held this much longer before the next writer gets it:
+ * Artifacts frees its own slot a moment after it answers, and a writer let in
+ * at once was sometimes refused "busy" (about 1 in 40 parallel door pushes).
+ * Door pushes release at once. GATE_RELEASE_MS overrides it.
+ */
+export const RELEASE_DELAY_MS = 200;
+
+export function releaseDelay(env: { GATE_RELEASE_MS?: string }): number {
+  const n = Number(env.GATE_RELEASE_MS);
+  return env.GATE_RELEASE_MS !== undefined && Number.isInteger(n) && n >= 0 && n <= 5000 ? n : RELEASE_DELAY_MS;
+}
 
 export class GateBusy extends Error {
   constructor(key: string, waitedMs: number) {
@@ -37,10 +50,14 @@ interface Gate {
 export class WriteGate {
   private gates = new Map<string, Gate>();
 
+  /** Leases released by their holder and waiting out the release delay. */
+  private releasing = new Set<string>();
+
   constructor(
     private slots = WRITE_SLOTS,
     private leaseMs = LEASE_MS,
     private waitMs = WAIT_MS,
+    private releaseDelayMs = 0,
   ) {}
 
   private gate(key: string): Gate {
@@ -73,18 +90,34 @@ export class WriteGate {
   renew(key: string, lease: string): boolean {
     const g = this.gates.get(key);
     const t = g?.held.get(lease);
-    if (!g || !t) return false;
+    if (!g || !t || this.releasing.has(lease)) return false;
     clearTimeout(t);
     g.held.set(lease, setTimeout(() => this.release(key, lease), this.leaseMs));
     return true;
   }
 
-  /** End a lease and let the next writer in. False if it already ended. */
-  release(key: string, lease: string): boolean {
+  /**
+   * End a lease and let the next writer in after holdMs (the slot stays taken
+   * until then; the gate's release delay unless given). False if it already ended.
+   */
+  release(key: string, lease: string, holdMs = this.releaseDelayMs): boolean {
     const g = this.gates.get(key);
     const t = g?.held.get(lease);
-    if (!g || !t) return false;
+    if (!g || !t || this.releasing.has(lease)) return false;
     clearTimeout(t);
+    if (holdMs > 0) {
+      this.releasing.add(lease);
+      g.held.set(lease, setTimeout(() => this.free(key, lease), holdMs));
+      return true;
+    }
+    this.free(key, lease);
+    return true;
+  }
+
+  private free(key: string, lease: string): void {
+    const g = this.gates.get(key);
+    this.releasing.delete(lease);
+    if (!g || !g.held.has(lease)) return;
     g.held.delete(lease);
     while (g.held.size < this.slots && g.waiters.length) {
       const w = g.waiters.shift()!;
@@ -92,7 +125,6 @@ export class WriteGate {
       w.resolve(this.grant(key, g));
     }
     if (g.held.size === 0 && g.waiters.length === 0) this.gates.delete(key);
-    return true;
   }
 
   /** Run fn while holding a slot (renewed as it runs), then release it. */
@@ -122,6 +154,7 @@ export class WriteGate {
       }
     }
     this.gates.clear();
+    this.releasing.clear();
   }
 
   private grant(key: string, g: Gate): string {

@@ -12,6 +12,7 @@
 
 import type { Env } from "../env";
 import { redact } from "../http";
+import { note, timed, timedStub } from "../timing";
 import { deliveryReadToken, withRepo } from "./artifacts";
 import { commitReader, compareWith } from "./graph";
 import { ZERO } from "./names";
@@ -47,8 +48,14 @@ async function readToken(env: Env, artifactsName: string): Promise<{ token: stri
 /** The pando-hooks consumer: deliveries 6 at a time. */
 export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
   const delays = retryDelays(env);
-  await pool([...batch.messages], 6, async (msg) => {
-    const stub = env.MONOREPO.getByName(msg.body.monorepo);
+  await pool([...batch.messages], 6, (msg) =>
+    timed("queue", { route: "hooks.delivery", monorepo: msg.body.monorepo, delivery: msg.body.delivery_id, attempt: msg.attempts }, () => deliverOne(env, msg, delays)),
+  );
+}
+
+async function deliverOne(env: Env, msg: Message<DeliveryMessage>, delays: number[]): Promise<void> {
+  {
+    const stub = timedStub(env.MONOREPO.getByName(msg.body.monorepo));
     let d;
     try {
       d = await stub.deliveryToSend(msg.body.delivery_id);
@@ -70,15 +77,17 @@ export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env
         p.base = null;
       }
     }
+    note({ repo: p.repo, event: p.event, hook_type: d.hook.type, seq: p.seq ?? null });
     const t0 = Date.now();
     const r = await attempt(env, d.hook, msg.body.delivery_id, p, () => readToken(env, d.artifacts_name));
+    note({ receiver_ms: Date.now() - t0, receiver_code: r.code, delivered: r.ok });
     const n = msg.attempts; // 1 on the first try
     const retryIn = r.ok ? null : (delays[n - 1] ?? null);
     await stub.recordAttempt(msg.body.delivery_id, { ...r, ms: Date.now() - t0 }, n, retryIn).catch(() => {});
     if (r.ok) msg.ack();
     else if (retryIn !== null) msg.retry({ delaySeconds: retryIn });
     else msg.retry(); // out of retries: the queue moves it to pando-hooks-dlq
-  });
+  }
 }
 
 /** The pando-hooks-dlq consumer: mark the deliveries dead (visible in the API; redeliver to try again). */

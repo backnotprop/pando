@@ -234,6 +234,24 @@ async function later(p: Promise<unknown>): Promise<void> {
 
 type Reader = D1Database | D1DatabaseSession;
 
+/** A monorepo_aliases row read back in a batch: the alias's monorepo, and the name that monorepo has now. */
+interface AliasHit {
+  monorepo_id: string;
+  pointed_to: string | null;
+}
+
+/** A D1 row of the alias query (`SELECT a.monorepo_id, ... AS pointed_to`). */
+function isAliasHit(v: unknown): v is AliasHit {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "monorepo_id" in v &&
+    typeof v.monorepo_id === "string" &&
+    "pointed_to" in v &&
+    (v.pointed_to === null || typeof v.pointed_to === "string")
+  );
+}
+
 export class Accounts {
   /** ready: awaited before the first query (the one-time copy from the AccountsObject). */
   constructor(
@@ -430,7 +448,8 @@ export class Accounts {
     ]);
 
     if (made.meta.changes !== 1) return null;
-    const was = (alias.results as { monorepo_id: string; pointed_to: string | null }[])[0];
+    const row = alias.results[0];
+    const was = isAliasHit(row) ? row : undefined;
 
     return {
       info: { id, owner, name, full_name: `${owner}/${name}`, kind, created_at: at },
@@ -490,7 +509,8 @@ export class Accounts {
       ]);
 
       if (moved.meta.changes !== 1) fail(409, "monorepo_exists", `${to.owner}/${to.name} exists`);
-      const was = (alias.results as { monorepo_id: string; pointed_to: string | null }[])[0];
+      const row = alias.results[0];
+      const was = isAliasHit(row) ? row : undefined;
 
       return {
         info: { ...cur, owner: to.owner, name: to.name, full_name: `${to.owner}/${to.name}` },

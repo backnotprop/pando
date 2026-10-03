@@ -298,6 +298,21 @@ await env.META.get(id).applyFromMain({
 Each change becomes a version with `source: "main"`, with no base check (main
 wins), and is broadcast. This is the only way `.pando/**` changes.
 
+## Deleting a monorepo
+
+`DELETE /v1/monorepos/{monorepo}` (owner only, server-git) calls the meta
+layer object (a Durable Object RPC):
+
+```ts
+await env.META.get(env.META.idFromName(monorepo)).destroy();  // {closed: <sockets>}
+```
+
+It closes every socket with code `4404` ("this monorepo was deleted"),
+drops the alarm and all of the object's storage, and leaves it empty, so a
+new monorepo with the same name starts with nothing. The caller deletes the
+R2 objects under `meta/<monorepo>/` and the Artifacts repo. A client that
+gets `4404` stops syncing and keeps its files.
+
 ## Identity
 
 Every request, the WebSocket upgrade included, carries

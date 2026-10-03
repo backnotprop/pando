@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1204,4 +1205,71 @@ func TestE2ECommitsOnDeployed(t *testing.T) {
 	}
 	st, _ := env.client().Status(context.Background())
 	t.Fatalf("no commit after 60 s; status %v", st)
+}
+
+// DELETE /v1/monorepos/{m} calls the object's destroy(): sockets close with
+// 4404 and engines stop, and a monorepo made again with the same name is empty.
+func TestE2EDestroy(t *testing.T) {
+	env := newEnv(t)
+	if env.shared || strings.HasPrefix(env.server, "https://") {
+		t.Skip("uses the local test Worker's /test/destroy")
+	}
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
+	a.write("doomed.md", "soon gone\n")
+	big := randomBinary(20 << 10)
+	a.write("doomed.bin", big)
+	waitContent(t, b, "doomed.md", "soon gone\n")
+	waitContent(t, b, "doomed.bin", big)
+
+	body, _ := json.Marshal(map[string]string{"monorepo": env.mono})
+	resp, err := http.Post(env.server+"/test/destroy", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(out), `"closed":2`) {
+		t.Fatalf("destroy: %d %s", resp.StatusCode, out)
+	}
+	t.Logf("destroy: %s", strings.TrimSpace(string(out)))
+	for _, m := range []*machine{a, b} {
+		select {
+		case err := <-m.done:
+			if !errors.Is(err, errDeleted) {
+				t.Errorf("%s stopped with %v, want errDeleted", m.name, err)
+			}
+			m.cancel = nil
+			m.logw.mu.Lock()
+			m.logw.done = true
+			m.logw.mu.Unlock()
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s's engine kept running after the monorepo was deleted", m.name)
+		}
+	}
+	if got, _ := b.read("doomed.md"); got != "soon gone\n" {
+		t.Error("a deleted monorepo removed files on a machine")
+	}
+
+	// Same name, fresh object: nothing in it, and it works.
+	st, err := env.client().Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st["head"].(float64) != 0 || st["files"].(float64) != 0 || st["uncommitted"].(float64) != 0 {
+		t.Errorf("after destroy: %v", st)
+	}
+	h, err := env.client().History(context.Background(), "doomed.md", 10)
+	if err != nil || len(h.Versions) != 0 {
+		t.Errorf("history after destroy: %+v %v", h, err)
+	}
+	carl := env.machine(t, "carl")
+	carl.write("fresh.md", "a new start\n")
+	waitFor(t, "a save into the emptied object", func() bool {
+		h, err := env.client().History(context.Background(), "fresh.md", 1)
+		return err == nil && len(h.Versions) == 1 && h.Versions[0].Version == 1
+	})
+	if _, ok := carl.read("doomed.md"); ok {
+		t.Error("a new machine received a file from before the delete")
+	}
 }

@@ -52,3 +52,9 @@ export function redact(s: string): string {
 export function now(): string {
   return new Date().toISOString();
 }
+
+/** The agent acting, from X-Pando-Agent (optional; agents act as their user). */
+export function agentHeader(req: Request): string | null {
+  const v = (req.headers.get("x-pando-agent") ?? "").replace(/[\x00-\x1f\x7f]/g, "").trim();
+  return v ? v.slice(0, 100) : null;
+}

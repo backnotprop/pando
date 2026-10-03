@@ -2,12 +2,13 @@
 
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
-import { HttpError, toErrorResponse } from "../http";
+import { agentHeader, HttpError, toErrorResponse } from "../http";
 import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
-import { gitwrite } from "./merge-port";
+import * as views from "./views";
+import { EVENT_STREAM, parseTopics } from "./stream";
 import {
   artifactsRepoName,
   DEFAULT_BRANCH,
@@ -216,7 +217,7 @@ const authed = async (c: C, next: () => Promise<void>) => {
   c.set("m", m);
   c.set("stub", monorepoStub(c.env, m));
   c.set("info", auth.monorepo);
-  c.set("identity", identityOf(auth));
+  c.set("identity", { ...identityOf(auth), agent: agentHeader(c.req.raw) });
   await next();
 };
 api.use("/v1/monorepos/:m", authed);
@@ -258,6 +259,26 @@ api.delete("/v1/monorepos/:m", async (c) => {
   await accounts(c.env).releaseMonorepo(m);
   forgetCachedAuth();
   return c.body(null, 204);
+});
+
+// ── The event stream ──────────────────────────────────────────────────────
+
+api.get("/v1/monorepos/:m/events", async (c) => {
+  if (!EVENT_STREAM) throw new HttpError(501, "event_stream_on_hold", "the event stream is built but on hold until the architecture review decides where events live");
+  const stub = c.get("stub");
+  if (c.req.header("upgrade")?.toLowerCase() === "websocket") {
+    const headers = new Headers(c.req.raw.headers);
+    headers.set("x-pando-login", c.get("identity").login);
+    return stub.fetch(new Request(c.req.raw, { headers }));
+  }
+  const sinceQ = c.req.query("since");
+  const since = sinceQ === undefined || sinceQ === "" ? null : Number(sinceQ);
+  if (since !== null && (!Number.isSafeInteger(since) || since < 0)) bad("since must be a whole number");
+  const limit = Number(c.req.query("limit") ?? "100");
+  if (!Number.isInteger(limit) || limit < 1) bad("limit must be a whole number from 1");
+  const topics = parseTopics(c.req.query("topics") ?? null);
+  if (!topics) bad("topics: up to 10 of all, main, main:<repo>, repo:<repo>, meta, kind:<kind>, comma-separated");
+  return c.json(await stub.events(since, limit, topics));
 });
 
 // ── Members ───────────────────────────────────────────────────────────────
@@ -344,89 +365,17 @@ api.get("/v1/monorepos/:m/repos/:r", async (c) => {
 
 // ── Branches ──────────────────────────────────────────────────────────────
 
-const mergeableCache = new Map<string, string>();
-
-async function mergeable(env: Env, r: RepoRecord, main: string, head: string, ahead: number | null): Promise<string> {
-  if (ahead === 0) return "up_to_date";
-  if (!gitwrite) return "unknown";
-  const key = `${r.artifacts_name}:${main}:${head}`;
-  const hit = mergeableCache.get(key);
-  if (hit) return hit;
-  let v = "unknown";
-  try {
-    const out = await gitwrite.mergeCommit(
-      { artifacts: env.ARTIFACTS, name: r.artifacts_name },
-      { base: r.default_branch, head, baseSha: main, message: "dry run\n", author: { name: "Pando", email: "pando@pando.invalid" }, dryRun: true },
-    );
-    v = out.status === "mergeable" ? "clean" : out.status === "conflict" ? "conflicts" : out.status === "up_to_date" ? "up_to_date" : "unknown";
-  } catch {
-    v = "unknown";
-  }
-  if (mergeableCache.size > 5000) mergeableCache.clear();
-  if (v !== "unknown") mergeableCache.set(key, v);
-  return v;
-}
-
-async function pool<T, U>(items: T[], n: number, fn: (t: T) => Promise<U>): Promise<U[]> {
-  const out: U[] = new Array(items.length);
-  let i = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(n, items.length) }, async () => {
-      while (i < items.length) {
-        const k = i++;
-        out[k] = await fn(items[k]);
-      }
-    }),
-  );
-  return out;
-}
-
-async function branchViews(c: C, r: RepoRecord, names: string[] | null, state: string) {
-  const refs = branchesOf(await listRefs(c.env, r));
-  const main = refs.get(r.default_branch) ?? null;
+/** The branch rows for one repo, read through this request's monorepo object. */
+function branchViews(c: C, r: RepoRecord, names: string[] | null, state: string) {
   const stub = c.get("stub");
-  const records = new Map((await stub.branchRecords(r.name)).map((b) => [b.name, b]));
-  const required = await requiredChecks(c.env, c.get("info"), r);
-  const wantNames = (names ?? [...refs.keys()]).filter((n) => n !== r.default_branch && refs.has(n));
-  const views = await withRepo(c.env, r.artifacts_name, async (repo) => {
-    const read = commitReader(repo);
-    return pool(wantNames, 4, async (name) => {
-      const head = refs.get(name)!;
-      const rec = records.get(name) ?? null;
-      let base: string | null = null;
-      let ahead: number | null = null;
-      let behind: number | null = null;
-      if (main) {
-        try {
-          ({ mergeBase: base, ahead, behind } = await compareWith(read, main, head));
-        } catch {
-          /* too far apart: leave nulls */
-        }
-      }
-      const checks = combine(head, required, await stub.statuses(r.name, head));
-      return {
-        name,
-        head,
-        base,
-        author: rec?.creator ?? null,
-        title: rec?.title ?? null,
-        description: rec?.description ?? null,
-        ahead,
-        behind,
-        mergeable: main && base ? await mergeable(c.env, r, main, head, ahead) : "unknown",
-        checks,
-        state: rec?.merged_head === head ? "merged" : "open",
-        merge_commit: rec?.merged_head === head ? rec.merge_commit : null,
-        created_at: rec?.created_at ?? null,
-        updated_at: rec?.updated_at ?? null,
-      };
-    });
-  });
-  return {
-    default_branch: r.default_branch,
-    default_head: main,
-    branches: views.filter((v) => state === "all" || v.state === state),
-  };
+  return views.branchViews(
+    c.env,
+    c.get("info"),
+    { records: (repo) => stub.branchRecords(repo), statuses: (repo, sha) => stub.statuses(repo, sha) },
+    r,
+    names,
+    state as "open" | "merged" | "all",
+  );
 }
 
 api.get("/v1/monorepos/:m/repos/:r/branches", async (c) => {
@@ -452,8 +401,9 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   }
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${from}`);
   const ref = `refs/heads/${b.name}`;
-  const result = await updateRefs(c.env, r, [{ old: ZERO, new: sha, ref }]);
-  const reason = result.get(ref);
+  // Through the repo's write gate: waits for a slot, and goes out with other waiting ref updates.
+  const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [{ old: ZERO, new: sha, ref }]));
+  const reason = result[ref];
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
   const events = await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
@@ -468,7 +418,7 @@ function branchPath(c: C): { branch: string; rest: string } {
   const prefix = `/v1/monorepos/${c.get("m")}/repos/${c.req.param("r")}/branches/`;
   let tail = raw.slice(prefix.length);
   let rest = "";
-  for (const s of ["/diff", "/reviews", "/merge"]) {
+  for (const s of ["/diff", "/reviews", "/merge", "/commits"]) {
     if (tail.endsWith(s)) {
       rest = s.slice(1);
       tail = tail.slice(0, -s.length);
@@ -502,10 +452,12 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       title: str(b.title, "title", { optional: true, max: 300 }),
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
-    unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head));
+    unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head, c.get("identity")));
     return c.json((await branchViews(c, r, [branch], "all")).branches[0]);
   }
+  if (rest === "" && method === "DELETE") return deleteBranch(c, r, branch);
   if (rest === "diff" && method === "GET") return diff(c, r, branch);
+  if (rest === "commits" && method === "GET") return commits(c, r, branch);
   if (rest === "reviews" && method === "GET") return c.json({ reviews: await c.get("stub").listReviews(r.name, branch) });
   if (rest === "reviews" && method === "POST") return review(c, r, branch);
   if (rest === "merge" && method === "POST") return merge(c, r, branch);
@@ -550,6 +502,73 @@ async function diff(c: C, r: RepoRecord, branch: string): Promise<Response> {
     truncated: result.d.truncated,
     stats: result.d.stats,
     files: result.d.files,
+  });
+}
+
+/** Delete a branch (not the default one), through the repo's write gate. */
+async function deleteBranch(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  if (branch === r.default_branch) throw new HttpError(403, "protected", `${branch} is protected`);
+  const head = branchesOf(await listRefs(c.env, r)).get(branch);
+  if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
+  const ref = `refs/heads/${branch}`;
+  const cmd = { old: head, new: ZERO, ref };
+  const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [cmd]));
+  if (result[ref] !== null) throw new HttpError(409, "branch_not_deleted", `Artifacts refused: ${result[ref] ?? "no report"}`);
+  const events = await c.get("stub").recordPush(r.name, c.get("identity"), [cmd]);
+  c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
+  return c.body(null, 204);
+}
+
+/** The branch's own commits (on it, not on the default branch), newest first, with Pando's trailers parsed. */
+async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  const limitQ = c.req.query("limit");
+  const limit = limitQ === undefined ? views.COMMITS_MAX : Number(limitQ);
+  if (!Number.isInteger(limit) || limit < 1 || limit > views.COMMITS_MAX) bad(`limit is 1 to ${views.COMMITS_MAX}`);
+  const refs = branchesOf(await listRefs(c.env, r));
+  const head = refs.get(branch);
+  if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
+  // A merged branch is compared with main as it was before its merge, so its page still lists its commits.
+  const main = (await c.get("stub").mergedFrom(r.name, branch, head)) ?? refs.get(r.default_branch) ?? null;
+  const out = await withRepo(c.env, r.artifacts_name, async (repo) => {
+    const read = commitReader(repo);
+    let shas: string[];
+    let mergeBase: string | null = null;
+    if (main) {
+      const cmp = await compareWith(read, main, head);
+      mergeBase = cmp.mergeBase;
+      shas = cmp.aheadCommits;
+    } else {
+      shas = (await repo.log({ ref: head, limit })).map((x) => x.hash);
+    }
+    const list = await Promise.all(
+      shas.slice(0, limit).map(async (sha) => {
+        let ci = await read(sha);
+        if (ci.message === undefined) {
+          const full = await repo.readCommit(sha);
+          if (full) ci = { ...ci, message: full.message, author: full.author, committer: full.committer, authoredAt: full.authoredAt };
+        }
+        const message = ci.message ?? "";
+        return {
+          sha,
+          parents: ci.parents,
+          title: message.split("\n")[0],
+          message,
+          author: { name: ci.author?.name ?? null, email: ci.author?.email ?? null, date: ci.authoredAt ? new Date(ci.authoredAt * 1000).toISOString() : null },
+          committer: { name: ci.committer?.name ?? null, email: ci.committer?.email ?? null, date: new Date(ci.time * 1000).toISOString() },
+          trailers: views.pandoTrailers(message),
+        };
+      }),
+    );
+    return { mergeBase, total: shas.length, list };
+  });
+  return c.json({
+    branch,
+    head,
+    base_branch: r.default_branch,
+    merge_base: out.mergeBase,
+    total: out.total,
+    truncated: out.total > out.list.length,
+    commits: out.list,
   });
 }
 
@@ -634,7 +653,7 @@ api.post("/v1/monorepos/:m/repos/:r/statuses/:sha", async (c) => {
       target_url: str(b.target_url, "target_url", { optional: true, max: 2000 }) ?? null,
       description: str(b.description, "description", { optional: true, max: 1000 }) ?? null,
     },
-    c.get("identity").login,
+    c.get("identity"),
   );
   return c.json(s, 201);
 });
@@ -741,7 +760,7 @@ api.get("/v1/monorepos/:m/worktrees/:id", async (c) => {
 });
 
 api.delete("/v1/monorepos/:m/worktrees/:id", async (c) => {
-  unwrap(await c.get("stub").deleteWorktree(worktreeId(c)));
+  unwrap(await c.get("stub").deleteWorktree(worktreeId(c), c.get("identity")));
   return c.body(null, 204);
 });
 

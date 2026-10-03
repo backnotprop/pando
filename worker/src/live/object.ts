@@ -7,10 +7,18 @@ import { checkBytes, checkPath, MAX_BYTES, type Refusal } from "./rules";
 import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
+import { parse as parseToml } from "smol-toml";
+import type { MonorepoObject } from "../monorepo/object";
+import type { StreamEvent } from "../monorepo/types";
+import { EVENT_STREAM } from "../monorepo/stream";
+import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
 
-export type MetaEnv = CommitEnv;
+// MONOREPO: the monorepo object, whose event stream gets meta.saved and
+// machine.connected / machine.disconnected (absent in the live lane's test Worker).
+export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+const EVENTS_FLUSH_MS = 250; // meta events go to the monorepo's stream in one call per this much time
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
 const GROUP_MS = 2_000; // paths due within this of each other share a commit
 const RETRY_MIN_MS = 30_000;
@@ -32,6 +40,8 @@ interface Attachment {
   fixed: boolean; // identity came from the Worker, not from hello
   hello: boolean;
   live: boolean; // caught up: receives every new change
+  connected_at?: string;
+  client?: string | null; // the client's own name, from hello
 }
 
 interface VersionRow {
@@ -191,6 +201,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return this.restore(request);
       case "status":
         return json(this.status());
+      case "tree":
+        return this.tree(url);
+      case "references":
+        return this.references();
       case "init":
         if (request.method !== "POST") return fail(405, "method_not_allowed", "use POST");
         return this.init(request);
@@ -215,6 +229,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       fixed: author !== null,
       hello: false,
       live: false,
+      connected_at: new Date().toISOString(),
     };
     server.serializeAttachment(att);
     return new Response(null, { status: 101, webSocket: client });
@@ -373,6 +388,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       files,
       uncommitted,
       sockets: this.ctx.getWebSockets().length,
+      connections: this.connections(),
       last_commit: this.kv("parent"),
       commit_error: gitWriter(this.env) ? this.kv("commit_error") : "no Artifacts binding: versions are kept, not committed",
     };
@@ -421,6 +437,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    const att = ws.deserializeAttachment() as Attachment | null;
+    if (att?.hello) this.emitConnection("machine.disconnected", "delete", att);
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
     } catch {
@@ -455,7 +473,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!att.fixed) att.author = name(msg.author) || "unknown";
     att.machine = name(msg.machine) || "unknown";
     att.agent = name(msg.agent) || null; // agents act as their user; the trailers name them
+    att.client = name(msg.client) || null;
+    const first = !att.hello;
     att.hello = true;
+    if (first) this.emitConnection("machine.connected", "upsert", att);
     const head = this.head();
     let since = int(msg.since);
     if (since > head) since = 0; // the client saw a different history: send everything
@@ -676,7 +697,145 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at + QUIET_MS,
       );
     }
+    // To the event stream, only when it is on, and not during pando init's first upload
+    // (thousands of files; machines catch up from history, the web refetches the tree).
+    if (EVENT_STREAM && this.env.MONOREPO && !this.initializing()) {
+      this.emit({
+        kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
+        repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: this.historyEntry(this.row(version)),
+      });
+    }
     return version;
+  }
+
+  // ---- the write gate (held by the monorepo object) ----
+
+  private async gated<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const monorepo = this.kv("monorepo");
+    if (!monorepo || !this.env.MONOREPO) return fn(); // the live lane's test Worker has no gate
+    const stub = this.env.MONOREPO.getByName(monorepo);
+    const slot = await stub.acquireWrite(key);
+    if (!slot.ok) throw new Error((slot as { message?: string }).message ?? "the repo is busy");
+    const lease = slot.value.lease;
+    const renew = setInterval(() => {
+      stub.renewWrite(key, lease).catch(() => {});
+    }, LEASE_MS / 3);
+    try {
+      return await fn();
+    } finally {
+      clearInterval(renew);
+      await stub.releaseWrite(key, lease).catch(() => false);
+    }
+  }
+
+  // ---- the monorepo's event stream (A9) ----
+
+  private outbox: StreamEvent[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private sending: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Queue an event for the monorepo object's stream. Sent in order, in one
+   * call per FLUSH_MS (a burst of saves is one call), never awaited by the saver.
+   */
+  private emit(e: StreamEvent): void {
+    if (!EVENT_STREAM || !this.env.MONOREPO) return;
+    this.outbox.push(e);
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => this.flush(), EVENTS_FLUSH_MS);
+  }
+
+  private flush(): void {
+    this.flushTimer = null;
+    const batch = this.outbox;
+    this.outbox = [];
+    const monorepo = this.kv("monorepo");
+    if (!batch.length || !monorepo || !this.env.MONOREPO) return;
+    const stub = this.env.MONOREPO.getByName(monorepo);
+    this.sending = this.sending
+      .then(() => stub.publishMany(batch))
+      .catch((err) => console.error("meta events not sent:", err instanceof Error ? err.message : String(err)));
+    this.ctx.waitUntil(this.sending);
+  }
+
+  private connectionRow(att: Attachment) {
+    return {
+      id: att.id,
+      author: att.author,
+      machine: att.machine,
+      agent: att.agent,
+      client: att.client ?? null,
+      connected_at: att.connected_at ?? null,
+    };
+  }
+
+  // Presence is sent whole (who is connected now, from the live sockets), not as deltas:
+  // a close is not always reported, so a client never has to piece it together.
+  private emitConnection(kind: string, _op: "upsert" | "delete", att: Attachment): void {
+    if (!EVENT_STREAM || !this.env.MONOREPO) return;
+    this.emit({
+      kind, collection: "presence", key: "meta", op: "upsert", repo: "meta", actor: null,
+      machine: att.machine, agent: att.agent,
+      // The changing socket's attachment may not be saved yet: leave it out, then add it on connect.
+      row: { connections: [...this.connections(att.id), ...(kind === "machine.connected" ? [this.connectionRow(att)] : [])] },
+      connection: this.connectionRow(att),
+    });
+  }
+
+  // Who is connected now: every socket that said hello (A11), less one that is closing.
+  private connections(except: string | null = null) {
+    const out: ReturnType<MetaLayerObject["connectionRow"]>[] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as Attachment | null;
+      if (a?.hello && a.id !== except) out.push(this.connectionRow(a));
+    }
+    return out;
+  }
+
+  // ---- the tree and references (A10) ----
+
+  // Every current path, with its latest version, in one call. ?prefix= narrows it.
+  private tree(url: URL): Response {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const rows = this.sql
+      .exec<any>(
+        `SELECT v.* FROM files f JOIN versions v ON v.version = f.version
+         WHERE f.deleted = 0 AND substr(f.path, 1, ?) = ? ORDER BY f.path`,
+        prefix.length,
+        prefix,
+      )
+      .toArray() as VersionRow[];
+    return json({ head: this.head(), prefix, files: rows.map((r) => this.historyEntry(r)) });
+  }
+
+  // References (formats.md, section 4): each pointer under .pando/references/, parsed.
+  private references(): Response {
+    const prefix = ".pando/references/";
+    const rows = this.sql
+      .exec<any>(
+        `SELECT f.path, f.version, f.sha FROM files f
+         WHERE f.deleted = 0 AND substr(f.path, 1, ?) = ? AND f.path LIKE '%.toml' ORDER BY f.path`,
+        prefix.length,
+        prefix,
+      )
+      .toArray() as { path: string; version: number; sha: string }[];
+    const references = rows.map((r) => {
+      const path = r.path.slice(prefix.length, -".toml".length);
+      try {
+        const t = parseToml(new TextDecoder().decode(this.blob(r.sha))) as Record<string, unknown>;
+        return {
+          path,
+          url: typeof t.url === "string" ? t.url : null,
+          ref: typeof t.ref === "string" ? t.ref : null,
+          commit: typeof t.commit === "string" ? t.commit : null,
+          version: r.version,
+          error: null,
+        };
+      } catch (err) {
+        return { path, url: null, ref: null, commit: null, version: r.version, error: `not a reference pointer: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200) };
+      }
+    });
+    return json({ head: this.head(), references });
   }
 
   private changeMessage(r: VersionRow) {
@@ -796,9 +955,12 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const repoName = this.kv("meta_repo") ?? this.kv("monorepo");
     if (!repoName) throw new Error("the object does not know its monorepo yet");
     const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first), author };
-    let res = await writer.commit(repoName, "main", opts);
+    // Through the repo's write gate (merges into the meta layer push to the same repo), retrying Artifacts' "busy".
+    const commit = (o: typeof opts) =>
+      this.gated(repoName, () => retryBusy(() => writer.commit(repoName, "main", o), (e) => isBusy(e instanceof Error ? e.message : String(e))));
+    let res = await commit(opts);
     if (res.status === "ref_moved") {
-      res = await writer.commit(repoName, "main", { ...opts, parent: res.actual });
+      res = await commit({ ...opts, parent: res.actual });
     }
     if (res.status === "ref_moved") throw new Error(`main moved twice (expected ${res.expected}, saw ${res.actual})`);
     const sha = res.sha;

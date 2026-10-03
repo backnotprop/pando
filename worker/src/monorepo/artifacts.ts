@@ -4,6 +4,7 @@
 
 import type { Env } from "../env";
 import { HttpError } from "../http";
+import { isBusy } from "./gate";
 import { parseAdvertisement, parseReport, updateRefsRequest, type RefCommand } from "./pktline";
 
 export interface ArtifactsRef {
@@ -130,6 +131,10 @@ export async function updateRefs(env: Env, repo: ArtifactsRef, commands: RefComm
   });
   if (!res.ok) throw new HttpError(502, "artifacts", `Artifacts answered ${res.status} to a ref update`);
   const report = parseReport(new Uint8Array(await res.arrayBuffer()), new Set(caps));
+  if (report.error) {
+    const busy = isBusy(report.error);
+    throw new HttpError(busy ? 503 : 502, busy ? "repo_busy" : "artifacts", `Artifacts refused the write: ${report.error}`);
+  }
   if (report.unpack !== "ok") throw new HttpError(502, "artifacts", `Artifacts could not unpack: ${report.unpack}`);
   return report.refs;
 }

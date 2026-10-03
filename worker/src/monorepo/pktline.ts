@@ -163,6 +163,8 @@ export function refusal(commands: RefCommand[], reasons: Map<string, string>, ca
 }
 
 export interface PushReport {
+  /** An `ERR <message>` pkt-line instead of a report (for example artifacts_git_receive_pack_busy). */
+  error: string | null;
   unpack: string | null;
   /** ref -> null when updated, else the reason it was refused. */
   refs: Map<string, string | null>;
@@ -171,6 +173,11 @@ export interface PushReport {
 /** Read receive-pack's report-status (demultiplexing side-band if used). */
 export function parseReport(bytes: Uint8Array, caps: Set<string>): PushReport {
   let data = bytes;
+  const first = pktLines(bytes).next().value;
+  if (first) {
+    const t = dec.decode(first).replace(/\n$/, "");
+    if (t.startsWith("ERR ")) return { error: t.slice(4), unpack: null, refs: new Map() };
+  }
   if (sideband(caps)) {
     const band1: Uint8Array[] = [];
     for (const line of pktLines(bytes)) {
@@ -178,7 +185,7 @@ export function parseReport(bytes: Uint8Array, caps: Set<string>): PushReport {
     }
     data = concat(band1);
   }
-  const report: PushReport = { unpack: null, refs: new Map() };
+  const report: PushReport = { error: null, unpack: null, refs: new Map() };
   for (const line of pktLines(data)) {
     if (!line) continue;
     const text = dec.decode(line).replace(/\n$/, "");

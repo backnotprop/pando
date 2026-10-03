@@ -4,9 +4,13 @@ package meta
 // folder, against a real meta layer object. They need a server:
 //
 //	worker/test/live/run-e2e.sh            starts wrangler dev and runs them
-//	PANDO_META_TEST_URL=https://pando-dev... go test ./internal/meta -run E2E -v
+//	PANDO_META_TEST_URL=https://pando-dev.plannotator.workers.dev go test ./internal/meta -run E2E -v
 //
-// Each test uses its own monorepo name, so its own object.
+// Against wrangler dev each test has its own monorepo, so its own object.
+// Against a deployed Worker (https) a run makes one monorepo, e2e-live-<time>
+// (there is no delete), and each test works in its own folder in it; the
+// credential is this machine's pando login (config.LoadHome().Token), passed
+// to the engines as PANDO_TOKEN and never printed.
 
 import (
 	"bytes"
@@ -29,23 +33,126 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"pando/internal/config"
 )
 
-func testServer(t *testing.T) string {
-	u := os.Getenv("PANDO_META_TEST_URL")
+type testEnv struct {
+	server string
+	mono   string
+	prefix string // the test's folder in a shared monorepo; "" when it has its own
+	shared bool
+}
+
+var remote struct {
+	sync.Mutex
+	token string
+	mono  string
+	err   error
+}
+
+func remoteToken(t *testing.T, server string) string {
+	remote.Lock()
+	defer remote.Unlock()
+	if remote.token == "" && remote.err == nil {
+		home, err := config.LoadHome()
+		if err == nil {
+			remote.token, err = home.Token(server)
+		}
+		remote.err = err
+	}
+	if remote.err != nil {
+		t.Skipf("no credential for %s: %v", server, remote.err)
+	}
+	return remote.token
+}
+
+// createMonorepo makes a monorepo on a deployed Worker (the caller owns it).
+func createMonorepo(t *testing.T, server, token, name string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"name": name, "kind": "monorepo"})
+	req, _ := http.NewRequest(http.MethodPost, server+"/v1/monorepos", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("creating monorepo %s: %d %s", name, resp.StatusCode, out)
+	}
+	t.Logf("made monorepo %s on %s", name, server)
+}
+
+func newEnv(t *testing.T) *testEnv {
+	u := strings.TrimRight(os.Getenv("PANDO_META_TEST_URL"), "/")
 	if u == "" {
 		t.Skip("set PANDO_META_TEST_URL, or run worker/test/live/run-e2e.sh")
+	}
+	env := &testEnv{server: u}
+	deployed := strings.HasPrefix(u, "https://")
+	if deployed || os.Getenv("PANDO_META_TEST_SHARED") != "" {
+		token := ""
+		if deployed {
+			token = remoteToken(t, u)
+		}
+		remote.Lock()
+		if remote.mono == "" {
+			remote.mono = fmt.Sprintf("e2e-live-%d", time.Now().Unix())
+			if deployed {
+				createMonorepo(t, u, token, remote.mono)
+			}
+		}
+		env.mono, env.shared = remote.mono, true
+		env.prefix = strings.ToLower(strings.TrimPrefix(t.Name(), "TestE2E")) + "/"
+		remote.Unlock()
+		t.Setenv("PANDO_TOKEN", token)
+	} else {
+		b := make([]byte, 4)
+		rand.Read(b)
+		env.mono = "e2e-" + strings.ToLower(t.Name()[7:min(len(t.Name()), 27)]) + "-" + hex.EncodeToString(b)
 	}
 	// Never this machine's own ~/.pando (its server, its credential).
 	t.Setenv("PANDO_HOME", t.TempDir())
 	t.Setenv("PANDO_SERVER", "")
-	return strings.TrimRight(u, "/")
+	return env
 }
 
-func newMonorepo(t *testing.T) string {
-	b := make([]byte, 4)
-	rand.Read(b)
-	return "e2e-" + strings.ToLower(t.Name()[7:min(len(t.Name()), 27)]) + "-" + hex.EncodeToString(b)
+// own gives the test a monorepo of its own, also on a deployed Worker.
+func (env *testEnv) own(t *testing.T, suffix string) {
+	if env.shared {
+		env.mono = remote.mono + "-" + suffix
+		if strings.HasPrefix(env.server, "https://") {
+			createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), env.mono)
+		}
+		env.prefix, env.shared = "", false
+	}
+}
+
+func (env *testEnv) p(rel string) string { return env.prefix + rel }
+
+func (env *testEnv) client() *Client {
+	return NewClient(Config{Server: env.server, Monorepo: env.mono, Token: os.Getenv("PANDO_TOKEN")})
+}
+
+// machine makes and starts a machine; machineAt reaches the server through url.
+func (env *testEnv) machine(t *testing.T, name string) *machine {
+	return env.machineAt(t, name, env.server)
+}
+
+func (env *testEnv) machineAt(t *testing.T, name, url string) *machine {
+	m := env.bare(t, name)
+	m.server = url
+	m.writeRoot(".pando/local/root.json", fmt.Sprintf(`{"version": 1, "kind": "monorepo", "name": %q, "server": %q, "repos": []}`, env.mono, url))
+	m.start()
+	return m
+}
+
+// bare makes a machine's folder without starting it.
+func (env *testEnv) bare(t *testing.T, name string) *machine {
+	return &machine{t: t, name: name, root: t.TempDir(), server: env.server, mono: env.mono, prefix: env.prefix}
 }
 
 type tlog struct {
@@ -73,16 +180,7 @@ type machine struct {
 	done   chan error
 	logw   *tlog
 	hooks  Hooks
-}
-
-// newMachine makes a folder that is a Pando monorepo root (root.json) and
-// starts its engine.
-func newMachine(t *testing.T, name, server, mono string) *machine {
-	m := &machine{t: t, name: name, root: t.TempDir(), server: server, mono: mono}
-	rj := fmt.Sprintf(`{"version": 1, "kind": "monorepo", "name": %q, "server": %q, "repos": []}`, mono, server)
-	m.write(".pando/local/root.json", rj)
-	m.start()
-	return m
+	prefix string
 }
 
 func (m *machine) config() Config {
@@ -90,7 +188,8 @@ func (m *machine) config() Config {
 	return Config{
 		Root: m.root, Server: m.server, Monorepo: m.mono,
 		Author: strings.ToUpper(m.name[:1]) + m.name[1:] + " <" + m.name + "@example.com>", Machine: m.name,
-		Poll: 100 * time.Millisecond, Backoff: []time.Duration{200 * time.Millisecond, 500 * time.Millisecond},
+		Token: os.Getenv("PANDO_TOKEN"),
+		Poll:  100 * time.Millisecond, Backoff: []time.Duration{200 * time.Millisecond, 500 * time.Millisecond},
 		Log: log.New(m.logw, m.name+": ", log.Lmicroseconds),
 	}
 }
@@ -121,20 +220,27 @@ func (m *machine) stop() {
 	m.logw.mu.Unlock()
 }
 
-func (m *machine) path(rel string) string { return filepath.Join(m.root, filepath.FromSlash(rel)) }
+// path is where rel sits in the test's folder; rootPath ignores the folder.
+func (m *machine) path(rel string) string { return m.rootPath(m.prefix + rel) }
 
-func (m *machine) write(rel, body string) {
+func (m *machine) rootPath(rel string) string { return filepath.Join(m.root, filepath.FromSlash(rel)) }
+
+func (m *machine) write(rel, body string) { m.writeRoot(m.prefix+rel, body) }
+
+func (m *machine) writeRoot(rel, body string) {
 	m.t.Helper()
-	if err := os.MkdirAll(filepath.Dir(m.path(rel)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(m.rootPath(rel)), 0o755); err != nil {
 		m.t.Fatal(err)
 	}
-	if err := os.WriteFile(m.path(rel), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(m.rootPath(rel), []byte(body), 0o644); err != nil {
 		m.t.Fatal(err)
 	}
 }
 
-func (m *machine) read(rel string) (string, bool) {
-	b, err := os.ReadFile(m.path(rel))
+func (m *machine) read(rel string) (string, bool) { return m.readRoot(m.prefix + rel) }
+
+func (m *machine) readRoot(rel string) (string, bool) {
+	b, err := os.ReadFile(m.rootPath(rel))
 	return string(b), err == nil
 }
 
@@ -176,16 +282,15 @@ func waitGone(t *testing.T, m *machine, rel string) {
 }
 
 func client(server, mono string) *Client {
-	return NewClient(Config{Server: server, Monorepo: mono})
+	return NewClient(Config{Server: server, Monorepo: mono, Token: os.Getenv("PANDO_TOKEN")})
 }
 
 // ---- tests ----
 
 func TestE2ESaveReachesOtherMachine(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 
 	a.write("decisions/HISTORY.md", "# History\n\nWe chose plain files.\n")
 	d := waitContent(t, b, "decisions/HISTORY.md", "# History\n\nWe chose plain files.\n")
@@ -200,10 +305,9 @@ func TestE2ESaveReachesOtherMachine(t *testing.T) {
 }
 
 func TestE2EDeleteAndRename(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 
 	a.write("notes/x.md", "x\n")
 	a.write("notes/y.md", "y\n")
@@ -222,43 +326,46 @@ func TestE2EDeleteAndRename(t *testing.T) {
 	if _, err := os.Stat(b.path("notes")); err == nil {
 		t.Error("the emptied folder notes/ is still on ben")
 	}
-	h, err := client(server, mono).History(context.Background(), "archive/x2.md", 10)
+	h, err := env.client().History(context.Background(), env.p("archive/x2.md"), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(h.Versions) != 1 || h.Versions[0].Op != "rename" || h.Versions[0].From != "notes/x.md" {
+	if len(h.Versions) != 1 || h.Versions[0].Op != "rename" || h.Versions[0].From != env.p("notes/x.md") {
 		t.Errorf("archive/x2.md history: %+v", h.Versions)
 	}
 }
 
 func TestE2ELocalOnlyStays(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 
 	local := []string{
 		"web/node_modules/left-pad/index.js",
-		".env",
 		"app/.env.local",
 		"logs/run.ndjson",
-		".pando/pando.toml",
-		".pando/local/mine.json",
 		"research/infra/lib/README.md", // inside a folder with its own .git
-		"projects/web/README.md",
 		"data/cache.sqlite",
 	}
+	atRoot := []string{".env", ".pando/pando.toml", ".pando/local/mine.json", "projects/web/README.md"}
 	for _, p := range local {
 		a.write(p, "stays\n")
 	}
+	for _, p := range atRoot {
+		a.writeRoot(p, "stays\n")
+	}
+	pointer := ".pando/references/" + env.p("research/infra/lib.toml")
 	a.write("research/infra/lib/.git/HEAD", "ref: refs/heads/main\n")
 	a.write("big.txt", strings.Repeat("a", MaxBytes+1))
 	a.write("image.dat", "\x89PNG\x00\x01")
-	a.write(".pando/references/research/infra/lib.toml", "url = \"https://example.com/lib.git\"\n")
+	a.writeRoot(pointer, "url = \"https://example.com/lib.git\"\n")
 	a.write("normal.md", "goes\n")
 
 	waitContent(t, b, "normal.md", "goes\n")
-	waitContent(t, b, ".pando/references/research/infra/lib.toml", "url = \"https://example.com/lib.git\"\n")
+	waitFor(t, "the pointer on ben", func() bool {
+		got, _ := b.readRoot(pointer)
+		return got == "url = \"https://example.com/lib.git\"\n"
+	})
 	// Large files and binaries go too, through R2 (M7).
 	waitContent(t, b, "big.txt", strings.Repeat("a", MaxBytes+1))
 	waitContent(t, b, "image.dat", "\x89PNG\x00\x01")
@@ -268,21 +375,27 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 			t.Errorf("%s reached ben", p)
 		}
 	}
-	st, err := client(server, mono).Status(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	for _, p := range atRoot {
+		if _, ok := b.readRoot(p); ok {
+			t.Errorf("%s reached ben", p)
+		}
 	}
-	if st["files"].(float64) != 4 {
-		t.Errorf("the server holds %v files, want 4", st["files"])
+	if !env.shared {
+		st, err := env.client().Status(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st["files"].(float64) != 4 {
+			t.Errorf("the server holds %v files, want 4", st["files"])
+		}
 	}
 }
 
 // The object refuses what a client must not send, even from a client that
 // does not check.
 func TestE2EServerRefuses(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	send, next := rawSocket(t, server, mono)
+	env := newEnv(t)
+	send, next := rawSocket(t, env.server, env.mono)
 	body := []byte("x = 1\n")
 	for i, c := range []struct{ path, reason string }{
 		{".pando/pando.toml", "protected"},
@@ -299,20 +412,20 @@ func TestE2EServerRefuses(t *testing.T) {
 			t.Errorf("save of %s: got %s %s, want refused %s", c.path, m.Type, m.Reason, c.reason)
 		}
 	}
-	send(saveMsg{Type: "save", ID: "sha", Path: "a.md", SHA: gitSHA([]byte("other")), Bytes: body})
+	send(saveMsg{Type: "save", ID: "sha", Path: env.p("a.md"), SHA: gitSHA([]byte("other")), Bytes: body})
 	if m := next(""); m.Reason != "bad_sha" {
 		t.Errorf("a wrong sha: got %+v", m)
 	}
 	big := []byte(strings.Repeat("a", MaxBytes+1))
-	send(saveMsg{Type: "save", ID: "big", Path: "big.md", SHA: gitSHA(big), Bytes: big})
+	send(saveMsg{Type: "save", ID: "big", Path: env.p("big.md"), SHA: gitSHA(big), Bytes: big})
 	if m := next(""); m.Reason != "too_large" || m.Status != 413 {
 		t.Errorf("a big file: got %+v", m)
 	}
-	send(saveMsg{Type: "save", ID: "ok", Path: "a.md", SHA: gitSHA(body), Bytes: body})
-	if m := next(""); m.Type != "accepted" || m.Version != 1 {
+	send(saveMsg{Type: "save", ID: "ok", Path: env.p("a.md"), SHA: gitSHA(body), Bytes: body})
+	if m := next(""); m.Type != "accepted" || (!env.shared && m.Version != 1) {
 		t.Errorf("a good save: got %+v", m)
 	}
-	send(saveMsg{Type: "save", ID: "stale", Path: "a.md", Base: 0, SHA: gitSHA([]byte("b\n")), Bytes: []byte("b\n")})
+	send(saveMsg{Type: "save", ID: "stale", Path: env.p("a.md"), Base: 0, SHA: gitSHA([]byte("b\n")), Bytes: []byte("b\n")})
 	if m := next(""); m.Type != "stale" || m.Status != 409 || m.Current == nil || string(m.Current.Bytes) != "x = 1\n" {
 		t.Errorf("a stale base: got %+v", m)
 	}
@@ -322,10 +435,9 @@ func TestE2EServerRefuses(t *testing.T) {
 // first. The late one keeps its bytes in a conflict copy and freezes the file
 // until pando resolve.
 func TestE2EConflictCopyAndResolve(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 
 	a.write("plan.md", "v1\n")
 	waitContent(t, b, "plan.md", "v1\n")
@@ -333,7 +445,7 @@ func TestE2EConflictCopyAndResolve(t *testing.T) {
 	b.stop()
 	a.write("plan.md", "v2 from ana\n")
 	waitFor(t, "ana's v2 on the server", func() bool {
-		h, err := client(server, mono).History(context.Background(), "plan.md", 10)
+		h, err := env.client().History(context.Background(), env.p("plan.md"), 10)
 		return err == nil && len(h.Versions) == 2
 	})
 	b.write("plan.md", "v2 from ben, written offline\n")
@@ -351,7 +463,7 @@ func TestE2EConflictCopyAndResolve(t *testing.T) {
 		t.Errorf("ana's file changed to %q", got)
 	}
 	frozen, _ := ListFrozen(b.root)
-	if len(frozen) != 1 || frozen[0].Path != "plan.md" {
+	if len(frozen) != 1 || frozen[0].Path != env.p("plan.md") {
 		t.Fatalf("frozen: %+v", frozen)
 	}
 
@@ -377,10 +489,9 @@ func TestE2EConflictCopyAndResolve(t *testing.T) {
 // Both machines save the same file at the same moment. Exactly one loses,
 // keeps its bytes in a conflict copy, and both end with the winner's bytes.
 func TestE2ELiveRace(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 
 	a.write("race.md", "start\n")
 	waitContent(t, b, "race.md", "start\n")
@@ -411,11 +522,10 @@ func TestE2ELiveRace(t *testing.T) {
 // A real network cut: ana's connection goes through a proxy that is cut.
 // Her saves wait in the outbox and go out when the network returns.
 func TestE2EOfflineSavesGoOutOnReconnect(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	p := newProxy(t, server)
-	a := newMachine(t, "ana", p.url(), mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	p := newProxy(t, env.server)
+	a := env.machineAt(t, "ana", p.url())
+	b := env.machine(t, "ben")
 
 	a.write("base.md", "online\n")
 	waitContent(t, b, "base.md", "online\n")
@@ -441,23 +551,23 @@ func TestE2EOfflineSavesGoOutOnReconnect(t *testing.T) {
 }
 
 func TestE2EHistoryAndRestore(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 	ctx := context.Background()
-	c := client(server, mono)
+	c := env.client()
 
 	for _, body := range []string{"one\n", "two\n", "three\n"} {
 		a.write("h.md", body)
 		waitContent(t, b, "h.md", body)
 		time.Sleep(1100 * time.Millisecond) // one save per second, for --to by time
 	}
-	h, err := c.History(ctx, "h.md", 10)
+	h, err := c.History(ctx, env.p("h.md"), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(h.Versions) != 3 || h.Versions[0].Author != "Ana <ana@example.com>" || h.Versions[0].Machine != "ana" {
+	// On a deployed Worker the author is the signed-in account, not the test's.
+	if len(h.Versions) != 3 || (!env.shared && h.Versions[0].Author != "Ana <ana@example.com>") || h.Versions[0].Machine != "ana" {
 		t.Fatalf("history: %+v", h.Versions)
 	}
 	var out strings.Builder
@@ -485,54 +595,52 @@ func TestE2EHistoryAndRestore(t *testing.T) {
 	waitContent(t, b, "h.md", "two\n")
 	waitContent(t, a, "h.md", "two\n")
 
-	h, _ = c.History(ctx, "h.md", 10)
+	h, _ = c.History(ctx, env.p("h.md"), 10)
 	if len(h.Versions) != 5 || h.Versions[0].Source != "restore" || *h.Versions[0].RestoredFrom != h.Versions[3].Version {
 		t.Errorf("history after restores: %+v", h.Versions[:2])
 	}
 	// Restoring what is already there changes nothing.
-	r, err := c.Restore(ctx, "h.md", h.Versions[0].Version, "Ana", "ana", "")
+	r, err := c.Restore(ctx, env.p("h.md"), h.Versions[0].Version, "Ana", "ana", "")
 	if err != nil || !r.Unchanged {
 		t.Errorf("restore of the current version: %+v %v", r, err)
 	}
 }
 
 func TestE2ECloneDownload(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
 	files := map[string]string{"AGENTS.md": "agents\n", "decisions/RULINGS.md": "rulings\n", "research/a/b/c.md": "c\n", "gone.md": "soon gone\n"}
 	for p, body := range files {
 		a.write(p, body)
 	}
-	c := client(server, mono)
-	waitFor(t, "four files on the server", func() bool {
-		s, err := c.Status(context.Background())
-		return err == nil && s["files"].(float64) == 4
-	})
+	c := env.client()
+	onServer := func(p string, deleted bool) func() bool {
+		return func() bool {
+			h, err := c.History(context.Background(), env.p(p), 1)
+			return err == nil && len(h.Versions) == 1 && h.Versions[0].Deleted == deleted
+		}
+	}
+	for p := range files {
+		waitFor(t, p+" on the server", onServer(p, false))
+	}
 	os.Remove(a.path("gone.md"))
 	delete(files, "gone.md")
-	waitFor(t, "the delete on the server", func() bool {
-		s, err := c.Status(context.Background())
-		return err == nil && s["files"].(float64) == 3
-	})
+	waitFor(t, "the delete on the server", onServer("gone.md", true))
 
-	// pando clone on a new machine: root.json, then Download.
-	carl := t.TempDir()
-	os.MkdirAll(filepath.Join(carl, ".pando", "local"), 0o755)
-	os.WriteFile(filepath.Join(carl, ".pando", "local", "root.json"),
-		[]byte(fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server)), 0o644)
+	// pando clone on a new machine: root.json, then Clone.
+	carl := env.bare(t, "carl")
+	carl.writeRoot(".pando/local/root.json", fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, env.mono, env.server))
 	t.Setenv("PANDO_MACHINE", "carl")
 	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
-	if err := Clone(context.Background(), carl, CloneOptions{}); err != nil {
+	if err := Clone(context.Background(), carl.root, CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for p, body := range files {
-		got, err := os.ReadFile(filepath.Join(carl, filepath.FromSlash(p)))
-		if err != nil || string(got) != body {
-			t.Errorf("%s on the clone: %q %v", p, got, err)
+		if got, ok := carl.read(p); !ok || got != body {
+			t.Errorf("%s on the clone: %q", p, got)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(carl, "gone.md")); err == nil {
+	if _, ok := carl.read("gone.md"); ok {
 		t.Error("a deleted file came down")
 	}
 }
@@ -542,7 +650,11 @@ func rawSocket(t *testing.T, server, mono string) (send func(any), next func(str
 	t.Helper()
 	ctx := context.Background()
 	u := strings.Replace(server, "http", "ws", 1) + "/v1/monorepos/" + url.PathEscape(mono) + "/meta/socket"
-	c, _, err := websocket.Dial(ctx, u, nil)
+	opts := &websocket.DialOptions{HTTPHeader: http.Header{}}
+	if tok := os.Getenv("PANDO_TOKEN"); tok != "" {
+		opts.HTTPHeader.Set("Authorization", "Bearer "+tok)
+	}
+	c, _, err := websocket.Dial(ctx, u, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,8 +687,9 @@ func rawSocket(t *testing.T, server, mono string) (send func(any), next func(str
 // pando init's first upload carries .pando/pando.toml and the pointers; after
 // it, .pando/ is protected again and a second init is refused.
 func TestE2EInitFirstUpload(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
+	env := newEnv(t)
+	env.own(t, "init") // init needs an empty meta layer
+	server, mono := env.server, env.mono
 	t.Setenv("PANDO_MACHINE", "ana")
 	t.Setenv("PANDO_AUTHOR", "Ana <ana@example.com>")
 	root := t.TempDir()
@@ -598,12 +711,12 @@ func TestE2EInitFirstUpload(t *testing.T) {
 	if err := Init(ctx, root); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := client(server, mono).Status(ctx)
+	st, _ := env.client().Status(ctx)
 	if st["files"].(float64) != 4 {
 		t.Errorf("after init the server holds %v files, want 4", st["files"])
 	}
 
-	b := newMachine(t, "ben", server, mono)
+	b := env.machine(t, "ben")
 	for _, p := range []string{".pando/pando.toml", ".pando/references/research/infra/lib.toml", "AGENTS.md", "decisions/RULINGS.md"} {
 		waitContent(t, b, p, files[p])
 	}
@@ -614,26 +727,39 @@ func TestE2EInitFirstUpload(t *testing.T) {
 	}
 
 	// The window is closed: .pando/pando.toml is protected again.
-	send, next := rawSocket(t, server, mono)
+	send, next := rawSocket(t, env.server, env.mono)
 	body := []byte("local_only = []\n")
 	send(saveMsg{Type: "save", ID: "p", Path: ".pando/pando.toml", Base: 3, SHA: gitSHA(body), Bytes: body})
 	if m := next(""); m.Reason != "protected" {
 		t.Errorf("a live save of .pando/pando.toml after init: %+v", m)
 	}
 	// And a second init is refused.
-	err := client(server, mono).initAction(ctx, "start")
+	err := env.client().initAction(ctx, "start")
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "not_empty" {
 		t.Errorf("a second init: %v", err)
 	}
 }
 
 func TestE2EReferencesHook(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
+	env := newEnv(t)
 	var mu sync.Mutex
 	var calls [][]string
-	a := newMachine(t, "ana", server, mono)
-	b := &machine{t: t, name: "ben", root: t.TempDir(), server: server, mono: mono}
+	pointer := ".pando/references/" + env.p("research/infra/lib.toml")
+	ours := func() int { // calls that named our pointer (a shared monorepo has others)
+		mu.Lock()
+		defer mu.Unlock()
+		n := 0
+		for _, c := range calls {
+			for _, p := range c {
+				if p == pointer {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	a := env.machine(t, "ana")
+	b := env.bare(t, "ben")
 	b.hooks.References = func(root string, pointers []string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -644,40 +770,36 @@ func TestE2EReferencesHook(t *testing.T) {
 	}
 	b.start()
 
-	a.write(".pando/references/research/infra/lib.toml", "commit = \"aaaa\"\n")
-	waitFor(t, "the hook for the new pointer", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(calls) == 1 && len(calls[0]) == 1 && calls[0][0] == ".pando/references/research/infra/lib.toml"
-	})
+	a.writeRoot(pointer, "commit = \"aaaa\"\n")
+	waitFor(t, "the hook for the new pointer", func() bool { return ours() == 1 })
 	a.write("notes.md", "not a pointer\n")
-	a.write(".pando/references/research/infra/lib.toml", "commit = \"bbbb\"\n")
+	a.writeRoot(pointer, "commit = \"bbbb\"\n")
 	waitContent(t, b, "notes.md", "not a pointer\n")
-	waitFor(t, "the hook for the updated pointer", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(calls) == 2 && len(calls[1]) == 1
-	})
-	os.Remove(a.path(".pando/references/research/infra/lib.toml"))
-	waitFor(t, "the hook for the removed pointer", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(calls) == 3
-	})
+	waitFor(t, "the hook for the updated pointer", func() bool { return ours() == 2 })
+	os.Remove(a.rootPath(pointer))
+	waitFor(t, "the hook for the removed pointer", func() bool { return ours() == 3 })
+	mu.Lock()
+	for _, c := range calls {
+		for _, p := range c {
+			if !strings.HasPrefix(p, ".pando/references/") {
+				t.Errorf("the hook got %s, not a pointer", p)
+			}
+		}
+	}
+	mu.Unlock()
 }
 
 func TestE2ESyncOnce(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
 	a.write("from-ana.md", "ana\n")
 	waitFor(t, "ana's save on the server", func() bool {
-		s, err := client(server, mono).Status(context.Background())
-		return err == nil && s["files"].(float64) == 1
+		h, err := env.client().History(context.Background(), env.p("from-ana.md"), 1)
+		return err == nil && len(h.Versions) == 1
 	})
 
 	// An agent's sandbox: no daemon, just pando meta sync --once.
-	sb := &machine{t: t, name: "sandbox", root: t.TempDir(), server: server, mono: mono}
+	sb := env.bare(t, "sandbox")
 	sb.write("from-sandbox.md", "sandbox\n")
 	e, err := New(sb.config())
 	if err != nil {
@@ -768,12 +890,17 @@ func (p *proxy) restore() {
 
 // ---- commits after quiet, on real Artifacts (run-e2e.sh --artifacts) ----
 
-func artifactsServer(t *testing.T) string {
-	server := testServer(t)
+// artifactsEnv is for the local test Worker with Artifacts only: its
+// /test/meta-repo route makes and reads e2e-*--meta repos.
+func artifactsEnv(t *testing.T, prefix string) *testEnv {
 	if os.Getenv("PANDO_META_TEST_ARTIFACTS") == "" {
 		t.Skip("needs the test Worker with Artifacts: worker/test/live/run-e2e.sh --artifacts")
 	}
-	return server
+	env := newEnv(t)
+	b := make([]byte, 4)
+	rand.Read(b)
+	env.mono = prefix + hex.EncodeToString(b)
+	return env
 }
 
 func metaRepo(t *testing.T, server, mono, action string, extra map[string]string) []byte {
@@ -805,13 +932,11 @@ type gitCommit struct {
 }
 
 func TestE2ECommitsAfterQuiet(t *testing.T) {
-	server := artifactsServer(t)
-	b := make([]byte, 4)
-	rand.Read(b)
-	mono := "e2e-commit-" + hex.EncodeToString(b)
+	env := artifactsEnv(t, "e2e-commit-")
+	server, mono := env.server, env.mono
 	metaRepo(t, server, mono, "create", nil)
 	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
-	c := client(server, mono)
+	c := env.client()
 	ctx := context.Background()
 
 	logOf := func() []gitCommit {
@@ -845,7 +970,7 @@ func TestE2ECommitsAfterQuiet(t *testing.T) {
 		t.Fatalf("timed out waiting for %s", what)
 	}
 
-	a := newMachine(t, "ana", server, mono)
+	a := env.machine(t, "ana")
 	a.write("a.md", "a1\n")
 	a.write("notes/b.md", "b1\n")
 	start := time.Now()
@@ -875,7 +1000,7 @@ func TestE2ECommitsAfterQuiet(t *testing.T) {
 	}
 
 	// A restore is a commit too.
-	r, err := c.Restore(ctx, "a.md", 1, "Ana <ana@example.com>", "ana", "agent-7")
+	r, err := c.Restore(ctx, env.p("a.md"), 1, "Ana <ana@example.com>", "ana", "agent-7")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,10 +1020,8 @@ func TestE2ECommitsAfterQuiet(t *testing.T) {
 }
 
 func TestE2EInitCommits(t *testing.T) {
-	server := artifactsServer(t)
-	b := make([]byte, 4)
-	rand.Read(b)
-	mono := "e2e-init-" + hex.EncodeToString(b)
+	env := artifactsEnv(t, "e2e-init-")
+	server, mono := env.server, env.mono
 	metaRepo(t, server, mono, "create", nil)
 	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
 	t.Setenv("PANDO_MACHINE", "ana")
@@ -948,11 +1071,10 @@ func randomBinary(n int) string {
 }
 
 func TestE2ELargeFiles(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
+	env := newEnv(t)
 	ctx := context.Background()
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 
 	render := randomBinary(300 << 10)
 	big := strings.Repeat("a long text line\n", 2<<20/17+1) // just over 2 MiB
@@ -964,7 +1086,7 @@ func TestE2ELargeFiles(t *testing.T) {
 	t.Logf("a 300 KB binary and a 2 MiB text reached ben through R2 in %s", time.Since(start).Round(time.Millisecond))
 
 	// git and history hold a Git LFS pointer, not the bytes.
-	ptrText, err := client(server, mono).File(ctx, "design/render.png", 0)
+	ptrText, err := env.client().File(ctx, env.p("design/render.png"), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -984,8 +1106,8 @@ func TestE2ELargeFiles(t *testing.T) {
 	f.Close()
 
 	// A text-only clone keeps pointers until pando fetch.
-	carl := &machine{t: t, name: "carl", root: t.TempDir(), server: server, mono: mono}
-	carl.write(".pando/local/root.json", fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server))
+	carl := env.bare(t, "carl")
+	carl.writeRoot(".pando/local/root.json", fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, env.mono, env.server))
 	t.Setenv("PANDO_MACHINE", "carl")
 	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
 	if err := Clone(ctx, carl.root, CloneOptions{TextOnly: true}); err != nil {
@@ -995,7 +1117,7 @@ func TestE2ELargeFiles(t *testing.T) {
 		t.Fatalf("text-only clone has %d bytes at design/render.png, want a pointer", len(got))
 	}
 	var out strings.Builder
-	if err := Fetch(ctx, carl.root, []string{"design/render.png"}, &out); err != nil {
+	if err := Fetch(ctx, carl.root, []string{env.p("design/render.png")}, &out); err != nil {
 		t.Fatal(err)
 	}
 	t.Log(strings.TrimSpace(out.String()))
@@ -1020,10 +1142,9 @@ func TestE2ELargeFiles(t *testing.T) {
 }
 
 func TestE2ELargeFileConflict(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	a := newMachine(t, "ana", server, mono)
-	b := newMachine(t, "ben", server, mono)
+	env := newEnv(t)
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
 	v1 := randomBinary(50 << 10)
 	a.write("art/logo.bin", v1)
 	waitContent(t, b, "art/logo.bin", v1)
@@ -1032,7 +1153,7 @@ func TestE2ELargeFileConflict(t *testing.T) {
 	fromAna := randomBinary(60 << 10)
 	a.write("art/logo.bin", fromAna)
 	waitFor(t, "ana's second version on the server", func() bool {
-		h, err := client(server, mono).History(context.Background(), "art/logo.bin", 10)
+		h, err := env.client().History(context.Background(), env.p("art/logo.bin"), 10)
 		return err == nil && len(h.Versions) == 2
 	})
 	fromBen := randomBinary(70 << 10)
@@ -1051,14 +1172,35 @@ func TestE2ELargeFileConflict(t *testing.T) {
 }
 
 func TestE2EPointerNeedsItsBytes(t *testing.T) {
-	server := testServer(t)
-	mono := newMonorepo(t)
-	send, next := rawSocket(t, server, mono)
+	env := newEnv(t)
+	send, next := rawSocket(t, env.server, env.mono)
 	b := make([]byte, 32)
 	rand.Read(b)
 	ptr := Pointer{Oid: hex.EncodeToString(b), Size: 1234}.text()
-	send(saveMsg{Type: "save", ID: "p", Path: "x.png", SHA: gitSHA(ptr), Bytes: ptr})
+	send(saveMsg{Type: "save", ID: "p", Path: env.p("x.png"), SHA: gitSHA(ptr), Bytes: ptr})
 	if m := next(""); m.Type != "refused" || m.Reason != "missing_blob" {
 		t.Errorf("a pointer with no bytes in R2: %+v", m)
 	}
+}
+
+// On a deployed Worker: saves become commits on <monorepo>--meta after quiet.
+func TestE2ECommitsOnDeployed(t *testing.T) {
+	env := newEnv(t)
+	if !strings.HasPrefix(env.server, "https://") {
+		t.Skip("for a deployed Worker (commits on real Artifacts locally: run-e2e.sh --artifacts)")
+	}
+	a := env.machine(t, "ana")
+	a.write("committed.md", "a commit after quiet\n")
+	start := time.Now()
+	deadline := start.Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		h, err := env.client().History(context.Background(), env.p("committed.md"), 1)
+		if err == nil && len(h.Versions) == 1 && h.Versions[0].Commit != "" {
+			t.Logf("committed as %s after %s", h.Versions[0].Commit[:10], time.Since(start).Round(time.Second))
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	st, _ := env.client().Status(context.Background())
+	t.Fatalf("no commit after 60 s; status %v", st)
 }

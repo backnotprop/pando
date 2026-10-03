@@ -17,17 +17,24 @@ import (
 )
 
 // obtainCredential is the one sign-in step. How people sign in is not
-// decided yet (GitHub sign-in or an email link, RULINGS.md); until then it
-// takes a credential, or the server's bootstrap secret, typed or piped in.
-// A browser flow replaces this function and nothing else.
+// decided (an emailed code, passkeys or WorkOS; RULINGS.md). Until it is,
+// it takes a credential made on a signed-in machine with
+// `pando credential create`, typed with no echo or piped in. A real sign-in
+// flow replaces this function and nothing else.
 func obtainCredential(e *Env, serverURL string) (string, error) {
-	if v := os.Getenv("PANDO_LOGIN_CREDENTIAL"); v != "" {
-		return strings.TrimSpace(v), nil
-	}
 	if !e.isTerminal() {
 		return config.ReadToken(e.Stdin)
 	}
-	return e.readSecret("Credential or bootstrap secret for " + config.Host(serverURL) + " (input hidden): ")
+	return e.readSecret("Credential for " + config.Host(serverURL) + " (input hidden): ")
+}
+
+// readBootstrap asks for the server's bootstrap secret: typed with no echo,
+// or piped in. Never an argument, never printed.
+func readBootstrap(e *Env, serverURL string) (string, error) {
+	if !e.isTerminal() {
+		return config.ReadToken(e.Stdin)
+	}
+	return e.readSecret("Bootstrap secret for " + config.Host(serverURL) + " (input hidden): ")
 }
 
 var loginRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9]|-[a-z0-9]){0,38}$`)
@@ -48,7 +55,8 @@ func (e *Env) serverURL(flagValue string) string {
 func Login(e *Env, args []string) error {
 	fs := flags("login")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
-	login := fs.String("login", "", "with a bootstrap secret: the login to make (default: your login name)")
+	bootstrap := fs.Bool("bootstrap", false, "make your user with the server's bootstrap secret (asked for with no echo)")
+	login := fs.String("login", "", "with --bootstrap: the login to make (default: your login name)")
 	name := fs.String("name", "", "your name on commits (default: the account's, else git config user.name)")
 	email := fs.String("email", "", "your email on commits (default: the account's, else git config user.email)")
 	if _, err := parse(fs, args); err != nil {
@@ -58,33 +66,45 @@ func Login(e *Env, args []string) error {
 	if serverURL == "" {
 		return UsageError{"pando login --server <url>"}
 	}
-	secret, err := obtainCredential(e, serverURL)
-	if err != nil {
-		return err
-	}
-
-	// A user credential signs in as its user. Anything the server does not
-	// take as one is tried as the bootstrap secret, which makes the user.
-	var me *server.Me
-	if s, err := server.Open(serverURL, secret); err != nil {
-		return err
-	} else if m, err := s.Me(e.Ctx); err == nil {
-		me = m
-	} else if st := server.StatusOf(err); st != 401 && st != 403 {
-		return err
-	} else {
-		me, secret, err = makeUser(e, serverURL, secret, *login, *name, *email)
+	var (
+		me     *server.Me
+		secret string
+		err    error
+	)
+	if *bootstrap {
+		b, err := readBootstrap(e, serverURL)
 		if err != nil {
 			return err
 		}
+		if me, secret, err = makeUser(e, serverURL, b, *login, *name, *email); err != nil {
+			return err
+		}
+	} else {
+		if secret, err = obtainCredential(e, serverURL); err != nil {
+			return err
+		}
+		s, err := server.Open(serverURL, secret)
+		if err != nil {
+			return err
+		}
+		me, err = s.Me(e.Ctx)
+		if st := server.StatusOf(err); st == 401 || st == 403 {
+			return errors.New("the server did not take that credential (to make your user on a new server: pando login --bootstrap)")
+		} else if err != nil {
+			return err
+		}
 	}
+	return finishLogin(e, serverURL, *srv, secret, me, *name, *email)
+}
 
+// finishLogin stores the credential and who it signs in as.
+func finishLogin(e *Env, serverURL, flagServer, secret string, me *server.Me, name, email string) error {
 	acct := config.Account{Login: me.Login, Name: me.Name, Email: me.Email}
-	if *name != "" {
-		acct.Name = *name
+	if name != "" {
+		acct.Name = name
 	}
-	if *email != "" {
-		acct.Email = *email
+	if email != "" {
+		acct.Email = email
 	}
 	if acct.Name == "" {
 		acct.Name, _ = gitx.Cmd{}.Run(e.Ctx, "config", "--get", "user.name")
@@ -92,7 +112,7 @@ func Login(e *Env, args []string) error {
 	if acct.Email == "" {
 		acct.Email, _ = gitx.Cmd{}.Run(e.Ctx, "config", "--get", "user.email")
 	}
-	if e.Home.Server == "" || *srv != "" {
+	if e.Home.Server == "" || flagServer != "" {
 		e.Home.Server = serverURL
 	}
 	if err := e.Home.SaveCredential(serverURL, secret, acct); err != nil {

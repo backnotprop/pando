@@ -226,3 +226,12 @@ func short(s string) string {
 }
 
 var errSilent = errors.New("")
+
+// label is how a repo is named in messages: its path, or the repo's name
+// for a plain repo (path ".").
+func label(root *config.Root, repo string) string {
+	if repo == "." {
+		return root.Name
+	}
+	return repo
+}

@@ -70,7 +70,7 @@ func Branch(e *Env, args []string) error {
 		if i > 0 {
 			e.printf("\n")
 		}
-		e.printf("%s  (main at %s)\n", r, short(bl.DefaultHead))
+		e.printf("%s  (main at %s)\n", label(root, r), short(bl.DefaultHead))
 		if len(bl.Branches) == 0 {
 			e.printf("  no open branches\n")
 			continue
@@ -170,7 +170,7 @@ func Diff(e *Env, args []string) error {
 	if err := json.Unmarshal(body, &d); err != nil {
 		return fmt.Errorf("bad diff from server: %w", err)
 	}
-	e.printf("%s: %s against main (from %s to %s)\n", repo, branch, short(d.MergeBase), short(d.Head))
+	e.printf("%s: %s against main (from %s to %s)\n", label(root, repo), branch, short(d.MergeBase), short(d.Head))
 	letter := map[string]string{"added": "A", "modified": "M", "deleted": "D", "renamed": "R"}
 	tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
 	for _, f := range d.Files {
@@ -369,7 +369,7 @@ func Merge(e *Env, args []string) error {
 	if res.Forced {
 		forced = ", forced past checks"
 	}
-	e.printf("Merged %s into main of %s: %s (merge commit%s, by %s)\n", branch, repo, short(res.SHA), forced, dash(res.MergedBy))
+	e.printf("Merged %s into main of %s: %s (merge commit%s, by %s)\n", branch, label(root, repo), short(res.SHA), forced, dash(res.MergedBy))
 	refreshMain(e, root, repo)
 	return nil
 }

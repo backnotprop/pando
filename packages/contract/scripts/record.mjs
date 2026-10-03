@@ -437,6 +437,8 @@ try {
   record("merge.json", "MergeResult", "POST .../branches/{branch}/merge", r.status, r.json);
   r = await call("GET", `${repoPath}/branches?state=merged`, secret);
   record("branches-merged.json", "BranchList", "GET .../repos/{repo}/branches?state=merged", r.status, r.json);
+  r = await call("GET", `${base}/heads`, secret);
+  record("heads.json", "HeadList", "GET .../heads (after the merges: main's title)", r.status, r.json);
 
   // Restore: README.md saved again, then written back as it was, then again (unchanged).
   const first = meta.frames.find((f) => f.type === "accepted" && f.path === "README.md")?.version;

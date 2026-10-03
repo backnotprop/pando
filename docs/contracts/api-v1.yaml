@@ -790,12 +790,21 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [repo, path, default_branch, head, updated_at]
+                      required: [repo, path, default_branch, head, head_title, updated_at]
                       properties:
                         repo: { type: string, description: The repo's name in URLs. }
                         path: { type: string }
                         default_branch: { type: string }
                         head: { type: [string, "null"] }
+                        head_title:
+                          type: [string, "null"]
+                          description: >-
+                            The head commit's title (its first line), recorded when
+                            main moved: a merge's message, or the first push's
+                            commit (shortly after the push, once its numbers are
+                            read). A main recorded before titles were shows the
+                            last merge's branch title. Null when unknown, never
+                            a title from another commit.
                         updated_at: { type: [string, "null"], format: date-time }
                   seq:
                     type: [integer, "null"]

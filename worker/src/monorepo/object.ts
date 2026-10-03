@@ -22,6 +22,9 @@ import type { BranchList, BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
+import { FeedOut } from "../feed/out";
+import type { FeedEvent, Key, NeedRow, NeedState, Summary } from "../feed/shape";
+import type { JoinData } from "../feed/object";
 import type {
   BranchRecord,
   Checks,
@@ -139,10 +142,13 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Ref-only writes waiting for a slot, per Artifacts repo; sent together as one receive-pack. */
   private refQueues = new Map<string, { cmd: RefCommand; done: (reason: string | null) => void; fail: (err: unknown) => void }[]>();
   private refRunners = new Set<string>();
+  /** The home's activity feed (feed/out.ts, C25): activity marking, fan-out, presence, summary ticks. */
+  private feed: FeedOut;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.feed = new FeedOut(ctx, env, this.sql, () => this.info()?.name ?? null);
     this.ensureSchema();
   }
 
@@ -167,6 +173,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    this.feed.ensureSchema();
   }
 
   private rows<T>(query: string, ...args: unknown[]): T[] {
@@ -398,11 +405,11 @@ export class MonorepoObject extends DurableObject<Env> {
       if (name === main) {
         this.rememberHead(repo, u.new === ZERO ? null : u.new);
         this.forgetRequiredIfConfig(repo);
-        if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new });
         const seq = this.publish({
           kind: "push", collection: "default_heads", key: repo, op: "upsert", repo, ...who(identity),
           row: { repo, default_branch: main, default_head: u.new === ZERO ? null : u.new }, before: u.old, head: u.new,
         });
+        if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new, ...(seq ? { push: { seq, before: u.old } } : {}) });
         events.push({ ...base, event: "push", author: identity.login, seq: seq || null });
         continue;
       }
@@ -425,12 +432,13 @@ export class MonorepoObject extends DurableObject<Env> {
       } else {
         this.sql.exec("UPDATE branches SET head = ?, updated_at = ? WHERE repo = ? AND name = ?", u.new, at, repo, name);
       }
+      this.sql.exec("UPDATE branches SET pushed_machine = ? WHERE repo = ? AND name = ?", identity.credential_name, repo, name);
       b = this.branchRecord(repo, name)!;
       const seq = this.publishBranch(opened ? "branch.opened" : "push", repo, name, identity, { before: u.old, head: u.new });
       const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
       if (opened) events.push({ ...e, event: "branch.opened" });
       events.push({ ...e, event: "push" });
-      this.queueFacts({ type: "branch", repo, branch: name, head: u.new });
+      this.queueFacts({ type: "branch", repo, branch: name, head: u.new, ...(seq ? { push: { seq, before: u.old } } : {}) });
     }
     // Hook deliveries, in the same step as the change (C9).
     this.queueDeliveries(events, origin);
@@ -854,6 +862,7 @@ export class MonorepoObject extends DurableObject<Env> {
       "SELECT id FROM deliveries WHERE status = 'queued' AND sent_at IS NULL ORDER BY created_at LIMIT 500",
     ).map((r) => r.id);
     if (unsent.length) await this.sendDeliveries(unsent);
+    await this.feed.alarm();
   }
 
   // ── Object sizes (git protocol v2 object-info) ───────────────────────────
@@ -901,6 +910,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const seq = this.sql.exec<{ seq: number }>(
       "INSERT INTO events (at, kind, body, tags) VALUES (?, ?, ?, ?) RETURNING seq", at, e.kind, body, ` ${tags.join(" ")} `,
     ).one().seq as number;
+    this.feed.onPublish(seq, at, e);
     const frame = JSON.stringify({ type: "event", seq, at, ...rest });
     // Each socket subscribed to topics (acceptWebSocket tags); send once to every socket on any of this event's.
     const sent = new Set<WebSocket>();
@@ -974,7 +984,11 @@ export class MonorepoObject extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server, topics);
-    server.serializeAttachment({ login: request.headers.get("x-pando-login") ?? "", connected_at: now(), topics });
+    server.serializeAttachment({
+      login: request.headers.get("x-pando-login") ?? "", connected_at: now(), topics,
+      // For presence (C25): the socket's id, and the credential's name as the default machine.
+      sid: randomId("ws_"), machine: request.headers.get("x-pando-machine") ?? "",
+    });
     // Replay, then live. Nothing here awaits, so no event can fall between the two.
     const sinceParam = url.searchParams.get("since");
     const since = sinceParam === null || sinceParam === "" ? null : Number(sinceParam);
@@ -994,16 +1008,24 @@ export class MonorepoObject extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  async webSocketMessage(ws: WebSocket, _msg: string | ArrayBuffer): Promise<void> {
-    // The stream is one way. Text "ping" is answered "pong" without waking the object.
+  async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
+    // The stream is one way, but for a follower's hello (presence, C25). Text "ping" is answered "pong" without waking the object.
+    let reply: Record<string, unknown> = { type: "error", message: "this socket only sends; send the text ping to keep it open" };
     try {
-      ws.send(JSON.stringify({ type: "error", message: "this socket only sends; send the text ping to keep it open" }));
+      const m = typeof msg === "string" && msg.startsWith("{") ? (JSON.parse(msg) as Record<string, unknown>) : null;
+      if (m?.type === "hello") reply = this.feed.hello(ws, m);
+    } catch {
+      // not JSON
+    }
+    try {
+      ws.send(JSON.stringify(reply));
     } catch {
       // closed
     }
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    this.feed.gone(ws);
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
     } catch {
@@ -1029,6 +1051,7 @@ export class MonorepoObject extends DurableObject<Env> {
       merge_commit: merged ? b.merge_commit : null, merged_by: merged ? b.merged_by : null, merged_at: merged ? b.merged_at : null,
       merged_machine: merged ? (b.merge_machine ?? null) : null, merged_agent: merged ? (b.merge_agent ?? null) : null,
       forced: merged ? b.merge_forced === 1 : null,
+      pushed_machine: b.pushed_machine ?? null,
       created_at: b.created_at, updated_at: b.updated_at,
     };
   }
@@ -1043,7 +1066,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Branch facts (facts.ts): stored, computed on change by the queue ─────
 
-  private queueFacts(m: { type: "sweep"; repo: string; main: string } | { type: "branch"; repo: string; branch: string; head: string }): void {
+  private queueFacts(
+    m: ({ type: "sweep"; repo: string; main: string } | { type: "branch"; repo: string; branch: string; head: string }) & { push?: { seq: number; before: string } },
+  ): void {
     const monorepo = this.info()?.name;
     if (!monorepo || !this.env.BRANCH_FACTS) return;
     this.ctx.waitUntil(
@@ -1142,6 +1167,7 @@ export class MonorepoObject extends DurableObject<Env> {
         merged_machine: merged ? (b.merge_machine ?? null) : null,
         merged_agent: merged ? (b.merge_agent ?? null) : null,
         forced: merged ? b.merge_forced === 1 : null,
+        pushed_machine: b.pushed_machine ?? null,
         created_at: b.created_at,
         updated_at: b.updated_at,
         stale: !fresh,
@@ -1268,6 +1294,47 @@ export class MonorepoObject extends DurableObject<Env> {
     } finally {
       this.refRunners.delete(key);
     }
+  }
+
+  // ── The home's activity feed (feed/, C25) ────────────────────────────────
+
+  /** The member list as the accounts have it (the feed consumer reads it on each join or leave). */
+  setFeedMembers(logins: string[]): void {
+    if (this.info()) this.feed.setMembers(logins);
+  }
+
+  feedMembers(): string[] {
+    return this.feed.members();
+  }
+
+  /** A join: store the fresh member list, and for `login`, the latest `n` activity events and the summary. Null when the monorepo is gone. */
+  feedJoin(members: string[], login: string | null, n: number): JoinData | null {
+    const m = this.info();
+    if (!m) return null;
+    this.feed.setMembers(members);
+    if (!login) return null;
+    const large = this.feed.isLarge();
+    const events = large ? [] : this.feed.before(null, n);
+    return { kind: m.kind, large, events, complete: events.length < n, summary: this.feed.summary() };
+  }
+
+  /** The branch-facts job's commit count and head title for a push: the push goes out to feeds. */
+  feedPush(seq: number, summary: Record<string, unknown>): boolean {
+    return this.feed.push(seq, summary);
+  }
+
+  /** Activity events older than the cursor, newest first (fan-in for large monorepos and history past a feed's window). */
+  eventsBefore(cursor: Key | null, limit: number): FeedEvent[] {
+    return this.feed.before(cursor, Math.min(Math.max(limit, 1), 500));
+  }
+
+  /** Open branches that need someone (ready, conflicts, failing), from stored facts. */
+  needsYou(needs: NeedState[], limit: number): NeedRow[] {
+    return this.feed.needs(new Set(needs)).slice(0, Math.min(Math.max(limit, 1), 500));
+  }
+
+  feedSummary(): Summary {
+    return this.feed.summary();
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

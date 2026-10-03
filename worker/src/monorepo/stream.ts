@@ -22,7 +22,8 @@ export function parseTopics(q: string | null): string[] | null {
   if (q === null || q.trim() === "") return ["all"];
   const topics = [...new Set(q.split(",").map((t) => t.trim()).filter(Boolean))];
   if (!topics.length || topics.length > 10) return null;
-  const ok = topics.every((t) => t.length <= 200 && /^(all|main|meta|main:[A-Za-z0-9._-]+|repo:[A-Za-z0-9._-]+|kind:[a-z._]+)$/.test(t));
+  // `feed`: the activity lines (C25), as the person's feed shows them, for a large monorepo on the home.
+  const ok = topics.every((t) => t.length <= 200 && /^(all|main|meta|feed|main:[A-Za-z0-9._-]+|repo:[A-Za-z0-9._-]+|kind:[a-z._]+)$/.test(t));
   return ok ? topics : null;
 }
 

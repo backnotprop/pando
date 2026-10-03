@@ -49,6 +49,8 @@ export interface BranchRecord {
   merge_forced?: number | null;
   merge_machine?: string | null;
   merge_agent?: string | null;
+  /** The credential (machine) that last pushed it. */
+  pushed_machine?: string | null;
   /** Stored branch facts (facts.ts), for (facts_main, facts_head). */
   ahead?: number | null;
   behind?: number | null;

@@ -76,7 +76,8 @@ it (`git pull origin main`), push, and merge again.
 When there is more than one merge base (a criss-cross history, rare), the
 newest is used.
 
-Results (`status` tells them apart):
+Results (`status` tells them apart; every result also carries `stats`, see
+below):
 
 | `status` | Fields | Meaning |
 | --- | --- | --- |
@@ -113,6 +114,9 @@ const result = await commitChanges(repo, "main", {
   disappears, as in git.
 - Paths are repository-relative with `/` separators: no leading `/`, no
   empty, `.` or `..` segments, no `.git` segment, each path at most once.
+- Branch names (here and in `mergeCommit`) are short names such as `main` or
+  `agent/ana/login`, checked like `git check-ref-format`. A name that is 40
+  hex characters is refused, because it reads as a sha.
 
 Results:
 
@@ -124,6 +128,11 @@ Results:
 
 `actual` is the sha the branch was seen at, or `null` when it does not exist
 or is unknown.
+
+### `stats`
+
+Every result has `stats: { commitsRead, treesRead, objectsWritten, packBytes }`
+for logs and tests. It is not part of the decision; read `status`.
 
 ## Errors
 
@@ -146,9 +155,19 @@ the meta layer object). gitwrite does not lock anything. Every write sends a
 real `old` sha, so if the ref moved in between, Artifacts refuses the update
 and gitwrite returns `ref_moved`. A moved ref is never overwritten.
 
+Tested on Artifacts: an update whose `old` is not the ref's current sha, or
+that creates a ref which already exists, is answered `ng <ref> stale ref`,
+and the ref stays where it was.
+
 ## Limits
 
 - One file is at most 32 MB (Artifacts' blob limit).
 - The merge base search reads at most 5,000 commits.
-- Each call is a few Artifacts requests plus one tree read per changed
-  directory: a merge touching 20 directories reads about 60 trees.
+- A merge reads three trees (merge base, main, branch) for each directory
+  that both sides changed. A directory changed on one side only is taken
+  whole, unread. Tested: a merge in a 3,000-file repo where both sides
+  changed `pkg-010/src/` read 9 trees.
+- `commitChanges` reads one tree per directory on a changed path.
+- Each call also makes a few Artifacts requests: resolve the branch with
+  `log()`, `info()` for the remote, mint and revoke the write token, and the
+  push itself.

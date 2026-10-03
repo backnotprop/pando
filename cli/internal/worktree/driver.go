@@ -115,10 +115,20 @@ func credentialConfig(cloneURL string) [][2]string {
 	return credentialConfigFor(cloneURL, exe)
 }
 
+// PostBuffer is git's http.postBuffer for the Pando host: a push's pack up
+// to 100 MiB is sent in one request instead of chunked.
+const PostBuffer = "104857600"
+
 // credentialConfigFor is credentialConfig with the pando binary named. The
 // empty value comes first: it clears every helper git inherited for this
 // host (Apple's git has osxkeychain in its system config), so git neither
 // asks nor stores anywhere else. git adds "get", "store" or "erase".
+//
+// Two http settings ride along, for the Pando host only: HTTP/1.1, because
+// Apple's git (LibreSSL) over HTTP/2 breaks mid-upload on large pushes
+// ("bad record mac"); and a 100 MiB postBuffer, because a chunked HTTP/1.1
+// upload hung against the Worker. Measured by server-git: 24 of 24 pushes of
+// 12 MiB. The cost: git holds a push's pack in memory, up to 100 MiB.
 func credentialConfigFor(cloneURL, exe string) [][2]string {
 	scope := credentialScope(cloneURL)
 	if scope == "" {
@@ -128,6 +138,8 @@ func credentialConfigFor(cloneURL, exe string) [][2]string {
 		{"credential." + scope + ".helper", ""},
 		{"credential." + scope + ".helper", "!'" + strings.ReplaceAll(exe, "'", `'\''`) + "' credential"},
 		{"credential." + scope + ".useHttpPath", "true"},
+		{"http." + scope + "/.version", "HTTP/1.1"},
+		{"http." + scope + "/.postBuffer", PostBuffer},
 	}
 }
 
@@ -162,7 +174,13 @@ func WriteCredentialConfig(ctx context.Context, gitDir, cloneURL string) error {
 		return nil
 	}
 	g := gitx.Cmd{Env: []string{"GIT_DIR=" + gitDir}}
-	_, _ = g.Run(ctx, "config", "--unset-all", kv[0][0])
+	seen := map[string]bool{}
+	for _, p := range kv {
+		if !seen[p[0]] {
+			seen[p[0]] = true
+			_, _ = g.Run(ctx, "config", "--unset-all", p[0])
+		}
+	}
 	for _, p := range kv {
 		if _, err := g.Run(ctx, "config", "--add", p[0], p[1]); err != nil {
 			return err

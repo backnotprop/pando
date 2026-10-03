@@ -280,3 +280,25 @@ func TestPlainRepoInit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInitRefusesAnOversizedFirstPush(t *testing.T) {
+	h := newHarness(t)
+	acme := filepath.Join(h.base, "acme")
+	os.MkdirAll(acme, 0o755)
+	os.WriteFile(filepath.Join(acme, "README.md"), []byte(strings.Repeat("acme history\n", 1000)), 0o644)
+	h.git(acme, "init", "-q", "-b", "main")
+	h.git(acme, "add", "-A")
+	h.git(acme, "commit", "-q", "-m", "first")
+	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	t.Setenv("PANDO_PUSH_LIMIT", "100")
+	out, err := h.pando(acme, "", "init")
+	if err == nil || !strings.Contains(out, "over the 0.0 MB one push to Pando can carry") || !strings.Contains(out, "main is not pushed") {
+		t.Fatalf("init should refuse: %v\n%s", err, out)
+	}
+	t.Setenv("PANDO_PUSH_LIMIT", "")
+	if out := h.ok(acme, "init"); !strings.Contains(out, "pushed main") {
+		t.Fatalf("init again, under the limit:\n%s", out)
+	}
+}

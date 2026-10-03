@@ -349,6 +349,17 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		}
 		return fmt.Errorf("the server's main is at %s, not %s; it is left as it is (push a branch and merge it)", short(f[0]), short(p.Head))
 	}
+	// The same size check a worktree's pre-push hook makes. main takes only
+	// its first push, so history over the limit goes up in pieces on a side
+	// branch first.
+	check := gitx.Cmd{Dir: p.Checkout, Stdin: strings.NewReader(fmt.Sprintf("refs/heads/%s %s refs/heads/main %s\n", p.MainBranch, p.Head, strings.Repeat("0", len(p.Head))))}
+	if _, err := check.RunShell(e.Ctx, worktree.PrePushScript(), "pando", cloneURL); err != nil {
+		var ge *gitx.Error
+		if errors.As(err, &ge) {
+			e.Stderr.Write([]byte(ge.Stderr))
+		}
+		return fmt.Errorf("main is not pushed. Push older history first on a side branch, in pieces under 100 MB: git -C %s push pando <older commit>:refs/heads/import, then run pando init again", p.Checkout)
+	}
 	// A repo made a moment ago can be "not found" at the git door for a few
 	// seconds (seen on pando-dev), so that one error is retried briefly.
 	var err2 error

@@ -498,6 +498,24 @@ try {
     /last refused\s+.*X-Buildkite-Signature does not match/.test(cmd.stdout) && !cmd.stdout.includes(cliToken), scrub(cmd.stdout + cmd.stderr).trim().split("\n").slice(0, 4).join(" | "));
   cmd = pando(["ci", "connect", "--org", "o", "--monorepo", MO, "--out", join(work, "again")]);
   check("connecting twice says how to start over", cmd.status !== 0 && /pando ci disconnect --org o/.test(cmd.stderr));
+  // `pando ci pipeline`: a repo's buildkite hook without hand-crafting the POST. (No pushes while the
+  // hook it adds exists: that hook has no test api_url, so a push would call the real Buildkite.)
+  const bkHooks = async () => ((await call("GET", `${base}/hooks`, S)).json?.hooks ?? []).filter((h) => h.type === "buildkite");
+  cmd = pando(["ci", "pipeline", "add", M, "p2", "--monorepo", MO]);
+  let hooks2 = await bkHooks();
+  check("pando ci pipeline add <repo> <pipeline> (owner): a buildkite hook for the connected organization",
+    cmd.status === 0 && hooks2.some((h) => h.buildkite?.organization === "o" && h.buildkite?.pipeline === "p2") && /each push to a branch now starts a build of o\/p2/.test(cmd.stdout), scrub(cmd.stderr).trim());
+  cmd = pando(["ci", "pipeline", "add", M, "p2", "--monorepo", MO]);
+  check("adding it again adds nothing", cmd.status === 0 && /already starts/.test(cmd.stdout) && (await bkHooks()).length === hooks2.length);
+  cmd = pando(["ci", "pipeline", "list", "--monorepo", MO]);
+  check("pando ci pipeline list: both pipelines this repo starts", cmd.status === 0 && /o\/p\b/.test(cmd.stdout) && /o\/p2/.test(cmd.stdout));
+  const memberEnv = { ...pandoEnv, PANDO_HOME: join(work, "pando-home-member") };
+  spawnSync(bin, ["login", "--server", URL_, "--with-credential"], { cwd: work, env: memberEnv, encoding: "utf8", input: B + "\n" });
+  const asMember = spawnSync(bin, ["ci", "pipeline", "add", M, "p3", "--monorepo", MO], { cwd: work, env: memberEnv, encoding: "utf8" });
+  check("a member (not an owner) is told only an owner can add a pipeline", asMember.status !== 0 && /only an owner of .* can add a pipeline/.test(asMember.stderr) && !(await bkHooks()).some((h) => h.buildkite?.pipeline === "p3"));
+  cmd = pando(["ci", "pipeline", "remove", M, "p2", "--monorepo", MO]);
+  hooks2 = await bkHooks();
+  check("pando ci pipeline remove", cmd.status === 0 && !hooks2.some((h) => h.buildkite?.pipeline === "p2") && hooks2.some((h) => h.buildkite?.pipeline === "p"));
   cmd = pando(["ci", "disconnect", "--org", "o", "--monorepo", MO]);
   check("pando ci disconnect", cmd.status === 0 && (await call("GET", ciBase, S)).json?.connections?.length === 0);
 } catch (err) {

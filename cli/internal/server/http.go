@@ -459,3 +459,39 @@ func (h *HTTP) CIDisconnect(ctx context.Context, m, id string) error {
 	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m) + "/ci/connections/" + esc(id)}, nil)
 	return err
 }
+
+// BuildkiteHook is a repo's buildkite hook: on a push, Pando starts a build of
+// that pipeline (api-v1.yaml, createHook).
+type BuildkiteHook struct {
+	ID        string   `json:"id"`
+	Type      string   `json:"type"`
+	Events    []string `json:"events"`
+	Buildkite *struct {
+		Organization string `json:"organization"`
+		Pipeline     string `json:"pipeline"`
+	} `json:"buildkite"`
+	CreatedAt string `json:"created_at"`
+	CreatedBy string `json:"created_by"`
+}
+
+func (h *HTTP) ListHooks(ctx context.Context, m, repo string) ([]BuildkiteHook, error) {
+	var out struct {
+		Hooks []BuildkiteHook `json:"hooks"`
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: repoPath(m, repo) + "/hooks"}, &out)
+	return out.Hooks, err
+}
+
+// AddBuildkiteHook needs an owner's credential.
+func (h *HTTP) AddBuildkiteHook(ctx context.Context, m, repo, org, pipeline string) (*BuildkiteHook, error) {
+	body := map[string]any{"type": "buildkite", "buildkite": map[string]string{"organization": org, "pipeline": pipeline}}
+	out := &BuildkiteHook{}
+	_, _, err := h.do(ctx, request{method: "POST", path: repoPath(m, repo) + "/hooks", body: body}, out)
+	return out, err
+}
+
+// DeleteHook needs an owner's credential.
+func (h *HTTP) DeleteHook(ctx context.Context, m, repo, id string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: repoPath(m, repo) + "/hooks/" + esc(id)}, nil)
+	return err
+}

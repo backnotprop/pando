@@ -21,14 +21,18 @@ import (
 const ciToken = "0123456789abcdef0123456789abcdef0123456789abcdef"
 
 type ciFake struct {
-	srv      *httptest.Server
-	posts    []map[string]string
-	deletes  []string
-	conflict bool
+	srv       *httptest.Server
+	posts     []map[string]string
+	deletes   []string
+	conflict  bool
+	member    bool // not an owner: hook writes answer 403 owner_only
+	hooks     map[string][]map[string]any
+	hookPosts []map[string]any
+	noConn    bool
 }
 
 func newCIFake(t *testing.T) *ciFake {
-	f := &ciFake{}
+	f := &ciFake{hooks: map[string][]map[string]any{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer pando_test" {
 			w.WriteHeader(401)
@@ -40,7 +44,32 @@ func newCIFake(t *testing.T) *ciFake {
 			"webhook_url": "https://pando.example/v1/integrations/buildkite/m_1--cic_aaaaaaaaaaaa", "token": "worker_secret",
 			"created_at": "2026-10-03T12:00:00Z", "created_by": "ramos",
 		}
+		hookRe := strings.TrimPrefix(r.URL.Path, "/v1/monorepos/ramos/pando/repos/")
+		repo, rest, _ := strings.Cut(hookRe, "/")
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/v1/monorepos/ramos/pando/repos":
+			_ = json.NewEncoder(w).Encode(map[string]any{"repos": []any{
+				map[string]any{"name": "projects-web", "path": "projects/web"}, map[string]any{"name": "projects-api", "path": "projects/api"},
+			}})
+		case strings.HasPrefix(r.URL.Path, "/v1/monorepos/ramos/pando/repos/") && rest == "hooks" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(map[string]any{"hooks": append([]map[string]any{}, f.hooks[repo]...)})
+		case strings.HasPrefix(r.URL.Path, "/v1/monorepos/ramos/pando/repos/") && (rest == "hooks" || strings.HasPrefix(rest, "hooks/")) && f.member:
+			w.WriteHeader(403)
+			_, _ = io.WriteString(w, `{"error":{"code":"owner_only","message":"only an owner can register hooks"}}`)
+		case strings.HasPrefix(r.URL.Path, "/v1/monorepos/ramos/pando/repos/") && rest == "hooks" && r.Method == "POST":
+			var b map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			f.hookPosts = append(f.hookPosts, b)
+			k := map[string]any{"id": "hk_" + repo, "type": "buildkite", "events": []string{"push"}, "buildkite": b["buildkite"], "created_at": "2026-10-03T12:00:00Z", "created_by": "ramos"}
+			f.hooks[repo] = append(f.hooks[repo], k)
+			w.WriteHeader(201)
+			_ = json.NewEncoder(w).Encode(k)
+		case strings.HasPrefix(r.URL.Path, "/v1/monorepos/ramos/pando/repos/") && strings.HasPrefix(rest, "hooks/") && r.Method == "DELETE":
+			f.deletes = append(f.deletes, strings.TrimPrefix(rest, "hooks/"))
+			f.hooks[repo] = nil
+			w.WriteHeader(204)
+		case r.Method == "GET" && r.URL.Path == "/v1/monorepos/ramos/pando/ci" && f.noConn:
+			_ = json.NewEncoder(w).Encode(map[string]any{"connections": []any{}, "pipelines": []any{}})
 		case r.Method == "POST" && r.URL.Path == "/v1/monorepos/ramos/pando/ci/connections":
 			var b map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&b)
@@ -210,4 +239,63 @@ func asUsage(err error, ue *UsageError) bool {
 		*ue = u
 	}
 	return ok
+}
+
+func TestCIPipeline(t *testing.T) {
+	f := newCIFake(t)
+	e, out := ciEnv(t, f, "", false)
+	run := func(args ...string) error {
+		out.Reset()
+		return CI(e, append(append([]string{"pipeline"}, args...), "--monorepo", "ramos/pando", "--server", f.srv.URL))
+	}
+	if err := run("list"); err != nil || !strings.Contains(out.String(), "No repo of ramos/pando starts a Buildkite pipeline") {
+		t.Fatalf("empty list: %v\n%s", err, out.String())
+	}
+	// By path; the organization is the one connected (acme).
+	if err := run("add", "projects/web", "Pando-CI"); err != nil {
+		t.Fatal(err)
+	}
+	bk, _ := f.hookPosts[0]["buildkite"].(map[string]any)
+	if f.hookPosts[0]["type"] != "buildkite" || bk["organization"] != "acme" || bk["pipeline"] != "pando-ci" {
+		t.Fatalf("hook body %v", f.hookPosts[0])
+	}
+	if s := out.String(); !strings.Contains(s, "projects/web: each push to a branch now starts a build of acme/pando-ci") || !strings.Contains(s, `[repos."projects/web"]`) {
+		t.Fatalf("add output:\n%s", s)
+	}
+	// Again, by name: nothing new.
+	if err := run("add", "projects-web", "pando-ci"); err != nil || len(f.hookPosts) != 1 || !strings.Contains(out.String(), "already starts") {
+		t.Fatalf("a second add: %v, %d posts\n%s", err, len(f.hookPosts), out.String())
+	}
+	if err := run("list"); err != nil || !strings.Contains(out.String(), "projects/web") || !strings.Contains(out.String(), "acme/pando-ci") {
+		t.Fatalf("list: %v\n%s", err, out.String())
+	}
+	if err := run("add", "projects/nope", "pando-ci"); err == nil || !strings.Contains(err.Error(), "repos: projects/web, projects/api") {
+		t.Fatalf("an unknown repo names the repos: %v", err)
+	}
+	if err := run("add", "projects/web", "not a slug"); err == nil {
+		t.Fatal("a bad pipeline slug is refused")
+	}
+	// A member, not an owner.
+	f.member = true
+	if err := run("add", "projects/api", "api-ci"); err == nil || !strings.Contains(err.Error(), "only an owner of ramos/pando can add a pipeline") {
+		t.Fatalf("a member: %v", err)
+	}
+	if err := run("remove", "projects/web", "pando-ci"); err == nil || !strings.Contains(err.Error(), "only an owner") {
+		t.Fatalf("a member removing: %v", err)
+	}
+	f.member = false
+	if err := run("remove", "projects/web", "pando-ci"); err != nil || len(f.deletes) != 1 || f.deletes[0] != "hk_projects-web" {
+		t.Fatalf("remove: %v %v", err, f.deletes)
+	}
+	if err := run("remove", "projects/web", "pando-ci"); err == nil {
+		t.Fatal("removing what is not there is an error")
+	}
+	// No connection: --org is needed, and the add says Pando will not hear from it yet.
+	f.noConn = true
+	if err := run("add", "projects/api", "api-ci"); err == nil || !strings.Contains(err.Error(), "--org") {
+		t.Fatalf("no connection and no --org: %v", err)
+	}
+	if err := run("add", "projects/api", "api-ci", "--org", "other"); err != nil || !strings.Contains(out.String(), "pando ci connect --org other") {
+		t.Fatalf("--org with no connection: %v\n%s", err, out.String())
+	}
 }

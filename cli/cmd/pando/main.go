@@ -91,7 +91,7 @@ var commands = []app.Command{
 	{Name: "monorepo", Usage: "monorepo list | delete <owner/name> [--yes]               your monorepos; delete one (owners)", Run: app.Monorepo},
 	{Name: "members", Usage: "members list | invite <email> [--owner] | remove <who>      who belongs to a monorepo", Run: app.Members},
 	{Name: "mac", Usage: "mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)", Run: app.Mac},
-	{Name: "ci", Usage: "ci connect --org <slug> | status | disconnect --org <slug>   a monorepo's Buildkite connection [--monorepo <owner/name>]", Run: app.CI},
+	{Name: "ci", Usage: "ci connect --org <slug> | status | disconnect --org <slug>   a monorepo's Buildkite connection [--monorepo <owner/name>]\n  pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>   the pipeline a push starts", Run: app.CI},
 	{Name: "credential", Usage: "credential create --name <sandbox> | list | revoke <id>   credentials that act as you", Run: app.Credential},
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 
@@ -17,9 +18,12 @@ import (
 // (or a file they name, mode 600), never a pipe: an agent's session reads
 // pipes. It is shown once and kept nowhere on this machine.
 func CI(e *Env, args []string) error {
-	usage := UsageError{"pando ci connect --org <slug> | status | disconnect --org <slug>   [--monorepo <owner/name>]"}
+	usage := UsageError{"pando ci connect --org <slug> | status | disconnect --org <slug> | pipeline add|list|remove   [--monorepo <owner/name>]"}
 	if len(args) == 0 {
 		return usage
+	}
+	if args[0] == "pipeline" {
+		return ciPipeline(e, args[1:])
 	}
 	fs := flags("ci")
 	org := fs.String("org", "", "the Buildkite organization's slug (buildkite.com/<slug>)")
@@ -213,6 +217,177 @@ func ciStatus(e *Env, h *server.HTTP, full string) error {
 		}
 		req := strings.Join(p.RequiredChecks, ", ")
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Slug, dash(p.RepoPath), dash(req), last)
+	}
+	return tw.Flush()
+}
+
+// ── Pipelines: which Buildkite pipeline a push to a repo starts ──────────
+
+var pipelineSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
+
+// ciPipeline is `pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>`.
+// A pipeline is a repo's buildkite hook: on a push to a branch, Pando
+// starts a build of it. Adding and removing need an owner.
+func ciPipeline(e *Env, args []string) error {
+	usage := UsageError{"pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>   [--org <slug>] [--monorepo <owner/name>]"}
+	if len(args) == 0 {
+		return usage
+	}
+	fs := flags("ci pipeline")
+	org := fs.String("org", "", "the Buildkite organization (default: the monorepo's one connected organization)")
+	mono := fs.String("monorepo", "", "the monorepo (default: the one this folder is in)")
+	srvFlag := fs.String("server", "", "the server (default: the configured one)")
+	pos, err := parse(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	want := map[string]int{"add": 2, "list": 0, "ls": 0, "remove": 2, "rm": 2}
+	if n, ok := want[args[0]]; !ok || len(pos) != n {
+		return usage
+	}
+	h, full, err := ciTarget(e, *srvFlag, *mono)
+	if err != nil {
+		return err
+	}
+	repos, err := h.ListRepos(e.Ctx, full)
+	if err != nil {
+		return err
+	}
+	if args[0] == "list" || args[0] == "ls" {
+		return ciPipelineList(e, h, full, repos)
+	}
+	repo, err := pickRepo(repos, full, pos[0])
+	if err != nil {
+		return err
+	}
+	pipeline := strings.ToLower(pos[1])
+	if !pipelineSlug.MatchString(pipeline) {
+		return fmt.Errorf("%q is not a pipeline slug (as in buildkite.com/<org>/<pipeline>)", pos[1])
+	}
+	o, err := h.CIOverview(e.Ctx, full)
+	if err != nil {
+		return err
+	}
+	slug, err := pickOrg(o, strings.ToLower(*org), full)
+	if err != nil {
+		return err
+	}
+	hooks, err := h.ListHooks(e.Ctx, full, repo.Name)
+	if err != nil {
+		return err
+	}
+	var same []server.BuildkiteHook
+	for _, k := range hooks {
+		if k.Type == "buildkite" && k.Buildkite != nil && strings.EqualFold(k.Buildkite.Organization, slug) && k.Buildkite.Pipeline == pipeline {
+			same = append(same, k)
+		}
+	}
+	if args[0] == "remove" || args[0] == "rm" {
+		if len(same) == 0 {
+			return fmt.Errorf("%s does not start %s/%s", repo.Path, slug, pipeline)
+		}
+		for _, k := range same {
+			if err := h.DeleteHook(e.Ctx, full, repo.Name, k.ID); err != nil {
+				return ownerOnly(err, full, "remove a pipeline")
+			}
+		}
+		e.printf("%s no longer starts %s/%s on a push. Builds already made stay in Buildkite and on the CI tab.\n", repo.Path, slug, pipeline)
+		return nil
+	}
+	if len(same) > 0 {
+		e.printf("%s already starts %s/%s on each push (hook %s).\n", repo.Path, slug, pipeline, same[0].ID)
+		return nil
+	}
+	k, err := h.AddBuildkiteHook(e.Ctx, full, repo.Name, slug, pipeline)
+	if err != nil {
+		return ownerOnly(err, full, "add a pipeline")
+	}
+	e.printf("%s: each push to a branch now starts a build of %s/%s in Buildkite (hook %s).\n", repo.Path, slug, pipeline, k.ID)
+	e.printf("The build's env has PANDO_CLONE_URL, PANDO_READ_TOKEN (clone with it) and PANDO_STATUS_TOKEN.\n")
+	e.printf("A step with a key is a check of that name. To make one required, in .pando/pando.toml:\n")
+	e.printf("  [repos.%q]\n  required_checks = [\"ci\"]\n", repo.Path)
+	connected := false
+	for _, c := range o.Connections {
+		connected = connected || c.Organization == slug
+	}
+	if !connected {
+		e.printf("Pando does not hear from %s yet: builds start, but the CI tab and checks wait for pando ci connect --org %s --monorepo %s\n", slug, slug, full)
+	}
+	return nil
+}
+
+// ownerOnly turns the server's owner_only refusal into what to do.
+func ownerOnly(err error, full, what string) error {
+	if server.StatusOf(err) == 403 {
+		return fmt.Errorf("only an owner of %s can %s; ask one (pando members list %s shows who): %w", full, what, full, err)
+	}
+	return err
+}
+
+// pickRepo finds a repo by its path (projects/web), its name (projects-web), or "." in a plain repo.
+func pickRepo(repos []server.Repo, full, arg string) (server.Repo, error) {
+	a := strings.TrimSuffix(strings.TrimPrefix(arg, "./"), "/")
+	if a == "" {
+		a = "."
+	}
+	for _, r := range repos {
+		if r.Path == a || r.Name == a {
+			return r, nil
+		}
+	}
+	var paths []string
+	for _, r := range repos {
+		paths = append(paths, r.Path)
+	}
+	if len(paths) == 0 {
+		return server.Repo{}, fmt.Errorf("%s has no repos yet", full)
+	}
+	return server.Repo{}, fmt.Errorf("%s has no repo %s (repos: %s)", full, arg, strings.Join(paths, ", "))
+}
+
+// pickOrg is --org, else the monorepo's one connected Buildkite organization.
+func pickOrg(o *server.CIOverview, org, full string) (string, error) {
+	if org != "" {
+		if !pipelineSlug.MatchString(org) {
+			return "", fmt.Errorf("%q is not an organization slug (as in buildkite.com/<slug>)", org)
+		}
+		return org, nil
+	}
+	switch len(o.Connections) {
+	case 0:
+		return "", fmt.Errorf("which Buildkite organization? add --org <slug> (%s has none connected: pando ci connect --org <slug>)", full)
+	case 1:
+		return o.Connections[0].Organization, nil
+	}
+	var orgs []string
+	for _, c := range o.Connections {
+		orgs = append(orgs, c.Organization)
+	}
+	return "", fmt.Errorf("which Buildkite organization? add --org (connected: %s)", strings.Join(orgs, ", "))
+}
+
+func ciPipelineList(e *Env, h *server.HTTP, full string, repos []server.Repo) error {
+	tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
+	n := 0
+	for _, r := range repos {
+		hooks, err := h.ListHooks(e.Ctx, full, r.Name)
+		if err != nil {
+			return err
+		}
+		for _, k := range hooks {
+			if k.Type != "buildkite" || k.Buildkite == nil {
+				continue
+			}
+			if n == 0 {
+				fmt.Fprintln(tw, "REPO\tPIPELINE\tADDED BY\tHOOK")
+			}
+			n++
+			fmt.Fprintf(tw, "%s\t%s/%s\t%s %s\t%s\n", r.Path, k.Buildkite.Organization, k.Buildkite.Pipeline, dash(k.CreatedBy), ago(k.CreatedAt), k.ID)
+		}
+	}
+	if n == 0 {
+		e.printf("No repo of %s starts a Buildkite pipeline. Add one: pando ci pipeline add <repo> <pipeline> --monorepo %s\n", full, full)
+		return nil
 	}
 	return tw.Flush()
 }

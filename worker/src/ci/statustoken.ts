@@ -12,6 +12,7 @@
 
 import type { Env } from "../env";
 import { HttpError } from "../http";
+import { isInteger, isRecord, isText, parseJson } from "../parse";
 
 export const STATUS_TOKEN_PREFIX = "pst1.";
 
@@ -115,23 +116,19 @@ export async function verifyStatusToken(secret: string, token: string, nowMs = D
   const good = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, enc.encode(`${parts[0]}.${parts[1]}`));
 
   if (!good) return { ok: false, reason: "bad_signature" };
-  let c: StatusClaims;
+  // Signed by this Worker, so it is mintStatusToken's JSON; decoded all the same.
+  const raw = parseJson(new TextDecoder().decode(payload));
 
-  try {
-    c = JSON.parse(new TextDecoder().decode(payload)) as StatusClaims;
-  } catch {
-    return { ok: false, reason: "malformed" };
-  }
+  if (!isRecord(raw)) return { ok: false, reason: "malformed" };
+  const { m, r, s, a, h, x } = raw;
 
-  if (typeof c.m !== "string" || typeof c.r !== "string" || typeof c.s !== "string" || typeof c.h !== "string" || !Number.isSafeInteger(c.x)) {
-    return { ok: false, reason: "malformed" };
-  }
+  if (!isText(m) || !isText(r) || !isText(s) || !isText(h) || !isInteger(x)) return { ok: false, reason: "malformed" };
 
-  if (c.a !== null && (typeof c.a !== "string" || !APP_SLUG.test(c.a))) return { ok: false, reason: "malformed" };
+  if (a !== null && (!isText(a) || !APP_SLUG.test(a))) return { ok: false, reason: "malformed" };
 
-  if (c.x * 1000 <= nowMs) return { ok: false, reason: "expired" };
+  if (x * 1000 <= nowMs) return { ok: false, reason: "expired" };
 
-  return { ok: true, claims: c };
+  return { ok: true, claims: { m, r, s, a, h, x } };
 }
 
 /** The statuses route, the only one a status token opens: POST /v1/monorepos/{o}/{m}/repos/{r}/statuses/{sha}. */

@@ -33,7 +33,11 @@ import { isSha } from "../monorepo/names";
 import { cachedRepo, monorepoStub } from "../monorepo/session";
 import type { Outcome } from "../monorepo/types";
 import { pool } from "../monorepo/views";
-import { p, PAGE_MAX, pandoBuildEnv, rateWaitMs, restUrl, TERMINAL, WEBHOOK_MAX_BYTES, type CiState } from "./buildkite";
+import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
+import {
+  CI_STATES, decodeAnnotations, decodeArtifacts, decodePipelineDetails, errorMessage, isCiState, p, PAGE_MAX, pandoBuildEnv, rateWaitMs, restUrl, TERMINAL,
+  WEBHOOK_MAX_BYTES, type Annotation, type Artifact, type BuildEnv,
+} from "./buildkite";
 import { BUILDS_PAGE, BUILDS_PAGE_MAX, type CiRef } from "./store";
 import { mintStatusToken } from "./statustoken";
 
@@ -57,7 +61,6 @@ const RUNNING_TTL_MS = 10_000;
 /** A pipeline's configuration is read from the service at most this often. */
 const CONFIG_TTL_MS = 5 * 60_000;
 
-const STATES: CiState[] = ["queued", "running", "blocked", "passed", "failed", "canceled", "skipped"];
 
 const ORG_SLUG = /^[a-z0-9][a-z0-9-]{0,99}$/;
 
@@ -97,14 +100,36 @@ function serviceToken(env: Env, conn: CiRef["connection"]): string {
   return t;
 }
 
+/** Who a build Pando starts is by (Buildkite's create-build `author`). */
+interface BuildAuthor {
+  name: string;
+  email?: string;
+}
+
+/** Buildkite's create-build request (Rebuild). */
+interface CreateBuild {
+  commit: string;
+  branch: string;
+  message: string;
+  author: BuildAuthor;
+  env: BuildEnv;
+  meta_data: Record<string, string>;
+}
+
+/** A REST call's options. */
+interface CallOptions {
+  body?: CreateBuild;
+  accept?: string;
+  manual?: boolean;
+}
+
+/** An answer's JSON, decoded at the boundary; null when it is not JSON. */
+async function jsonOf(res: Response): Promise<Json | null> {
+  return parseJson(await res.text());
+}
+
 /** One REST call, after a permit. Turns the service's refusals into Pando's errors; never puts the token in one. */
-async function call(
-  c: C,
-  conn: CiRef["connection"],
-  method: string,
-  path: string,
-  o: { body?: unknown; accept?: string; manual?: boolean } = {},
-): Promise<Response> {
+async function call(c: C, conn: CiRef["connection"], method: string, path: string, o: CallOptions = {}): Promise<Response> {
   const token = serviceToken(c.env, conn);
   const stub = c.get("stub");
   const permit = await stub.ciPermit(conn.id);
@@ -113,14 +138,13 @@ async function call(
     throw new HttpError(503, "ci_rate_limited", `holding to Buildkite's rate limit; try again in ${Math.ceil(permit.retry_after_ms / 1000)} s`, { retry_after_ms: permit.retry_after_ms });
   }
 
+  const headers = new Headers({ authorization: `Bearer ${token}`, accept: o.accept ?? "application/json", "user-agent": "Pando-CI/1" });
+
+  if (o.body !== undefined) headers.set("content-type", "application/json");
+
   const res = await fetch(restUrl(conn, path), {
     method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: o.accept ?? "application/json",
-      "user-agent": "Pando-CI/1",
-      ...(o.body !== undefined ? { "content-type": "application/json" } : {}),
-    },
+    headers,
     body: o.body !== undefined ? JSON.stringify(o.body) : undefined,
     redirect: o.manual ? "manual" : "follow",
     signal: AbortSignal.timeout(20_000),
@@ -133,11 +157,7 @@ async function call(
 
   if (res.ok || (o.manual && res.status >= 300 && res.status < 400)) return res;
   const text = (await res.text().catch(() => "")).slice(0, 300);
-  let message = text;
-
-  try {
-    message = (JSON.parse(text) as { message?: string }).message ?? text;
-  } catch {}
+  const message = errorMessage(parseJson(text)) ?? text;
 
   if (res.status === 429) throw new HttpError(503, "ci_rate_limited", "Buildkite's rate limit was reached; try again shortly", { retry_after_ms: wait ?? 60_000 });
 
@@ -181,8 +201,11 @@ async function toCache(env: Env, key: string, text: string, meta: Record<string,
   await env.CACHE.put(key, text, { customMetadata: meta }).catch((err) => console.warn("ci: caching a detail failed:", err instanceof Error ? err.message : String(err)));
 }
 
+/** The Cache-Control header of a detail. */
+type CacheControl = { "cache-control": string };
+
 /** A finished detail never changes, so the browser may keep it; a running one is re-read. */
-function cacheHeader(complete: boolean): Record<string, string> {
+function cacheHeader(complete: boolean): CacheControl {
   return { "cache-control": complete ? "private, max-age=31536000, immutable" : "private, no-store" };
 }
 
@@ -222,44 +245,37 @@ async function tail(res: Response, max: number): Promise<{ bytes: Uint8Array; to
 
 const hasNext = (res: Response) => /rel="next"/.test(res.headers.get("link") ?? "");
 
-async function annotationsOf(c: C, ref: CiRef): Promise<{ list: Record<string, unknown>[]; truncated: boolean; complete: boolean; fetched_at: string; cached: boolean }> {
-  const key = cacheKey(c, ref, "annotations.json");
-  const hit = await fromCache(c.env, key);
-
-  if (hit) return { list: JSON.parse(hit.text), truncated: hit.meta.truncated === "1", complete: hit.meta.complete === "1", fetched_at: hit.meta.fetched_at, cached: true };
-  const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/annotations?per_page=${PAGE_MAX}`);
-  const raw = (await res.json()) as Record<string, unknown>[];
-
-  const list = (Array.isArray(raw) ? raw : []).map((a) => ({
-    id: a.id ?? null, context: a.context ?? null, style: a.style ?? null, body_html: a.body_html ?? "", created_at: a.created_at ?? null, updated_at: a.updated_at ?? null,
-  }));
-
-  const complete = settled(ref.build.finished_at);
-  const fetched_at = new Date().toISOString();
-  await toCache(c.env, key, JSON.stringify(list), { complete: complete ? "1" : "0", fetched_at, truncated: hasNext(res) ? "1" : "0" });
-
-  return { list, truncated: hasNext(res), complete, fetched_at, cached: false };
+/** A list fetched from the service: the first page, cached as the service sent it. */
+interface Fetched<T> {
+  list: T[];
+  truncated: boolean;
+  complete: boolean;
+  fetched_at: string;
+  cached: boolean;
 }
 
-async function artifactsOf(c: C, ref: CiRef): Promise<{ list: Record<string, unknown>[]; truncated: boolean; complete: boolean; fetched_at: string; cached: boolean }> {
-  const key = cacheKey(c, ref, "artifacts.json");
+/**
+ * A build's list from the service (annotations, artifacts), from the cache
+ * or Buildkite. The cache keeps Buildkite's own JSON, so both paths go
+ * through the one decoder.
+ */
+async function listOf<T>(c: C, ref: CiRef, what: "annotations" | "artifacts", decode: (v: Json | null) => T[]): Promise<Fetched<T>> {
+  const key = cacheKey(c, ref, `${what}.json`);
   const hit = await fromCache(c.env, key);
 
-  if (hit) return { list: JSON.parse(hit.text), truncated: hit.meta.truncated === "1", complete: hit.meta.complete === "1", fetched_at: hit.meta.fetched_at, cached: true };
-  const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/artifacts?per_page=${PAGE_MAX}`);
-  const raw = (await res.json()) as Record<string, unknown>[];
-
-  const list = (Array.isArray(raw) ? raw : []).map((a) => ({
-    id: a.id ?? null, job: a.job_id ?? null, path: a.path ?? null, filename: a.filename ?? null, dirname: a.dirname ?? null,
-    mime_type: a.mime_type ?? null, size: typeof a.file_size === "number" ? a.file_size : null, sha1sum: a.sha1sum ?? null, state: a.state ?? null,
-  }));
-
+  if (hit) return { list: decode(parseJson(hit.text)), truncated: hit.meta.truncated === "1", complete: hit.meta.complete === "1", fetched_at: hit.meta.fetched_at, cached: true };
+  const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/${what}?per_page=${PAGE_MAX}`);
+  const text = await res.text();
   const complete = settled(ref.build.finished_at);
   const fetched_at = new Date().toISOString();
-  await toCache(c.env, key, JSON.stringify(list), { complete: complete ? "1" : "0", fetched_at, truncated: hasNext(res) ? "1" : "0" });
+  await toCache(c.env, key, text, { complete: complete ? "1" : "0", fetched_at, truncated: hasNext(res) ? "1" : "0" });
 
-  return { list, truncated: hasNext(res), complete, fetched_at, cached: false };
+  return { list: decode(parseJson(text)), truncated: hasNext(res), complete, fetched_at, cached: false };
 }
+
+const annotationsOf = (c: C, ref: CiRef): Promise<Fetched<Annotation>> => listOf(c, ref, "annotations", decodeAnnotations);
+
+const artifactsOf = (c: C, ref: CiRef): Promise<Fetched<Artifact>> => listOf(c, ref, "artifacts", decodeArtifacts);
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -275,8 +291,8 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
 
     return c.json({
       services: SERVICES,
-      connections: o.connections.map((x) => ({ ...x, webhook_url: webhookUrl(c, x.service as string, x.id as string) })),
-      pipelines: o.pipelines.map((x) => ({ ...x, required_checks: x.repo ? (required.get(x.repo as string) ?? []) : [] })),
+      connections: o.connections.map((x) => ({ ...x, webhook_url: webhookUrl(c, x.service, x.id) })),
+      pipelines: o.pipelines.map((x) => ({ ...x, required_checks: x.repo ? (required.get(x.repo) ?? []) : [] })),
       required_checks: repos.map((r) => ({ repo: r.name, path: r.path, checks: required.get(r.name) ?? [] })),
     });
   });
@@ -287,7 +303,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     if (!Number.isInteger(limit) || limit < 1 || limit > BUILDS_PAGE_MAX) bad(`limit is 1 to ${BUILDS_PAGE_MAX}`);
     const state = c.req.query("state");
 
-    if (state && !STATES.includes(state as CiState)) bad(`state is one of ${STATES.join(", ")}`);
+    if (state && !isCiState(state)) bad(`state is one of ${CI_STATES.join(", ")}`);
     const sha = c.req.query("sha");
 
     if (sha && !isSha(sha)) bad("sha must be a full 40-character sha");
@@ -346,8 +362,8 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     // Only an artifact of this build: the token could reach any build in the organization.
     const a = (await artifactsOf(c, ref)).list.find((x) => x.id === c.req.param("artifact"));
 
-    if (!a || typeof a.job !== "string") throw new HttpError(404, "not_found", "no such artifact in this build");
-    const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(a.job)}/artifacts/${p(a.id as string)}/download`, { manual: true });
+    if (!a?.job || !a.id) throw new HttpError(404, "not_found", "no such artifact in this build");
+    const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(a.job)}/artifacts/${p(a.id)}/download`, { manual: true });
     const to = res.headers.get("location");
     await res.body?.cancel();
 
@@ -368,14 +384,9 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     if (!fetchedAt || Date.now() - Date.parse(fetchedAt) > CONFIG_TTL_MS) {
       try {
         const res = await call(c, pl.connection, "GET", `/pipelines/${p(slug)}`);
-        const j = (await res.json()) as Record<string, unknown>;
-        configuration = typeof j.configuration === "string" ? j.configuration : null;
-        await stub.ciSavePipeline(pl.connection.id, slug, (pl.pipeline.repo as string | null) ?? null, {
-          configuration,
-          name: typeof j.name === "string" ? j.name : null,
-          web_url: typeof j.web_url === "string" ? j.web_url : null,
-          default_branch: typeof j.default_branch === "string" ? j.default_branch : null,
-        });
+        const details = decodePipelineDetails(await jsonOf(res));
+        configuration = details.configuration;
+        await stub.ciSavePipeline(pl.connection.id, slug, pl.pipeline.repo, details);
         fetchedAt = new Date().toISOString();
       } catch (err) {
         if (!(err instanceof HttpError)) throw err;
@@ -415,13 +426,16 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
       : null;
 
     const who = c.get("identity");
+    const author: BuildAuthor = { name: who.name ?? who.login };
+
+    if (who.email) author.email = who.email;
 
     const res = await call(c, ref.connection, "POST", `/pipelines/${p(b.pipeline)}/builds`, {
       body: {
         commit: b.sha,
         branch: b.branch ?? r.default_branch,
         message: b.message ?? `Rebuild of #${b.number}`,
-        author: { name: who.name ?? who.login, ...(who.email ? { email: who.email } : {}) },
+        author,
         env: pandoBuildEnv({
           clone_url: c.get("info").kind === "repo" ? `${origin}/${full}.git` : `${origin}/${full}/${b.repo}.git`,
           read_token: read.token,
@@ -433,7 +447,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
       },
     });
 
-    const out = unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await res.json()));
+    const out = unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await jsonOf(res)));
     const build = out.build ? await c.get("stub").ciBuild(out.build) : null;
 
     return c.json({ build }, 201);
@@ -444,7 +458,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
 
     if (TERMINAL.has(ref.build.state)) throw new HttpError(409, "ci_finished", `build #${ref.build.number} has finished (${ref.build.state})`);
     const res = await call(c, ref.connection, "PUT", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/cancel`);
-    unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await res.json()));
+    unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await jsonOf(res)));
 
     return c.json({ build: await c.get("stub").ciBuild(ref.build.id) }, 202);
   });
@@ -452,29 +466,27 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
   api.post(`${base}/builds/:build/jobs/:job/retry`, async (c) => {
     const ref = await refOf(c, true);
     const res = await call(c, ref.connection, "PUT", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(ref.job!.external_id)}/retry`);
-    const job = await c.get("stub").ciIngestJob(ref.build.id, await res.json());
+    const job = await c.get("stub").ciIngestJob(ref.build.id, await jsonOf(res));
 
     return c.json({ job }, 202);
   });
 
   api.post(`${base}/connections`, async (c) => {
     ownerOnly(c, "connect a CI service");
-    let b: Record<string, unknown>;
+    const parsed = parseJson(await c.req.text());
 
-    try {
-      b = (await c.req.json()) as Record<string, unknown>;
-    } catch {
-      bad("the body must be JSON");
-    }
+    if (parsed === null) bad("the body must be JSON");
+    // JSON that is not an object names no service: answered as such below.
+    const b: JsonObject = isRecord(parsed) ? parsed : {};
 
     if (b.service !== "buildkite") bad("service: buildkite (the one CI service Pando connects today)");
-    const organization = typeof b.organization === "string" ? b.organization.toLowerCase() : "";
+    const organization = isText(b.organization) ? b.organization.toLowerCase() : "";
 
     if (!ORG_SLUG.test(organization)) bad("organization: the Buildkite organization's slug (as in buildkite.com/<slug>)");
     let token: string | null = null;
 
     if (b.webhook_token !== undefined) {
-      if (typeof b.webhook_token !== "string" || b.webhook_token.length < 16 || b.webhook_token.length > 200) bad("webhook_token: 16 to 200 characters (or leave it out and Pando makes one)");
+      if (!isText(b.webhook_token) || b.webhook_token.length < 16 || b.webhook_token.length > 200) bad("webhook_token: 16 to 200 characters (or leave it out and Pando makes one)");
       token = b.webhook_token;
     }
 
@@ -482,17 +494,16 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
 
     if (b.api_url !== undefined) {
       // Tests only: the token is never sent anywhere but Buildkite or this machine.
-      const m = typeof b.api_url === "string" ? /^(http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)\/?$/.exec(b.api_url) : null;
+      const m = isText(b.api_url) ? /^(http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)\/?$/.exec(b.api_url) : null;
 
       if (!m) bad("api_url may only point at localhost (for tests)");
       apiBase = m[1];
     }
 
     const out = unwrap(await c.get("stub").ciConnect({ service: "buildkite", organization, api_base: apiBase, webhook_token: token }, c.get("identity")));
-    const conn = out.connection as { id: string; service: string };
 
     // The webhook token is shown once: paste it into Buildkite's webhook settings.
-    return c.json({ connection: { ...out.connection, webhook_url: webhookUrl(c, conn.service, conn.id) }, webhook_token: out.webhook_token }, 201);
+    return c.json({ connection: { ...out.connection, webhook_url: webhookUrl(c, out.connection.service, out.connection.id) }, webhook_token: out.webhook_token }, 201);
   });
 
   api.delete(`${base}/connections/:connection`, async (c) => {

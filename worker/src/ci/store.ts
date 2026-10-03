@@ -12,6 +12,7 @@
 import type { Env } from "../env";
 import { HttpError, now } from "../http";
 import type { Identity, ObjectInfo, StatusRecord, StreamEvent } from "../monorepo/types";
+import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
 import {
   CHECK_TYPES, duration, jobCheck, normalizeBuild, normalizeJob, normalizePipeline, rank, TERMINAL, verifyWebhook,
   type CiState, type NormBuild, type NormJob, type NormPipeline,
@@ -59,9 +60,10 @@ const REFUSED_EVERY_MS = 10_000;
 /** The app every Buildkite check carries. */
 const BUILDKITE = { app: "buildkite", creator: "app:buildkite" };
 
+/** A row as SQLite returns it; the row types below name its columns (SCHEMA). */
 type Row = Record<string, SqlStorageValue>;
 
-export interface ConnectionRow {
+export type ConnectionRow = {
   id: string;
   service: string;
   organization: string;
@@ -77,9 +79,9 @@ export interface ConnectionRow {
   last_result: string | null;
   last_refused_at: string | null;
   last_refused: string | null;
-}
+};
 
-export interface BuildRow {
+export type BuildRow = {
   id: string;
   connection_id: string;
   external_id: string;
@@ -102,9 +104,9 @@ export interface BuildRow {
   event_ms: number;
   first_seen_at: string;
   updated_at: string;
-}
+};
 
-export interface JobRow {
+export type JobRow = {
   build_id: string;
   external_id: string;
   name: string | null;
@@ -120,7 +122,7 @@ export interface JobRow {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
-}
+};
 
 /** What a route needs to call the service about one build (and job): never the webhook secret. */
 export interface CiRef {
@@ -190,6 +192,39 @@ export interface JobView {
   check: string | null;
 }
 
+/** Connecting's answer: the connection, and its webhook token, shown this once. */
+export interface Connected {
+  connection: ConnectionView;
+  webhook_token: string;
+}
+
+/** The CI tab's top. */
+export interface CiOverview {
+  connections: ConnectionView[];
+  pipelines: PipelineView[];
+}
+
+/** A page of builds, newest first. */
+export interface BuildsPage {
+  builds: BuildView[];
+  next_cursor: string | null;
+}
+
+/** A pipeline's page: what a route needs to call the service, the pipeline, and its stored configuration. */
+export interface PipelineDetail {
+  connection: CiRef["connection"];
+  pipeline: PipelineView;
+  configuration: string | null;
+  configuration_fetched_at: string | null;
+}
+
+/** A buildkite hook's pipeline, from its stored config. */
+interface HookPipeline {
+  pipeline: string;
+  repo: string;
+  hook_id: string;
+}
+
 export interface PipelineView {
   connection: string;
   service: string;
@@ -203,8 +238,8 @@ export interface PipelineView {
   last_build: BuildView | null;
 }
 
-function fail(status: number, code: string, message: string, extra?: Record<string, unknown>): never {
-  throw new HttpError(status, code, message, extra);
+function fail(status: number, code: string, message: string): never {
+  throw new HttpError(status, code, message);
 }
 
 function hexId(prefix: string, bytes: number): string {
@@ -236,11 +271,12 @@ export class CiStore {
     private host: CiHost,
   ) {}
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  /** Rows of a query; T names its columns (the platform's typed exec). */
+  private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
-  private row<T>(q: string, ...args: unknown[]): T | null {
+  private row<T extends Row>(q: string, ...args: SqlStorageValue[]): T | null {
     return this.rows<T>(q, ...args)[0] ?? null;
   }
 
@@ -250,7 +286,7 @@ export class CiStore {
 
   // ── Connections ──────────────────────────────────────────────────────────
 
-  connect(c: { service: "buildkite"; organization: string; api_base: string | null; webhook_token: string | null }, by: Identity): { connection: ConnectionView; webhook_token: string } {
+  connect(c: { service: "buildkite"; organization: string; api_base: string | null; webhook_token: string | null }, by: Identity): Connected {
     const m = this.host.info() ?? fail(404, "not_found", "no such monorepo");
 
     if (this.row("SELECT id FROM ci_connections WHERE service = ? AND organization = ?", c.service, c.organization)) {
@@ -320,15 +356,12 @@ export class CiStore {
       fail(401, "unauthorized", auth.reason);
     }
 
-    let payload: Record<string, unknown>;
+    const parsed = parseJson(body);
 
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      fail(400, "bad_request", "the body is not JSON");
-    }
-
-    const event = h.event ?? (typeof payload.event === "string" ? payload.event : "");
+    if (parsed === null) fail(400, "bad_request", "the body is not JSON");
+    // A body that is JSON but not an object has no build: it is answered "ignored", as any unused event.
+    const payload: JsonObject = isRecord(parsed) ? parsed : {};
+    const event = h.event ?? (isText(payload.event) ? payload.event : "");
     // The signature's time orders events Buildkite sent; with a plain token, the time they arrived. Both in whole seconds.
     const at = (auth.ts ?? Math.floor(nowMs / 1000)) * 1000;
     let out: IngestResult = { result: "ignored" };
@@ -344,9 +377,9 @@ export class CiStore {
   }
 
   /** A build the service returned to one of our calls (Rebuild, Cancel): recorded at once, before its webhooks. */
-  ingestBuild(connId: string, build: unknown): IngestResult {
+  ingestBuild(connId: string, build: Json | null): IngestResult {
     const c = this.connection(connId) ?? fail(404, "not_found", "no such CI connection");
-    const b = (build ?? {}) as Record<string, unknown>;
+    const b: JsonObject = isRecord(build) ? build : {};
     let out: IngestResult = { result: "ignored" };
     this.ctx.storage.transactionSync(() => {
       out = this.ingest(c, "build.api", { build: b, pipeline: b.pipeline }, Math.floor(Date.now() / 1000) * 1000);
@@ -356,9 +389,9 @@ export class CiStore {
   }
 
   /** A job the service returned (Retry): recorded at once under its build. */
-  ingestJob(buildId: string, job: unknown): JobRow | null {
+  ingestJob(buildId: string, job: Json | null): JobRow | null {
     const b = this.buildRow(buildId);
-    const j = normalizeJob(job);
+    const j = normalizeJob(job ?? undefined);
 
     if (!b || !j || j.type === "waiter") return null;
     this.ctx.storage.transactionSync(() => this.upsertJob(b, j));
@@ -366,7 +399,7 @@ export class CiStore {
     return this.row<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ? AND external_id = ?", b.id, j.external_id);
   }
 
-  private ingest(c: ConnectionRow, event: string, payload: Record<string, unknown>, at: number): IngestResult {
+  private ingest(c: ConnectionRow, event: string, payload: JsonObject, at: number): IngestResult {
     if (event === "ping") return { result: "recorded" };
     const isJob = event.startsWith("job.");
 
@@ -420,9 +453,10 @@ export class CiStore {
       if (d) {
         repo = d.repo;
         delivery = md.pando_delivery;
-        const p = JSON.parse(d.payload) as { head?: string; pusher?: string };
+        // The delivery's stored payload (hooks.ts StoredPayload): who pushed the head it was for.
+        const p = parseJson(d.payload);
 
-        if (p.head === b.commit) pushedBy = p.pusher ?? null;
+        if (isRecord(p) && p.head === b.commit && isText(p.pusher)) pushedBy = p.pusher;
       } else if (!md.pando_monorepo) return { ignore: "another monorepo's build (its delivery is not here)" };
     }
 
@@ -453,12 +487,16 @@ export class CiStore {
     return repos.size === 1 ? [...repos][0] : null;
   }
 
-  /** Buildkite hooks of this connection's organization: (pipeline, repo, hook). */
-  private hookPipelines(c: ConnectionRow): { pipeline: string; repo: string; hook_id: string }[] {
+  /** Buildkite hooks of this connection's organization: (pipeline, repo, hook). Their config is the JSON api.ts stored. */
+  private hookPipelines(c: ConnectionRow): HookPipeline[] {
     return this.rows<{ id: string; repo: string; config: string | null }>("SELECT id, repo, config FROM hooks WHERE type = 'buildkite' AND active = 1 ORDER BY created_at")
-      .map((h) => ({ h, cfg: JSON.parse(h.config ?? "{}") as { organization?: string; pipeline?: string } }))
-      .filter(({ cfg }) => (cfg.organization ?? "").toLowerCase() === c.organization && !!cfg.pipeline)
-      .map(({ h, cfg }) => ({ pipeline: cfg.pipeline!, repo: h.repo, hook_id: h.id }));
+      .flatMap((h) => {
+        const cfg = parseJson(h.config ?? "{}");
+
+        if (!isRecord(cfg) || !isText(cfg.organization) || !isText(cfg.pipeline) || !cfg.pipeline) return [];
+
+        return cfg.organization.toLowerCase() === c.organization ? [{ pipeline: cfg.pipeline, repo: h.repo, hook_id: h.id }] : [];
+      });
   }
 
   /** Who pushed a commit, from Pando's push events (the last PUSH_SCAN) or the merge that made it. */
@@ -675,7 +713,7 @@ export class CiStore {
   }
 
   /** The CI tab's top: connections (with webhook health) and pipelines (each with its last build). */
-  overview(): { connections: ConnectionView[]; pipelines: PipelineView[] } {
+  overview(): CiOverview {
     const conns = this.rows<ConnectionRow>("SELECT * FROM ci_connections ORDER BY created_at");
     const paths = this.repoPaths();
     const services = this.connectionServices();
@@ -727,10 +765,10 @@ export class CiStore {
   }
 
   /** Stored builds, newest first. */
-  builds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }): { builds: BuildView[]; next_cursor: string | null } {
+  builds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }): BuildsPage {
     const limit = Math.min(Math.max(q.limit, 1), BUILDS_PAGE_MAX);
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SqlStorageValue[] = [];
 
     for (const [col, v] of [["repo", q.repo], ["branch", q.branch], ["sha", q.sha], ["pipeline", q.pipeline], ["connection_id", q.connection], ["state", q.state]] as const) {
       if (v) {
@@ -790,7 +828,7 @@ export class CiStore {
   }
 
   /** A pipeline this monorepo knows (stored or from a hook), with its stored configuration. */
-  pipeline(slug: string, connection: string | null): { connection: CiRef["connection"]; pipeline: PipelineView; configuration: string | null; configuration_fetched_at: string | null } {
+  pipeline(slug: string, connection: string | null): PipelineDetail {
     const { pipelines } = this.overview();
     const hits = pipelines.filter((p) => p.slug === slug && (!connection || p.connection === connection));
 

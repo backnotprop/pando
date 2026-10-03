@@ -30,6 +30,7 @@ import { Machines, type MachineRow } from "./machines";
 import type { FeedEvent, Key, NeedRow, NeedState, PushNumbers, Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { CiStore, type CiRef, type IngestResult } from "../ci/store";
+import type { Json } from "../parse";
 import type {
   BranchRecord,
   Checks,
@@ -1593,11 +1594,11 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.ci.webhook(id, h, body, nowMs));
   }
 
-  ciIngestBuild(connection: string, build: unknown): Promise<Outcome<IngestResult>> {
+  ciIngestBuild(connection: string, build: Json | null): Promise<Outcome<IngestResult>> {
     return this.guard(() => this.ci.ingestBuild(connection, build));
   }
 
-  ciIngestJob(build: string, job: unknown) {
+  ciIngestJob(build: string, job: Json | null) {
     const j = this.ci.ingestJob(build, job);
 
     return j ? this.ci.jobView(j) : null;

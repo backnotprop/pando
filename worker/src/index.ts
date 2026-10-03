@@ -3,7 +3,7 @@
 //   /healthz                       up check
 //   /v1/openapi.yaml               the contract (docs/contracts/api-v1.yaml)
 //   /<monorepo>/<repo>.git/...     the git door (server-git)
-//   /v1/users                      sign-in (server-git; the method is open)
+//   /v1/users, /v1/login/...       sign-in (accounts/signin.ts)
 //   /v1/monorepos/{m}/meta/...     the meta layer (live; wired at M3)
 //   /v1/...                        the API (server-git)
 import contract from "../../docs/contracts/api-v1.yaml";
@@ -26,7 +26,7 @@ export default {
     if (url.pathname === "/healthz") return new Response("ok\n");
     if (url.pathname === "/v1/openapi.yaml") return new Response(contract, { headers: { "content-type": "application/yaml; charset=utf-8" } });
     if (isDoorPath(url.pathname)) return handleDoor(request, env, ctx);
-    if (url.pathname === "/v1/users") return signin.fetch(request, env, ctx);
+    if (url.pathname === "/v1/users" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
     if (META_RE.test(url.pathname)) return errorJson(501, "not_wired", "the meta layer routes arrive with the live lane (M3)");
     return api.fetch(request, env, ctx);
   },

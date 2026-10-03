@@ -47,12 +47,19 @@ info:
     and approvals, not a gate. The merge gate is the checks, and `?force=1`
     merges past them. Owners also manage members and hooks.
 
-    Signing in: the method (GitHub sign-in or an email link) is not decided.
-    Until it is, the Worker secret `PANDO_BOOTSTRAP` makes users:
-    `POST /v1/users` with it as the bearer returns the user and a first
-    credential. That user then makes more credentials
-    (`POST /v1/user/credentials`) and monorepos (`POST /v1/monorepos`).
-    The bootstrap secret works on `POST /v1/users` only.
+    Signing in (`pando login`): WorkOS AuthKit's CLI Auth, the OAuth device
+    flow, run through the Worker. `POST /v1/login/device` returns a code
+    and a URL; the person confirms the code in the browser; the CLI polls
+    `POST /v1/login/token` with the device code until it returns the user and
+    a new machine credential. WorkOS only proves who the person is: Pando
+    keeps its own users, credentials and membership, and keeps no WorkOS
+    token. A user's login comes from their email (`ana@x.com` is `ana`, or
+    `ana-2` if taken). Invites by email wait until that email first signs in.
+
+    Self-hosted, one person: the Worker secret `PANDO_BOOTSTRAP` makes users
+    with `POST /v1/users` (it works there only). Either way, a user then makes
+    more credentials (`POST /v1/user/credentials`) and monorepos
+    (`POST /v1/monorepos`).
 
     Branch names in paths: encode `/` as `%2F` (`agent-3%2Foauth`). Raw
     slashes are accepted too.
@@ -106,7 +113,7 @@ paths:
   /v1/users:
     post:
       operationId: createUser
-      summary: Make a user and a first credential (bootstrap secret only, until sign-in exists)
+      summary: Make a user and a first credential (bootstrap secret only; self-hosted, one person)
       tags: [users]
       security:
         - bootstrap: []
@@ -137,6 +144,78 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "503":
           description: "`bootstrap_not_configured`: the PANDO_BOOTSTRAP secret is not set."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/login/device:
+    post:
+      operationId: loginStart
+      summary: "pando login, step 1: a code to confirm in the browser"
+      description: |
+        Starts WorkOS CLI Auth. Show `user_code` and `verification_uri` (or
+        open `verification_uri_complete`). Keep `device_code` to yourself: it
+        is what the CLI polls with. No credential needed.
+      tags: [users]
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_code, user_code, verification_uri, expires_in, interval]
+                properties:
+                  device_code: { type: string }
+                  user_code: { type: string, description: "For example `RRGQ-BJVS`." }
+                  verification_uri: { type: string }
+                  verification_uri_complete: { type: string }
+                  expires_in: { type: integer, description: "Seconds, usually 300." }
+                  interval: { type: integer, description: "Seconds between polls, usually 5." }
+        "503":
+          description: "`sign_in_not_configured`: WORKOS_CLIENT_ID is not set on this Worker (use the bootstrap path)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/login/token:
+    post:
+      operationId: loginPoll
+      summary: "pando login, step 2 (polled): the user and a new machine credential"
+      description: |
+        Poll every `interval` seconds. Until the person confirms, the answer is
+        400 with `error.code` `authorization_pending` (keep polling) or
+        `slow_down` (add 5 seconds to the interval). `access_denied`,
+        `expired_token` and `invalid_grant` end the attempt. On success,
+        `joined` lists the monorepos whose email invites were accepted.
+      tags: [users]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_code, credential_name]
+              properties:
+                device_code: { type: string }
+                credential_name: { type: string, description: "The machine name (formats.md, section 7)." }
+                kind: { type: string, enum: [machine, sandbox], default: machine }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, credential, joined]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  credential: { $ref: "#/components/schemas/NewCredential" }
+                  joined:
+                    type: array
+                    items: { type: string }
+        "400":
+          description: "Not yet, or not at all: `error.code` is one of the codes above."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -298,6 +377,78 @@ paths:
                   members:
                     type: array
                     items: { $ref: "#/components/schemas/Member" }
+  /v1/monorepos/{monorepo}/invites:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: invite
+      summary: Invite a person by email (owners)
+      description: |
+        If someone has already signed in with that email, they are added now
+        (200, `status: added`). Otherwise the invite waits (201,
+        `status: invited`) and is accepted when that email first signs in with
+        `pando login` (a verified email only).
+      tags: [monorepos]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+                role: { $ref: "#/components/schemas/MemberRole" }
+      responses:
+        "200":
+          description: Added as a member now
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [added] }
+                  member: { $ref: "#/components/schemas/Member" }
+        "201":
+          description: Invited; waiting for that email to sign in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [invited] }
+                  invite: { $ref: "#/components/schemas/Invite" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listInvites
+      summary: Invites still waiting
+      tags: [monorepos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invites]
+                properties:
+                  invites:
+                    type: array
+                    items: { $ref: "#/components/schemas/Invite" }
+  /v1/monorepos/{monorepo}/invites/{email}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - name: email
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: revokeInvite
+      summary: Withdraw an invite (owners)
+      tags: [monorepos]
+      responses:
+        "204": { description: Withdrawn }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{monorepo}/members/{login}:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -1037,6 +1188,14 @@ components:
             secret:
               type: string
               description: "`pando_` and 40 hex characters. Shown once; Pando keeps only its SHA-256."
+    Invite:
+      type: object
+      required: [email, role, invited_by, created_at]
+      properties:
+        email: { type: string }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        invited_by: { type: string }
+        created_at: { type: string, format: date-time }
     Member:
       type: object
       required: [login, role, added_at]

@@ -237,6 +237,34 @@ api.delete("/v1/monorepos/:m/members/:login", async (c) => {
   return c.body(null, 204);
 });
 
+// ── Invites by email ──────────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+api.post("/v1/monorepos/:m/invites", async (c) => {
+  const by = owner(c, "invite people");
+  const b = await body(c);
+  const email = str(b.email, "email", { max: 200 })!;
+  if (!EMAIL_RE.test(email)) bad("email is not an email address");
+  const role = b.role ?? "member";
+  if (role !== "owner" && role !== "member") bad("role is owner or member");
+  const out = unwrap(await accounts(c.env).invite(c.get("m"), email, role, by.login));
+  forgetCachedAuth();
+  return c.json(out, out.status === "added" ? 200 : 201);
+});
+
+api.get("/v1/monorepos/:m/invites", async (c) => {
+  return c.json({ invites: await accounts(c.env).invites(c.get("m")) });
+});
+
+api.delete("/v1/monorepos/:m/invites/:email", async (c) => {
+  owner(c, "revoke invites");
+  if (!(await accounts(c.env).revokeInvite(c.get("m"), decodeURIComponent(c.req.param("email"))))) {
+    throw new HttpError(404, "not_found", "no such invite");
+  }
+  return c.body(null, 204);
+});
+
 // ── Repos ─────────────────────────────────────────────────────────────────
 
 api.post("/v1/monorepos/:m/repos", async (c) => {

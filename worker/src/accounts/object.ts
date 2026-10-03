@@ -43,6 +43,21 @@ export interface MonorepoEntry {
   created_at: string;
 }
 
+export interface Invite {
+  email: string;
+  role: MemberRole;
+  invited_by: string;
+  created_at: string;
+}
+
+/** Who WorkOS says signed in. Only an id and an email; WorkOS tokens never reach Pando's storage. */
+export interface SignedIn {
+  workos_id: string;
+  email: string;
+  email_verified: boolean;
+  name: string | null;
+}
+
 export interface Auth {
   user: User;
   credential: Credential;
@@ -63,6 +78,10 @@ CREATE TABLE IF NOT EXISTS members (
   monorepo TEXT NOT NULL, login TEXT NOT NULL, role TEXT NOT NULL, added_at TEXT NOT NULL, added_by TEXT,
   PRIMARY KEY (monorepo, login));
 CREATE INDEX IF NOT EXISTS members_login ON members (login);
+CREATE TABLE IF NOT EXISTS invites (
+  monorepo TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, invited_by TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (monorepo, email));
+CREATE INDEX IF NOT EXISTS invites_email ON invites (email);
 `;
 
 function fail(status: number, code: string, message: string): never {
@@ -81,6 +100,10 @@ export class AccountsObject extends DurableObject<Env> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+    // Added with WorkOS sign-in: the WorkOS user id behind a Pando user.
+    const cols = this.rows<{ name: string }>("PRAGMA table_info(users)").map((c) => c.name);
+    if (!cols.includes("workos_id")) this.sql.exec("ALTER TABLE users ADD COLUMN workos_id TEXT");
+    this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_workos ON users (workos_id)");
   }
 
   private rows<T>(query: string, ...args: unknown[]): T[] {
@@ -175,6 +198,7 @@ export class AccountsObject extends DurableObject<Env> {
 
   /** Undo claimMonorepo when creating the monorepo failed. */
   releaseMonorepo(name: string): void {
+    this.sql.exec("DELETE FROM invites WHERE monorepo = ?", name);
     this.sql.exec("DELETE FROM members WHERE monorepo = ?", name);
     this.sql.exec("DELETE FROM monorepos WHERE name = ?", name);
   }
@@ -214,6 +238,75 @@ export class AccountsObject extends DurableObject<Env> {
       this.sql.exec("DELETE FROM members WHERE monorepo = ? AND login = ?", monorepo, login);
       return true;
     });
+  }
+
+  // ── Sign-in and invites ──────────────────────────────────────────────────
+
+  /**
+   * After WorkOS proved who signed in: find or make the Pando user, accept any
+   * invites for a verified email, and give the machine a credential.
+   */
+  signIn(who: SignedIn, cred: { hash: string; name: string; kind: CredentialKind }): { user: User; credential: Credential; joined: string[] } {
+    const email = who.email.toLowerCase();
+    let login = this.row<{ login: string }>("SELECT login FROM users WHERE workos_id = ?", who.workos_id)?.login;
+    if (login) {
+      this.sql.exec("UPDATE users SET email = ?, name = COALESCE(?, name) WHERE login = ?", email, who.name, login);
+    } else {
+      login = this.freeLogin(email, who.name);
+      this.sql.exec("INSERT INTO users (login, name, email, created_at, workos_id) VALUES (?, ?, ?, ?, ?)", login, who.name, email, now(), who.workos_id);
+    }
+    const joined: string[] = [];
+    if (who.email_verified) {
+      for (const inv of this.rows<{ monorepo: string; role: MemberRole; invited_by: string }>("SELECT monorepo, role, invited_by FROM invites WHERE email = ?", email)) {
+        this.sql.exec(
+          `INSERT INTO members (monorepo, login, role, added_at, added_by) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (monorepo, login) DO NOTHING`,
+          inv.monorepo, login, inv.role, now(), inv.invited_by,
+        );
+        joined.push(inv.monorepo);
+      }
+      this.sql.exec("DELETE FROM invites WHERE email = ?", email);
+    }
+    return { user: this.getUser(login)!, credential: this.insertCredential(login, cred), joined };
+  }
+
+  /** A login from the email's local part, made unique. */
+  private freeLogin(email: string, name: string | null): string {
+    const base =
+      (email.split("@")[0] || name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "user";
+    for (let i = 1; i < 1000; i++) {
+      const candidate = i === 1 ? base : `${base}-${i}`;
+      if (!this.row("SELECT login FROM users WHERE login = ?", candidate)) return candidate;
+    }
+    return `${base.slice(0, 20)}-${randomId("").slice(0, 8)}`;
+  }
+
+  /** Invite by email: a signed-in user with that email is added now; anyone else when they first sign in. */
+  invite(monorepo: string, email: string, role: MemberRole, by: string): Outcome<{ status: "added"; member: Member } | { status: "invited"; invite: Invite }> {
+    return this.guard(() => {
+      const e = email.toLowerCase();
+      const user = this.row<{ login: string }>("SELECT login FROM users WHERE email = ? AND workos_id IS NOT NULL", e);
+      if (user) {
+        const out = this.putMember(monorepo, user.login, role, by);
+        if (!out.ok) fail(out.status, out.code, out.message);
+        return { status: "added" as const, member: out.value };
+      }
+      const at = now();
+      this.sql.exec(
+        `INSERT INTO invites (monorepo, email, role, invited_by, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (monorepo, email) DO UPDATE SET role = excluded.role, invited_by = excluded.invited_by`,
+        monorepo, e, role, by, at,
+      );
+      return { status: "invited" as const, invite: this.row<Invite>("SELECT email, role, invited_by, created_at FROM invites WHERE monorepo = ? AND email = ?", monorepo, e)! };
+    });
+  }
+
+  invites(monorepo: string): Invite[] {
+    return this.rows<Invite>("SELECT email, role, invited_by, created_at FROM invites WHERE monorepo = ? ORDER BY created_at", monorepo);
+  }
+
+  revokeInvite(monorepo: string, email: string): boolean {
+    return this.sql.exec("DELETE FROM invites WHERE monorepo = ? AND email = ?", monorepo, email.toLowerCase()).rowsWritten > 0;
   }
 
   private ownerCount(monorepo: string): number {

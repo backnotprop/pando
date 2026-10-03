@@ -6,6 +6,7 @@
 // Secrets (the owner types them; never in this file):
 //   npx wrangler secret put PANDO_BOOTSTRAP      the first admin credential
 //   npx wrangler secret put BUILDKITE_API_TOKEN  for buildkite hooks (M5)
+//   npx wrangler secret put WORKOS_API_KEY       the WorkOS environment "Pando"
 // Local dev reads them from worker/.dev.vars (gitignored).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
@@ -14,6 +15,11 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "vars": {
+    // The WorkOS environment "Pando" (public in a device flow). A secret of
+    // the same name, if set, takes its place.
+    "WORKOS_CLIENT_ID": "client_01M3ZW5WYKNDQZE358DYA7VHY5"
+  },
   "observability": { "enabled": true },
   "artifacts": [
     // remote: wrangler dev talks to the real Artifacts service.

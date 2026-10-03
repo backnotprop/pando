@@ -100,7 +100,7 @@ type InviteResult struct {
 	Invite *Invite `json:"invite"`
 }
 
-// Head is one repo's main, from GET /v1/monorepos/{m}/heads.
+// Head is one repo's main, from GET /v1/monorepos/{owner}/{name}/heads.
 type Head struct {
 	Repo          string `json:"repo"` // the repo's URL name
 	Path          string `json:"path"`

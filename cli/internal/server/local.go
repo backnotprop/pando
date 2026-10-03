@@ -154,7 +154,7 @@ func (l *Local) ListMonorepos(_ context.Context, name string) ([]Monorepo, error
 			continue
 		}
 		lm := &localMono{}
-		if json.Unmarshal(b, lm) != nil || lm.Owner == "" || (name != "" && lm.Name != name) {
+		if json.Unmarshal(b, lm) != nil || lm.Owner == "" || (name != "" && !strings.EqualFold(lm.Name, name)) {
 			continue
 		}
 		if lm.Owner == l.login() {

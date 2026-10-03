@@ -41,7 +41,7 @@ func resolveMonorepo(e *Env, srv server.Server, arg string) (*server.Monorepo, e
 	}
 	var named []server.Monorepo
 	for _, m := range ms {
-		if m.Name == arg {
+		if strings.EqualFold(m.Name, arg) {
 			named = append(named, m)
 		}
 	}

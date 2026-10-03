@@ -2,7 +2,7 @@ package meta
 
 // Entry points for the cli lane (cli/cmd/pando/main.go and cli/internal/app):
 //
-//	pando clone, after root.json:  Clone(ctx, root, opts)   the first download of the meta layer
+//	pando clone, after root.json:  Clone(ctx, root[, opts]) the first download of the meta layer
 //	pando fetch <path>...:         CmdFetch(args)           a large file's bytes on a --text-only clone
 //	pando init, after root.json:   Init(ctx, root)          the first upload, .pando/ included
 //	the daemon:                    Sync(ctx, root, hooks)   the live sync until ctx ends
@@ -43,12 +43,14 @@ type CloneOptions struct {
 // .pando/local/root.json, and returns once every file is written (large
 // files included, unless TextOnly). It does not call Hooks.References: the
 // caller sets up references after it.
-func Clone(ctx context.Context, root string, opts CloneOptions) error {
+func Clone(ctx context.Context, root string, opts ...CloneOptions) error {
 	e, err := engineFor(root)
 	if err != nil {
 		return err
 	}
-	e.textOnly = opts.TextOnly
+	for _, o := range opts {
+		e.textOnly = e.textOnly || o.TextOnly
+	}
 	return e.CatchUp(ctx)
 }
 

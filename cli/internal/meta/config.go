@@ -74,9 +74,9 @@ func (c *Config) check() error {
 
 // LoadConfig reads the cli lane's files through pando/internal/config:
 // .pando/local/root.json (the monorepo and its server), ~/.pando/config.toml
-// (server, machine; PANDO_SERVER and PANDO_MACHINE win), the credential
-// pando login stored (PANDO_TOKEN wins) and the signed-in account as the
-// author. PANDO_MONOREPO and PANDO_AUTHOR are overrides for tests.
+// (server; PANDO_SERVER wins), config.Credential (PANDO_TOKEN, else what
+// pando login stored) and config.Author (the signed-in account, the machine;
+// PANDO_MACHINE wins). PANDO_MONOREPO and PANDO_AUTHOR are overrides for tests.
 func LoadConfig(root string) (Config, error) {
 	c := Config{Root: root}
 	if r, err := config.LoadRoot(root); err == nil {
@@ -87,29 +87,17 @@ func LoadConfig(root string) (Config, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return c, err
 	}
-	home, err := config.LoadHome()
-	if err != nil {
-		return c, err
-	}
-	if os.Getenv("PANDO_SERVER") != "" || c.Server == "" {
-		c.Server = home.Server
+	if c.Server == "" || os.Getenv("PANDO_SERVER") != "" {
+		if home, err := config.LoadHome(); err == nil {
+			c.Server = home.Server
+		}
 	}
 	c.Server = strings.TrimRight(c.Server, "/")
-	c.Machine = home.Machine
 	if c.Server != "" {
-		if tok, err := home.Token(c.Server); err == nil {
+		if tok, err := config.Credential(c.Server); err == nil {
 			c.Token = tok // never printed or logged
 		}
-		if acct, ok := home.Account(c.Server); ok {
-			name := acct.Name
-			if name == "" {
-				name = acct.Login
-			}
-			c.Author = name
-			if acct.Email != "" {
-				c.Author = name + " <" + acct.Email + ">"
-			}
-		}
+		c.Author, c.Machine = config.Author(c.Server)
 	}
 	if v := os.Getenv("PANDO_MONOREPO"); v != "" {
 		c.Monorepo = v

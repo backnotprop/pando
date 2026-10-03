@@ -9,7 +9,7 @@ package meta
 // Against wrangler dev each test has its own monorepo, so its own object.
 // Against a deployed Worker (https) a run makes one monorepo, e2e-live-<time>
 // (there is no delete), and each test works in its own folder in it; the
-// credential is this machine's pando login (config.LoadHome().Token), passed
+// credential is this machine's pando login (config.Credential), passed
 // to the engines as PANDO_TOKEN and never printed.
 
 import (
@@ -55,11 +55,7 @@ func remoteToken(t *testing.T, server string) string {
 	remote.Lock()
 	defer remote.Unlock()
 	if remote.token == "" && remote.err == nil {
-		home, err := config.LoadHome()
-		if err == nil {
-			remote.token, err = home.Token(server)
-		}
-		remote.err = err
+		remote.token, remote.err = config.Credential(server)
 	}
 	if remote.err != nil {
 		t.Skipf("no credential for %s: %v", server, remote.err)

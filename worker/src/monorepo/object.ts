@@ -17,8 +17,8 @@ import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
-import { STALE_GRACE_MS, type FactsMessage } from "./facts";
-import { FactsOut } from "./facts-out";
+import { STALE_GRACE_MS } from "./facts";
+import { FactsOut, type FactsRequest } from "./facts-out";
 import { HooksOut } from "./hooks-out";
 import type { BranchList, BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
@@ -1229,11 +1229,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Branch facts (facts.ts): stored, computed on change by FactsDrain ────
 
-  private queueFacts(
-    m: ({ type: "sweep"; repo: string; main: string } | { type: "branch"; repo: string; branch: string; head: string }) & { push?: { seq: number; before: string } },
-  ): void {
+  private queueFacts(m: FactsRequest): void {
     // The outbox (facts-out.ts), drained at once by RPC.
-    this.factsOut.add(m as Omit<FactsMessage, "monorepo">);
+    this.factsOut.add(m);
   }
 
   /** Tests only (HOOKS_TEST=1): die after the next delivery's call answers, before recording it. */

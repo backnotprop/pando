@@ -223,7 +223,7 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
 
   const files: DiffFile[] = pairs.map((p) => ({
     path: (p.new ?? p.old)!.path,
-    ...(p.status === "renamed" ? { old_path: p.old!.path } : {}),
+    old_path: p.status === "renamed" ? p.old!.path : undefined, // left out of the JSON unless renamed
     status: p.status,
     old_sha: p.old?.sha ?? null,
     new_sha: p.new?.sha ?? null,
@@ -277,7 +277,13 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
       let add = 0;
       let del = 0;
 
-      for (const h of hunks) for (const l of h.lines) l[0] === "+" ? add++ : l[0] === "-" ? del++ : 0;
+      for (const h of hunks) {
+        for (const l of h.lines) {
+          if (l[0] === "+") add++;
+          else if (l[0] === "-") del++;
+        }
+      }
+
       f.additions = add;
       f.deletions = del;
       computed.set(f, hunks);
@@ -333,7 +339,13 @@ export async function changedFiles(repo: ArtifactsRepo, fromTree: string, toTree
 }
 
 /** A unified diff with git's headers, for `git apply` and Plannotator. */
-export function toPatch(result: DiffResult, hunksOf: (f: DiffFile) => Hunk[] | undefined): { text: string; omitted: number } {
+/** A diff as git's patch text, and how many files were left out of it. */
+export interface Patch {
+  text: string;
+  omitted: number;
+}
+
+export function toPatch(result: DiffResult, hunksOf: (f: DiffFile) => Hunk[] | undefined): Patch {
   const out: string[] = [];
   let omitted = 0;
 

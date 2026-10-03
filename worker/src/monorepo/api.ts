@@ -1016,14 +1016,12 @@ api.get("/v1/monorepos/:o/:m/repos/:r/history", async (c) => {
 
   const key = files.answerKey("hist", start, await files.sha1Hex(`${limit}\n${walked}\n${path}`));
 
-  type Page = { commits: files.CommitLine[]; next: string | null; capped: boolean };
-
-  const stored = await obj.json<Page>(`/answer/${r.artifacts_name}/${key}`);
+  const stored = await obj.json<files.HistoryPage>(`/answer/${r.artifacts_name}/${key}`);
 
   if (stored) return c.json({ ref, path, ...stored, complete_page: true });
   const stub = c.get("stub");
   const p = await files.walkHistory(w, start, path, limit, walked, (shas) => stub.mergedBranches(r.name, shas));
-  const page: Page = { commits: p.changes, next: p.next ? `${p.next}.${p.walked}` : null, capped: p.capped };
+  const page: files.HistoryPage = { commits: p.changes, next: p.next ? `${p.next}.${p.walked}` : null, capped: p.capped };
 
   // A page cut short by the budget is not kept: the next ask walks further.
   if (!p.budgetCut) await files.storeAnswer(c.env, r.artifacts_name, key, page);

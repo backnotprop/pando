@@ -34,7 +34,7 @@ export function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 export function pkt(data: string | Uint8Array): Uint8Array {
-  const body = typeof data === "string" ? enc.encode(data) : data;
+  const body = data instanceof Uint8Array ? data : enc.encode(data);
   const len = (body.length + 4).toString(16).padStart(4, "0");
 
   return concat([enc.encode(len), body]);

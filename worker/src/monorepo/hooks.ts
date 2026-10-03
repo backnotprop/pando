@@ -14,6 +14,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
 import { redact } from "../http";
+import { isRecord, isText, isTextList, parseJson, type Json } from "../parse";
 import { note, timed } from "../timing";
 import type { HookJob, HookResult } from "./hooks-out";
 import { deliveryReadToken, withRepo } from "./artifacts";
@@ -48,10 +49,35 @@ export async function readToken(env: Env, artifactsName: string, kind: "web" | "
   return t;
 }
 
+/** A hook's stored config: Buildkite's organization and pipeline (and a test api_url), or a web hook's own app. */
+interface HookConfig {
+  organization: string | null;
+  pipeline: string | null;
+  api_url: string | null;
+  app: string | null;
+}
+
+/** The hook's config, read from its stored JSON (a field that is missing or not text reads as null). */
+function hookConfig(h: HookRow): HookConfig {
+  const c = h.config ? parseJson(h.config) : null;
+  const text = (v: Json | undefined) => (isText(v) ? v : null);
+
+  if (!isRecord(c)) return { organization: null, pipeline: null, api_url: null, app: null };
+
+  return { organization: text(c.organization), pipeline: text(c.pipeline), api_url: text(c.api_url), app: text(c.app) };
+}
+
+/** The events a hook receives, from its stored JSON list. */
+function hookEvents(h: HookRow): string[] {
+  const events = parseJson(h.events);
+
+  return isTextList(events) ? events : [];
+}
+
 /** The delivery's status token, or null when PANDO_STATUS_SECRET is not set or there is no commit. */
 async function statusToken(env: Env, hook: HookRow, p: StoredPayload): Promise<{ token: string; expires_at: string } | null> {
   if (!env.PANDO_STATUS_SECRET || !p.monorepo_id || !/^[0-9a-f]{40}$/.test(p.head)) return null;
-  const app = hook.type === "buildkite" ? "buildkite" : ((JSON.parse(hook.config ?? "{}") as { app?: string }).app ?? null);
+  const app = hook.type === "buildkite" ? "buildkite" : hookConfig(hook).app;
   const claims: Omit<StatusClaims, "x"> = { m: p.monorepo_id, r: p.repo, s: p.head, a: app, h: hook.id };
 
   return mintStatusToken(env.PANDO_STATUS_SECRET, claims);
@@ -98,7 +124,8 @@ async function deliverOne(env: Env, j: HookJob): Promise<HookResult> {
   return { ...r, ms: Date.now() - t0 };
 }
 
-export interface HookRow {
+/** A hooks row (a type, not an interface, so SQLite's typed exec can return it). */
+export type HookRow = {
   id: string;
   repo: string;
   type: "web" | "buildkite";
@@ -109,7 +136,7 @@ export interface HookRow {
   active: number;
   created_at: string;
   created_by: string;
-}
+};
 
 /** The stored payload: the round 3 body minus the token, which is added per attempt. `seq` is the stream's. */
 export interface StoredPayload extends RepoEvent {
@@ -124,16 +151,16 @@ export interface StoredPayload extends RepoEvent {
 }
 
 export function hookView(h: HookRow) {
-  const config = h.config ? (JSON.parse(h.config) as { organization?: string; pipeline?: string; app?: string }) : null;
+  const config = hookConfig(h);
 
   return {
     id: h.id,
     type: h.type,
     url: h.url,
-    events: JSON.parse(h.events) as string[],
-    buildkite: h.type === "buildkite" ? { organization: config?.organization, pipeline: config?.pipeline } : null,
+    events: hookEvents(h),
+    buildkite: h.type === "buildkite" ? { organization: config.organization, pipeline: config.pipeline } : null,
     // The CI service its status tokens stamp: buildkite, a web hook's own app, or null.
-    app: h.type === "buildkite" ? "buildkite" : (config?.app ?? null),
+    app: h.type === "buildkite" ? "buildkite" : config.app,
     active: h.active === 1,
     created_at: h.created_at,
     created_by: h.created_by,
@@ -182,7 +209,9 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
         ...u,
         read_token: read.token,
         read_token_expires_at: read.expiresAt,
-        ...(status ? { status_token: status.token, status_token_expires_at: status.expires_at } : {}),
+        // Left out of the JSON when there is no status token (stringify drops undefined).
+        status_token: status?.token,
+        status_token_expires_at: status?.expires_at,
       });
 
       const signature = await hmacHex(hook.secret ?? "", body);
@@ -206,13 +235,13 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
     }
 
     // buildkite
-    const config = JSON.parse(hook.config ?? "{}") as { organization: string; pipeline: string; api_url?: string };
+    const config = hookConfig(hook);
 
     if (!env.BUILDKITE_API_TOKEN) return { ok: false, code: null, error: "the Worker secret BUILDKITE_API_TOKEN is not set" };
 
     const url =
       config.api_url ??
-      `https://api.buildkite.com/v2/organizations/${encodeURIComponent(config.organization)}/pipelines/${encodeURIComponent(config.pipeline)}/builds`;
+      `https://api.buildkite.com/v2/organizations/${encodeURIComponent(config.organization ?? "")}/pipelines/${encodeURIComponent(config.pipeline ?? "")}/builds`;
 
     const body = JSON.stringify({
       commit: p.head,
@@ -248,9 +277,8 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
 /** Which events a hook receives, and whether this event applies. */
 export function wants(hook: HookRow, e: RepoEvent): boolean {
   if (hook.active !== 1) return false;
-  const events = JSON.parse(hook.events) as string[];
 
-  if (!events.includes(e.event)) return false;
+  if (!hookEvents(hook).includes(e.event)) return false;
 
   // A build needs a commit: no Buildkite build for a deleted branch.
   if (hook.type === "buildkite" && e.head === ZERO) return false;
@@ -265,9 +293,11 @@ export async function hooksTestRoute(request: Request, env: Env): Promise<Respon
   const { isBootstrap } = await import("./session");
 
   if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
-  const b = request.method === "POST" ? ((await request.json().catch(() => ({}))) as { monorepo?: string; crash?: boolean }) : {};
+  const b = request.method === "POST" ? await request.json<Json>().catch(() => null) : null;
+  const monorepo = isRecord(b) && isText(b.monorepo) ? b.monorepo : null;
 
-  if (!b.monorepo) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+  if (!monorepo) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+  const crash = isRecord(b) && (b.crash === true || b.crash === false) ? b.crash : undefined;
 
-  return Response.json(await env.MONOREPO.getByName(b.monorepo).testHooksOutbox(b.crash === undefined ? {} : { crash: b.crash }));
+  return Response.json(await env.MONOREPO.getByName(monorepo).testHooksOutbox(crash === undefined ? {} : { crash }));
 }

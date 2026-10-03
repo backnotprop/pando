@@ -1,19 +1,20 @@
 // The merge gate: required checks from .pando/pando.toml on main, and
 // GitHub's combined status over the latest status per context.
 
-import { parse as parseToml } from "smol-toml";
+import { parse as parseToml, TomlDate, type TomlTable, type TomlValue } from "smol-toml";
 import type { Env } from "../env";
+import { isText } from "../parse";
 import { withRepo } from "./artifacts";
 import { metaArtifactsName } from "./names";
 import type { Checks, Kind, RepoRecord, StatusRecord } from "./types";
 
 // Read on every check, uncached: a merge into main can change it, and the
 // gate must see the change at once.
-async function readConfig(env: Env, artifactsName: string): Promise<Record<string, unknown> | null> {
+async function readConfig(env: Env, artifactsName: string): Promise<TomlTable | null> {
   try {
     const blob = await withRepo(env, artifactsName, (repo) => repo.readFile({ ref: "main", path: ".pando/pando.toml" }));
 
-    return blob ? (parseToml(await blob.text()) as Record<string, unknown>) : null;
+    return blob ? parseToml(await blob.text()) : null;
   } catch (err) {
     // An empty repo, a missing file or a bad file all mean "no required checks".
     console.warn(`pando.toml in ${artifactsName}: ${err instanceof Error ? err.message : String(err)}`);
@@ -22,14 +23,20 @@ async function readConfig(env: Env, artifactsName: string): Promise<Record<strin
   }
 }
 
+/** A TOML table (`[section]` or an inline `{ }`), not a list, a date or a plain value. */
+function isTomlTable(v: TomlValue | undefined): v is TomlTable {
+  return typeof v === "object" && !Array.isArray(v) && !(v instanceof TomlDate);
+}
+
 /** `repos."<repo path>".required_checks` from the right pando.toml (formats.md, section 2). */
 export async function requiredChecks(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
   const source = monorepo.kind === "repo" ? repo.artifacts_name : metaArtifactsName(monorepo.id);
   const toml = await readConfig(env, source);
-  const repos = toml?.repos as Record<string, { required_checks?: unknown }> | undefined;
-  const list = repos?.[repo.path]?.required_checks;
+  const repos = toml?.repos;
+  const entry = isTomlTable(repos) ? repos[repo.path] : undefined;
+  const list = isTomlTable(entry) ? entry.required_checks : undefined;
 
-  return Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+  return Array.isArray(list) ? list.filter(isText) : [];
 }
 
 /** The latest status per context, then the gate's verdict. */

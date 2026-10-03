@@ -4,6 +4,7 @@
 
 import type { Env } from "../env";
 import { HttpError } from "../http";
+import { hasCode } from "../parse";
 import { isBusy } from "./gate";
 import { addArtifacts, currentTiming, timeArtifacts, timed, timedRepo, timedStub } from "../timing";
 import { parseAdvertisement, parseReport, updateRefsRequest, type RefCommand } from "./pktline";
@@ -21,7 +22,13 @@ const TOKEN_TTL_SECONDS = 900;
 
 const TOKEN_REUSE_MS = 5 * 60_000;
 
-const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+/** A minted Artifacts token and when it expires (ms). */
+export interface TokenEntry {
+  token: string;
+  expiresAt: number;
+}
+
+const tokenCache = new Map<string, TokenEntry>();
 
 /**
  * A repo token for the Worker's own git requests. Cached per isolate, keyed
@@ -47,12 +54,12 @@ export async function repoTokenEntry(
   generation = "",
   source: TokenSource = "object",
   fresh = false,
-): Promise<{ token: string; expiresAt: number }> {
+): Promise<TokenEntry> {
   const key = `${name}\n${scope}\n${generation}`;
   const hit = tokenCache.get(key);
 
   if (!fresh && hit && hit.expiresAt - Date.now() > TOKEN_REUSE_MS) return hit;
-  let entry: { token: string; expiresAt: number };
+  let entry: TokenEntry;
 
   if (source === "local") {
     const mint = () => withRepo(env, name, (repo) => repo.createToken(scope, TOKEN_TTL_SECONDS));
@@ -108,11 +115,9 @@ export async function withRepo<T>(env: Env, name: string, fn: (repo: ArtifactsRe
  * An Artifacts error's code. Across RPC (and through wrangler dev's remote
  * binding) the `code` property can be lost, so the message is read too.
  */
-export function artifactsCode(err: unknown): string | null {
-  const code = (err as { code?: unknown })?.code;
-
-  if (typeof code === "string" && code) return code;
-  const m = err instanceof Error ? err.message : String(err);
+export function artifactsCode(cause: unknown): string | null {
+  if (hasCode(cause) && cause.code) return cause.code;
+  const m = cause instanceof Error ? cause.message : String(cause);
 
   if (/already exists/i.test(m)) return "ALREADY_EXISTS";
 
@@ -129,14 +134,14 @@ export function artifactsCode(err: unknown): string | null {
   return null;
 }
 
-export function artifactsError(err: unknown, what: string): HttpError {
-  const code = artifactsCode(err);
+export function artifactsError(cause: unknown, what: string): HttpError {
+  const code = artifactsCode(cause);
 
   if (code === "NOT_FOUND") return new HttpError(404, "not_found", `${what} was not found`);
 
   if (code === "CREATE_IN_PROGRESS" || code === "IMPORT_IN_PROGRESS" || code === "FORK_IN_PROGRESS")
     return new HttpError(409, "not_ready", `${what} is still being created; retry`);
-  const message = err instanceof Error ? err.message : String(err);
+  const message = cause instanceof Error ? cause.message : String(cause);
 
   return new HttpError(502, "artifacts", `${what}: ${code ?? ""} ${message}`.trim());
 }

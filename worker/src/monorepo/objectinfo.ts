@@ -104,7 +104,7 @@ export async function answerObjectInfo(
   args: string[],
 ): Promise<Uint8Array> {
   const wantSize = args.includes("size");
-  const oids = args.filter((a) => a.startsWith("oid ")).map((a) => a.slice(4).trim()).slice(0, MAX_OIDS);
+  const oids = args.flatMap((a) => (a.startsWith("oid ") ? [a.slice(4).trim()] : [])).slice(0, MAX_OIDS);
 
   if (!oids.length) return FLUSH;
   const valid = oids.filter((o) => /^[0-9a-f]{40}$/.test(o));

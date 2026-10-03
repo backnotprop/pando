@@ -88,7 +88,7 @@ export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: s
 }
 
 export async function pool<T, U>(items: T[], n: number, fn: (t: T) => Promise<U>): Promise<U[]> {
-  const out: U[] = new Array(items.length);
+  const out: U[] = [];
   let i = 0;
   await Promise.all(
     Array.from({ length: Math.min(n, items.length) }, async () => {
@@ -102,9 +102,16 @@ export async function pool<T, U>(items: T[], n: number, fn: (t: T) => Promise<U>
   return out;
 }
 
+/** Pando's who-made-it trailers on a commit (formats.md, section 6); null when absent. */
+export interface PandoTrailers {
+  agent: string | null;
+  worktree: string | null;
+  machine: string | null;
+}
+
 /** Pando's who-made-it trailers (formats.md, section 6), from a commit message's last paragraph. */
-export function pandoTrailers(message: string): { agent: string | null; worktree: string | null; machine: string | null } {
-  const out = { agent: null as string | null, worktree: null as string | null, machine: null as string | null };
+export function pandoTrailers(message: string): PandoTrailers {
+  const out: PandoTrailers = { agent: null, worktree: null, machine: null };
   const paragraphs = message.replace(/\r\n/g, "\n").trimEnd().split(/\n\s*\n/);
   const last = paragraphs.length > 1 ? paragraphs[paragraphs.length - 1] : "";
 
@@ -112,8 +119,9 @@ export function pandoTrailers(message: string): { agent: string | null; worktree
     const m = line.match(/^Pando-(Agent|Worktree|Machine):\s*(.*?)\s*$/i);
 
     if (!m || !m[2]) continue;
-    const k = m[1].toLowerCase() as "agent" | "worktree" | "machine";
-    out[k] = m[2];
+    const k = m[1].toLowerCase();
+
+    if (k === "agent" || k === "worktree" || k === "machine") out[k] = m[2];
   }
 
   return out;

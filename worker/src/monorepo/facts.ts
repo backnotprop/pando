@@ -16,6 +16,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
 import type { FactsJob } from "./facts-out";
 import { HttpError } from "../http";
+import { isRecord, isText, isWholeNumber, type Json } from "../parse";
 import { currentTiming, note, timed, timedStub } from "../timing";
 import { withRepo } from "./artifacts";
 import { requiredKept } from "./checks";
@@ -194,10 +195,11 @@ export async function factsTestRoute(request: Request, env: Env): Promise<Respon
 
   if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
   const url = new URL(request.url);
-  const b = request.method === "POST" ? ((await request.json().catch(() => ({}))) as { monorepo?: string; fail?: number }) : {};
-  const id = b.monorepo ?? url.searchParams.get("monorepo");
+  const b = request.method === "POST" ? await request.json<Json>().catch(() => null) : null;
+  const id = (isRecord(b) && isText(b.monorepo) ? b.monorepo : null) ?? url.searchParams.get("monorepo");
 
   if (!id) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+  const fail = isRecord(b) && isWholeNumber(b.fail) ? b.fail : undefined;
 
-  return Response.json(await stubOf(env, id).testFactsOutbox(b.fail === undefined ? {} : { fail: b.fail }));
+  return Response.json(await stubOf(env, id).testFactsOutbox(fail === undefined ? {} : { fail }));
 }

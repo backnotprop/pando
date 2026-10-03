@@ -14,7 +14,7 @@ import { authenticateRequest } from "./accounts/auth";
 import { finishTiming, note, runTimed, startTiming } from "./timing";
 import { metaRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
-import { handleDoor, isDoorPath } from "./monorepo/door";
+import { handleDoor, isDoorPath, type IncomingRequest } from "./monorepo/door";
 import { handleRaw, RAW_RE } from "./monorepo/raw";
 import { handleHistoryBatch, type HistoryMessage } from "./monorepo/files";
 import { objectsClient } from "./objects";
@@ -109,7 +109,7 @@ export default {
     batch.ackAll();
   },
 
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: IncomingRequest, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/healthz") return new Response("ok\n");

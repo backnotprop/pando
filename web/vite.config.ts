@@ -6,11 +6,12 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 /**
- * Apple's SF Pro Text and SF Mono, for local builds only: PANDO_SF_FONTS=1
- * copies them in from the landing page's folder in the meta layer (or
- * PANDO_FONTS_DIR) and declares them. Every other build ships no font files
- * and no @font-face, so nothing of Apple's is served; the font stacks fall
- * back to the system's (pando-ops, 2026-10-03: the owner rules on fonts).
+ * Apple's SF Pro Text (Regular and Semibold), served when the build is asked
+ * to (owner: "serve sf pro for now"): PANDO_SF_FONTS=1 copies them in from the
+ * landing page's folder in the meta layer (or PANDO_FONTS_DIR) and declares
+ * them. They are never committed, and a build without the switch ships no file
+ * of Apple's: regular text then falls back to the system's. The monospace is
+ * Ioskeley Mono, committed under src/fonts and declared in theme.css.
  */
 const SF_FONTS = process.env.PANDO_SF_FONTS === "1";
 
@@ -18,12 +19,11 @@ const FONTS_FROM = process.env.PANDO_FONTS_DIR ?? fileURLToPath(new URL("../../.
 
 const FONTS_TO = fileURLToPath(new URL("public/fonts", import.meta.url));
 
-const FILES = ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SFNSMono.ttf"];
+const FILES = ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf"];
 
 const FACES = `
 @font-face{font-family:"SF Pro Text";src:url("/fonts/SF-Pro-Text-Regular.otf") format("opentype");font-weight:400;font-style:normal;font-display:swap}
-@font-face{font-family:"SF Pro Text";src:url("/fonts/SF-Pro-Text-Semibold.otf") format("opentype");font-weight:600;font-style:normal;font-display:swap}
-@font-face{font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf") format("truetype");font-weight:300 900;font-style:normal;font-display:swap}`;
+@font-face{font-family:"SF Pro Text";src:url("/fonts/SF-Pro-Text-Semibold.otf") format("opentype");font-weight:600;font-style:normal;font-display:swap}`;
 
 function sfFonts(): Plugin {
   return {
@@ -45,7 +45,6 @@ function sfFonts(): Plugin {
 
       return [
         { tag: "link", attrs: { rel: "preload", href: "/fonts/SF-Pro-Text-Regular.otf", as: "font", type: "font/otf", crossorigin: "" }, injectTo: "head" },
-        { tag: "link", attrs: { rel: "preload", href: "/fonts/SFNSMono.ttf", as: "font", type: "font/ttf", crossorigin: "" }, injectTo: "head" },
         { tag: "style", children: FACES, injectTo: "head" },
       ];
     },

@@ -1,0 +1,10 @@
+Pando
+Copyright 2026 the Pando authors
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+This product bundles Ioskeley Mono v2.1.0, the web app's monospace font
+(web/src/fonts/IoskeleyMono-Regular.woff2), copyright (c) 2025 Ahmed Hatem,
+licensed under the SIL Open Font License, Version 1.1
+(web/src/fonts/IoskeleyMono-OFL.txt).
+Source: https://github.com/ahatem/IoskeleyMono (release v2.1.0)

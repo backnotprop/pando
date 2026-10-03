@@ -4,8 +4,17 @@
    (research/design/pando-ui-2026-10-03/v3/prototype.html). Components use them
    through the Tailwind names below (bg-loam, text-bark-dim, border-rootline). */
 
-/* SF Pro Text and SF Mono are declared only in local builds (vite.config.ts,
-   PANDO_SF_FONTS=1); otherwise the stacks below fall back to the system's. */
+/* Monospace: Ioskeley Mono (SIL OFL 1.1; fonts/IoskeleyMono-OFL.txt), in every
+   build. Regular text: SF Pro Text, declared only when the build copies it in
+   (vite.config.ts, PANDO_SF_FONTS=1); otherwise the system's (owner ruling on
+   web app fonts, 2026-10-03). */
+@font-face {
+  font-family: "Ioskeley Mono";
+  src: url("./fonts/IoskeleyMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   --soil: #0c0f0c;
@@ -166,7 +175,7 @@ html[data-theme$="-light"] {
   --color-doc: var(--doc);
   --color-transparent: transparent;
   --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: "Ioskeley Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --ease-pando: cubic-bezier(0.23, 1, 0.32, 1);
   --shadow-pop: 0 14px 40px var(--shadow);
 }

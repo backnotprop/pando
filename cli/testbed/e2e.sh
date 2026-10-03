@@ -17,6 +17,11 @@ pass=0
 ok()   { pass=$((pass + 1)); echo "  ok   $*"; }
 fail() { echo "  FAIL $*"; exit 1; }
 step() { echo; echo "== $*"; }
+made=()
+cleanup() {
+  for m in "${made[@]}"; do pando monorepo delete "$m" --yes --server "$SERVER" | sed 's/^/  /' || true; done
+}
+trap cleanup EXIT
 
 hydrated() { # hydrated blob count of one worktree's ArtifactFS state
   local name="$1" state
@@ -46,6 +51,7 @@ else
   ok "against $SERVER with the credential in PANDO_TOKEN"
 fi
 name="acme-$(date +%s)"
+made+=("$name")
 pando init --yes --name "$name" --server "$SERVER" | sed 's/^/  /'
 cd /work
 pando clone "$name" /work/acme | sed 's/^/  /'
@@ -124,6 +130,7 @@ newest=$(git -C "/work/ws/$ref" rev-parse HEAD)
 git -C "/work/ws/$ref" checkout -q --detach HEAD~1
 older=$(git -C "/work/ws/$ref" rev-parse HEAD)
 wsname="ws-$(date +%s)"
+made+=("$wsname")
 pando init /work/ws --yes --name "$wsname" --server "$SERVER" | grep -E "pushed|reference pointer" | sed 's/^/  /'
 grep -q "commit = \"$newest\"" "/work/ws/.pando/references/$ref.toml" || grep -q "commit = \"$older\"" "/work/ws/.pando/references/$ref.toml" \
   && ok "init wrote the reference pointer" || fail "no pointer"

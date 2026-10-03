@@ -11,6 +11,12 @@ S="${1:-https://pando-dev.plannotator.workers.dev}"
 T="$(mktemp -d /tmp/pando-m1.XXXXXX)"
 name="cli-m1-$(date +%s)"
 step() { echo; echo "== $*"; }
+cleanup() {
+  [ -n "${made:-}" ] && "$P" monorepo delete "$name" --yes --server "$S" | sed 's/^/  /' || true
+  # Read-only mains have read-only folders.
+  chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"
+}
+trap cleanup EXIT
 ok() { echo "  ok   $*"; }
 fail() { echo "  FAIL $*"; exit 1; }
 
@@ -20,6 +26,7 @@ step "a plain git repo becomes a Pando repo ($name)"
 mkdir -p "$T/src" && cd "$T/src" && git init -q -b main acme && cd acme
 mkdir -p src && for i in 1 2 3; do echo "package src // $i" > "src/f$i.go"; done
 echo "# acme" > README.md && git add -A && git -c user.name="M1 Test" -c user.email=m1@example.com commit -q -m "acme: first commit"
+made=1
 "$P" init --yes --name "$name" --server "$S" | sed 's/^/  /'
 
 step "clone it, then a branch worktree"
@@ -44,4 +51,4 @@ PANDO_AGENT=agent-2 "$P" review feat-1 -m "An agent's comment." | sed 's/^/  /'
 "$P" merge feat-1 | sed 's/^/  /' || echo "  (merge did not land; see above)"
 "$P" worktree list | sed 's/^/  /'
 "$P" worktree remove worktrees/feat-1 | sed 's/^/  /'
-echo; echo "M1 run done in $T"
+echo; echo "M1 run done; deleting $name"

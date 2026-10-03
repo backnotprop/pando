@@ -615,3 +615,12 @@ func (l *Local) RevokeInvite(ctx context.Context, m, email string) error {
 	}
 	return writeJSONFile(l.invitesPath(m), out)
 }
+
+func (l *Local) DeleteMonorepo(_ context.Context, m string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, err := l.load(m); err != nil {
+		return err
+	}
+	return os.RemoveAll(l.monoDir(m))
+}

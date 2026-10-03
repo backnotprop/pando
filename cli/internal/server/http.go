@@ -249,14 +249,32 @@ func (h *HTTP) CreateRepo(ctx context.Context, m, path string) (*Repo, error) {
 	return out, err
 }
 
+// ListBranches reads every page of the branch list (500 a page).
 func (h *HTTP) ListBranches(ctx context.Context, m, repo, state string) (*BranchList, error) {
 	out := &BranchList{}
-	q := url.Values{}
-	if state != "" {
-		q.Set("state", state)
+	cursor := ""
+	for page := 0; page < 100; page++ {
+		q := url.Values{"limit": {"500"}}
+		if state != "" {
+			q.Set("state", state)
+		}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		pg := &BranchList{}
+		if _, _, err := h.do(ctx, request{method: "GET", path: repoPath(m, repo) + "/branches", query: q}, pg); err != nil {
+			return nil, err
+		}
+		if page == 0 {
+			out.DefaultBranch, out.DefaultHead = pg.DefaultBranch, pg.DefaultHead
+		}
+		out.Branches = append(out.Branches, pg.Branches...)
+		if pg.NextCursor == "" || pg.NextCursor == cursor {
+			break
+		}
+		cursor = pg.NextCursor
 	}
-	_, _, err := h.do(ctx, request{method: "GET", path: repoPath(m, repo) + "/branches", query: q}, out)
-	return out, err
+	return out, nil
 }
 
 func (h *HTTP) GetBranch(ctx context.Context, m, repo, b string) (*Branch, error) {

@@ -66,3 +66,29 @@ func TestAgentHeaderOnAPICalls(t *testing.T) {
 		t.Fatalf("X-Pando-Agent per call: %q", got)
 	}
 }
+
+// The branch list is read page by page until next_cursor is null.
+func TestListBranchesReadsEveryPage(t *testing.T) {
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := r.URL.Query().Get("cursor")
+		cursors = append(cursors, c+"|"+r.URL.Query().Get("limit"))
+		switch c {
+		case "":
+			w.Write([]byte(`{"default_branch":"main","default_head":"aaa","branches":[{"name":"a","head":"1","state":"open","checks":{},"mergeable":"clean"}],"next_cursor":"p2"}`))
+		case "p2":
+			w.Write([]byte(`{"default_branch":"main","default_head":"aaa","branches":[{"name":"b","head":"2","state":"open","checks":{},"mergeable":"pending","stale":true,"last_mergeable":"clean"}],"next_cursor":null}`))
+		}
+	}))
+	defer srv.Close()
+	bl, err := NewHTTP(srv.URL, "tok").ListBranches(context.Background(), "m", "r", "open")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bl.Branches) != 2 || bl.DefaultHead != "aaa" || !bl.Branches[1].Stale || bl.Branches[1].LastMergeable != "clean" {
+		t.Fatalf("list: %+v", bl)
+	}
+	if len(cursors) != 2 || cursors[0] != "|500" || cursors[1] != "p2|500" {
+		t.Fatalf("requests: %q", cursors)
+	}
+}

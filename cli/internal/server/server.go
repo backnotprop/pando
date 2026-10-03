@@ -127,17 +127,23 @@ type Branch struct {
 	Description string `json:"description"`
 	Ahead       *int   `json:"ahead"`
 	Behind      *int   `json:"behind"`
-	Mergeable   string `json:"mergeable"`
-	Checks      Checks `json:"checks"`
-	State       string `json:"state"`
-	MergeCommit string `json:"merge_commit"`
-	UpdatedAt   string `json:"updated_at"`
+	Mergeable   string `json:"mergeable"` // clean, conflicts, up_to_date, unknown, pending
+	// Stale: ahead, behind, base and mergeable are not yet for the current
+	// main and head (the server computes them on change); LastMergeable is
+	// the last known answer meanwhile.
+	Stale         bool   `json:"stale"`
+	LastMergeable string `json:"last_mergeable"`
+	Checks        Checks `json:"checks"`
+	State         string `json:"state"`
+	MergeCommit   string `json:"merge_commit"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type BranchList struct {
 	DefaultBranch string   `json:"default_branch"`
 	DefaultHead   string   `json:"default_head"`
 	Branches      []Branch `json:"branches"`
+	NextCursor    string   `json:"next_cursor"`
 }
 
 type ReviewComment struct {

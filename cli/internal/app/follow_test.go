@@ -76,7 +76,7 @@ func (f *fakeStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		defer c.CloseNow()
 		ctx := r.Context()
-		c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"caught_up","head":%d}`, f.seq.Load())))
+		c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"caught_up","seq":%d}`, f.seq.Load())))
 		gone := make(chan struct{})
 		go func() { // answer pings; notice the client leaving
 			defer close(gone)
@@ -200,7 +200,7 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 
 	// A resync: read heads once more and resume from its seq.
 	fs.seq.Store(40)
-	fs.send <- `{"type":"resync","head":40,"oldest":30}`
+	fs.send <- `{"type":"resync","seq":40,"oldest_seq":30}`
 	waitFor("the subscription after the resync", queries(3))
 	if fs.headsN.Load() != 3 || query(2) != "since=40&topics=main%3Aacme" {
 		t.Fatalf("heads reads %d, query %q: want a third read, then since=40", fs.headsN.Load(), query(2))
@@ -258,4 +258,22 @@ func execGit(dir string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	return cmd
+}
+
+func TestCaughtUpSeqAndOldName(t *testing.T) {
+	f := &follower{}
+	f.handle(frame{Type: "caught_up", Seq: 12}, nil)
+	if f.last != 12 {
+		t.Fatalf("seq: %d", f.last)
+	}
+	var old frame
+	json.Unmarshal([]byte(`{"type":"caught_up","head":20}`), &old) // before 08afe089
+	f.handle(old, nil)
+	if f.last != 20 {
+		t.Fatalf("old head: %d", f.last)
+	}
+	var ev frame
+	if err := json.Unmarshal([]byte(`{"type":"event","seq":21,"head":"3beea1b0aa","before":"0000","collection":"default_heads","row":{"repo":"x","default_head":"3beea1b0aa"}}`), &ev); err != nil || ev.Seq != 21 {
+		t.Fatalf("event frame: %v %+v", err, ev)
+	}
 }

@@ -142,8 +142,10 @@ func (f *follower) debugf(format string, a ...any) {
 type frame struct {
 	Type string `json:"type"` // event, resync, caught_up
 	Seq  int64  `json:"seq"`
-	// Head is a number on caught_up and resync (the stream's newest seq),
-	// and a commit sha on an event (main's new head), so it is read raw.
+	// Head is a commit sha on an event. Before pando-dev 08afe089 it was
+	// also the stream's newest seq (a number) on caught_up and resync; it is
+	// read raw so both parse, and that old number is used only when seq is
+	// missing.
 	Head       json.RawMessage `json:"head"`
 	Kind       string          `json:"kind"`
 	Collection string          `json:"collection"`
@@ -343,9 +345,12 @@ func (f *follower) handle(fr frame, want map[string]bool) {
 			moveMain(f.e, f.root, path, fr.Row.DefaultHead)
 		}
 	case "caught_up":
-		var head int64
-		if json.Unmarshal(fr.Head, &head) == nil && head > f.last {
-			f.last = head
+		seq := fr.Seq
+		if seq == 0 {
+			_ = json.Unmarshal(fr.Head, &seq) // the old name, for one deploy
+		}
+		if seq > f.last {
+			f.last = seq
 		}
 	}
 }

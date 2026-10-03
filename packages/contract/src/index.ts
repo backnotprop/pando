@@ -16,4 +16,6 @@ export * from "./feed.ts";
 
 export * from "./meta.ts";
 
+export * from "./decode.ts";
+
 export * as Routes from "./routes.ts";

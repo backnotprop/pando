@@ -9,6 +9,8 @@ import { parseAdvertisement, parseReport, updateRefsRequest, type RefCommand } f
 export interface ArtifactsRef {
   artifacts_name: string;
   remote: string;
+  /** When Pando recorded the repo. A repo deleted and made again under the same name gets a new one. */
+  created_at?: string;
 }
 
 // Tokens are reused inside one isolate while they have at least 5 minutes
@@ -17,8 +19,13 @@ const TOKEN_TTL_SECONDS = 900;
 const TOKEN_REUSE_MS = 5 * 60_000;
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-export async function repoToken(env: Env, name: string, scope: "read" | "write"): Promise<string> {
-  const key = `${name}\n${scope}`;
+/**
+ * A repo token for the Worker's own git requests. Cached per isolate, keyed
+ * by the repo's record too, so a token for a deleted repo is never reused for
+ * a new repo of the same name.
+ */
+export async function repoToken(env: Env, name: string, scope: "read" | "write", generation = ""): Promise<string> {
+  const key = `${name}\n${scope}\n${generation}`;
   const hit = tokenCache.get(key);
   if (hit && hit.expiresAt - Date.now() > TOKEN_REUSE_MS) return hit.token;
   const t = await withRepo(env, name, (repo) => repo.createToken(scope, TOKEN_TTL_SECONDS));
@@ -46,8 +53,25 @@ export async function withRepo<T>(env: Env, name: string, fn: (repo: ArtifactsRe
   }
 }
 
+/**
+ * An Artifacts error's code. Across RPC (and through wrangler dev's remote
+ * binding) the `code` property can be lost, so the message is read too.
+ */
+export function artifactsCode(err: unknown): string | null {
+  const code = (err as { code?: unknown })?.code;
+  if (typeof code === "string" && code) return code;
+  const m = err instanceof Error ? err.message : String(err);
+  if (/already exists/i.test(m)) return "ALREADY_EXISTS";
+  if (/not found|does not exist|no such repo/i.test(m)) return "NOT_FOUND";
+  if (/import(ing)? in progress/i.test(m)) return "IMPORT_IN_PROGRESS";
+  if (/fork(ing)? in progress/i.test(m)) return "FORK_IN_PROGRESS";
+  if (/in progress|not ready/i.test(m)) return "CREATE_IN_PROGRESS";
+  if (/invalid repo name|INVALID_REPO_NAME/i.test(m)) return "INVALID_REPO_NAME";
+  return null;
+}
+
 export function artifactsError(err: unknown, what: string): HttpError {
-  const code = (err as { code?: string })?.code;
+  const code = artifactsCode(err);
   if (code === "NOT_FOUND") return new HttpError(404, "not_found", `${what} was not found`);
   if (code === "CREATE_IN_PROGRESS" || code === "IMPORT_IN_PROGRESS" || code === "FORK_IN_PROGRESS")
     return new HttpError(409, "not_ready", `${what} is still being created; retry`);
@@ -63,11 +87,20 @@ export async function gitRequest(
   scope: "read" | "write",
   init: RequestInit & { headers?: Record<string, string> },
 ): Promise<Response> {
-  const token = await repoToken(env, repo.artifacts_name, scope);
-  return fetch(`${repo.remote}${path}`, {
-    ...init,
-    headers: { ...init.headers, authorization: `Bearer ${token}` },
-  });
+  const send = async () =>
+    fetch(`${repo.remote}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${await repoToken(env, repo.artifacts_name, scope, repo.created_at)}` },
+    });
+  const res = await send();
+  // A cached token Artifacts no longer accepts: mint a new one and retry once,
+  // when the request body can be sent again (not a stream).
+  if ((res.status === 401 || res.status === 403) && !(init.body instanceof ReadableStream)) {
+    await res.body?.cancel();
+    tokenCache.delete(`${repo.artifacts_name}\n${scope}\n${repo.created_at ?? ""}`);
+    return send();
+  }
+  return res;
 }
 
 /** Every ref in the repo (`refs/heads/main` -> sha). Empty for an empty repo. */

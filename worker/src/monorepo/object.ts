@@ -110,6 +110,10 @@ export class MonorepoObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.ensureSchema();
+  }
+
+  private ensureSchema(): void {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
   }
 
@@ -158,6 +162,9 @@ export class MonorepoObject extends DurableObject<Env> {
   async destroy(): Promise<void> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    // This instance may serve the next request (a new monorepo of the same name).
+    this.locks.clear();
+    this.ensureSchema();
   }
 
   /** Every Artifacts repo this monorepo owns, the meta layer's included. */

@@ -63,8 +63,14 @@ let made = false;
 try {
   let r = await call("GET", "/v1/user");
   check("the credential works", r.status === 200, `${r.status} as ${r.json?.login}`);
+  // Ask about the name before it exists, from many requests (many isolates).
+  for (let i = 0; i < 8; i++) await call("GET", `/v1/monorepos/${M}`);
+  git(["ls-remote", `${URL_}/${M}/${M}.git`], work);
   r = await call("POST", "/v1/monorepos", { name: M, kind: "repo" });
   made = r.status === 201;
+  let stale = 0;
+  for (let i = 0; i < 8; i++) if ((await call("GET", `/v1/monorepos/${M}`)).status !== 200) stale++;
+  check("right after creating it, no request sees a cached 404", stale === 0, `${stale} of 8 stale`);
   check("create a plain repo", made, `${r.status}`);
   const url = r.json?.repos?.[0]?.clone_url;
   const src = join(work, "src");

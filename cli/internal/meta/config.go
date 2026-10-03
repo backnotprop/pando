@@ -24,7 +24,7 @@ type Config struct {
 	Machine string
 	Agent   string // PANDO_AGENT, optional
 
-	Poll        time.Duration   // the shortest gap between scans (default 500 ms; longer on big trees)
+	Poll        time.Duration   // the shortest gap between scans (default 100 ms; longer on big trees)
 	MaxHold     time.Duration   // a file still changing is sent after this (default 5 min)
 	Backoff     []time.Duration // reconnect waits (default 5, 10, 30, 60 s)
 	PingEvery   time.Duration   // default 30 s
@@ -35,7 +35,7 @@ type Config struct {
 
 func (c *Config) defaults() {
 	if c.Poll == 0 {
-		c.Poll = 500 * time.Millisecond
+		c.Poll = 100 * time.Millisecond
 	}
 	if c.MaxHold == 0 {
 		c.MaxHold = 5 * time.Minute

@@ -165,9 +165,10 @@ above:
   temporary file `.<name>.pando-tmp-<random>` in the same folder, which is
   then renamed over the file. A delete removes the file and any folder left
   empty. A rename moves the file when it is clean.
-- **Sending a local change.** The daemon polls the folder (twice a second by
-  default). A changed file is sent once it has stopped changing for one
-  poll, or after 5 minutes of continuous change (the maximum hold). One
+- **Sending a local change.** The daemon scans the folder every 100 ms by
+  default (a big tree spaces its scans out: each waits ten times the last
+  scan's length). A changed file is sent once it has stopped changing for
+  one scan, or after 5 minutes of continuous change (the maximum hold). One
   change per path is in flight at a time; later edits go out after the
   answer, on top of the new version.
 - **Renames are never guessed.** A delete and a create seen in one pass are

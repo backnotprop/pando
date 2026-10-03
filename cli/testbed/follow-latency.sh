@@ -7,7 +7,7 @@ set -uo pipefail
 export GIT_CONFIG_NOSYSTEM=1
 P="${PANDO_BIN:-pando}"; S="${1:-https://pando-dev.plannotator.workers.dev}"; N="${2:-5}"
 T="$(mktemp -d /tmp/pando-follow.XXXXXX)"; name="cli-follow-$(date +%s)"
-ms() { python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo $(( $(date +%s%N) / 1000000 )); }
+ms() { if [ "$(uname)" = Linux ]; then echo $(( $(date +%s%N) / 1000000 )); else python3 -c 'import time; print(int(time.time()*1000))'; fi; }
 cleanup() { [ -n "${fpid:-}" ] && kill "$fpid" 2>/dev/null; "$P" monorepo delete "$name" --yes --server "$S" >/dev/null 2>&1 && echo "deleted $name"; chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"; }
 trap cleanup EXIT
 cd "$T" && git init -q -b main src && cd src && echo hi > README.md && git add -A && git -c user.name=p -c user.email=p@p commit -qm one

@@ -624,3 +624,21 @@ func (l *Local) DeleteMonorepo(_ context.Context, m string) error {
 	}
 	return os.RemoveAll(l.monoDir(m))
 }
+
+// Heads on a file:// server: each bare repo's main; no stream, so no seq.
+func (l *Local) Heads(ctx context.Context, m string) (*Heads, error) {
+	lm, err := l.load(m)
+	if err != nil {
+		return nil, err
+	}
+	out := &Heads{}
+	for _, r := range lm.Repos {
+		g, err := l.bare(m, r.Name)
+		if err != nil {
+			continue
+		}
+		head, _ := g.Run(ctx, "rev-parse", "--verify", "--quiet", "refs/heads/main")
+		out.Heads = append(out.Heads, Head{Repo: r.Name, Path: r.Path, DefaultBranch: "main", Head: head})
+	}
+	return out, nil
+}

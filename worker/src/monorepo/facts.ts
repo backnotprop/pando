@@ -13,6 +13,7 @@
 
 import type { Env } from "../env";
 import { HttpError } from "../http";
+import { timed, timedStub } from "../timing";
 import { withRepo } from "./artifacts";
 import { requiredKept } from "./checks";
 import { commitReader, compareWith, type CommitReader } from "./graph";
@@ -61,7 +62,7 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
 }
 
 function stubOf(env: Env, monorepo: string) {
-  return env.MONOREPO.getByName(monorepo);
+  return timedStub(env.MONOREPO.getByName(monorepo));
 }
 
 /**
@@ -72,7 +73,8 @@ function stubOf(env: Env, monorepo: string) {
 export async function handleFactsBatch(batch: MessageBatch<FactsMessage>, env: Env): Promise<void> {
   const run = async (msg: Message<FactsMessage>) => {
     try {
-      await runFacts(env, msg.body);
+      const b = msg.body;
+      await timed("queue", { route: `facts.${b.type}`, monorepo: b.monorepo, repo: b.repo, attempt: msg.attempts }, () => runFacts(env, b));
       msg.ack();
     } catch (err) {
       if (err instanceof MainMoved) {

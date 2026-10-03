@@ -11,7 +11,8 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
-import { GateBusy, isBusy, retryBusy, WriteGate } from "./gate";
+import { GateBusy, isBusy, LEASE_MS, retryBusy, WriteGate } from "./gate";
+import { finishTiming, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
 import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
@@ -287,10 +288,14 @@ export class MonorepoObject extends DurableObject<Env> {
    * minutes. Handed to the Worker's isolates, which never log it. `fresh`
    * mints anew (Artifacts refused the cached one).
    */
-  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number }> {
+  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number }> {
     const m = this.info()?.name;
     if (!m || !name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
-    return repoTokenEntry(this.env, name, scope, generation, "local", fresh);
+    const t0 = Date.now();
+    const e = await repoTokenEntry(this.env, name, scope, generation, "local", fresh);
+    // mint_ms: how long this took when it minted (0 when it was cached), for the caller's timing line.
+    const ms = Date.now() - t0;
+    return { ...e, mint_ms: ms > 2 ? ms : 0 };
   }
 
   // ── Required checks, kept here (C3) ──────────────────────────────────────
@@ -510,7 +515,12 @@ export class MonorepoObject extends DurableObject<Env> {
   // ── Merge ────────────────────────────────────────────────────────────────
 
   merge(args: MergeArgs): Promise<Outcome<MergeResult>> {
-    return this.guard(() => this.serial(`merge:${args.repo}`, () => this.mergeNow(args)));
+    const m = this.info()?.name ?? null;
+    return this.guard(() =>
+      this.serial(`merge:${args.repo}`, () =>
+        timed("object", { route: "merge", monorepo: m, repo: args.repo, branch: args.branch }, () => this.mergeNow(args)),
+      ),
+    );
   }
 
   private async mergeNow(a: MergeArgs): Promise<MergeResult> {
@@ -532,11 +542,11 @@ export class MonorepoObject extends DurableObject<Env> {
     const engine = gitwrite;
     try {
       // One of the repo's two write slots, held for the merge's push; Artifacts' "busy" is retried.
-      out = await this.gate.with(r.artifacts_name, () =>
+      out = await this.gatedTimed(r.artifacts_name, () =>
         retryBusy(
           () =>
             engine.mergeCommit(
-              { artifacts: this.env.ARTIFACTS, name: r.artifacts_name },
+              { artifacts: timedArtifacts(this.env.ARTIFACTS), name: r.artifacts_name },
               {
                 base: r.default_branch, head, baseSha: base, message,
                 author: { name: a.identity.name ?? a.identity.login, email },
@@ -1102,6 +1112,18 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Writes: the gate, and ref updates sent together ────────────────────
 
+  /** gate.with, with the wait recorded as gate time on the current timing line. */
+  private async gatedTimed<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const lease = await timeGate(() => this.gate.acquire(key));
+    const renew = setInterval(() => this.gate.renew(key, lease), Math.max(1000, Math.floor(LEASE_MS / 3)));
+    try {
+      return await fn();
+    } finally {
+      clearInterval(renew);
+      this.gate.release(key, lease);
+    }
+  }
+
   /** Take one of the repo's write slots (waits in line, at most WAIT_MS). Key: the Artifacts repo name. */
   async acquireWrite(key: string): Promise<Outcome<{ lease: string; waited_ms: number }>> {
     const t = Date.now();
@@ -1162,10 +1184,13 @@ export class MonorepoObject extends DurableObject<Env> {
       for (;;) {
         const q = this.refQueues.get(key);
         if (!q || q.length === 0) return;
+        // One timing line per batch (timing.ts): the gate wait, then Artifacts.
+        const t = startTiming("object", { route: "ref-batch", monorepo: this.info()?.name ?? null, repo: r.name });
         let lease: string;
         try {
-          lease = await this.gate.acquire(key);
+          lease = await runTimed(t, () => timeGate(() => this.gate.acquire(key)));
         } catch (err) {
+          finishTiming(t, { status: "busy" });
           for (const e of q.splice(0)) e.fail(err);
           return;
         }
@@ -1181,12 +1206,17 @@ export class MonorepoObject extends DurableObject<Env> {
           batch.push(...q.splice(i, 1));
         }
         try {
-          const result = await retryBusy(
-            () => updateRefs(this.env, r, batch.map((e) => e.cmd), "local"),
-            (e) => e instanceof HttpError && e.code === "repo_busy",
+          t.fields.refs = batch.length;
+          const result = await runTimed(t, () =>
+            retryBusy(
+              () => updateRefs(this.env, r, batch.map((e) => e.cmd), "local"),
+              (e) => e instanceof HttpError && e.code === "repo_busy",
+            ),
           );
+          finishTiming(t, { status: "ok" });
           for (const e of batch) e.done(result.has(e.cmd.ref) ? result.get(e.cmd.ref)! : "no status in Artifacts' report");
         } catch (err) {
+          finishTiming(t, { status: "error" });
           for (const e of batch) e.fail(err);
         } finally {
           this.gate.release(key, lease);

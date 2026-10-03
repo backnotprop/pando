@@ -2,6 +2,7 @@
 // (docs/contracts/gitwrite.md, owned by the merge-engine lane), on the meta
 // layer's Artifacts repo `<monorepo>--meta`.
 import { commitChanges, type Change, type CommitOptions, type CommitResult } from "../gitwrite";
+import { timedArtifacts } from "../timing";
 
 export type { Change as FileChange };
 
@@ -26,6 +27,6 @@ export function gitWriter(env: CommitEnv): GitWriter | null {
   const artifacts = env.ARTIFACTS;
   if (!artifacts) return null;
   return {
-    commit: (name, branch, opts) => commitChanges({ artifacts, name }, branch, opts),
+    commit: (name, branch, opts) => commitChanges({ artifacts: timedArtifacts(artifacts), name }, branch, opts),
   };
 }

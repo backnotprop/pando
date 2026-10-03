@@ -241,6 +241,8 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** Make the monorepo, keyed by its id and labelled owner/name. False if it exists already. */
   init(id: string, label: string, kind: Kind): boolean {
+    // After a delete (deleteAll), make sure the tables are back before the first read.
+    this.ensureSchema();
     if (this.info()) return false;
     const at = now();
     for (const [k, v] of [["name", id], ["label", label], ["kind", kind], ["created_at", at]]) this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?)", k, v);
@@ -330,9 +332,11 @@ export class MonorepoObject extends DurableObject<Env> {
    * minutes. Handed to the Worker's isolates, which never log it. `fresh`
    * mints anew (Artifacts refused the cached one).
    */
-  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number }> {
+  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number } | null> {
     const m = this.info()?.id;
-    if (!m || !name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
+    // Gone (deleted, while another isolate still had it cached for up to 15 s): the Worker answers 404.
+    if (!m) return null;
+    if (!name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
     const t0 = Date.now();
     const e = await repoTokenEntry(this.env, name, scope, generation, "local", fresh);
     // mint_ms: how long this took when it minted (0 when it was cached), for the caller's timing line.
@@ -1135,6 +1139,28 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Main's head as recorded (null when unknown or the repo is empty). */
+  /** A branch's head from the stored rows (main from the repo's record), or null when unknown here (FILES.md). */
+  refHead(repo: string, ref: string): string | null {
+    const r = this.row<{ default_branch: string; default_head: string | null }>("SELECT default_branch, default_head FROM repos WHERE name = ?", repo);
+    if (!r) return null;
+    if (ref === r.default_branch) return r.default_head;
+    return this.row<{ head: string | null }>("SELECT head FROM branches WHERE repo = ? AND name = ? AND deleted_at IS NULL", repo, ref)?.head ?? null;
+  }
+
+  /** For merge commits: the branch each merged and its title (the file pages' history). */
+  mergedBranches(repo: string, shas: string[]): Record<string, { branch: string; title: string | null }> {
+    const out: Record<string, { branch: string; title: string | null }> = {};
+    for (let i = 0; i < shas.length; i += 100) {
+      const chunk = shas.slice(i, i + 100);
+      for (const r of this.rows<{ merge_commit: string; branch: string; title: string | null }>(
+        `SELECT m.merge_commit, m.branch, b.title FROM merges m LEFT JOIN branches b ON b.repo = m.repo AND b.name = m.branch
+         WHERE m.repo = ? AND m.merge_commit IN (${chunk.map(() => "?").join(",")})`,
+        repo, ...chunk,
+      )) out[r.merge_commit] = { branch: r.branch, title: r.title };
+    }
+    return out;
+  }
+
   currentMain(repo: string): string | null {
     return this.row<{ default_head: string | null }>("SELECT default_head FROM repos WHERE name = ?", repo)?.default_head ?? null;
   }

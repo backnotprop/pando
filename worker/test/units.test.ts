@@ -453,3 +453,36 @@ describe("namespaces", () => {
     expect(first("@example.com", 1)).toEqual(["user"]);
   });
 });
+
+describe("the file pages (FILES.md)", () => {
+  it("paths: no empty, . or .. segments; slashes trimmed", async () => {
+    const { cleanPath } = await import("../src/monorepo/files");
+    expect(cleanPath("")).toBe("");
+    expect(cleanPath(undefined)).toBe("");
+    expect(cleanPath("/src/lib/")).toBe("src/lib");
+    expect(() => cleanPath("src/../etc")).toThrow();
+    expect(() => cleanPath("src//x")).toThrow();
+    expect(() => cleanPath("./x")).toThrow();
+  });
+  it("raw: images as images, text (HTML and SVG too) as text, a NUL as binary; sandboxed", async () => {
+    const { rawResponse } = await import("../src/monorepo/files");
+    const as = async (name: string, bytes: Uint8Array) => (await rawResponse(new Response(bytes), name, "a".repeat(40), false, false)).headers;
+    const enc = new TextEncoder();
+    expect((await as("x.png", Uint8Array.of(0x89, 0, 1))).get("content-type")).toBe("image/png");
+    expect((await as("x.html", enc.encode("<script>1</script>"))).get("content-type")).toBe("text/plain; charset=utf-8");
+    expect((await as("x.svg", enc.encode("<svg/>"))).get("content-type")).toBe("text/plain; charset=utf-8");
+    expect((await as("x.bin", Uint8Array.of(1, 0, 2))).get("content-type")).toBe("application/octet-stream");
+    const h = await as("README", enc.encode("hi"));
+    expect(h.get("content-security-policy")).toContain("sandbox");
+    expect(h.get("x-content-type-options")).toBe("nosniff");
+    expect(h.get("cache-control")).toBe("private, no-cache");
+    const pinned = await rawResponse(new Response("hi"), "a.txt", "b".repeat(40), true, false);
+    expect(pinned.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    expect(await pinned.text()).toBe("hi");
+  });
+  it("a test budget, else the default", async () => {
+    const { requestBudget, REQUEST_BUDGET } = await import("../src/monorepo/files");
+    expect(requestBudget({})).toEqual(REQUEST_BUDGET);
+    expect(requestBudget({ FILES_BUDGET: "1" }).misses).toBe(1);
+  });
+});

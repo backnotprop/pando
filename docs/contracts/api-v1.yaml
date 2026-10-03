@@ -172,6 +172,16 @@ tags:
       `Pando: <repo> is busy with other pushes right now; push again` (every
       ref `busy; push again`), and nothing is written: push again.
 
+      Raw files (FILES.md section 3), GET or HEAD, beside the git door:
+      `/{owner}/{monorepo}/projects/{repo}/raw/{path}?ref=` for a
+      monorepo's project repo, `/{owner}/{name}/raw/{path}?ref=` for a plain
+      repo. The session cookie or a Bearer credential. Served so nothing
+      runs: `Content-Security-Policy: sandbox`, nosniff, images as images,
+      everything else as `text/plain` (HTML and SVG included) or, with a NUL
+      in its first 8,000 bytes, `application/octet-stream`. `ETag` is the
+      blob's hash. By branch: `private, no-cache` (a repeat is a 304); by a
+      40-character sha: `private, max-age=31536000, immutable`.
+
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.
@@ -1435,6 +1445,121 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/tree:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getTree
+      summary: A folder at any ref (FILES.md section 1)
+      description: |
+        Folders first, then by name; 1,000 entries a page. Read by hash
+        through the edge cache: a repeat view reaches no Artifacts call. A
+        branch name resolves from Pando's stored heads; a sha that is not in
+        this repo is a 404. No sizes (git trees have none).
+      tags: [repos]
+      parameters:
+        - { name: ref, in: query, description: "A branch name (`/` as is, URL-encoded) or a 40-character sha. Default: the default branch.", schema: { type: string } }
+        - { name: path, in: query, description: "The folder, `a/b/c`. Default: the root.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 } }
+        - { name: cursor, in: query, description: A `next` from an earlier page., schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ref, commit, path, entries, total, next]
+                properties:
+                  ref: { type: string }
+                  commit: { type: string, description: The commit the ref resolved to. }
+                  path: { type: string }
+                  entries: { type: array, items: { $ref: "#/components/schemas/TreeEntry" } }
+                  total: { type: integer }
+                  next: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { description: "`not_found` (ref, commit or path), or `not_a_folder`.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/tree/last-commits:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getLastCommits
+      summary: The last commit that changed each entry of a folder (FILES.md section 2)
+      description: |
+        First parents (`git log -1 --first-parent -- <entry>`): on main, a
+        change merged from a branch is the merge, with `merged_branch`. A
+        complete answer is stored (it never changes) and reused by later
+        commits' answers. A walk stops after about 40 Artifacts reads: the
+        answer then has `complete: false`, the entries found so far (null for
+        the rest), and `retry_after_ms`; a job finishes it. Entries unchanged
+        within 10,000 commits stay null with `older.before`.
+      tags: [repos]
+      parameters:
+        - { name: ref, in: query, schema: { type: string } }
+        - { name: path, in: query, schema: { type: string } }
+        - { name: names, in: query, description: "Comma-separated entry names (a page of a large folder). Default: all.", schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ref, commit, path, complete, entries, older, retry_after_ms]
+                properties:
+                  ref: { type: string }
+                  commit: { type: string }
+                  path: { type: string }
+                  complete: { type: boolean }
+                  entries:
+                    type: object
+                    additionalProperties:
+                      oneOf:
+                        - $ref: "#/components/schemas/CommitLine"
+                        - type: "null"
+                  older: { type: [object, "null"], properties: { before: { type: string, format: date-time } } }
+                  retry_after_ms: { type: [integer, "null"] }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/history:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getHistory
+      summary: Commits that changed one path, newest first (FILES.md section 6)
+      description: |
+        `git log --first-parent -- <path>`, paged. A page may stop short of
+        `limit` when its walk spent its budget (`complete_page: false`); ask
+        again with `next`. Renames are not followed. The walk stops at
+        10,000 commits from the ref (`capped`).
+      tags: [repos]
+      parameters:
+        - { name: ref, in: query, schema: { type: string } }
+        - { name: path, in: query, description: "A file or a folder. Default: the root (every commit).", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, description: A `next` from an earlier page., schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ref, path, commits, next, capped, complete_page]
+                properties:
+                  ref: { type: [string, "null"], description: Null on a page asked with a cursor. }
+                  path: { type: string }
+                  commits: { type: array, items: { $ref: "#/components/schemas/CommitLine" } }
+                  next: { type: [string, "null"] }
+                  capped: { type: boolean }
+                  complete_page: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/files/{path}:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -2383,6 +2508,28 @@ components:
         kind: { type: string, enum: [monorepo, repo] }
         role: { $ref: "#/components/schemas/MemberRole" }
         created_at: { type: string, format: date-time }
+    TreeEntry:
+      type: object
+      required: [name, type, mode, oid]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [dir, file, symlink, submodule] }
+        mode: { type: string, description: "git's mode: `100644`, `100755` (executable), `120000`, `40000`, `160000`." }
+        oid: { type: string, description: The object's hash (a blob for files; read it with raw). }
+    CommitLine:
+      type: object
+      required: [sha, title, author, at, merged_branch]
+      properties:
+        sha: { type: string }
+        title: { type: string, description: The message's first line. }
+        author: { type: object, properties: { name: { type: string }, email: { type: string } } }
+        at: { type: string, format: date-time, description: The author date. }
+        merged_branch:
+          type: [object, "null"]
+          description: On a merge into main, the branch it merged.
+          properties:
+            branch: { type: string }
+            title: { type: [string, "null"] }
     ReplacedAlias:
       type: [object, "null"]
       description: An old `owner/name` (from a rename or transfer) that led to another monorepo and now leads to this one. Null when nothing was taken over. Never silent.

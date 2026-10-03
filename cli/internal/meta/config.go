@@ -26,7 +26,7 @@ type Config struct {
 	Machine string
 	Agent   string // PANDO_AGENT, optional
 
-	Poll        time.Duration   // how often the folder is scanned (default 500 ms)
+	Poll        time.Duration   // the shortest gap between scans (default 500 ms; longer on big trees)
 	MaxHold     time.Duration   // a file still changing is sent after this (default 5 min)
 	Backoff     []time.Duration // reconnect waits (default 5, 10, 30, 60 s)
 	PingEvery   time.Duration   // default 30 s

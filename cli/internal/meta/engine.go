@@ -101,18 +101,19 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	defer e.close()
 	e.cfg.Log.Printf("syncing %s with %s (monorepo %s, machine %s)", e.cfg.Root, e.cfg.Server, e.cfg.Monorepo, e.cfg.Machine)
-	e.tick(ctx) // first look at the folder
-	e.dial(ctx)
-	ticker := time.NewTicker(e.cfg.Poll)
-	defer ticker.Stop()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case ev := <-e.events:
 			e.handle(ctx, ev)
-		case <-ticker.C:
-			e.tick(ctx)
+		case <-timer.C:
+			// A scan takes at most a tenth of the time: on a big tree the
+			// passes space out instead of using more of a core.
+			took := e.tick(ctx)
+			timer.Reset(max(e.cfg.Poll, 10*took))
 		}
 	}
 }
@@ -378,13 +379,17 @@ func (e *Engine) message(ctx context.Context, m *serverMsg) {
 
 // ---- the folder ----
 
-func (e *Engine) tick(ctx context.Context) {
+// tick is one pass: scan, held changes, connection, outbox. It returns how
+// long the scan took.
+func (e *Engine) tick(ctx context.Context) time.Duration {
 	e.pass++
 	if e.rules.Refresh() {
 		e.logf("read .pando/pando.toml again")
 	}
 	e.loadFrozen()
-	e.scan(time.Now())
+	start := time.Now()
+	e.scan(start)
+	took := time.Since(start)
 	for _, m := range e.held {
 		e.applyOne(m)
 	}
@@ -402,6 +407,7 @@ func (e *Engine) tick(ctx context.Context) {
 	if e.dirty {
 		e.saveState()
 	}
+	return took
 }
 
 func (e *Engine) loadFrozen() {

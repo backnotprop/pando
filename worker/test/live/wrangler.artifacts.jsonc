@@ -1,0 +1,14 @@
+// The live lane's test Worker with a real Artifacts binding, on the remote
+// pando-spike namespace (tests only; every repo it makes is deleted after).
+// Used by `run-e2e.sh --artifacts` to test commits after quiet. Never deployed.
+{
+  "name": "pando-live-test",
+  "main": "entry.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "META", "class_name": "MetaLayerObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MetaLayerObject"] }],
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "pando-spike", "remote": true }]
+}

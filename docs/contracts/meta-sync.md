@@ -34,7 +34,8 @@ The object refuses, and the client never sends:
 
 | Rule | Paths | `reason` | `status` |
 | --- | --- | --- | --- |
-| Protected | `.pando/**` (changes only through a reviewed branch) | `protected` | 403 |
+| Machine only | `.pando/local/**` (see `formats.md`, section 3) | `local_only` | 403 |
+| Protected | the rest of `.pando/**` (changes only through a reviewed branch, or in `pando init`'s first upload), except reference pointers `.pando/references/**`, which are live | `protected` | 403 |
 | Code | `projects/**` (code repos are not live) | `not_meta` | 403 |
 | Local only | dependencies and build output: any `node_modules/`, `.pnpm-store/`, `dist/`, `build/`, `.wrangler/`, `.next/`, `.cache/`, `__pycache__/`, `.venv/` folder; event captures `*.ndjson`, `*.jsonl`; secrets: `.env*`, `.dev.vars*`, `.secrets/`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.mobileprovision`, `*.provisionprofile`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`; noise: `.git/`, `.DS_Store`, `*.swp`, `*~`, `.#*`; Pando's own files: `*.conflict-local-*`, `.*.pando-tmp-*` | `local_only` | 403 |
 | Too large | more than 1.5 MiB (1,572,864 bytes) | `too_large` | 413 |
@@ -42,10 +43,12 @@ The object refuses, and the client never sends:
 | Bad path | empty, absolute, `\`, NUL, `.` or `..` segments, empty segments, longer than 1,024 bytes | `bad_path` | 400 |
 | Bad sha | `sha` does not match `bytes` | `bad_sha` | 400 |
 
-The client also skips folders with their own `.git` (projects and
-references; references sync as pointers, see `formats.md`), symlinks, and
-anything matched by `local_only` in `.pando/pando.toml`. Binaries and files
-over 1.5 MiB stay on the machine that made them until the R2 step (below).
+The client also skips everything inside a folder with its own `.git` (a
+directory or a file): such a folder is a repo or a reference, and only its
+pointer under `.pando/references/` syncs (`formats.md`, section 4). It skips
+symlinks, and anything matched by `local_only` in `.pando/pando.toml`
+(`.gitignore` syntax, `formats.md` section 2). Binaries and files over
+1.5 MiB stay on the machine that made them until the R2 step (below).
 
 ## The WebSocket
 
@@ -58,11 +61,12 @@ frame `pong` without waking the object (send one every 30 s).
 1. Client sends `hello`:
 
    ```json
-   {"type": "hello", "since": 412, "author": "Ana <ana@example.com>", "machine": "ana-mbp", "client": "pando/0.1"}
+   {"type": "hello", "since": 412, "author": "Ana <ana@example.com>", "machine": "ana-mbp", "agent": "agent-3", "client": "pando/0.1"}
    ```
 
    `since` is the last version this machine has seen in order (`0` on a new
-   clone).
+   clone). `agent` is optional (`PANDO_AGENT`); when set, it is kept on every
+   version this socket saves.
 
 2. The object answers `welcome`:
 
@@ -134,7 +138,7 @@ above:
 ```json
 {"type": "change", "op": "save", "path": "decisions/HISTORY.md", "version": 432, "sha": "4b82...", "size": 9,
  "bytes": "IyBIaXN0b3J5Cg==", "deleted": false, "author": "Ana <ana@example.com>", "machine": "ana-mbp",
- "at": 1790000000000, "source": "live"}
+ "agent": null, "at": 1790000000000, "source": "live"}
 ```
 
 - `op` is `save`, `delete` or `rename`. A delete has `deleted: true`, no
@@ -188,6 +192,24 @@ above:
 - **Refused.** A refused change is dropped and not retried until the file
   changes again.
 
+## The first upload (`pando init`)
+
+`pando init` in a folder that is not a git repo uploads the folder's meta
+layer to the new, empty monorepo. The first commit of a meta layer is not a
+live edit, so it may carry `.pando/pando.toml` and the rest of `.pando/`
+(never `.pando/local/`).
+
+1. `POST /v1/monorepos/{monorepo}/meta/init` with `{"action": "start"}`
+   opens the window. Only on an empty meta layer: otherwise 409
+   `not_empty` ("use pando clone").
+2. The client sends every file as ordinary `save` messages (base version 0).
+   While the window is open the object accepts `.pando/` paths and makes no
+   commits.
+3. `{"action": "done"}` closes the window. Everything uploaded is committed
+   at once, titled `Start the meta layer`.
+
+A window left open closes by itself after 30 minutes.
+
 ## History and restore (HTTP)
 
 All under `/v1/monorepos/{monorepo}/meta/`.
@@ -201,7 +223,7 @@ changed since I last looked").
 {"path": "decisions/HISTORY.md", "head": 440,
  "versions": [
    {"version": 432, "path": "decisions/HISTORY.md", "op": "save", "sha": "4b82...", "size": 9, "deleted": false,
-    "author": "Ana <ana@example.com>", "machine": "ana-mbp", "at": 1790000000000, "source": "live",
+    "author": "Ana <ana@example.com>", "machine": "ana-mbp", "agent": null, "at": 1790000000000, "source": "live",
     "from": null, "restored_from": null, "commit": "e1f0..."}
  ]}
 ```
@@ -209,12 +231,13 @@ changed since I last looked").
 `commit` is the meta layer commit that carries the version, or `null` until
 it is committed.
 
-**`GET file?path=<path>&version=<version>`**: the bytes of that version
-(`version` defaults to the current one). Headers `X-Pando-Version` and
-`X-Pando-Sha`. 404 when the path is absent at that version.
+**`GET file?path=<path>&version=<version>`**: the bytes of the path as it
+was at that version, that is its latest change at or before it (`version`
+defaults to now). Headers `X-Pando-Version` (the change's own version) and
+`X-Pando-Sha`. 404 when the path is absent then.
 
 **`POST restore`** with `{"path": "...", "version": 420, "author": "...", "machine": "..."}`:
-writes version 420's bytes back as a new change on top of the current one
+writes the path as it was at version 420 back as a new change on top of the current one
 (`source: "restore"`, `restored_from: 420`), broadcast to every socket,
 including the machine that asked. History is never rewritten. Restoring a
 delete removes the file. Answers `{"path", "version", "sha", "restored_from"}`,
@@ -234,15 +257,20 @@ pando resolve decisions/HISTORY.md                # unfreeze after a conflict
 ## Commits after quiet
 
 When a path has had no change for 10 seconds, the object commits it to the
-meta layer's `main` through gitwrite's `commitChanges` (see `gitwrite.md`).
-Paths that become due together and share an author go in one commit.
+meta layer's `main` (the Artifacts repo `<monorepo>--meta`) through
+gitwrite's `commitChanges` (see `gitwrite.md`). Paths that become due within
+2 seconds of each other and share an author, machine and agent go in one
+commit.
 
+- A commit holds at most 1,000 files and about 24 MiB, so a big first
+  upload becomes several commits.
 - Message: `Save decisions/HISTORY.md` (also `Delete <path>`,
   `Rename <from> to <path>`, `Restore <path> to version <n>`; several paths:
-  `Save 3 files`, listed in the body), then the who-made-it trailers
-  `Pando-Machine: <machine>` and `Pando-Version: <n>`.
-- Author: whoever made the latest change, at the time they made it.
-  Committer: Pando.
+  `Save 3 files`, the first 50 listed in the body), then the who-made-it trailers from
+  `formats.md` section 6 (`Pando-Agent` when set, `Pando-Machine`; a save
+  has no worktree) and `Pando-Version: <n>`.
+- Author: whoever made the latest change, at the time they made it. The
+  committer is the same person (gitwrite's default).
 - The object keeps the last commit it wrote as the parent. On `ref_moved` it
   retries once with `actual` as the parent. Other failures leave the versions
   uncommitted and retry later; nothing live is lost, since the object holds
@@ -269,10 +297,15 @@ wins), and is broadcast. This is the only way `.pando/**` changes.
 
 ## Identity
 
-Until the Worker authenticates requests, the object takes `author` and
-`machine` from `hello` (and from the `restore` body). When it does, the
-Worker sets `X-Pando-Author` and `X-Pando-Machine` on the forwarded request
-and the object uses those instead.
+Every request, the WebSocket upgrade included, carries
+`Authorization: Bearer <pando token>` (`api-v1.yaml`). The Worker checks the
+token and passes who it is to the object: the author is the token's name and
+email, and an agent token's name is also the `agent`. The machine is always
+the client's own word, from `hello` or the `restore` body. Until the Worker
+checks tokens, the object takes `author` and `agent` from `hello` too.
+
+Errors on the HTTP routes have the `/v1` shape:
+`{"error": {"code": "...", "message": "..."}}`.
 
 ## Later (M7): large files and binaries through R2
 

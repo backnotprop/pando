@@ -298,3 +298,47 @@ describe("browser sign-in helpers", () => {
     expect(browserName(null)).toBe("browser: a browser");
   });
 });
+
+describe("the write gate's release delay", () => {
+  it("keeps a released slot taken for the delay, then lets the next writer in", async () => {
+    const { WriteGate } = await import("../src/monorepo/gate");
+    const g = new WriteGate(1, 10_000, 5_000, 120);
+    const l1 = await g.acquire("r");
+    let got = 0;
+    const next = g.acquire("r").then(() => (got = Date.now()));
+    const t0 = Date.now();
+    expect(g.release("r", l1)).toBe(true);
+    expect(g.release("r", l1)).toBe(false); // a second release is a no-op
+    expect(g.renew("r", l1)).toBe(false); // and it cannot be renewed while releasing
+    expect(g.stats("r").held).toBe(1);
+    await next;
+    expect(got - t0).toBeGreaterThanOrEqual(110);
+  });
+  it("reads GATE_RELEASE_MS, else the default", async () => {
+    const { releaseDelay, RELEASE_DELAY_MS } = await import("../src/monorepo/gate");
+    expect(releaseDelay({})).toBe(RELEASE_DELAY_MS);
+    expect(releaseDelay({ GATE_RELEASE_MS: "0" })).toBe(0);
+    expect(releaseDelay({ GATE_RELEASE_MS: "350" })).toBe(350);
+    expect(releaseDelay({ GATE_RELEASE_MS: "nope" })).toBe(RELEASE_DELAY_MS);
+  });
+});
+
+describe("RPC results are released on arrival", () => {
+  it("calls the result's disposer once and drops it, keeping the data", async () => {
+    const { released } = await import("../src/timing");
+    const D = (Symbol as unknown as { dispose: symbol }).dispose;
+    let calls = 0;
+    const r: Record<string | symbol, unknown> = { token: "t", n: 2 };
+    Object.defineProperty(r, D, { value: () => calls++, enumerable: false, configurable: true });
+    const out = released(r);
+    expect(calls).toBe(1);
+    expect(D in out).toBe(false);
+    expect(out.token).toBe("t");
+    const arr = Object.defineProperty([1, 2], D, { value: () => calls++, configurable: true });
+    expect(released(arr)).toEqual([1, 2]);
+    expect(calls).toBe(2);
+    expect(released(null)).toBe(null);
+    expect(released(true)).toBe(true);
+    expect(released({ plain: 1 })).toEqual({ plain: 1 });
+  });
+});

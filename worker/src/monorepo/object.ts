@@ -11,7 +11,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoToken, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
-import { GateBusy, isBusy, LEASE_MS, retryBusy, WriteGate } from "./gate";
+import { GateBusy, isBusy, LEASE_MS, releaseDelay, retryBusy, WAIT_MS, WRITE_SLOTS, WriteGate } from "./gate";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
 import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
@@ -135,7 +135,7 @@ export class MonorepoObject extends DurableObject<Env> {
   private sql: SqlStorage;
   private locks = new Map<string, Promise<unknown>>();
   /** At most two writes at once per Artifacts repo (gate.ts). In memory: leases end when the object restarts. */
-  private gate = new WriteGate();
+  private gate = new WriteGate(WRITE_SLOTS, LEASE_MS, WAIT_MS, releaseDelay(this.env));
   /** Ref-only writes waiting for a slot, per Artifacts repo; sent together as one receive-pack. */
   private refQueues = new Map<string, { cmd: RefCommand; done: (reason: string | null) => void; fail: (err: unknown) => void }[]>();
   private refRunners = new Set<string>();

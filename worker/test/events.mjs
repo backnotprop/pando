@@ -251,6 +251,52 @@ try {
   checkS("event: meta.saved (history entry row, no bytes)", e?.collection === "meta_files" && e?.op === "upsert" && e?.row?.size === bytes.length && e?.row?.agent === "agent-2" && !("bytes" in (e?.row ?? {})), scrub(JSON.stringify(e)).slice(0, 220));
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/tree`, A);
   check("meta/tree lists the file in one call", r.json?.files?.some((f) => f.path === "notes/today.md" && f.size === bytes.length && f.version >= 1), `${r.status} ${(r.json?.files ?? []).map((f) => f.path).join(",")}`);
+  // login beside the display name: on the event, the history and the tree
+  checkS("meta.saved carries the saver's login beside the name", e?.row?.login === `ana-${id}` && /^Ana Lima/.test(e?.row?.author ?? ""), `${e?.row?.login} / ${e?.row?.author}`);
+  const v1 = (await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s1"), 10_000))?.version;
+  r = await call("GET", `/v1/monorepos/${O}/${M}/meta/history?path=notes/today.md`, A);
+  check("meta history entries carry login", r.json?.versions?.[0]?.login === `ana-${id}`, JSON.stringify(r.json?.versions?.[0]?.login));
+  // a second file and folder, so each folder's last change is its own
+  const plan = Buffer.from("plan\n");
+  meta.send(JSON.stringify({ type: "save", id: "s2", path: "plans/q4/plan.md", base_version: 0, sha: blobSha(plan), bytes: plan.toString("base64") }));
+  const v2 = (await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s2"), 10_000))?.version;
+  r = await call("GET", `/v1/monorepos/${O}/${M}/meta/tree?dir=`, A);
+  const fNotes = r.json?.folders?.find((f) => f.name === "notes");
+  const fPlans = r.json?.folders?.find((f) => f.name === "plans");
+  check("meta/tree?dir= gives each folder its last change (who, what, when, version)", fNotes?.files === 1 && fNotes?.last?.version === v1 && fNotes?.last?.path === "notes/today.md" && fNotes?.last?.login === `ana-${id}` && typeof fNotes?.last?.at === "number" && fPlans?.last?.version === v2 && fPlans?.last?.path === "plans/q4/plan.md", JSON.stringify(r.json?.folders));
+
+  // the root raw route: a monorepo's own file, now and at a version
+  const rawGet = async (path, secret, headers = {}) => {
+    const res = await fetch(`${URL_}/${O}/${M}/raw/${path}`, { headers: { authorization: `Bearer ${secret}`, ...headers } });
+    return { status: res.status, headers: res.headers, text: await res.text() };
+  };
+  let raw = await rawGet("notes/today.md", A);
+  const etagOk = (h) => (h ?? "").replace(/^W\//, "") === `"${blobSha(bytes)}"`;
+  check("root raw: a meta file's bytes, as text, sandboxed, ETag the blob sha", raw.status === 200 && raw.text === bytes.toString() && raw.headers.get("content-type")?.startsWith("text/plain") && /sandbox/.test(raw.headers.get("content-security-policy") ?? "") && raw.headers.get("x-content-type-options") === "nosniff" && etagOk(raw.headers.get("etag")) && raw.headers.get("cache-control") === "private, no-cache", `${raw.status} ${raw.headers.get("etag")} ${raw.headers.get("cache-control")}`);
+  const raw304 = await rawGet("notes/today.md", A, { "if-none-match": raw.headers.get("etag") });
+  check("root raw: a repeat with If-None-Match is a 304", raw304.status === 304, `${raw304.status}`);
+  const edited = Buffer.from("# Notes\nhello again\n");
+  meta.send(JSON.stringify({ type: "save", id: "s3", path: "notes/today.md", base_version: v1, sha: blobSha(edited), bytes: edited.toString("base64") }));
+  await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s3"), 10_000);
+  raw = await rawGet("notes/today.md", A);
+  const rawV1 = await rawGet(`notes/today.md?v=${v1}`, A);
+  const rawV2 = await rawGet(`notes/today.md?v=${v2}`, A);
+  check("root raw: now is the new bytes; ?v= is the file as of that version, cached a year", raw.text === edited.toString() && rawV1.text === bytes.toString() && rawV2.text === bytes.toString() && rawV1.headers.get("cache-control") === "private, max-age=31536000, immutable", `${rawV1.status} ${rawV1.headers.get("cache-control")}`);
+  const before = await rawGet(`plans/q4/plan.md?v=${v1}`, A);
+  const badV = await rawGet("notes/today.md?v=x", A);
+  const none = await rawGet("notes/none.md", A);
+  const outsiderRaw = await rawGet("notes/today.md", B);
+  check("root raw: 404 before a file existed or when absent, 400 for a bad v, 403 for a non-member", before.status === 404 && none.status === 404 && badV.status === 400 && outsiderRaw.status === 403, `${before.status} ${none.status} ${badV.status} ${outsiderRaw.status}`);
+  // a large file: its pointer in the meta layer, its bytes in R2
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`pando-${id}`)]);
+  const oid = createHash("sha256").update(png).digest("hex");
+  const put = await fetch(`${URL_}/v1/monorepos/${O}/${M}/meta/blobs/${oid}`, { method: "PUT", headers: { authorization: `Bearer ${A}`, "content-length": String(png.length) }, body: png });
+  const pointer = Buffer.from(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${png.length}\n`);
+  meta.send(JSON.stringify({ type: "save", id: "s4", path: "art/logo.png", base_version: 0, sha: blobSha(pointer), bytes: pointer.toString("base64") }));
+  await waitFor(() => metaFrames.find((f) => f.id === "s4"), 10_000);
+  const big = await fetch(`${URL_}/${O}/${M}/raw/art/logo.png`, { headers: { authorization: `Bearer ${A}` } });
+  const bigBytes = Buffer.from(await big.arrayBuffer());
+  check("root raw: a large file comes from R2, as an image, ETag its SHA-256", put.status === 201 && big.status === 200 && bigBytes.equals(png) && big.headers.get("content-type") === "image/png" && (big.headers.get("etag") ?? "").replace(/^W\//, "") === `"${oid}"`, `${put.status} ${big.status} ${big.headers.get("content-type")} ${bigBytes.length} bytes`);
   meta.close();
   e = await find(ev, (x) => x.kind === "machine.disconnected");
   checkS("event: machine.disconnected, its snapshot without that socket", e?.collection === "presence" && Array.isArray(e?.row?.connections) && !e.row.connections.some((c) => c.id === e.connection?.id));
@@ -275,6 +321,7 @@ try {
   check("merge a reference pointer into the meta layer", r.status === 200, `${r.status} ${r.json?.error?.code ?? ""}`);
   e = await find(ev, (x) => x.kind === "meta.saved" && x.key === ".pando/references/research/infra/oak.toml");
   checkS("event: meta.saved for the merged pointer (source main)", e?.row?.source === "main");
+  checkS("a version merged on main carries the merger's login", e?.row?.login === `ana-${id}`, JSON.stringify(e?.row?.login));
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/references`, A);
   const ref = r.json?.references?.[0];
   check("meta/references lists it, parsed", ref?.path === "research/infra/oak" && ref?.url === "https://github.com/example/oak.git" && ref?.commit === "0123456789abcdef0123456789abcdef01234567", JSON.stringify(r.json));

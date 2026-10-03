@@ -64,7 +64,7 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
       throw new HttpError(403, "owner_only", "only an owner can make the meta layer's first upload");
     }
     const user = auth.user;
-    return (await routeMeta(request, env, auth.monorepo.id, { name: user.name ?? user.login, email: user.email ?? undefined }))!;
+    return (await routeMeta(request, env, auth.monorepo.id, { name: user.name ?? user.login, email: user.email ?? undefined, login: user.login }))!;
   } catch (err) {
     return toErrorResponse(err);
   }

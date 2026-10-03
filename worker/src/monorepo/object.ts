@@ -742,7 +742,7 @@ export class MonorepoObject extends DurableObject<Env> {
       );
     });
     const author = `${who.name ?? who.login} <${who.email ?? `${who.login}@users.pando.invalid`}>`;
-    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, changes });
+    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, login: who.login, changes });
   }
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────

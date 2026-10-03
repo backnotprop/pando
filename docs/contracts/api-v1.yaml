@@ -178,12 +178,16 @@ tags:
       Raw files (FILES.md section 3), GET or HEAD, beside the git door:
       `/{owner}/{monorepo}/projects/{repo}/raw/{path}?ref=` for a
       monorepo's project repo, `/{owner}/{name}/raw/{path}?ref=` for a plain
-      repo. The session cookie or a Bearer credential. Served so nothing
-      runs: `Content-Security-Policy: sandbox`, nosniff, images as images,
-      everything else as `text/plain` (HTML and SVG included) or, with a NUL
-      in its first 8,000 bytes, `application/octet-stream`. `ETag` is the
-      blob's hash. By branch: `private, no-cache` (a repeat is a 304); by a
-      40-character sha: `private, max-age=31536000, immutable`.
+      repo, and `/{owner}/{monorepo}/raw/{path}?v=` for a monorepo's own
+      files (the meta layer; `v` is a meta layer version, meta-sync.md).
+      Members only, by the session cookie or a Bearer credential. Served so
+      nothing runs: `Content-Security-Policy: sandbox`, nosniff, images as
+      images, everything else as `text/plain` (HTML and SVG included) or,
+      with a NUL in its first 8,000 bytes, `application/octet-stream`.
+      `ETag` is the content's hash (the git blob's; a large meta file's
+      SHA-256). By branch, or a meta file now: `private, no-cache` (a repeat
+      is a 304); by a 40-character sha or a `v`: `private, max-age=31536000,
+      immutable`.
 
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`

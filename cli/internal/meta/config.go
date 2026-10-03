@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,8 +92,8 @@ func FindRoot(dir string) (string, error) {
 }
 
 // LoadConfig reads .pando/local/root.json (formats.md, section 3), then
-// ~/.pando/config.toml and ~/.pando/token (section 7), then the PANDO_*
-// environment, which wins.
+// ~/.pando/config.toml and the credential in ~/.pando/credentials/<host>
+// (section 7), then the PANDO_* environment, which wins.
 func LoadConfig(root string) (Config, error) {
 	c := Config{Root: root}
 	var rj struct {
@@ -126,12 +127,16 @@ func LoadConfig(root string) (Config, error) {
 			}
 			c.Machine = mc.Machine
 		}
-		if b, err := os.ReadFile(filepath.Join(home, "token")); err == nil {
-			c.Token = strings.TrimSpace(string(b))
-		}
 	}
 	if v := os.Getenv("PANDO_SERVER"); v != "" {
 		c.Server = v
+	}
+	// The credential pando login stored for this server (the cli lane's
+	// ~/.pando/credentials/<host>, mode 600). Never printed or logged.
+	if u, err := url.Parse(c.Server); err == nil && u.Host != "" && home != "" {
+		if b, err := os.ReadFile(filepath.Join(home, "credentials", u.Host)); err == nil {
+			c.Token = strings.TrimSpace(string(b))
+		}
 	}
 	if v := os.Getenv("PANDO_MONOREPO"); v != "" {
 		c.Monorepo = v

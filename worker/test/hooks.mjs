@@ -1,11 +1,11 @@
-// Hook deliveries on the pando-hooks queue (C9), end to end against `wrangler dev`.
+// Hook deliveries through the monorepo object's outbox (C9, C25 step 3), end to end against `wrangler dev`.
 //
 //   PANDO_URL=http://localhost:8797 node test/hooks.mjs
 //
 // worker/.dev.vars sets HOOK_RETRY_DELAYS=1,1,1,1 so retries take seconds,
 // not 36 minutes. A receiver on this machine fails twice then succeeds (flaky),
-// always fails (dead), or plays Buildkite. Checks: signatures, seq, attempts
-// recorded, the dead-letter path, one row per (hook, event, seq) under
+// always fails (dead), answers after 4 s (slow), or plays Buildkite. Checks: signatures, seq, attempts
+// recorded, dead after the fifth try, one row per (hook, event, seq) under
 // redeliver, and replay from a seq. Credentials are never printed.
 import { spawnSync } from "node:child_process";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -40,7 +40,7 @@ const waitFor = async (pred, ms = 30_000) => {
 };
 
 // ── the receiver ──
-const got = { flaky: [], dead: [], ok: [], buildkite: [] };
+const got = { flaky: [], dead: [], ok: [], buildkite: [], slow: [] };
 const tries = new Map();
 const server = createServer((req, res) => {
   let raw = "";
@@ -58,9 +58,10 @@ const server = createServer((req, res) => {
     const want = "sha256=" + createHmac("sha256", SECRET).update(raw).digest("hex");
     const sig = String(req.headers["x-pando-signature-256"] ?? "");
     const valid = sig.length === want.length && timingSafeEqual(Buffer.from(sig), Buffer.from(want));
-    const entry = { valid, delivery: req.headers["x-pando-delivery"], event: req.headers["x-pando-event"], body };
+    const entry = { valid, delivery: req.headers["x-pando-delivery"], event: req.headers["x-pando-event"], body, at: Date.now() };
     (got[route] ?? []).push(entry);
     if (route === "dead") return res.writeHead(500).end("down");
+    if (route === "slow") return setTimeout(() => res.writeHead(200).end(), 4_000);
     if (route === "flaky") {
       const n = (tries.get(entry.delivery) ?? 0) + 1;
       tries.set(entry.delivery, n);
@@ -89,7 +90,8 @@ try {
   const flaky = await hook({ type: "web", url: `http://127.0.0.1:${port}/flaky`, secret: SECRET, events: ["push", "merged"] });
   const dead = await hook({ type: "web", url: `http://127.0.0.1:${port}/dead`, secret: SECRET, events: ["push"] });
   const bk = await hook({ type: "buildkite", buildkite: { organization: "o", pipeline: "p", api_url: `http://127.0.0.1:${port}/buildkite` } });
-  check("three hooks registered (web flaky, web dead, buildkite)", flaky && dead && bk);
+  const slow = await hook({ type: "web", url: `http://127.0.0.1:${port}/slow`, secret: SECRET, events: ["push"] });
+  check("four hooks registered (web flaky, web dead, web slow, buildkite)", flaky && dead && bk && slow);
 
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: S, GIT_AUTHOR_NAME: "x", GIT_AUTHOR_EMAIL: "x@pando.invalid", GIT_COMMITTER_NAME: "x", GIT_COMMITTER_EMAIL: "x@pando.invalid" };
   const git = (a, cwd) => spawnSync("git", ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", ...a], { cwd, env, encoding: "utf8" });
@@ -122,14 +124,17 @@ try {
   check("the attempts are recorded (503, 503, 200)", JSON.stringify(deliveredFlaky?.recent_attempts?.map((a) => a.response_code)) === "[200,503,503]", JSON.stringify(deliveredFlaky?.recent_attempts?.map((a) => a.response_code)));
   check("the payload carries clone_url, a read token and the merge base", /^art_v\d+_/.test(flakyGot.at(-1)?.body?.read_token ?? "") && /^[0-9a-f]{40}$/.test(flakyGot.at(-1)?.body?.base ?? ""));
 
-  // dead: 5 tries, then the dead-letter queue
+  // dead: 5 tries, then dead
   const deadD = await waitFor(async () => {
     const ds = (await call("GET", `${base}/hooks/${dead}/deliveries`, S)).json?.deliveries ?? [];
     const d = ds.find((x) => x.seq === pushSeq);
     return d?.status === "dead" ? d : null;
   }, 90_000);
-  check("a dead receiver: 5 tries, then the dead-letter queue (status dead)", !!deadD && deadD.attempts === 5 && got.dead.filter((x) => x.body?.head === head).length === 5, `${deadD?.status}, ${deadD?.attempts} attempts, last ${deadD?.response_code}`);
-  check("buildkite rides the same queue, with PANDO_SEQ", got.buildkite.some((b) => b?.commit === head && b?.env?.PANDO_SEQ === String(pushSeq)));
+  check("a dead receiver: 5 tries, then status dead", !!deadD && deadD.attempts === 5 && got.dead.filter((x) => x.body?.head === head).length === 5, `${deadD?.status}, ${deadD?.attempts} attempts, last ${deadD?.response_code}`);
+  const slowGot = got.slow.find((x) => x.body?.head === head);
+  const firstFlaky = flakyGot[0];
+  check("a slow receiver holds no one: the flaky hook's first try arrived before the slow one answered", !!slowGot && !!firstFlaky && firstFlaky.at < slowGot.at + 4_000, slowGot && firstFlaky ? `flaky ${firstFlaky.at - t0} ms, slow answered ${slowGot.at + 4_000 - t0} ms after the push started` : "missing");
+  check("buildkite rides the same outbox, with PANDO_SEQ", got.buildkite.some((b) => b?.commit === head && b?.env?.PANDO_SEQ === String(pushSeq)));
 
   // redeliver: same row, same seq, a new attempt
   const before = (await call("GET", `${base}/hooks/${flaky}/deliveries`, S)).json?.deliveries?.length;

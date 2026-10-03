@@ -1787,7 +1787,7 @@ paths:
     post:
       operationId: replayHook
       summary: Replay a hook from a seq, after an outage (owners)
-      description: Every delivery of this hook with a seq above `since` goes back on the queue, oldest first, at most 1,000. Only changes made while the hook existed have deliveries.
+      description: Every delivery of this hook with a seq above `since` is sent again, oldest first, at most 1,000, each with a fresh round of five tries. Only changes made while the hook existed have deliveries.
       tags: [hooks]
       parameters:
         - name: since
@@ -1819,7 +1819,7 @@ paths:
     post:
       operationId: redeliver
       summary: Send a delivery again (owners)
-      description: The same delivery (same id and seq) goes back on the queue, with a fresh read token; its attempts continue.
+      description: The same delivery (same id and seq) is sent again now, with a fresh read token and a fresh round of five tries; `attempts` keeps counting.
       tags: [hooks]
       responses:
         "202":
@@ -3041,7 +3041,7 @@ components:
         status:
           type: string
           enum: [queued, retrying, delivered, failed, dead]
-          description: "`queued`: waiting for its first try. `retrying`: the last try failed; `next_attempt_at` says when the next is. `failed`: the fifth try failed. `dead`: it reached the dead-letter queue (redeliver to try again)."
+          description: "`queued`: waiting for its first try. `retrying`: the last try failed; `next_attempt_at` says when the next is. `dead`: the fifth try failed, or its hook or repo was deleted (redeliver to try again). `failed` appears only on deliveries from before 2026-10-03, between the fifth try and `dead`."
         attempts: { type: integer }
         response_code: { type: [integer, "null"] }
         error: { type: [string, "null"] }

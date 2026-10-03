@@ -1,15 +1,16 @@
 // Branch facts (ahead, behind, merge base, mergeable), computed on change and
 // stored in the monorepo object, so a branch list answers at once.
 //
-// - When main moves (a merge, main's first push), the object queues one
-//   "sweep" for that repo and that main. The consumer walks the open branches
+// - When main moves (a merge, main's first push), the object's outbox
+//   (facts-out.ts) holds one "sweep" for that repo and that main, drained at
+//   once into FactsDrain by RPC. The sweep walks the open branches
 //   pushed in the last SWEEP_DAYS, newest first, at most SWEEP_MAX, SWEEP_PARALLEL
 //   at a time, and stops when main moves on (the newer main has its own sweep).
-// - When a branch's head moves, the object queues a one-branch job.
+// - When a branch's head moves, the outbox holds a one-branch job.
 // - A branch's facts are skipped when already stored for its (main, head).
 // - Branches no sweep reaches are computed when listed: at most INLINE_MAX per
 //   list call, once they have been stale for STALE_GRACE_MS.
-// The object never calls Artifacts for this; the consumer and the list route do.
+// The object never calls Artifacts for this; FactsDrain and the list route do.
 
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
@@ -74,43 +75,9 @@ function stubOf(env: Env, monorepo: string) {
 }
 
 /**
- * The queue consumer. One-branch jobs in a batch run SWEEP_PARALLEL at a
- * time; sweeps run one after another (each already runs SWEEP_PARALLEL dry
- * runs), so one invocation has at most SWEEP_PARALLEL in flight.
- */
-export async function handleFactsBatch(batch: MessageBatch<FactsMessage>, env: Env): Promise<void> {
-  const run = async (msg: Message<FactsMessage>) => {
-    try {
-      const b = msg.body;
-      await timed("queue", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () =>
-        runFacts(env, b).finally(() => {
-          // The facts themselves, apart from the push's line (push_summary_ms).
-          const t = currentTiming();
-          if (t) t.fields.facts_job_ms = Date.now() - t.start - Number(t.fields.push_summary_ms ?? 0);
-        }),
-      );
-      msg.ack();
-    } catch (err) {
-      if (err instanceof MainMoved) {
-        msg.ack(); // main moved on; its own sweep recomputes this branch
-        return;
-      }
-      if (err instanceof HttpError && err.status === 404) {
-        msg.ack(); // the repo or monorepo is gone
-        return;
-      }
-      console.error(`branch facts (${msg.body.type} ${msg.body.repo}) failed:`, err instanceof Error ? err.message : String(err));
-      msg.retry({ delaySeconds: 5 * msg.attempts });
-    }
-  };
-  await pool(batch.messages.filter((m) => m.body.type === "branch"), SWEEP_PARALLEL, run);
-  for (const m of batch.messages.filter((x) => x.body.type === "sweep")) await run(m);
-}
-
-/**
  * The facts drain (C25-LIVE-HOME.md step 2): the monorepo object's outbox
  * calls this by RPC with its due jobs. One-branch jobs run SWEEP_PARALLEL at
- * a time, sweeps one after another, as the queue consumer did. Answers, per
+ * a time, sweeps one after another. Answers, per
  * job, whether it is done: main having moved on, or the repo being gone,
  * counts as done; anything else is retried by the object.
  */

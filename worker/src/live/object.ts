@@ -81,6 +81,12 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+// A name from the client (author, machine, agent), kept short: it lives in
+// the socket's attachment, which holds at most 2 KB.
+function name(v: unknown): string {
+  return str(v).slice(0, 200);
+}
+
 function int(v: unknown, fallback = 0): number {
   const n = typeof v === "number" ? v : typeof v === "string" && v !== "" ? Number(v) : NaN;
   return Number.isSafeInteger(n) && n >= 0 ? n : fallback;
@@ -274,9 +280,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!target) return fail(404, "not_found", `${path} has no version at or before ${body?.version}`);
 
     // From here to the broadcast nothing awaits, so no other change interleaves.
-    const author = request.headers.get("x-pando-author") ?? (str(body?.author) || "unknown");
-    const agent = str(body?.agent) || null;
-    const machine = str(body?.machine) || "unknown";
+    const author = request.headers.get("x-pando-author") ?? (name(body?.author) || "unknown");
+    const agent = name(body?.agent) || null;
+    const machine = name(body?.machine) || "unknown";
     const cur = this.current(path);
     const same = target.deleted ? !cur || cur.deleted : !!cur && !cur.deleted && cur.sha === target.sha;
     if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 });
@@ -420,9 +426,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   private hello(ws: WebSocket, att: Attachment, msg: any): void {
-    if (!att.fixed) att.author = str(msg.author) || "unknown";
-    att.machine = str(msg.machine) || "unknown";
-    att.agent = str(msg.agent) || null; // agents act as their user; the trailers name them
+    if (!att.fixed) att.author = name(msg.author) || "unknown";
+    att.machine = name(msg.machine) || "unknown";
+    att.agent = name(msg.agent) || null; // agents act as their user; the trailers name them
     att.hello = true;
     const head = this.head();
     let since = int(msg.since);

@@ -164,6 +164,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			return nil
 		case ev := <-e.events:
 			e.handle(ctx, ev)
+			if e.untilSynced && !e.live && e.attempt >= 3 {
+				return fmt.Errorf("could not reach %s (%d tries); changes wait in the outbox for the next sync", e.cfg.Server, e.attempt)
+			}
 		case <-timer.C:
 			// A scan takes at most a tenth of the time: on a big tree the
 			// passes space out instead of using more of a core.

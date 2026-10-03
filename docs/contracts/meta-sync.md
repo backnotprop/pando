@@ -246,7 +246,23 @@ including the machine that asked. History is never rewritten. Restoring a
 delete removes the file. Answers `{"path", "version", "sha", "restored_from"}`,
 or `{"unchanged": true, "version"}` when the file already holds those bytes.
 
-**`GET status`**: `{"head", "files", "uncommitted", "sockets", "last_commit", "commit_error"}`.
+**`GET status`**: `{"head", "files", "uncommitted", "sockets", "connections", "last_commit", "commit_error"}`.
+`connections` is who is connected now: one entry per socket that sent
+`hello`, `{"id", "author", "machine", "agent", "client", "connected_at"}`
+(`client` is hello's optional `client` field).
+
+**`GET tree?prefix=<path prefix>`**: every current path in one call, sorted,
+each as a history entry (above): `{"head", "prefix", "files": [...]}`.
+Deleted paths are left out. `prefix` is a plain string match on the path.
+
+**`GET references`**: the reference pointers under `.pando/references/`
+(formats.md, section 4), parsed:
+`{"head", "references": [{"path", "url", "ref", "commit", "version", "error"}]}`.
+`path` is the reference's folder (`research/infra/oak`); `error` says why
+a pointer did not parse.
+
+Added by the web-api lane (2026-10-03) for the web screens; the live lane
+owns this contract.
 
 The CLI:
 

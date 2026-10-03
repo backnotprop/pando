@@ -66,6 +66,10 @@ info:
     more credentials (`POST /v1/user/credentials`) and monorepos
     (`POST /v1/monorepos`).
 
+    Agents: an agent acts as its user, through the user's credential. It may
+    also send `X-Pando-Agent: <name>` on API calls and pushes; Pando then
+    records the agent on merges (`merged_agent`) and on events.
+
     Branch names in paths: encode `/` as `%2F` (`agent-3%2Foauth`). Raw
     slashes are accepted too.
 
@@ -387,6 +391,65 @@ paths:
         "204": { description: Deleted }
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/events:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: events
+      summary: The monorepo's event stream (ON HOLD; answers 501 for now)
+      description: |
+        ON HOLD until the architecture review decides where events live. Today
+        it answers 501 `event_stream_on_hold`. The shape below is built and
+        tested behind a switch.
+
+        Every change a screen shows is an event: a `seq`, a `kind`, and the
+        changed `row` in the shape its REST route returns, with the
+        client-side `collection`, `key` and `op` (`upsert` or `delete`) it
+        applies to, so a client store (TanStack DB) can apply it directly.
+        Kinds and collections:
+        `push` and `branch.opened`, `branch.updated`, `branch.deleted`,
+        `merged` (branches, Branch row with `repo`); `push` of main and
+        `default_head.updated` (default_heads); `status` (statuses);
+        `review` (reviews); `worktree.reported`, `worktree.removed`
+        (worktrees); `meta.saved` (meta_files, a meta history entry, no
+        bytes); `machine.connected`, `machine.disconnected` (connections);
+        `branches.stale` (no row: refetch the repo's branch list).
+        Every event is kept.
+
+        Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
+        latest `limit` with no `since`. With `Upgrade: websocket`: events after
+        `?since=` (at most 500, else one `resync` frame), then
+        `{"type": "caught_up", "head"}`, then live `{"type": "event", ...}`
+        frames. The text `ping` gets `pong`.
+      tags: [monorepos]
+      parameters:
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, head, oldest, resync]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+                  head: { type: integer }
+                  oldest: { type: integer }
+                  resync: { type: boolean, description: "True when `since` is not in the stream; refetch everything." }
+        "101": { description: The WebSocket. }
+        "501":
+          description: "`event_stream_on_hold`"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/monorepos/{monorepo}/members:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -671,6 +734,45 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
+  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/commits:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/branch"
+    get:
+      operationId: branchCommits
+      summary: The branch's own commits, newest first, with Pando's trailers parsed
+      description: |
+        The commits on the branch that are not on the default branch (the
+        ones `ahead` counts), in git log's order: each commit before its
+        parents. `trailers` holds the who-made-it lines from formats.md,
+        section 6 (`Pando-Agent`, `Pando-Worktree`, `Pando-Machine`), read from
+        the message's last paragraph.
+      tags: [branches]
+      parameters:
+        - name: limit
+          in: query
+          description: At most 250.
+          schema: { type: integer, minimum: 1, maximum: 250, default: 250 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branch, head, base_branch, merge_base, total, truncated, commits]
+                properties:
+                  branch: { type: string }
+                  head: { type: string }
+                  base_branch: { type: string }
+                  merge_base: { type: [string, "null"] }
+                  total: { type: integer, description: Commits on the branch only; may be more than returned. }
+                  truncated: { type: boolean }
+                  commits:
+                    type: array
+                    items: { $ref: "#/components/schemas/Commit" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/diff:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -1161,7 +1263,7 @@ components:
     Name:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. `v1` and `healthz` are reserved."
+      description: "A monorepo name: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Reserved for the Worker and the web app: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, favicon.ico, robots.txt, manifest.json, index.html."
     Login:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9]|-(?!-)){0,38}$"
@@ -1225,11 +1327,56 @@ components:
         role: { $ref: "#/components/schemas/MemberRole" }
         invited_by: { type: string }
         created_at: { type: string, format: date-time }
+    Event:
+      type: object
+      required: [seq, at, kind, collection, key, op, row]
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        kind: { type: string }
+        collection: { type: [string, "null"] }
+        key: { type: [string, "null"] }
+        op: { type: [string, "null"], enum: [upsert, delete, null] }
+        repo: { type: [string, "null"] }
+        actor: { type: [string, "null"], description: The user's login. }
+        machine: { type: [string, "null"], description: The credential's name. }
+        agent: { type: [string, "null"] }
+        row: { description: "The changed row in its REST shape; on a delete, the last row (or its key fields)." }
+    Commit:
+      type: object
+      required: [sha, parents, title, message, author, committer, trailers]
+      properties:
+        sha: { type: string }
+        parents:
+          type: array
+          items: { type: string }
+        title: { type: string, description: The message's first line. }
+        message: { type: string, description: "The full message, at most 4,096 characters." }
+        author:
+          type: object
+          properties:
+            name: { type: [string, "null"] }
+            email: { type: [string, "null"] }
+            date: { type: [string, "null"], format: date-time }
+        committer:
+          type: object
+          properties:
+            name: { type: [string, "null"] }
+            email: { type: [string, "null"] }
+            date: { type: [string, "null"], format: date-time }
+        trailers:
+          type: object
+          required: [agent, worktree, machine]
+          properties:
+            agent: { type: [string, "null"] }
+            worktree: { type: [string, "null"] }
+            machine: { type: [string, "null"] }
     Member:
       type: object
-      required: [login, role, added_at]
+      required: [login, name, role, added_at]
       properties:
         login: { type: string }
+        name: { type: [string, "null"], description: "The user's display name, if known." }
         role: { $ref: "#/components/schemas/MemberRole" }
         added_at: { type: string, format: date-time }
         added_by: { type: [string, "null"] }
@@ -1281,6 +1428,11 @@ components:
           enum: [open, merged]
           description: "`merged` when the branch's current head was landed by a Pando merge."
         merge_commit: { type: [string, "null"] }
+        merged_by: { type: [string, "null"], description: "The user who merged (state merged only)." }
+        merged_at: { type: [string, "null"], format: date-time }
+        merged_machine: { type: [string, "null"], description: "The name of the credential used to merge: the machine or sandbox." }
+        merged_agent: { type: [string, "null"], description: "The agent that merged, from X-Pando-Agent, if one said so." }
+        forced: { type: [boolean, "null"], description: "True when the merge went past red or missing checks with force=1." }
         created_at: { type: [string, "null"], format: date-time }
         updated_at: { type: [string, "null"], format: date-time }
     StatusState:

@@ -4,7 +4,7 @@
 // push that creates it passes). Only members of the monorepo get through.
 
 import type { Env } from "../env";
-import { credential, errorJson, HttpError, toErrorResponse } from "../http";
+import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
 import { gitRequest, listRefs } from "./artifacts";
 import { compare } from "./graph";
 import { ZERO } from "./names";
@@ -76,7 +76,7 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   if (!auth) return unauthorized();
   if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${monorepo}`);
   if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${monorepo}`);
-  const identity = identityOf(auth);
+  const identity = { ...identityOf(auth), agent: agentHeader(req) };
   const repo = await stub.getRepo(repoName);
   if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
 
@@ -168,6 +168,7 @@ async function receivePack(
       if (!accepted.length) return;
       const events = await stub.recordPush(repo.name, identity, accepted);
       if (!events.length) return;
+      await stub.publishRepoEvents(repo.name, events, identity);
       await withBases(env, repo, events);
       await stub.enqueue(events, origin);
     })().catch((err) => console.error("recording a push failed:", err instanceof Error ? err.message : String(err))),

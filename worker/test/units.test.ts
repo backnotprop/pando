@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { cacheable } from "../src/accounts/auth";
 import type { Auth } from "../src/accounts/object";
 import { combine } from "../src/monorepo/checks";
+import { pandoTrailers } from "../src/monorepo/views";
 import { compareWith, type CommitInfo } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
 import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection, refusal } from "../src/monorepo/pktline";
@@ -111,15 +112,15 @@ describe("merge base, ahead and behind", () => {
   const read = async (s: string) => g[s];
 
   it("a branch off an older main", async () => {
-    expect(await compareWith(read, "m3", "b1")).toEqual({ mergeBase: "m1", ahead: 1, behind: 4 });
+    expect(await compareWith(read, "m3", "b1")).toEqual({ mergeBase: "m1", ahead: 1, behind: 4, aheadCommits: ["b1"] });
   });
 
   it("a stacked branch after the lower branch merged", async () => {
-    expect(await compareWith(read, "m3", "z1")).toEqual({ mergeBase: "y2", ahead: 1, behind: 1 });
+    expect(await compareWith(read, "m3", "z1")).toEqual({ mergeBase: "y2", ahead: 1, behind: 1, aheadCommits: ["z1"] });
   });
 
   it("the same commit", async () => {
-    expect(await compareWith(read, "m3", "m3")).toEqual({ mergeBase: "m3", ahead: 0, behind: 0 });
+    expect(await compareWith(read, "m3", "m3")).toEqual({ mergeBase: "m3", ahead: 0, behind: 0, aheadCommits: [] });
   });
 });
 
@@ -191,5 +192,19 @@ describe("the auth cache keeps successes only", () => {
   });
   it("never caches a caller who is not a member yet", () => {
     expect(cacheable(auth({ role: null }), "acme")).toBe(false);
+  });
+});
+
+describe("Pando's commit trailers", () => {
+  it("reads the three from the last paragraph", () => {
+    const msg = "Add login\n\nBody text.\n\nPando-Agent: agent-3\nPando-Worktree: projects/web/worktrees/login\nPando-Machine: ramos-mbp\n";
+    expect(pandoTrailers(msg)).toEqual({ agent: "agent-3", worktree: "projects/web/worktrees/login", machine: "ramos-mbp" });
+  });
+  it("ignores look-alikes outside the last paragraph and missing ones", () => {
+    expect(pandoTrailers("Pando-Agent: not a trailer\n\nbody")).toEqual({ agent: null, worktree: null, machine: null });
+    expect(pandoTrailers("One line")).toEqual({ agent: null, worktree: null, machine: null });
+  });
+  it("keeps other trailers out and accepts any case", () => {
+    expect(pandoTrailers("T\n\nSigned-off-by: x\npando-machine: box")).toEqual({ agent: null, worktree: null, machine: "box" });
   });
 });

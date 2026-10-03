@@ -4,7 +4,9 @@
 //   GET  /v1/monorepos/{monorepo}/meta/history
 //   GET  /v1/monorepos/{monorepo}/meta/file
 //   POST /v1/monorepos/{monorepo}/meta/restore
-//   GET  /v1/monorepos/{monorepo}/meta/status
+//   GET  /v1/monorepos/{monorepo}/meta/status    (with connections: who is connected now)
+//   GET  /v1/monorepos/{monorepo}/meta/tree      every current path, ?prefix= to narrow
+//   GET  /v1/monorepos/{monorepo}/meta/references   the reference pointers, parsed
 //   POST /v1/monorepos/{monorepo}/meta/init      pando init's first upload
 //   PUT, GET, HEAD /v1/monorepos/{monorepo}/meta/blobs/{sha256}   large files (blobs.ts)
 //
@@ -24,7 +26,7 @@ export interface MetaIdentity {
   email?: string;
 }
 
-const ROUTE = /^\/v1\/monorepos\/([^/]+)\/meta\/(socket|history|file|restore|status|init|blobs\/[^/]+)$/;
+const ROUTE = /^\/v1\/monorepos\/([^/]+)\/meta\/(socket|history|file|restore|status|init|tree|references|blobs\/[^/]+)$/;
 const NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?!-)){0,62}$/; // Pando names forbid "--"
 
 // metaRoute returns the monorepo name when the request is a meta layer route.

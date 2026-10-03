@@ -15,6 +15,7 @@ import { combine, requiredChecks } from "./checks";
 import { attempt, hookView, RETRY_DELAYS_MS, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
+import { branchViews } from "./views";
 import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
 import type {
@@ -27,6 +28,7 @@ import type {
   RepoEvent,
   RepoRecord,
   StatusRecord,
+  StreamEvent,
 } from "./types";
 
 const SCHEMA = `
@@ -59,6 +61,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   created_at TEXT NOT NULL, last_attempt_at TEXT, next_attempt_at TEXT);
 CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries (status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS deliveries_hook ON deliveries (hook_id, created_at);
+CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS object_sizes (repo TEXT NOT NULL, oid TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (repo, oid));
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL, machine TEXT NOT NULL,
@@ -67,6 +70,16 @@ CREATE TABLE IF NOT EXISTS worktrees (
 `;
 
 type Row = Record<string, SqlStorageValue>;
+
+/** Events replayed to a reconnecting socket or returned by one JSON page. */
+export const REPLAY_MAX = 500;
+/** Open branches republished after a merge moves main; past this, a branches.stale event. */
+export const BRANCHES_AFTER_MERGE = 100;
+
+/** Who did it, for an event: the user, the credential (machine) and the agent. */
+function who(by: Identity | null): { actor: string | null; machine: string | null; agent: string | null } {
+  return { actor: by?.login ?? null, machine: by?.credential_name ?? null, agent: by?.agent ?? null };
+}
 
 function randomId(prefix: string, bytes = 8): string {
   const b = crypto.getRandomValues(new Uint8Array(bytes));
@@ -115,6 +128,11 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private ensureSchema(): void {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+    // Added for the web: who merged from where (credential name) and as which agent.
+    const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
+    if (!cols.includes("machine")) this.sql.exec("ALTER TABLE merges ADD COLUMN machine TEXT");
+    if (!cols.includes("agent")) this.sql.exec("ALTER TABLE merges ADD COLUMN agent TEXT");
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
   private rows<T>(query: string, ...args: unknown[]): T[] {
@@ -160,6 +178,13 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** Undo a monorepo whose creation failed half way, or delete one. */
   async destroy(): Promise<void> {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(4404, "this monorepo was deleted");
+      } catch {
+        // already closed
+      }
+    }
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // This instance may serve the next request (a new monorepo of the same name).
@@ -230,7 +255,12 @@ export class MonorepoObject extends DurableObject<Env> {
   // ── Branches and pushes ──────────────────────────────────────────────────
 
   branchRecords(repo: string): BranchRecord[] {
-    return this.rows<BranchRecord>("SELECT * FROM branches WHERE repo = ? AND deleted_at IS NULL ORDER BY name", repo);
+    return this.rows<BranchRecord>(
+      `SELECT b.*, m.forced AS merge_forced, m.machine AS merge_machine, m.agent AS merge_agent
+       FROM branches b LEFT JOIN merges m ON m.repo = b.repo AND m.branch = b.name AND m.merge_commit = b.merge_commit
+       WHERE b.repo = ? AND b.deleted_at IS NULL ORDER BY b.name`,
+      repo,
+    );
   }
 
   branchRecord(repo: string, name: string): BranchRecord | null {
@@ -326,7 +356,9 @@ export class MonorepoObject extends DurableObject<Env> {
       "INSERT INTO reviews (id, repo, branch, head, verdict, body, comments, author, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       id, repo, branch, head, verdict, body, JSON.stringify(comments), identity.login, at,
     );
-    return { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
+    const review = { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
+    this.publish({ kind: "review", collection: "reviews", key: `${repo}/${id}`, op: "upsert", repo, ...who(identity), row: review });
+    return review;
   }
 
   listReviews(repo: string, branch: string) {
@@ -338,13 +370,18 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Statuses and the gate ────────────────────────────────────────────────
 
-  addStatus(repo: string, sha: string, s: { state: StatusRecord["state"]; context: string; target_url: string | null; description: string | null }, creator: string): StatusRecord {
+  addStatus(repo: string, sha: string, s: { state: StatusRecord["state"]; context: string; target_url: string | null; description: string | null }, identity: Identity): StatusRecord {
     const at = now();
+    const creator = identity.login;
     this.sql.exec(
       "INSERT INTO statuses (repo, sha, context, state, target_url, description, creator, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       repo, sha, s.context, s.state, s.target_url, s.description, creator, at,
     );
-    return { sha, ...s, creator, created_at: at };
+    const status = { sha, ...s, creator, created_at: at };
+    this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(identity), row: status });
+    // The branches at this commit: their checks changed.
+    this.ctx.waitUntil(this.publishBranchesAt(repo, sha, identity));
+    return status;
   }
 
   statuses(repo: string, sha: string): StatusRecord[] {
@@ -410,8 +447,8 @@ export class MonorepoObject extends DurableObject<Env> {
     const at = now();
     const forced = checks.state !== "success";
     this.sql.exec(
-      "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.login, forced ? 1 : 0, at,
+      "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at, machine, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.login, forced ? 1 : 0, at, a.identity.credential_name, a.identity.agent ?? null,
     );
     this.sql.exec(
       `INSERT INTO branches (repo, name, head, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -436,7 +473,10 @@ export class MonorepoObject extends DurableObject<Env> {
       }],
       a.origin,
     );
-    return { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
+    const result: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
+    // main moved: the merged branch, main's head, and every open branch's ahead, behind and mergeable.
+    this.ctx.waitUntil(this.publishAfterMerge(a.repo, a.branch, result, a.identity));
+    return result;
   }
 
   /** A merge landed on the meta layer's main: hand the changed files to the live meta layer. */
@@ -585,6 +625,178 @@ export class MonorepoObject extends DurableObject<Env> {
     }
   }
 
+  // ── The event stream ─────────────────────────────────────────────────────
+  //
+  // Every change a screen shows is an event: a sequence number, a kind, and
+  // the changed row in the shape its REST route returns, with the client-side
+  // collection, key and op (upsert or delete) it applies to. Every event is
+  // kept (owner, 2026-10-03); the one limit is the object's storage (10 GB per
+  // Durable Object on Workers Paid; an event is about 0.3 to 2 KB). Sockets
+  // (hibernating) get each new event; a socket opened with ?since=<seq> first
+  // gets what it missed, at most REPLAY_MAX, else a "resync" frame. Each event
+  // is self-contained JSON, so the same rows could later also go to an event
+  // log for hooks and replay.
+
+  /** Record an event and send it to every open event socket. Returns its seq. */
+  publish(e: StreamEvent): number {
+    const at = now();
+    const { seq: _s, at: _a, ...rest } = e;
+    const body = JSON.stringify(rest);
+    const seq = this.sql.exec<{ seq: number }>(
+      "INSERT INTO events (at, kind, body) VALUES (?, ?, ?) RETURNING seq", at, e.kind, body,
+    ).one().seq as number;
+    const frame = JSON.stringify({ type: "event", seq, at, ...rest });
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(frame);
+      } catch {
+        // closed; its close event cleans up
+      }
+    }
+    return seq;
+  }
+
+  /** Events from the meta layer object, in order (meta.saved, machine.connected, machine.disconnected). */
+  publishMany(events: StreamEvent[]): number {
+    let seq = 0;
+    for (const e of events) seq = this.publish(e);
+    return seq;
+  }
+
+  private eventRows(since: number, limit: number, latest: boolean): Record<string, unknown>[] {
+    const rows = latest
+      ? this.rows<{ seq: number; at: string; body: string }>("SELECT seq, at, body FROM events ORDER BY seq DESC LIMIT ?", limit).reverse()
+      : this.rows<{ seq: number; at: string; body: string }>("SELECT seq, at, body FROM events WHERE seq > ? ORDER BY seq LIMIT ?", since, limit);
+    return rows.map((r) => ({ seq: r.seq, at: r.at, ...JSON.parse(r.body) }));
+  }
+
+  private eventBounds(): { head: number; oldest: number } {
+    const b = this.row<{ head: number | null; oldest: number | null }>("SELECT MAX(seq) AS head, MIN(seq) AS oldest FROM events");
+    return { head: b?.head ?? 0, oldest: b?.oldest ?? 0 };
+  }
+
+  /** Events after `since` (oldest first), or the latest `limit` with no `since`. */
+  events(since: number | null, limit: number): { events: Record<string, unknown>[]; head: number; oldest: number; resync: boolean } {
+    const { head, oldest } = this.eventBounds();
+    const n = Math.min(Math.max(limit, 1), REPLAY_MAX);
+    if (since === null) return { events: this.eventRows(0, n, true), head, oldest, resync: false };
+    const resync = since > head || (head > 0 && since < oldest - 1);
+    return { events: resync ? [] : this.eventRows(since, n, false), head, oldest, resync };
+  }
+
+  /** The event socket (GET /v1/monorepos/{m}/events with Upgrade), after the Worker checked membership. */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (!url.pathname.endsWith("/events") || request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+    }
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ login: request.headers.get("x-pando-login") ?? "", connected_at: now() });
+    // Replay, then live. Nothing here awaits, so no event can fall between the two.
+    const sinceParam = url.searchParams.get("since");
+    const since = sinceParam === null || sinceParam === "" ? null : Number(sinceParam);
+    const { head, oldest } = this.eventBounds();
+    if (since !== null) {
+      const missed = Number.isSafeInteger(since) && since >= 0 ? head - since : Infinity;
+      if (!Number.isSafeInteger(since) || since < 0 || since > head || (head > 0 && since < oldest - 1) || missed > REPLAY_MAX) {
+        server.send(JSON.stringify({ type: "resync", head, oldest }));
+      } else {
+        for (const e of this.eventRows(since, REPLAY_MAX, false)) server.send(JSON.stringify({ type: "event", ...e }));
+      }
+    }
+    server.send(JSON.stringify({ type: "caught_up", head }));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws: WebSocket, _msg: string | ArrayBuffer): Promise<void> {
+    // The stream is one way. Text "ping" is answered "pong" without waking the object.
+    try {
+      ws.send(JSON.stringify({ type: "error", message: "this socket only sends; send the text ping to keep it open" }));
+    } catch {
+      // closed
+    }
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    try {
+      ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+    } catch {
+      // already closed
+    }
+  }
+
+  async webSocketError(_ws: WebSocket): Promise<void> {}
+
+  /**
+   * Publish branch rows, computed now from Artifacts (the same rows the REST
+   * routes return). Runs one at a time per repo, so a later change is never
+   * overtaken by an earlier one's slower computation.
+   */
+  publishBranches(repo: string, items: { name: string; kind: string; extra?: Record<string, unknown> }[], by: Identity | null): Promise<void> {
+    if (!items.length) return Promise.resolve();
+    return this.serial(`events:${repo}`, async () => {
+      const r = this.repoRow(repo);
+      const m = this.info();
+      if (!r || !m) return;
+      const store = { records: (x: string) => this.branchRecords(x), statuses: (x: string, sha: string) => this.statuses(x, sha) };
+      const list = await branchViews(this.env, m, store, r, items.map((i) => i.name).filter((n) => n !== r.default_branch), "all");
+      const byName = new Map(list.branches.map((b) => [b.name, b]));
+      for (const it of items) {
+        if (it.name === r.default_branch) {
+          const row = { repo, default_branch: r.default_branch, default_head: list.default_head };
+          this.publish({ kind: it.kind, collection: "default_heads", key: repo, op: "upsert", repo, ...who(by), row, ...it.extra });
+          continue;
+        }
+        const row = byName.get(it.name) ?? null;
+        this.publish({
+          kind: it.kind, collection: "branches", key: `${repo}/${it.name}`, op: row ? "upsert" : "delete",
+          repo, ...who(by), row: row ? { repo, ...row } : { repo, name: it.name }, ...it.extra,
+        });
+      }
+    }).catch((err) => console.error("publishing branches failed:", redact(err instanceof Error ? err.message : String(err))));
+  }
+
+  /** After a push or a branch made by the API: the hook events, as stream events. */
+  publishRepoEvents(repo: string, events: RepoEvent[], by: Identity | null): Promise<void> {
+    const opened = new Set(events.filter((e) => e.event === "branch.opened").map((e) => e.branch));
+    const items: { name: string; kind: string; extra?: Record<string, unknown> }[] = [];
+    for (const e of events) {
+      if (e.event === "push" && opened.has(e.branch)) continue; // one event for a new branch
+      const kind = e.event === "branch.opened" ? "branch.opened" : e.head === ZERO ? "branch.deleted" : "push";
+      items.push({ name: e.branch, kind, extra: { before: e.before, head: e.head } });
+    }
+    return this.publishBranches(repo, items, by);
+  }
+
+  /** A status was posted: the branches whose head is that commit. */
+  private async publishBranchesAt(repo: string, sha: string, by: Identity): Promise<void> {
+    const r = this.repoRow(repo);
+    if (!r) return;
+    const refs = branchesOf(await listRefs(this.env, r).catch(() => new Map<string, string>()));
+    const names = [...refs].filter(([n, h]) => h === sha && n !== r.default_branch).map(([n]) => n);
+    await this.publishBranches(repo, names.map((name) => ({ name, kind: "branch.updated" })), by);
+  }
+
+  /** After a merge: the merged branch, main's head, and up to BRANCHES_AFTER_MERGE open branches. */
+  private async publishAfterMerge(repo: string, branch: string, result: MergeResult, by: Identity): Promise<void> {
+    const r = this.repoRow(repo);
+    if (!r) return;
+    await this.publishBranches(repo, [
+      { name: branch, kind: "merged", extra: { merge: result } },
+      { name: r.default_branch, kind: "default_head.updated", extra: { merge: result } },
+    ], by);
+    const refs = branchesOf(await listRefs(this.env, r).catch(() => new Map<string, string>()));
+    const merged = new Set(this.branchRecords(repo).filter((b) => b.merged_head && b.merged_head === refs.get(b.name)).map((b) => b.name));
+    const others = [...refs.keys()].filter((n) => n !== r.default_branch && n !== branch && !merged.has(n));
+    if (others.length > BRANCHES_AFTER_MERGE) {
+      this.publish({ kind: "branches.stale", collection: null, key: null, op: null, repo, ...who(by), row: { repo, reason: "main moved; refetch the branch list" } });
+      return;
+    }
+    await this.publishBranches(repo, others.map((name) => ({ name, kind: "branch.updated" })), by);
+  }
+
   // ── Worktrees ────────────────────────────────────────────────────────────
 
   putWorktree(id: string, w: { repo: string; branch: string; path: string; machine: string; agent: string | null; kind: string }, identity: Identity): Promise<Outcome<Record<string, unknown>>> {
@@ -598,7 +810,9 @@ export class MonorepoObject extends DurableObject<Env> {
            agent = excluded.agent, kind = excluded.kind, reported_by = excluded.reported_by, last_seen_at = excluded.last_seen_at`,
         id, w.repo, w.branch, w.path, w.machine, w.agent, w.kind, identity.login, old?.created_at ?? at, at,
       );
-      return this.worktree(id)!;
+      const row = this.worktree(id)!;
+      this.publish({ kind: "worktree.reported", collection: "worktrees", key: id, op: "upsert", repo: null, ...who(identity), row });
+      return row;
     });
   }
 
@@ -620,10 +834,11 @@ export class MonorepoObject extends DurableObject<Env> {
     );
   }
 
-  deleteWorktree(id: string): Promise<Outcome<boolean>> {
+  deleteWorktree(id: string, identity: Identity): Promise<Outcome<boolean>> {
     return this.guard(() => {
-      if (!this.row("SELECT id FROM worktrees WHERE id = ?", id)) fail(404, "not_found", `no worktree ${id}`);
+      const row = this.worktree(id) ?? fail(404, "not_found", `no worktree ${id}`);
       this.sql.exec("DELETE FROM worktrees WHERE id = ?", id);
+      this.publish({ kind: "worktree.removed", collection: "worktrees", key: id, op: "delete", repo: null, ...who(identity), row });
       return true;
     });
   }

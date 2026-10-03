@@ -5,7 +5,11 @@ export const DEFAULT_BRANCH = "main";
 
 const MONOREPO_RE = /^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$/;
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9._]|-(?!-))*$/;
-const RESERVED_MONOREPOS = new Set(["v1", "healthz"]);
+// The Worker's own paths, and the web app's top-level pages and files.
+const RESERVED_MONOREPOS = new Set([
+  "v1", "healthz", "login", "logout", "settings", "assets", "fonts", "new", "api", "app", "static",
+  "favicon.ico", "robots.txt", "manifest.json", "index.html",
+]);
 const SHA_RE = /^[0-9a-f]{40}$/;
 
 export function isSha(s: string): boolean {

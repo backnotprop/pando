@@ -11,9 +11,22 @@ export interface CommitInfo {
   parents: string[];
   time: number;
   tree: string;
+  /** Present when read from Artifacts; tests may leave them out. */
+  message?: string;
+  author?: { name: string; email: string };
+  committer?: { name: string; email: string };
+  authoredAt?: number;
 }
 
-const MAX_CACHE = 50_000;
+function info(c: ArtifactsCommitMetadata): CommitInfo {
+  return {
+    parents: c.parents, time: c.committedAt, tree: c.treeHash,
+    message: c.message.length > 4096 ? c.message.slice(0, 4096) : c.message,
+    author: c.author, committer: c.committer, authoredAt: c.authoredAt,
+  };
+}
+
+const MAX_CACHE = 20_000;
 const BATCH = 64;
 const BUDGET = 5_000;
 const cache = new Map<string, CommitInfo>();
@@ -26,12 +39,12 @@ export function commitReader(repo: ArtifactsRepo): CommitReader {
     if (hit) return hit;
     if (cache.size > MAX_CACHE) cache.clear();
     const list = await repo.log({ ref: sha, limit: BATCH });
-    for (const c of list) cache.set(c.hash, { parents: c.parents, time: c.committedAt, tree: c.treeHash });
+    for (const c of list) cache.set(c.hash, info(c));
     let got = cache.get(sha);
     if (!got) {
       const c = await repo.readCommit(sha);
       if (!c) throw new HttpError(404, "not_found", `commit ${sha} not found`);
-      got = { parents: c.parents, time: c.committedAt, tree: c.treeHash };
+      got = info(c);
       cache.set(sha, got);
     }
     return got;
@@ -44,6 +57,8 @@ export interface Comparison {
   ahead: number;
   /** Commits reachable from `base` and not from `head`. */
   behind: number;
+  /** The commits counted in `ahead`, newest first. */
+  aheadCommits: string[];
 }
 
 const FROM_BASE = 1;
@@ -55,7 +70,7 @@ const STALE = 4;
  * commit left in the queue is known to be below a common ancestor.
  */
 export async function compareWith(read: CommitReader, base: string, head: string): Promise<Comparison> {
-  if (base === head) return { mergeBase: base, ahead: 0, behind: 0 };
+  if (base === head) return { mergeBase: base, ahead: 0, behind: 0, aheadCommits: [] };
   const flags = new Map<string, number>([[base, FROM_BASE], [head, FROM_HEAD]]);
   const queue = new Heap();
   queue.push(base, (await read(base)).time);
@@ -81,14 +96,17 @@ export async function compareWith(read: CommitReader, base: string, head: string
       }
     }
   }
-  let ahead = 0;
   let behind = 0;
-  for (const f of flags.values()) {
+  const aheadCommits: string[] = [];
+  for (const [sha, f] of flags) {
     const side = f & (FROM_BASE | FROM_HEAD);
-    if (side === FROM_HEAD) ahead++;
+    if (side === FROM_HEAD) aheadCommits.push(sha);
     else if (side === FROM_BASE) behind++;
   }
-  return { mergeBase: bases[0] ?? null, ahead, behind };
+  const times = new Map<string, number>();
+  for (const sha of aheadCommits) times.set(sha, (await read(sha)).time);
+  aheadCommits.sort((a, b) => times.get(b)! - times.get(a)! || (a < b ? -1 : 1));
+  return { mergeBase: bases[0] ?? null, ahead: aheadCommits.length, behind, aheadCommits };
 }
 
 export async function compare(env: Env, artifactsName: string, base: string, head: string): Promise<Comparison> {

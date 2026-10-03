@@ -11,6 +11,8 @@ export interface Identity {
   credential_id: string;
   credential_name: string;
   role: MemberRole;
+  /** The agent acting, from the X-Pando-Agent header; null for a person. */
+  agent?: string | null;
 }
 
 export interface MonorepoInfo {
@@ -43,6 +45,10 @@ export interface BranchRecord {
   merged_head: string | null;
   merged_at: string | null;
   merged_by: string | null;
+  /** From the merge that landed merge_commit (joined from merges). */
+  merge_forced?: number | null;
+  merge_machine?: string | null;
+  merge_agent?: string | null;
 }
 
 export type HookEvent = "push" | "branch.opened" | "merged";
@@ -61,6 +67,26 @@ export interface RepoEvent {
   title: string | null;
   description: string | null;
   merge_commit?: string;
+  /** The pusher's credential name (the machine), and the agent if one said so. */
+  machine?: string | null;
+  agent?: string | null;
+}
+
+/** One entry of the event stream (api-v1.yaml, EventEnvelope). */
+export interface StreamEvent {
+  seq?: number;
+  at?: string;
+  kind: string;
+  /** The client-side collection the row belongs to, its key, and what to do with it. */
+  collection: string | null;
+  key: string | null;
+  op: "upsert" | "delete" | null;
+  repo?: string | null;
+  actor?: string | null;
+  machine?: string | null;
+  agent?: string | null;
+  row: unknown;
+  [extra: string]: unknown;
 }
 
 export interface StatusRecord {

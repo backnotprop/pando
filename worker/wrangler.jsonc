@@ -32,8 +32,22 @@
   // Branch facts (ahead, behind, mergeable) computed on change: a sweep per new
   // main head, a job per pushed branch. The consumer is this Worker's queue().
   "queues": {
-    "producers": [{ "binding": "BRANCH_FACTS", "queue": "pando-branch-facts" }],
+    "producers": [
+      { "binding": "BRANCH_FACTS", "queue": "pando-branch-facts" },
+      // Hook deliveries (C9): message = {monorepo, delivery_id}; the row is in the monorepo object.
+      { "binding": "HOOKS", "queue": "pando-hooks" }
+    ],
     "consumers": [
+      {
+        "queue": "pando-hooks",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        // 1 try and 4 retries (10 s, 60 s, 5 min, 30 min), then the dead-letter queue.
+        "max_retries": 4,
+        "max_concurrency": 10,
+        "dead_letter_queue": "pando-hooks-dlq"
+      },
+      { "queue": "pando-hooks-dlq", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3 },
       {
         "queue": "pando-branch-facts",
         "max_batch_size": 10,

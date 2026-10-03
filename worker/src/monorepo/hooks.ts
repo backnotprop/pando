@@ -1,15 +1,93 @@
 // Hooks out: the signed JSON POST (`web`) and Buildkite's create-build call
-// (`buildkite`). Payloads are stored without any token; each attempt mints a
-// fresh 30-minute read token for the one repo.
+// (`buildkite`), delivered from the pando-hooks queue (C9).
+//
+// The monorepo object writes each delivery row in the same step as the change
+// and sends its id to the queue. This consumer reads the row, adds a read
+// token for the one repo (30 minutes, cached per repo for 25), POSTs, and
+// reports the attempt to the object. A failure is retried by the queue after
+// 10 s, 60 s, 5 min and 30 min; then the message goes to pando-hooks-dlq,
+// whose consumer marks the delivery dead. Deliveries are at least once and
+// unordered: payloads carry `seq`, so a receiver can drop repeats.
+// Payloads are stored without any token.
 
 import type { Env } from "../env";
 import { redact } from "../http";
-import { deliveryReadToken } from "./artifacts";
+import { deliveryReadToken, withRepo } from "./artifacts";
+import { commitReader, compareWith } from "./graph";
 import { ZERO } from "./names";
 import type { RepoEvent } from "./types";
+import { pool } from "./views";
 
-export const RETRY_DELAYS_MS = [10_000, 60_000, 300_000, 1_800_000];
+/** Retry delays in seconds; attempts = 1 + this many (owner limit: 5 tries over about 36 minutes). */
+export const RETRY_DELAYS_S = [10, 60, 300, 1800];
 const TIMEOUT_MS = 10_000;
+/** A read token is reused for this long (it lives 30 minutes, so a receiver gets at least 5). */
+const READ_TOKEN_REUSE_MS = 25 * 60_000;
+const readTokens = new Map<string, { token: string; expiresAt: string; at: number }>();
+
+export interface DeliveryMessage {
+  monorepo: string;
+  delivery_id: string;
+}
+
+function retryDelays(env: Env): number[] {
+  const v = env.HOOK_RETRY_DELAYS?.split(",").map((x) => Number(x.trim()));
+  return v && v.length && v.every((n) => Number.isInteger(n) && n >= 0 && n <= 43_200) ? v : RETRY_DELAYS_S;
+}
+
+async function readToken(env: Env, artifactsName: string): Promise<{ token: string; expiresAt: string }> {
+  const hit = readTokens.get(artifactsName);
+  if (hit && Date.now() - hit.at < READ_TOKEN_REUSE_MS) return hit;
+  const t = await deliveryReadToken(env, artifactsName);
+  if (readTokens.size > 5000) readTokens.clear();
+  readTokens.set(artifactsName, { ...t, at: Date.now() });
+  return t;
+}
+
+/** The pando-hooks consumer: deliveries 6 at a time. */
+export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
+  const delays = retryDelays(env);
+  await pool([...batch.messages], 6, async (msg) => {
+    const stub = env.MONOREPO.getByName(msg.body.monorepo);
+    let d;
+    try {
+      d = await stub.deliveryToSend(msg.body.delivery_id);
+    } catch (err) {
+      msg.retry({ delaySeconds: 5 });
+      return;
+    }
+    if (!d || d.status === "delivered") {
+      msg.ack(); // gone, or already delivered (a repeat of the same message)
+      return;
+    }
+    const p = d.payload;
+    if (p.base === null && p.head !== ZERO && p.event !== "merged") {
+      // The merge base with main, computed here (the object makes no Artifacts reads).
+      try {
+        const main = await stub.currentMain(p.repo);
+        if (main) p.base = (await withRepo(env, d.artifacts_name, (repo) => compareWith(commitReader(repo), main, p.head))).mergeBase;
+      } catch {
+        p.base = null;
+      }
+    }
+    const t0 = Date.now();
+    const r = await attempt(env, d.hook, msg.body.delivery_id, p, () => readToken(env, d.artifacts_name));
+    const n = msg.attempts; // 1 on the first try
+    const retryIn = r.ok ? null : (delays[n - 1] ?? null);
+    await stub.recordAttempt(msg.body.delivery_id, { ...r, ms: Date.now() - t0 }, n, retryIn).catch(() => {});
+    if (r.ok) msg.ack();
+    else if (retryIn !== null) msg.retry({ delaySeconds: retryIn });
+    else msg.retry(); // out of retries: the queue moves it to pando-hooks-dlq
+  });
+}
+
+/** The pando-hooks-dlq consumer: mark the deliveries dead (visible in the API; redeliver to try again). */
+export async function handleDeadDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
+  for (const msg of batch.messages) {
+    await env.MONOREPO.getByName(msg.body.monorepo).markDead(msg.body.delivery_id);
+    msg.ack();
+  }
+}
 
 export interface HookRow {
   id: string;
@@ -24,7 +102,7 @@ export interface HookRow {
   created_by: string;
 }
 
-/** The stored payload: the round 3 body minus the token, which is added per attempt. */
+/** The stored payload: the round 3 body minus the token, which is added per attempt. `seq` is the stream's. */
 export interface StoredPayload extends RepoEvent {
   occurred_at: string;
   monorepo: string;
@@ -68,9 +146,9 @@ export interface AttemptResult {
 }
 
 /** One delivery attempt. Never throws; never logs the token. */
-export async function attempt(env: Env, hook: HookRow, deliveryId: string, artifactsName: string, p: StoredPayload): Promise<AttemptResult> {
+export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: StoredPayload, token: () => Promise<{ token: string; expiresAt: string }>): Promise<AttemptResult> {
   try {
-    const read = await deliveryReadToken(env, artifactsName);
+    const read = await token();
     const u = urls(p);
     if (hook.type === "web") {
       const { origin: _origin, ...rest } = p;
@@ -117,6 +195,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, artif
         PANDO_BRANCH: p.branch,
         PANDO_HEAD: p.head,
         PANDO_DELIVERY: deliveryId,
+        PANDO_SEQ: String(p.seq ?? ""),
       },
       meta_data: { pando_delivery: deliveryId },
     });

@@ -373,7 +373,7 @@ try {
     check("deliveries are listed as delivered", ds.length > 0 && ds.every((d) => d.status === "delivered"), ds.map((d) => `${d.event}:${d.status}`).join(" "));
     const before = received.length;
     r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/hooks/deliveries/${ds[0]?.id}/redeliver`, A);
-    check("redeliver queues a new delivery", r.status === 202 && r.json?.id !== ds[0]?.id);
+    check("redeliver sends the same delivery again (one row per hook, event and seq)", r.status === 202 && r.json?.id === ds[0]?.id && r.json?.status === "queued");
     check("and it arrives", !!(await waitFor(() => received.length > before)));
   }
 

@@ -183,17 +183,8 @@ async function receivePack(
   const report = parseReport(bytes, section.caps);
   if (report.error) console.warn(`receive-pack on ${repo.artifacts_name}: ${report.error}`);
   const accepted = report.unpack === "ok" ? section.commands.filter((c) => report.refs.get(c.ref) === null) : [];
-  if (accepted.length) {
-    const events = await stub.recordPush(repo.name, identity, accepted);
-    if (events.length) {
-      ctx.waitUntil(
-        (async () => {
-          await withBases(env, repo, events);
-          await stub.enqueue(events, origin);
-        })().catch((err) => console.error("queueing hooks for a push failed:", err instanceof Error ? err.message : String(err))),
-      );
-    }
-  }
+  // The object writes the branch rows, their events and their hook deliveries in one step (C2, C9).
+  if (accepted.length) await stub.recordPush(repo.name, identity, accepted, {}, origin);
   return new Response(bytes, { headers });
 }
 
@@ -204,18 +195,3 @@ function gitError(message: string): Response {
   });
 }
 
-/** Fill in each event's merge base with the default branch, best effort. */
-async function withBases(env: Env, repo: RepoRecord, events: RepoEvent[]): Promise<void> {
-  const main = (await listRefs(env, repo)).get(`refs/heads/${repo.default_branch}`);
-  if (!main) return;
-  await Promise.all(
-    events.map(async (e) => {
-      if (e.head === ZERO || e.branch === repo.default_branch) return;
-      try {
-        e.base = (await compare(env, repo.artifacts_name, main, e.head)).mergeBase;
-      } catch {
-        e.base = null;
-      }
-    }),
-  );
-}

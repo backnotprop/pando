@@ -15,6 +15,7 @@ import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath } from "./monorepo/door";
 import { signin } from "./accounts/signin";
 import { handleFactsBatch, type FactsMessage } from "./monorepo/facts";
+import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./monorepo/hooks";
 
 export { MonorepoObject } from "./monorepo/object";
 export { AccountsObject } from "./accounts/object";
@@ -44,9 +45,11 @@ async function meta(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
-  /** Branch facts computed on change (monorepo/facts.ts). */
-  async queue(batch: MessageBatch<FactsMessage>, env: Env): Promise<void> {
-    await handleFactsBatch(batch, env);
+  /** The queues: branch facts (monorepo/facts.ts), hook deliveries and their dead letters (monorepo/hooks.ts). */
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    if (batch.queue === "pando-hooks") return handleDeliveries(batch as MessageBatch<DeliveryMessage>, env);
+    if (batch.queue === "pando-hooks-dlq") return handleDeadDeliveries(batch as MessageBatch<DeliveryMessage>, env);
+    return handleFactsBatch(batch as MessageBatch<FactsMessage>, env);
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -58,4 +61,4 @@ export default {
     if (META_RE.test(url.pathname)) return meta(request, env);
     return api.fetch(request, env, ctx);
   },
-} satisfies ExportedHandler<Env, FactsMessage>;
+} satisfies ExportedHandler<Env, unknown>;

@@ -13,7 +13,7 @@ import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, retryBusy, WriteGate } from "./gate";
 import { combine, requiredChecks } from "./checks";
-import { attempt, hookView, RETRY_DELAYS_MS, wants, type HookRow, type StoredPayload } from "./hooks";
+import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS } from "./facts";
@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS deliveries (
   created_at TEXT NOT NULL, last_attempt_at TEXT, next_attempt_at TEXT);
 CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries (status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS deliveries_hook ON deliveries (hook_id, created_at);
+CREATE TABLE IF NOT EXISTS delivery_attempts (
+  delivery_id TEXT NOT NULL, n INTEGER NOT NULL, at TEXT NOT NULL, response_code INTEGER, error TEXT, ms INTEGER);
+CREATE INDEX IF NOT EXISTS delivery_attempts_d ON delivery_attempts (delivery_id);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS object_sizes (repo TEXT NOT NULL, oid TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (repo, oid));
 CREATE TABLE IF NOT EXISTS worktrees (
@@ -76,6 +79,12 @@ type Row = Record<string, SqlStorageValue>;
 
 /** Events replayed to a reconnecting socket or returned by one JSON page. */
 export const REPLAY_MAX = 500;
+/** Delivery records kept per hook (owner limit). */
+export const DELIVERIES_KEPT = 1_000;
+/** Attempts kept per delivery. */
+export const ATTEMPTS_KEPT = 10;
+/** Deliveries one replay re-sends. */
+export const REPLAY_DELIVERIES = 1_000;
 /** Rows read to filter one topic-filtered replay or page. */
 export const SCAN_MAX = 5_000;
 /** Ref commands sent in one receive-pack. */
@@ -150,6 +159,10 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!rcols.includes("default_head")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head TEXT");
     if (!rcols.includes("default_head_at")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head_at TEXT");
     if (!rcols.includes("required_checks")) this.sql.exec("ALTER TABLE repos ADD COLUMN required_checks TEXT");
+    const dcols = this.rows<{ name: string }>("PRAGMA table_info(deliveries)").map((c) => c.name);
+    if (!dcols.includes("seq")) this.sql.exec("ALTER TABLE deliveries ADD COLUMN seq INTEGER");
+    if (!dcols.includes("sent_at")) this.sql.exec("ALTER TABLE deliveries ADD COLUMN sent_at TEXT");
+    this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS deliveries_once ON deliveries (hook_id, event, seq)");
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -359,7 +372,13 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Record branch heads after Artifacts accepted a push. Returns the events to deliver. */
-  recordPush(repo: string, identity: Identity, updates: RefCommand[], made: { title?: string | null; description?: string | null } = {}): RepoEvent[] {
+  recordPush(
+    repo: string,
+    identity: Identity,
+    updates: RefCommand[],
+    made: { title?: string | null; description?: string | null } = {},
+    origin: string | null = null,
+  ): RepoEvent[] {
     const r = this.repoRow(repo);
     const main = r?.default_branch ?? DEFAULT_BRANCH;
     const at = now();
@@ -375,18 +394,18 @@ export class MonorepoObject extends DurableObject<Env> {
         this.rememberHead(repo, u.new === ZERO ? null : u.new);
         this.forgetRequiredIfConfig(repo);
         if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new });
-        events.push({ ...base, event: "push", author: identity.login });
-        this.publish({
+        const seq = this.publish({
           kind: "push", collection: "default_heads", key: repo, op: "upsert", repo, ...who(identity),
           row: { repo, default_branch: main, default_head: u.new === ZERO ? null : u.new }, before: u.old, head: u.new,
         });
+        events.push({ ...base, event: "push", author: identity.login, seq: seq || null });
         continue;
       }
       let b = this.branchRecord(repo, name);
       if (u.new === ZERO) {
         if (b) this.sql.exec("UPDATE branches SET deleted_at = ?, head = NULL, updated_at = ? WHERE repo = ? AND name = ?", at, at, repo, name);
-        events.push({ ...base, event: "push", author: b?.creator ?? null, title: b?.title ?? null, description: b?.description ?? null });
-        this.publish({ kind: "branch.deleted", collection: "branches", key: `${repo}/${name}`, op: "delete", repo, ...who(identity), row: { repo, name }, before: u.old, head: u.new });
+        const seq = this.publish({ kind: "branch.deleted", collection: "branches", key: `${repo}/${name}`, op: "delete", repo, ...who(identity), row: { repo, name }, before: u.old, head: u.new });
+        events.push({ ...base, event: "push", author: b?.creator ?? null, title: b?.title ?? null, description: b?.description ?? null, seq: seq || null });
         continue;
       }
       const opened = !b;
@@ -402,18 +421,20 @@ export class MonorepoObject extends DurableObject<Env> {
         this.sql.exec("UPDATE branches SET head = ?, updated_at = ? WHERE repo = ? AND name = ?", u.new, at, repo, name);
       }
       b = this.branchRecord(repo, name)!;
-      const e = { ...base, author: b.creator, title: b.title, description: b.description };
+      const seq = this.publishBranch(opened ? "branch.opened" : "push", repo, name, identity, { before: u.old, head: u.new });
+      const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
       if (opened) events.push({ ...e, event: "branch.opened" });
       events.push({ ...e, event: "push" });
-      this.publishBranch(opened ? "branch.opened" : "push", repo, name, identity, { before: u.old, head: u.new });
       this.queueFacts({ type: "branch", repo, branch: name, head: u.new });
     }
+    // Hook deliveries, in the same step as the change (C9).
+    this.queueDeliveries(events, origin);
     return events;
   }
 
   /** A branch made by the API (createBranch): the caller is its creator. */
-  createBranchRecord(repo: string, name: string, head: string, identity: Identity, title: string | null, description: string | null): RepoEvent[] {
-    return this.recordPush(repo, identity, [{ old: ZERO, new: head, ref: `refs/heads/${name}` }], { title, description });
+  createBranchRecord(repo: string, name: string, head: string, identity: Identity, title: string | null, description: string | null, origin: string | null = null): RepoEvent[] {
+    return this.recordPush(repo, identity, [{ old: ZERO, new: head, ref: `refs/heads/${name}` }], { title, description }, origin);
   }
 
   updateBranch(repo: string, name: string, patch: { title?: string; description?: string }, head: string, identity: Identity | null = null): Promise<Outcome<BranchRecord>> {
@@ -563,26 +584,28 @@ export class MonorepoObject extends DurableObject<Env> {
     this.forgetRequiredIfConfig(a.repo);
     this.queueFacts({ type: "sweep", repo: a.repo, main: out.sha });
     const merge = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
-    this.publishBranch("merged", a.repo, a.branch, a.identity, { merge });
+    const mergedSeq = this.publishBranch("merged", a.repo, a.branch, a.identity, { merge });
     // main moved: every open branch's ahead, behind and mergeable change; clients refetch the branch list.
     this.publish({
       kind: "default_head.updated", collection: "default_heads", key: a.repo, op: "upsert", repo: a.repo, ...who(a.identity),
       row: { repo: a.repo, default_branch: r.default_branch, default_head: out.sha }, before: out.old, head: out.sha, merge,
     });
+    this.queueDeliveries(
+      [{
+        event: "merged", repo: a.repo, branch: a.branch, ref: `refs/heads/${a.branch}`, before: out.old, head,
+        base: out.mergeBase, author: b?.creator ?? null, pusher: a.identity.login, title: b?.title ?? null,
+        description: b?.description ?? null, merge_commit: out.sha, seq: mergedSeq || null,
+        machine: a.identity.credential_name, agent: a.identity.agent ?? null,
+      }],
+      a.origin,
+    );
     if (r.artifacts_name === metaArtifactsName(this.info()!.name)) {
       // The merge has landed; machines get it on the live layer's next try if this fails.
       await this.applyToMetaLayer(out.old, out.sha, a.identity).catch((err) =>
         console.error("applyFromMain failed:", redact(err instanceof Error ? err.message : String(err))),
       );
     }
-    await this.enqueue(
-      [{
-        event: "merged", repo: a.repo, branch: a.branch, ref: `refs/heads/${a.branch}`, before: out.old, head,
-        base: out.mergeBase, author: b?.creator ?? null, pusher: a.identity.login, title: b?.title ?? null,
-        description: b?.description ?? null, merge_commit: out.sha,
-      }],
-      a.origin,
-    );
+
     const result: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
     return result;
   }
@@ -625,89 +648,160 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.sql.exec("DELETE FROM hooks WHERE repo = ? AND id = ?", repo, id).rowsWritten > 0;
   }
 
-  listDeliveries(repo: string, hookId: string) {
-    return this.rows<Record<string, unknown>>(
-      `SELECT id, hook_id, event, status, attempts, response_code, error, created_at, last_attempt_at, next_attempt_at
-       FROM deliveries WHERE repo = ? AND hook_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100`,
-      repo, hookId,
+  // ── Deliveries: rows here, the work on the pando-hooks queue (C9) ─────────
+  //
+  // A delivery row is written in the same step as the change that caused it,
+  // keyed by (hook, event, seq) so a retry or a replay never makes a second
+  // row, and its id goes to the queue. The consumer (hooks.ts) POSTs and
+  // reports each attempt here. The alarm only re-sends ids whose queue send
+  // failed.
+
+  private deliveryView(id: string): Record<string, unknown> | null {
+    const d = this.row<Record<string, unknown>>(
+      `SELECT id, hook_id, event, seq, status, attempts, response_code, error, created_at, last_attempt_at, next_attempt_at
+       FROM deliveries WHERE id = ?`,
+      id,
     );
+    if (!d) return null;
+    const attempts = this.rows<Record<string, unknown>>(
+      "SELECT n, at, response_code, error, ms FROM delivery_attempts WHERE delivery_id = ? ORDER BY n DESC LIMIT ?",
+      id, ATTEMPTS_KEPT,
+    );
+    return { ...d, recent_attempts: attempts };
   }
 
-  /** Fan events out to the repo's hooks and start delivering. */
-  async enqueue(events: RepoEvent[], origin: string): Promise<number> {
+  listDeliveries(repo: string, hookId: string) {
+    const ids = this.rows<{ id: string }>(
+      "SELECT id FROM deliveries WHERE repo = ? AND hook_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100",
+      repo, hookId,
+    );
+    return ids.map((r) => this.deliveryView(r.id)!);
+  }
+
+  /** Write a delivery row per (hook, event) the events reach, and send their ids to the queue. */
+  private queueDeliveries(events: RepoEvent[], origin: string | null): number {
     const m = this.info();
     if (!m || events.length === 0) return 0;
-    let n = 0;
+    const ids: string[] = [];
     for (const e of events) {
       const hooks = this.rows<HookRow>("SELECT * FROM hooks WHERE repo = ?", e.repo).filter((h) => wants(h, e));
       for (const h of hooks) {
-        const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.name, origin };
-        this.insertDelivery(h.id, e.repo, e.event, JSON.stringify(payload));
-        n++;
+        const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.name, origin: origin ?? "" };
+        const id = this.insertDelivery(h.id, e.repo, e.event, e.seq ?? null, JSON.stringify(payload));
+        if (id) ids.push(id);
       }
     }
-    if (n) await this.ctx.storage.setAlarm(Date.now());
-    return n;
+    if (ids.length) this.ctx.waitUntil(this.sendDeliveries(ids));
+    return ids.length;
   }
 
-  private insertDelivery(hookId: string, repo: string, event: string, payload: string): string {
+  /** A new row, or null when (hook, event, seq) already has one. */
+  private insertDelivery(hookId: string, repo: string, event: string, seq: number | null, payload: string): string | null {
     const id = randomId("dlv_");
     const at = now();
-    this.sql.exec(
-      "INSERT INTO deliveries (id, hook_id, repo, event, payload, status, attempts, created_at, next_attempt_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)",
-      id, hookId, repo, event, payload, at, at,
+    const written = this.sql.exec(
+      `INSERT OR IGNORE INTO deliveries (id, hook_id, repo, event, seq, payload, status, attempts, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?)`,
+      id, hookId, repo, event, seq, payload, at,
+    ).rowsWritten;
+    if (!written) return null;
+    // Keep the latest DELIVERIES_KEPT per hook (and their attempts).
+    const old = this.rows<{ id: string }>(
+      "SELECT id FROM deliveries WHERE hook_id = ? ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?",
+      hookId, DELIVERIES_KEPT,
     );
+    for (const o of old) {
+      this.sql.exec("DELETE FROM delivery_attempts WHERE delivery_id = ?", o.id);
+      this.sql.exec("DELETE FROM deliveries WHERE id = ?", o.id);
+    }
     return id;
   }
 
+  private async sendDeliveries(ids: string[]): Promise<void> {
+    const m = this.info()?.name;
+    if (!m || !this.env.HOOKS) return;
+    try {
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        await this.env.HOOKS.sendBatch(chunk.map((id) => ({ body: { monorepo: m, delivery_id: id } })));
+        for (const id of chunk) this.sql.exec("UPDATE deliveries SET sent_at = ? WHERE id = ?", now(), id);
+      }
+    } catch (err) {
+      console.error("sending deliveries to the queue failed; the alarm retries:", err instanceof Error ? err.message : String(err));
+      await this.ctx.storage.setAlarm(Date.now() + 30_000);
+    }
+  }
+
+  /** For the queue consumer: the hook and payload of a delivery (null when gone). */
+  deliveryToSend(id: string): { hook: HookRow; payload: StoredPayload; artifacts_name: string; status: string; repo: RepoRecord } | null {
+    const d = this.row<{ hook_id: string; repo: string; payload: string; status: string }>(
+      "SELECT hook_id, repo, payload, status FROM deliveries WHERE id = ?", id,
+    );
+    if (!d) return null;
+    const hook = this.row<HookRow>("SELECT * FROM hooks WHERE id = ?", d.hook_id);
+    const repo = this.repoRow(d.repo);
+    if (!hook || !repo) return null;
+    return { hook, payload: JSON.parse(d.payload) as StoredPayload, artifacts_name: repo.artifacts_name, status: d.status, repo };
+  }
+
+  /**
+   * One attempt's result. `retryInS` is when the queue tries again (null: no
+   * more retries; the message goes to the dead-letter queue).
+   */
+  recordAttempt(id: string, r: { ok: boolean; code: number | null; error: string | null; ms: number }, n: number, retryInS: number | null): void {
+    const at = now();
+    if (!this.row("SELECT id FROM deliveries WHERE id = ?", id)) return;
+    this.sql.exec(
+      "INSERT INTO delivery_attempts (delivery_id, n, at, response_code, error, ms) VALUES (?, ?, ?, ?, ?, ?)",
+      id, n, at, r.code, r.error, r.ms,
+    );
+    this.sql.exec(
+      `DELETE FROM delivery_attempts WHERE delivery_id = ? AND rowid NOT IN
+       (SELECT rowid FROM delivery_attempts WHERE delivery_id = ? ORDER BY rowid DESC LIMIT ?)`,
+      id, id, ATTEMPTS_KEPT,
+    );
+    const status = r.ok ? "delivered" : retryInS === null ? "failed" : "retrying";
+    this.sql.exec(
+      `UPDATE deliveries SET status = ?, attempts = attempts + 1, response_code = ?, error = ?, last_attempt_at = ?, next_attempt_at = ? WHERE id = ?`,
+      status, r.code, r.ok ? null : r.error, at, r.ok || retryInS === null ? null : new Date(Date.now() + retryInS * 1000).toISOString(), id,
+    );
+  }
+
+  /** The dead-letter queue's consumer: the delivery gave up. */
+  markDead(id: string): void {
+    this.sql.exec("UPDATE deliveries SET status = 'dead', next_attempt_at = NULL WHERE id = ? AND status != 'delivered'", id);
+  }
+
+  /** Send one delivery again (same row, same seq; new attempts are added). */
   redeliver(repo: string, deliveryId: string): Promise<Outcome<Record<string, unknown>>> {
     return this.guard(async () => {
-      const d = this.row<{ hook_id: string; event: string; payload: string }>(
-        "SELECT hook_id, event, payload FROM deliveries WHERE repo = ? AND id = ?", repo, deliveryId,
-      ) ?? fail(404, "not_found", `no delivery ${deliveryId}`);
-      const payload = JSON.parse(d.payload) as StoredPayload;
-      payload.occurred_at = now();
-      const id = this.insertDelivery(d.hook_id, repo, d.event, JSON.stringify(payload));
-      await this.ctx.storage.setAlarm(Date.now());
-      return this.row<Record<string, unknown>>(
-        "SELECT id, hook_id, event, status, attempts, response_code, error, created_at, last_attempt_at, next_attempt_at FROM deliveries WHERE id = ?", id,
-      )!;
+      if (!this.row("SELECT id FROM deliveries WHERE repo = ? AND id = ?", repo, deliveryId)) fail(404, "not_found", `no delivery ${deliveryId}`);
+      this.sql.exec("UPDATE deliveries SET status = 'queued', next_attempt_at = NULL, sent_at = NULL WHERE id = ?", deliveryId);
+      await this.sendDeliveries([deliveryId]);
+      return this.deliveryView(deliveryId)!;
     });
   }
 
-  async alarm(): Promise<void> {
-    const due = this.rows<{ id: string; hook_id: string; repo: string; payload: string; attempts: number }>(
-      "SELECT id, hook_id, repo, payload, attempts FROM deliveries WHERE status = 'pending' AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT 25",
-      now(),
-    );
-    await Promise.all(due.map((d) => this.deliver(d)));
-    const next = this.row<{ t: string | null }>("SELECT MIN(next_attempt_at) AS t FROM deliveries WHERE status = 'pending'");
-    if (next?.t) await this.ctx.storage.setAlarm(Math.max(Date.parse(next.t), Date.now() + 1000));
+  /** Replay a hook from a seq (after an outage): every delivery of it with a higher seq, at most REPLAY_DELIVERIES. */
+  replayHook(repo: string, hookId: string, since: number): Promise<Outcome<{ queued: number; ids: string[] }>> {
+    return this.guard(async () => {
+      if (!this.row("SELECT id FROM hooks WHERE repo = ? AND id = ?", repo, hookId)) fail(404, "not_found", `no hook ${hookId}`);
+      const ids = this.rows<{ id: string }>(
+        "SELECT id FROM deliveries WHERE repo = ? AND hook_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+        repo, hookId, since, REPLAY_DELIVERIES,
+      ).map((r) => r.id);
+      for (const id of ids) this.sql.exec("UPDATE deliveries SET status = 'queued', next_attempt_at = NULL, sent_at = NULL WHERE id = ?", id);
+      await this.sendDeliveries(ids);
+      return { queued: ids.length, ids };
+    });
   }
 
-  private async deliver(d: { id: string; hook_id: string; repo: string; payload: string; attempts: number }) {
-    const hook = this.row<HookRow>("SELECT * FROM hooks WHERE id = ?", d.hook_id);
-    const repo = this.repoRow(d.repo);
-    const at = now();
-    if (!hook || !repo) {
-      this.sql.exec("UPDATE deliveries SET status = 'failed', error = ?, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?", "the hook or repo was removed", at, d.id);
-      return;
-    }
-    const result = await attempt(this.env, hook, d.id, repo.artifacts_name, JSON.parse(d.payload));
-    const attempts = d.attempts + 1;
-    if (result.ok) {
-      this.sql.exec(
-        "UPDATE deliveries SET status = 'delivered', attempts = ?, response_code = ?, error = NULL, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
-        attempts, result.code, at, d.id,
-      );
-      return;
-    }
-    const delay = RETRY_DELAYS_MS[attempts - 1];
-    this.sql.exec(
-      "UPDATE deliveries SET status = ?, attempts = ?, response_code = ?, error = ?, last_attempt_at = ?, next_attempt_at = ? WHERE id = ?",
-      delay === undefined ? "failed" : "pending", attempts, result.code, result.error, at,
-      delay === undefined ? null : new Date(Date.now() + delay).toISOString(), d.id,
-    );
+  /** Re-send ids whose queue send failed. */
+  async alarm(): Promise<void> {
+    const unsent = this.rows<{ id: string }>(
+      "SELECT id FROM deliveries WHERE status = 'queued' AND sent_at IS NULL ORDER BY created_at LIMIT 500",
+    ).map((r) => r.id);
+    if (unsent.length) await this.sendDeliveries(unsent);
   }
 
   // ── Object sizes (git protocol v2 object-info) ───────────────────────────
@@ -887,9 +981,9 @@ export class MonorepoObject extends DurableObject<Env> {
     };
   }
 
-  private publishBranch(kind: string, repo: string, name: string, by: Identity | null, extra: Record<string, unknown> = {}): void {
+  private publishBranch(kind: string, repo: string, name: string, by: Identity | null, extra: Record<string, unknown> = {}): number {
     const row = this.branchEventRow(repo, name);
-    this.publish({
+    return this.publish({
       kind, collection: "branches", key: `${repo}/${name}`, op: row ? "upsert" : "delete", repo, ...who(by),
       row: row ?? { repo, name }, partial: true, ...extra,
     });

@@ -2631,7 +2631,7 @@ components:
         repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
         repo_path: { type: [string, "null"], description: "`projects/web`; `.` for the meta layer and a plain repo." }
         branch: { type: [string, "null"] }
-        actor: { type: [string, "null"], description: "The person (a login). For meta.saved, the author's name." }
+        actor: { type: [string, "null"], description: "The person (a login). A meta.saved line from before versions kept the login has the author's name." }
         machine: { type: [string, "null"], description: The credential's name (the machine or sandbox). }
         summary:
           type: [object, "null"]

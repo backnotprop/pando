@@ -5,14 +5,14 @@
   "body": {
     "branches": [
       {
-        "monorepo": "rec-musxh5dd/rec-musxh5dd",
-        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxrg89/rec-musxrg89",
+        "monorepo_id": "m_e7e0e01beaeb5808",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
         "title": null,
-        "head": "2aefb967742888f92f024aa15774c7117659f376",
-        "author": "rec-musxh5dd",
+        "head": "540150b0e6b96a29f38280e8633f321c3b5329d1",
+        "author": "rec-musxrg89",
         "pushed_machine": "ana-mbp",
         "state": "failing",
         "checks": {
@@ -21,24 +21,24 @@
             "ci/test"
           ]
         },
-        "updated_at": "2026-10-03T21:52:50.616Z"
+        "updated_at": "2026-10-03T22:00:51.206Z"
       },
       {
-        "monorepo": "rec-musxh5dd/rec-musxh5dd",
-        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxrg89/rec-musxrg89",
+        "monorepo_id": "m_e7e0e01beaeb5808",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
         "title": null,
-        "head": "61af03349f556fdc868bea21d352443bd81c5aa7",
-        "author": "rec-musxh5dd",
+        "head": "f802fc5a4dd76b85e11ff2dd9181fc20a4f6a32b",
+        "author": "rec-musxrg89",
         "pushed_machine": "ana-mbp",
         "state": "ready",
         "checks": {
           "state": "success",
           "failing": []
         },
-        "updated_at": "2026-10-03T21:52:49.734Z"
+        "updated_at": "2026-10-03T22:00:50.393Z"
       }
     ],
     "truncated": false,

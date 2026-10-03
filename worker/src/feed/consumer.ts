@@ -87,13 +87,13 @@ export class FeedDrain extends WorkerEntrypoint<Env> {
 }
 
 /** Deliver messages; one answer per message (true: done; false: try again, every write is idempotent). */
-export async function fanOut(env: Env, msgs: FeedMessage[], onError?: (err: unknown) => void): Promise<boolean[]> {
+export async function fanOut(env: Env, msgs: FeedMessage[], onError?: (cause: unknown) => void): Promise<boolean[]> {
   const ok = msgs.map(() => true);
 
-  const fail = (i: number, what: string, err: unknown) => {
+  const fail = (i: number, what: string, cause: unknown) => {
     ok[i] = false;
-    onError?.(err);
-    console.error(`feed: ${what} failed:`, err instanceof Error ? err.message : String(err));
+    onError?.(cause);
+    console.error(`feed: ${what} failed:`, cause instanceof Error ? cause.message : String(cause));
   };
 
   // Events: group by person, then by monorepo, so each feed gets one call.
@@ -102,7 +102,7 @@ export async function fanOut(env: Env, msgs: FeedMessage[], onError?: (err: unkn
     if (b.type !== "events") return;
 
     for (const login of b.members) {
-      const p = perLogin.get(login) ?? { msgs: [] as number[], groups: new Map<string, FeedEvent[]>() };
+      const p = perLogin.get(login) ?? { msgs: new Array<number>(), groups: new Map<string, FeedEvent[]>() };
       p.msgs.push(i);
       p.groups.set(b.monorepo, [...(p.groups.get(b.monorepo) ?? []), ...b.events]);
       perLogin.set(login, p);

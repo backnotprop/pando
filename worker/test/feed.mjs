@@ -317,7 +317,8 @@ try {
   // ── Out-of-order and repeated queue deliveries (run in a chosen order through the test route) ──
   const base = Date.now() - 3_600_000;
   const at = (s) => new Date(base + s * 1000).toISOString();
-  const line = (seq, s, title) => ({ monorepo: ID[O], seq, at: at(s), kind: "push", repo: O, repo_path: ".", branch: "ooo", actor: login.ana, machine: "ana-mbp", summary: { commits: 1, head_title: title } });
+  // A line as FeedDrain receives it (the test route decodes it the same way).
+  const line = (seq, s, title) => ({ monorepo_id: ID[O], monorepo: `${login.ana}/${O}`, seq, at: at(s), kind: "push", repo: O, repo_path: ".", branch: "ooo", actor: login.ana, machine: "ana-mbp", summary: { head: null, before: null, commits: 1, head_title: title } });
   const before = live.frames.length;
   await deliver(
     { type: "events", monorepo: ID[O], members: [login.ana], events: [line(100003, 3, "three")] },
@@ -336,7 +337,7 @@ try {
   check("out of order: an older summary arriving late is dropped", r.json?.monorepos?.find((m) => m.name === O)?.worktrees_active === 7, JSON.stringify(r.json?.monorepos?.find((m) => m.name === O)));
   await deliver({ type: "member", monorepo: ID[O], login: login.cy });
   check("a member message for a non-member (a stale join) leaves cy's feed without O", !(await debugFeed(login.cy)).index.some((i) => i.name === ID[O]));
-  await deliver({ type: "events", monorepo: ID[T], members: [login.cy], events: [{ ...line(100009, 9, "x"), monorepo: ID[T] }] });
+  await deliver({ type: "events", monorepo: ID[T], members: [login.cy], events: [{ ...line(100009, 9, "x"), monorepo_id: ID[T] }] });
   check("lines for a monorepo not in the person's index are dropped", !(await debugFeed(login.cy)).pointers[ID[T]]);
   const n0 = (await debugFeed(login.ana)).pointers[ID[O]];
   await deliver({ type: "member", monorepo: ID[O], login: login.ana });

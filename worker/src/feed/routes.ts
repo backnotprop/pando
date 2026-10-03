@@ -13,11 +13,11 @@ import { isBootstrap, monorepoStub } from "../monorepo/session";
 import { monorepoRef } from "../monorepo/names";
 import { pool } from "../monorepo/views";
 import { finishTiming, runTimed, startTiming } from "../timing";
-import { feedStub, handleFeedBatch } from "./consumer";
-import type { IndexRow, WindowPage } from "./object";
+import { isRecord, isWholeNumber, type Json } from "../parse";
+import { fanOut, feedStub } from "./consumer";
 import {
-  decodeCursor, encodeCursor, LOGS_MAX, mergePages, NEED_STATES, NEEDS_MONOREPOS_MAX, PAGE_DEFAULT, PAGE_MAX, uncovered,
-  type FeedEvent, type FeedMessage, type NeedRow, type NeedState,
+  decodeCursor, encodeCursor, feedMessageOf, LOGS_MAX, mergePages, NEED_STATES, needStatesOf, NEEDS_MONOREPOS_MAX, PAGE_DEFAULT, PAGE_MAX,
+  textOf, uncovered, type FeedEvent, type FeedMessage,
 } from "./shape";
 
 export function isFeedPath(path: string): boolean {
@@ -98,7 +98,12 @@ async function route(request: Request, env: Env): Promise<Response> {
 /** Queue `member` messages (the consumer joins or leaves). */
 async function queueMembers(env: Env, pairs: { monorepo: string; login: string }[]): Promise<void> {
   if (!pairs.length || !env.FEED_QUEUE) return;
-  const msgs = pairs.map((p) => ({ body: { type: "member", ...p } as FeedMessage }));
+
+  const msgs = pairs.map((p) => {
+    const body: FeedMessage = { type: "member", monorepo: p.monorepo, login: p.login };
+
+    return { body };
+  });
 
   for (let i = 0; i < msgs.length; i += 100) await env.FEED_QUEUE.sendBatch(msgs.slice(i, i + 100));
 }
@@ -111,7 +116,7 @@ async function reconcile(env: Env, login: string) {
     console.error("feed: joins not queued (retried on the next load):", err instanceof Error ? err.message : String(err)),
   );
 
-  return { list, rows: r.rows as IndexRow[] };
+  return { list, rows: r.rows };
 }
 
 const byLast = (a: { last: string | null }, b: { last: string | null }) => ((b.last ?? "") < (a.last ?? "") ? -1 : (b.last ?? "") > (a.last ?? "") ? 1 : 0);
@@ -130,15 +135,15 @@ async function eventsPage(env: Env, login: string, url: URL) {
   const inn = await monorepoParam(env, url);
   const only = inn?.id ?? null;
   const feed = feedStub(env, login);
-  let p = (await feed.page(cursor, limit, only)) as unknown as WindowPage;
+  let p = await feed.page(cursor, limit, only);
 
   if (p.need_list) {
     await reconcile(env, login);
-    p = (await feed.page(cursor, limit, only)) as unknown as WindowPage;
+    p = await feed.page(cursor, limit, only);
   }
 
   if (inn && !p.known) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
-  const readLog = (name: string) => monorepoStub(env, name).eventsBefore(cursor, limit) as Promise<FeedEvent[]>;
+  const readLog = (name: string) => monorepoStub(env, name).eventsBefore(cursor, limit);
   const large = [...p.large].sort(byLast);
   const reading = large.slice(0, LOGS_MAX);
   // skipped: owner/names, for people.
@@ -196,9 +201,9 @@ async function needsPage(env: Env, login: string, url: URL) {
 
   if (state !== "open") bad("state: open (needs-you is about open branches)");
   const q = url.searchParams.get("needs");
-  const needs = (q ? q.split(",").map((s) => s.trim()).filter(Boolean) : NEED_STATES) as NeedState[];
+  const needs = q ? needStatesOf(q) : NEED_STATES;
 
-  if (!needs.length || needs.some((n) => !NEED_STATES.includes(n))) bad("needs: some of ready, conflicts, failing");
+  if (!needs?.length) bad("needs: some of ready, conflicts, failing");
   const inn = await monorepoParam(env, url);
   const limit = int(url.searchParams.get("limit"), 100, 1, 500, "limit");
   const { rows } = await reconcile(env, login);
@@ -212,7 +217,7 @@ async function needsPage(env: Env, login: string, url: URL) {
   const skipped = ordered.slice(NEEDS_MONOREPOS_MAX).map((x) => x.label);
 
   const lists = await pool(ask, 10, async (m) =>
-    ((await monorepoStub(env, m.name).needsYou(needs, limit)) as NeedRow[]).map((r) => ({ monorepo: m.label, monorepo_id: m.name, ...r })),
+    (await monorepoStub(env, m.name).needsYou(needs, limit)).map((r) => ({ monorepo: m.label, monorepo_id: m.name, ...r })),
   );
 
   const all = lists.flat().sort((a, b) => ((a.updated_at ?? "") < (b.updated_at ?? "") ? 1 : -1));
@@ -250,34 +255,37 @@ async function testRoute(request: Request, env: Env): Promise<Response> {
     bad("login or monorepo");
   }
 
-  const b = (await request.json()) as {
-    deliver?: FeedMessage[];
-    trim?: { login: string; days: number };
-    outbox?: { monorepo: string; crash?: "before" | "after"; fail?: number };
-  };
+  const b = await request.json<Json>();
 
-  if (b.trim) return Response.json(await feedStub(env, b.trim.login).trim(b.trim.days));
+  if (!isRecord(b)) bad("a JSON object");
 
-  if (b.outbox) {
-    const { monorepo, ...set } = b.outbox;
+  if (isRecord(b.trim)) {
+    const login = textOf(b.trim.login);
+    const days = b.trim.days;
 
-    return Response.json(await monorepoStub(env, monorepo).feedTestOutbox(set));
+    if (login === null || !isWholeNumber(days)) bad("trim: {login, days}");
+
+    return Response.json(await feedStub(env, login).trim(days));
   }
 
+  if (isRecord(b.outbox)) {
+    const monorepo = textOf(b.outbox.monorepo);
+    const crash = b.outbox.crash === "before" || b.outbox.crash === "after" ? b.outbox.crash : undefined;
+    const fail = isWholeNumber(b.outbox.fail) ? b.outbox.fail : undefined;
+
+    if (monorepo === null) bad("outbox: {monorepo, crash?, fail?}");
+
+    return Response.json(await monorepoStub(env, monorepo).feedTestOutbox({ crash, fail }));
+  }
+
+  const deliver = Array.isArray(b.deliver) ? b.deliver.map(feedMessageOf) : [];
   const out: string[] = [];
 
-  for (const body of b.deliver ?? []) {
-    let result = "ack";
-
-    const msg = {
-      id: crypto.randomUUID(), timestamp: new Date(), body, attempts: 1,
-      ack() {}, retry() {
-        result = "retry";
-      },
-    } as unknown as Message<FeedMessage>;
-
-    await handleFeedBatch({ queue: "pando-feed", messages: [msg], ackAll() {}, retryAll() {} } as unknown as MessageBatch<FeedMessage>, env);
-    out.push(result);
+  // One at a time, in this order, as the queue would deliver them: true is an ack, false a retry.
+  for (const msg of deliver) {
+    if (msg === null) bad("deliver: messages as the queue carries them");
+    const [ok] = await fanOut(env, [msg]);
+    out.push(ok ? "ack" : "retry");
   }
 
   return Response.json({ results: out });

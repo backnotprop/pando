@@ -13,12 +13,58 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { now } from "../http";
+import { isRecord, isText, isWholeNumber, parseJson } from "../parse";
 import {
-  effectiveAfter, PENDING, REPLAY_MAX, uncovered, WINDOW_DAYS, WINDOW_MAX,
+  effectiveAfter, PENDING, REPLAY_MAX, storedPointerOf, summaryOf, uncovered, WINDOW_DAYS, WINDOW_MAX,
   type FeedEvent, type Key, type NeedChange, type StoredPointer, type Summary,
 } from "./shape";
 
-type Row = Record<string, SqlStorageValue>;
+/** A row of the monorepos table, as selected by INDEX_COLUMNS. */
+type IndexSqlRow = {
+  name: string; label: string | null; kind: string | null; joined_at: string; pending: number; large: number;
+  covered_after: string | null; summary: string | null; summary_at: string | null;
+};
+
+const INDEX_COLUMNS = "name, label, kind, joined_at, pending, large, covered_after, summary, summary_at";
+
+/** A pointer row as stored (its body is a StoredPointer, as JSON). */
+type PointerRow = { monorepo: string; seq: number; at: string; body: string };
+
+/** Frames on the person's socket. */
+type PersonFrame =
+  | { type: "event"; landed: number; event: FeedEvent }
+  | { type: "summary"; monorepo: string; monorepo_id: string; summary: Summary }
+  | { type: "needs"; monorepo: string; monorepo_id: string; changed: NeedChange[]; more: boolean }
+  | { type: "joined"; monorepo: string; monorepo_id: string; large: boolean }
+  | { type: "left"; monorepo: string; monorepo_id: string }
+  | { type: "resync"; landed: number }
+  | { type: "caught_up"; landed: number }
+  | { type: "error"; message: string };
+
+/** A monorepo as the accounts list it for this person. */
+export interface ListedMonorepo {
+  name: string;
+  kind: string;
+  label?: string;
+}
+
+export interface Reconciled {
+  added: string[];
+  removed: string[];
+  rows: IndexRow[];
+}
+
+export interface Trimmed {
+  dropped: number;
+  floor: string | null;
+}
+
+export interface FeedDebug {
+  index: IndexRow[];
+  pointers: { [monorepo: string]: number };
+  landed: number;
+  floor: string | null;
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -91,11 +137,12 @@ export class FeedObject extends DurableObject<Env> {
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  /** Rows of a query, typed by the caller to the columns it selects. */
+  private rows<T extends Record<string, SqlStorageValue>>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
-  private row<T>(q: string, ...args: unknown[]): T | null {
+  private row<T extends Record<string, SqlStorageValue>>(q: string, ...args: SqlStorageValue[]): T | null {
     return this.rows<T>(q, ...args)[0] ?? null;
   }
 
@@ -107,21 +154,32 @@ export class FeedObject extends DurableObject<Env> {
     this.sql.exec("INSERT INTO state (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", k, v);
   }
 
-  private indexRow(r: Record<string, unknown>): IndexRow {
+  private indexRow(r: IndexSqlRow): IndexRow {
     return {
-      name: r.name as string,
-      label: (r.label as string | null) ?? null,
-      kind: (r.kind as string | null) ?? null,
-      joined_at: r.joined_at as string,
+      name: r.name,
+      label: r.label,
+      kind: r.kind,
+      joined_at: r.joined_at,
       pending: r.pending === 1,
       large: r.large === 1,
-      covered_after: (r.covered_after as string | null) ?? null,
-      summary: r.summary ? (JSON.parse(r.summary as string) as Summary) : null,
+      covered_after: r.covered_after,
+      summary: r.summary ? summaryOf(parseJson(r.summary)) : null,
     };
   }
 
   private index(only: string | null = null): IndexRow[] {
-    return this.rows<Record<string, unknown>>("SELECT * FROM monorepos WHERE (?1 IS NULL OR name = ?1) ORDER BY name", only).map((r) => this.indexRow(r));
+    return this.rows<IndexSqlRow>(`SELECT ${INDEX_COLUMNS} FROM monorepos WHERE (?1 IS NULL OR name = ?1) ORDER BY name`, only).map((r) => this.indexRow(r));
+  }
+
+  private indexRowOf(monorepo: string): IndexSqlRow | null {
+    return this.row<IndexSqlRow>(`SELECT ${INDEX_COLUMNS} FROM monorepos WHERE name = ?`, monorepo);
+  }
+
+  /** A stored pointer back as a line, with its monorepo's label. */
+  private lineOf(r: PointerRow, labels: Map<string, string>): FeedEvent | null {
+    const p = storedPointerOf(parseJson(r.body));
+
+    return p ? { monorepo_id: r.monorepo, monorepo: labels.get(r.monorepo) ?? r.monorepo, seq: r.seq, at: r.at, ...p } : null;
   }
 
   // ── The index ────────────────────────────────────────────────────────────
@@ -131,7 +189,7 @@ export class FeedObject extends DurableObject<Env> {
    * New ones get a pending row (the caller queues their joins); gone ones
    * leave. Returns the rows.
    */
-  reconcile(list: { name: string; kind: string; label?: string }[]): { added: string[]; removed: string[]; rows: IndexRow[] } {
+  reconcile(list: ListedMonorepo[]): Reconciled {
     const have = new Set(this.rows<{ name: string }>("SELECT name FROM monorepos").map((r) => r.name));
     const want = new Set(list.map((m) => m.name));
     const added: string[] = [];
@@ -161,7 +219,7 @@ export class FeedObject extends DurableObject<Env> {
 
   /** A join's backfill and summary (from the queue consumer, after it checked the accounts). */
   join(monorepo: string, j: JoinData): void {
-    const old = this.row<Record<string, unknown>>("SELECT * FROM monorepos WHERE name = ?", monorepo);
+    const old = this.indexRowOf(monorepo);
     const prev = old ? this.indexRow(old) : null;
     let after: string | null = j.large || j.complete || !j.events.length ? null : j.events[j.events.length - 1].at;
 
@@ -265,12 +323,12 @@ export class FeedObject extends DurableObject<Env> {
 
   /** A monorepo's summary line changed. Older ticks arriving late are dropped. */
   putSummary(monorepo: string, s: Summary, needsChanged: NeedChange[], needsMore: boolean): boolean {
-    const old = this.row<Record<string, unknown>>("SELECT * FROM monorepos WHERE name = ?", monorepo);
+    const old = this.indexRowOf(monorepo);
 
     if (!old) return false;
     const r = this.indexRow(old);
 
-    if (old.summary_at && (old.summary_at as string) > s.at) return false;
+    if (old.summary_at && old.summary_at > s.at) return false;
     this.sql.exec("UPDATE monorepos SET summary = ?, summary_at = ?, large = ? WHERE name = ?", JSON.stringify(s), s.at, s.large ? 1 : 0, monorepo);
 
     if (!r.large && s.large) this.sql.exec("DELETE FROM pointers WHERE monorepo = ?", monorepo); // read from its log from now on
@@ -299,7 +357,7 @@ export class FeedObject extends DurableObject<Env> {
 
     if (only && !idx.length) return { events: [], large: [], uncovered: [], known: false, need_list: true };
 
-    type P = { monorepo: string; seq: number; at: string; body: string };
+    type P = PointerRow;
 
     let rows: P[];
 
@@ -325,7 +383,14 @@ export class FeedObject extends DurableObject<Env> {
     }
 
     const labels = this.labels();
-    const events = rows.map((r) => ({ monorepo_id: r.monorepo, monorepo: labels.get(r.monorepo) ?? r.monorepo, seq: r.seq, at: r.at, ...(JSON.parse(r.body) as StoredPointer) }));
+    const events: FeedEvent[] = [];
+
+    for (const r of rows) {
+      const event = this.lineOf(r, labels);
+
+      if (event) events.push(event);
+    }
+
     const boundary = events.length === limit ? events[limit - 1].at : null;
     const floor = this.get("floor");
     const last = (r: IndexRow) => r.summary?.last_activity_at ?? null;
@@ -370,7 +435,7 @@ export class FeedObject extends DurableObject<Env> {
   }
 
   /** Keep WINDOW_DAYS of pointers, at most WINDOW_MAX; `floor` remembers the newest `at` dropped. `days`: tests only. */
-  trim(days = WINDOW_DAYS): { dropped: number; floor: string | null } {
+  trim(days = WINDOW_DAYS): Trimmed {
     let floor = this.get("floor");
 
     const raise = (t: string | null) => {
@@ -405,8 +470,8 @@ export class FeedObject extends DurableObject<Env> {
   }
 
   /** Tests only: the index, pointer counts and counters. */
-  debugState(): { index: IndexRow[]; pointers: Record<string, number>; landed: number; floor: string | null } {
-    const pointers: Record<string, number> = {};
+  debugState(): FeedDebug {
+    const pointers: FeedDebug["pointers"] = {};
 
     for (const r of this.rows<{ monorepo: string; n: number }>("SELECT monorepo, COUNT(*) AS n FROM pointers GROUP BY monorepo")) pointers[r.monorepo] = r.n;
 
@@ -434,17 +499,12 @@ export class FeedObject extends DurableObject<Env> {
   }
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
-    let m: Record<string, unknown> | null = null;
+    const m = isText(msg) ? parseJson(msg) : null;
 
-    try {
-      m = typeof msg === "string" ? (JSON.parse(msg) as Record<string, unknown>) : null;
-    } catch {
-      m = null;
-    }
-
-    if (!m || m.type !== "hello") return this.send(ws, { type: "error", message: 'send {"type":"hello","since":<landed>} (since optional), or the text ping' });
+    if (!isRecord(m) || m.type !== "hello") return this.send(ws, { type: "error", message: 'send {"type":"hello","since":<landed>} (since optional), or the text ping' });
     const head = Number(this.get("landed") ?? 0);
-    const since = m.since === undefined || m.since === null ? null : Number(m.since);
+    // A number, or a number as text; anything else is out of range (resync).
+    const since = m.since === undefined || m.since === null ? null : isWholeNumber(m.since) ? m.since : isText(m.since) ? Number(m.since) : -1;
 
     if (since !== null) {
       if (!Number.isSafeInteger(since) || since < 0 || since > head) {
@@ -458,7 +518,11 @@ export class FeedObject extends DurableObject<Env> {
         else {
           const labels = this.labels();
 
-          for (const r of rows) this.send(ws, { type: "event", landed: r.landed, event: { monorepo_id: r.monorepo, monorepo: labels.get(r.monorepo) ?? r.monorepo, seq: r.seq, at: r.at, ...JSON.parse(r.body) } });
+          for (const r of rows) {
+            const event = this.lineOf(r, labels);
+
+            if (event) this.send(ws, { type: "event", landed: r.landed, event });
+          }
         }
       }
     }
@@ -476,7 +540,7 @@ export class FeedObject extends DurableObject<Env> {
 
   async webSocketError(_ws: WebSocket): Promise<void> {}
 
-  private send(ws: WebSocket, frame: Record<string, unknown>): void {
+  private send(ws: WebSocket, frame: PersonFrame): void {
     try {
       ws.send(JSON.stringify(frame));
     } catch {
@@ -484,7 +548,7 @@ export class FeedObject extends DurableObject<Env> {
     }
   }
 
-  private broadcast(frame: Record<string, unknown>): void {
+  private broadcast(frame: PersonFrame): void {
     const s = JSON.stringify(frame);
 
     for (const ws of this.ctx.getWebSockets("feed")) {

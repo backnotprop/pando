@@ -24,3 +24,31 @@ export async function isBootstrap(env: Env, secret: string | null): Promise<bool
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
+
+// ── Repo records, cached per isolate (C3) ───────────────────────────────────
+
+const REPO_CACHE_MS = 15_000;
+const repoCache = new Map<string, { at: number; rec: import("./types").RepoRecord }>();
+
+/**
+ * A repo's record, cached for 15 s per isolate (found ones only), so the door
+ * and the API do not ask the monorepo object on every request. A recreated
+ * repo has a new created_at, which keys its tokens, so a stale record only
+ * costs one refused token and a retry.
+ */
+export async function cachedRepo(env: Env, monorepo: string, name: string): Promise<import("./types").RepoRecord | null> {
+  const key = `${monorepo}/${name}`;
+  const hit = repoCache.get(key);
+  if (hit && Date.now() - hit.at < REPO_CACHE_MS) return hit.rec;
+  const rec = await monorepoStub(env, monorepo).getRepo(name);
+  if (rec) {
+    if (repoCache.size > 10_000) repoCache.clear();
+    repoCache.set(key, { at: Date.now(), rec });
+  } else repoCache.delete(key);
+  return rec;
+}
+
+/** Forget a monorepo's cached records (it was deleted here). */
+export function forgetRepos(monorepo: string): void {
+  for (const k of repoCache.keys()) if (k.startsWith(`${monorepo}/`)) repoCache.delete(k);
+}

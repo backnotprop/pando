@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { agentHeader, HttpError, toErrorResponse } from "../http";
 import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
-import { combine, requiredChecks } from "./checks";
+import { combine, requiredKept } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
@@ -23,7 +23,7 @@ import {
   ZERO,
 } from "./names";
 import type { MonorepoObject } from "./object";
-import { hashToken, monorepoStub, newToken } from "./session";
+import { cachedRepo, forgetRepos, hashToken, monorepoStub, newToken } from "./session";
 import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoEvent, RepoRecord, StatusRecord } from "./types";
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
@@ -92,7 +92,7 @@ function repoView(c: C, r: RepoRecord, required?: string[]) {
 }
 
 async function repoOf(c: C): Promise<RepoRecord> {
-  const r = await c.get("stub").getRepo(c.req.param("r")!);
+  const r = await cachedRepo(c.env, c.get("m"), c.req.param("r")!);
   if (!r) throw new HttpError(404, "not_found", `no repo ${c.req.param("r")}`);
   return r;
 }
@@ -258,6 +258,7 @@ api.delete("/v1/monorepos/:m", async (c) => {
   // The live meta layer: closes its sockets and clears its storage, so the name starts clean.
   if (c.get("info").kind === "monorepo") await c.env.META.get(c.env.META.idFromName(m)).destroy();
   await stub.destroy();
+  forgetRepos(m);
   await accounts(c.env).releaseMonorepo(m);
   forgetCachedAuth();
   return c.body(null, 204);
@@ -385,7 +386,7 @@ api.get("/v1/monorepos/:m/repos", async (c) => {
 
 api.get("/v1/monorepos/:m/repos/:r", async (c) => {
   const r = await repoOf(c);
-  return c.json(repoView(c, r, await requiredChecks(c.env, c.get("info"), r)));
+  return c.json(repoView(c, r, await requiredKept(c.env, c.get("info"), r)));
 });
 
 // ── Branches ──────────────────────────────────────────────────────────────
@@ -409,7 +410,7 @@ async function branchViews(
     main = branchesOf(await listRefs(c.env, r).catch(() => new Map<string, string>())).get(r.default_branch) ?? null;
     if (main) await stub.rememberHead(r.name, main);
   }
-  const required = await requiredChecks(c.env, c.get("info"), r);
+  const required = await requiredKept(c.env, c.get("info"), r);
   const ask = { names: names ?? undefined, state: state as "open" | "merged" | "all", limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
   let list = (await stub.branchRows(r.name, ask)) as BranchList;
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);
@@ -723,7 +724,7 @@ api.get("/v1/monorepos/:m/repos/:r/commits/*", async (c) => {
   const ref = decodeURIComponent(raw.slice(prefix.length, -"/status".length));
   const sha = isSha(ref) ? ref : branchesOf(await listRefs(c.env, r)).get(ref);
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${ref}`);
-  const required = await requiredChecks(c.env, c.get("info"), r);
+  const required = await requiredKept(c.env, c.get("info"), r);
   return c.json(combine(sha, required, await c.get("stub").statuses(r.name, sha)));
 });
 

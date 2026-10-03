@@ -552,9 +552,7 @@ paths:
 
         Numbers and shas: `seq`, `oldest_seq` are stream sequence numbers. In
         an event, `head` and `before` (push and default_head events) are commit
-        shas. caught_up, resync and the JSON page also carry `head` and
-        `oldest` with the same numbers as `seq` and `oldest_seq`, for one
-        deploy only (2026-10-03); read `seq`. Set `EVENT_STREAM` false in
+        shas. Set `EVENT_STREAM` false in
         worker/src/monorepo/stream.ts and it answers 501 `event_stream_on_hold`.
       tags: [monorepos]
       parameters:
@@ -581,8 +579,6 @@ paths:
                     items: { $ref: "#/components/schemas/Event" }
                   seq: { type: integer, description: "The newest event's seq (0 when none)." }
                   oldest_seq: { type: integer, description: The oldest kept. }
-                  head: { type: integer, deprecated: true, description: "Old name of seq, for one deploy." }
-                  oldest: { type: integer, deprecated: true, description: "Old name of oldest_seq, for one deploy." }
                   resync: { type: boolean, description: "True when `since` is not in the stream; refetch everything." }
         "101": { description: The WebSocket. }
         "501":

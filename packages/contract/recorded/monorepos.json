@@ -1,0 +1,18 @@
+{
+  "schema": "MonorepoList",
+  "route": "GET /v1/monorepos",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_9a76490c5f6fa954",
+        "owner": "rec-muswdcxb",
+        "name": "rec-muswdcxb",
+        "full_name": "rec-muswdcxb/rec-muswdcxb",
+        "kind": "monorepo",
+        "created_at": "2026-10-03T21:21:44.152Z",
+        "role": "owner"
+      }
+    ]
+  }
+}

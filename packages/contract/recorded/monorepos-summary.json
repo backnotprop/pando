@@ -1,0 +1,28 @@
+{
+  "schema": "MonorepoSummaryList",
+  "route": "GET /v1/monorepos?summary=1",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_9a76490c5f6fa954",
+        "owner": "rec-muswdcxb",
+        "name": "rec-muswdcxb",
+        "full_name": "rec-muswdcxb/rec-muswdcxb",
+        "kind": "monorepo",
+        "created_at": "2026-10-03T21:21:44.152Z",
+        "role": "owner",
+        "last_activity_at": "2026-10-03T21:21:56.503Z",
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 1,
+          "conflicts": 0,
+          "failing": 1
+        },
+        "members": 1,
+        "large": false
+      }
+    ]
+  }
+}

@@ -2,7 +2,11 @@
   "name": "pando-repo",
   "private": true,
   "type": "module",
-  "description": "Repo tooling for projects/pando: lint (oxlint with the vendored anti-slop plugin, tools/oxlint/anti-slop) and Effect's source for agents to read. Not an npm workspace root; worker/ keeps its own install.",
+  "description": "Repo tooling for projects/pando: lint (oxlint with the vendored anti-slop plugin, tools/oxlint/anti-slop) and Effect's source for agents to read. npm workspaces: web and packages/*; worker/ keeps its own install until it joins.",
+  "workspaces": [
+    "web",
+    "packages/*"
+  ],
   "scripts": {
     "lint": "oxlint --deny-warnings worker/src worker/test web packages"
   },

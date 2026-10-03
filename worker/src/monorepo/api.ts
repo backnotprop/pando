@@ -215,6 +215,24 @@ api.use("/v1/monorepos/:m/*", authed);
 
 api.get("/v1/monorepos/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role }));
 
+api.delete("/v1/monorepos/:m", async (c) => {
+  owner(c, "delete a monorepo");
+  const m = c.get("m");
+  if (c.req.query("confirm") !== m) bad(`add ?confirm=${m} to delete the monorepo, its repos and their history`);
+  const stub = c.get("stub");
+  for (const name of await stub.artifactsRepos()) {
+    try {
+      await c.env.ARTIFACTS.delete(name);
+    } catch (err) {
+      if ((err as { code?: string })?.code !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
+    }
+  }
+  await stub.destroy();
+  await accounts(c.env).releaseMonorepo(m);
+  forgetCachedAuth();
+  return c.body(null, 204);
+});
+
 // ── Members ───────────────────────────────────────────────────────────────
 
 api.get("/v1/monorepos/:m/members", async (c) => {

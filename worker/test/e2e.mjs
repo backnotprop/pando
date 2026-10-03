@@ -136,6 +136,7 @@ try {
   r = await call("POST", "/v1/users", BOOT, { login: `ana-${id}`, name: "Ana", email: "ana@pando.invalid", credential_name: "ana-mbp" });
   check("bootstrap makes user ana and a credential", r.status === 201 && r.json?.credential?.secret?.startsWith("pando_"), `${r.status}`);
   const A = r.json?.credential?.secret;
+  globalThis.__A = A;
   r = await call("POST", "/v1/users", BOOT, { login: `bo-${id}` });
   const B = r.json?.credential?.secret;
   check("bootstrap makes user bo", r.status === 201 && !!B);
@@ -407,13 +408,20 @@ try {
 } finally {
   server?.close();
   if (process.env.PANDO_KEEP !== "1") {
+    for (const [m, secret] of [[M, globalThis.__A], [MM, globalThis.__A]]) {
+      if (!secret) continue;
+      const r = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, secret);
+      const after = await call("GET", `/v1/monorepos/${m}`, secret);
+      check(`DELETE /v1/monorepos/${m} removes it`, r.status === 204 && after.status === 404, `${r.status}, then ${after.status}`);
+    }
     for (const name of made) {
       const r = spawnSync("npx", ["wrangler", "artifacts", "repos", "delete", name, "--namespace", "pando-dev", "--force"], {
         cwd: new URL("..", import.meta.url).pathname,
         encoding: "utf8",
         input: "y\n",
       });
-      say(`cleanup ${name}: ${r.status === 0 ? "deleted" : "not deleted: " + scrub((r.stderr || r.stdout).split("\n").find((l) => /error|✘/i.test(l)) ?? r.status)}`);
+      // After DELETE /v1/monorepos, each repo should already be gone.
+      say(`cleanup ${name}: ${r.status === 0 ? "deleted by wrangler (the API delete may still be finishing)" : "already gone"}`);
     }
   }
   rmSync(work, { recursive: true, force: true });

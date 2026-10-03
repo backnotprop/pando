@@ -153,9 +153,18 @@ export class MonorepoObject extends DurableObject<Env> {
     return true;
   }
 
-  /** Undo a monorepo whose creation failed half way. */
+  /** Undo a monorepo whose creation failed half way, or delete one. */
   async destroy(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+  }
+
+  /** Every Artifacts repo this monorepo owns, the meta layer's included. */
+  artifactsRepos(): string[] {
+    const m = this.info();
+    const names = new Set(this.rows<{ artifacts_name: string }>("SELECT artifacts_name FROM repos").map((r) => r.artifacts_name));
+    if (m?.kind === "monorepo") names.add(metaArtifactsName(m.name));
+    return [...names];
   }
 
   // ── Repos ────────────────────────────────────────────────────────────────

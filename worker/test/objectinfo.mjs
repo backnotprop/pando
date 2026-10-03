@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -52,8 +53,7 @@ const pkt = (s) => {
   return Buffer.concat([Buffer.from((b.length + 4).toString(16).padStart(4, "0")), b]);
 };
 
-const call = async (method, path, secret, body) =>
-  fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: body && JSON.stringify(body) }).then((r) => r.json().catch(() => null));
+const call = async (method, path, secret, body) => (await request(URL_, method, path, { secret, body })).json;
 
 const id = Date.now().toString(36);
 

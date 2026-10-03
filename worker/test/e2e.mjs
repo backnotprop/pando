@@ -18,6 +18,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -49,21 +50,8 @@ function check(name, pass, detail = "") {
   say(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`);
 }
 
-async function call(method, path, secret, body) {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, text, headers: res.headers };
+function call(method, path, secret, body) {
+  return request(URL_, method, path, { secret, body });
 }
 
 const work = mkdtempSync(join(tmpdir(), "pando-e2e-"));

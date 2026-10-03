@@ -1,0 +1,31 @@
+{
+  "schema": "MachineList",
+  "route": "GET .../machines",
+  "status": 200,
+  "body": {
+    "machines": [
+      {
+        "login": "rec-musyuiou",
+        "credential_id": "cred_fde944f28ace0551",
+        "name": "ana-mbp",
+        "kind": "bootstrap",
+        "connected": false,
+        "connected_at": null,
+        "last_activity": {
+          "seq": 25,
+          "at": "2026-10-03T22:31:15.084Z",
+          "kind": "worktree.reported",
+          "repo": "projects-web",
+          "repo_path": "projects/web",
+          "branch": "feat/ready",
+          "summary": {
+            "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
+            "worktree": "wt-musyuiou"
+          }
+        },
+        "worktrees": [],
+        "updated_at": "2026-10-03T22:31:15.084Z"
+      }
+    ]
+  }
+}

@@ -13,6 +13,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -25,17 +26,7 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`.replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
 };
 
-const call = async (method, path, secret, body) => {
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const work = mkdtempSync(join(tmpdir(), "pando-gate-"));
 
@@ -60,7 +51,7 @@ const gitAsync = (a, cwd) =>
     const p = spawn("git", [...gitArgs, ...a], { cwd, env });
     let err = "";
     p.stderr.on("data", (d) => (err += d));
-    p.on("close", (code) => resolve({ ok: code === 0, err: err.replace(/pando_[a-f0-9]+/g, "<credential>").trim().split("\n").filter((l) => !/^error: failed to push/.test(l)).join(" | ") }));
+    p.on("close", (code) => resolve({ ok: code === 0, err: err.replace(/pando_[a-f0-9]+/g, "<credential>").trim().split("\n").filter((l) => !l.startsWith("error: failed to push")).join(" | ") }));
   });
 
 const tally = (rs, ok) => {

@@ -1,0 +1,59 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch}",
+  "status": 200,
+  "body": {
+    "name": "feat/ready",
+    "head": "4b51324ff026310024bef9cd9a0bae1a67ef25bb",
+    "base": "39fc63459f6dbc29690a2e89bcd20be4dbd001d8",
+    "author": "rec-musyuiou",
+    "title": null,
+    "description": null,
+    "ahead": 1,
+    "behind": 2,
+    "mergeable": "clean",
+    "checks": {
+      "sha": "4b51324ff026310024bef9cd9a0bae1a67ef25bb",
+      "state": "success",
+      "required": [
+        "ci/test"
+      ],
+      "missing": [],
+      "statuses": [
+        {
+          "sha": "4b51324ff026310024bef9cd9a0bae1a67ef25bb",
+          "context": "ci/test",
+          "state": "success",
+          "target_url": "https://ci.example/builds/1",
+          "description": null,
+          "creator": "rec-musyuiou",
+          "app": null,
+          "created_at": "2026-10-03T22:31:14.008Z"
+        },
+        {
+          "sha": "4b51324ff026310024bef9cd9a0bae1a67ef25bb",
+          "context": "lint",
+          "state": "success",
+          "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
+          "description": "#1 passed in 8 s",
+          "creator": "app:buildkite",
+          "app": "buildkite",
+          "created_at": "2026-10-03T22:31:14.349Z"
+        }
+      ]
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "ana-mbp",
+    "created_at": "2026-10-03T22:31:12.263Z",
+    "updated_at": "2026-10-03T22:31:12.263Z",
+    "stale": false,
+    "last_mergeable": null,
+    "facts_at": "2026-10-03T22:31:15.799Z"
+  }
+}

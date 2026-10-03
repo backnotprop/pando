@@ -1,0 +1,15 @@
+{
+  "schema": "MergeResult",
+  "route": "POST .../branches/{branch}/merge?force=1",
+  "status": 200,
+  "body": {
+    "status": "merged",
+    "branch": "feat/merge-me",
+    "head": "0f7cc0091ddbcde025e2bfa7dd49166f898fd6a3",
+    "sha": "b3a90f39e70279bc80fdef54288e88bf83842073",
+    "base_before": "39fc63459f6dbc29690a2e89bcd20be4dbd001d8",
+    "merge_base": "39fc63459f6dbc29690a2e89bcd20be4dbd001d8",
+    "forced": true,
+    "merged_by": "rec-musyuiou"
+  }
+}

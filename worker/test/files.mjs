@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -33,17 +34,7 @@ const check = (name, ok, detail = "") => {
 
 let S = null;
 
-const call = async (method, path, body, headers = {}) => {
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${S}`, ...(body ? { "content-type": "application/json" } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, text, headers: res.headers };
-};
+const call = (method, path, body, headers = {}) => request(URL_, method, path, { secret: S, body, headers });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -211,7 +202,7 @@ try {
   const etag = r.headers.get("etag");
   check(
     "raw by branch: the bytes, text/plain, sandboxed, nosniff, revalidated by ETag",
-    r.status === 200 && r.text === "# files\n" && /^text\/plain/.test(r.headers.get("content-type")) && /sandbox/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-content-type-options") === "nosniff" && r.headers.get("cache-control") === "private, no-cache" && /^(W\/)?"[0-9a-f]{40}"$/.test(etag ?? ""),
+    r.status === 200 && r.text === "# files\n" && (r.headers.get("content-type") ?? "").startsWith("text/plain") && /sandbox/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-content-type-options") === "nosniff" && r.headers.get("cache-control") === "private, no-cache" && /^(W\/)?"[0-9a-f]{40}"$/.test(etag ?? ""),
     `${r.status} ${r.headers.get("content-type")} ${r.headers.get("cache-control")}`,
   );
   r = await call("GET", rawUrl(A, "README.md"), null, { "if-none-match": etag });

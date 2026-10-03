@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -27,15 +28,7 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`.replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
 };
 
-const call = async (method, path, secret, body) => {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body ? { "content-type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  return { status: res.status, json: await res.json().catch(() => null) };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const work = mkdtempSync(join(tmpdir(), "pando-ns-"));
 

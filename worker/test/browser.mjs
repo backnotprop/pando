@@ -14,6 +14,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { send } from "./http.mjs";
 
 retryResetFetch();
 
@@ -132,19 +133,17 @@ async function signIn(user, returnTo) {
   return { start, loginSet, cb, set, session: cookieValue(set, "__Host-pando_session"), location: cb.headers.get("location"), callbackUrl: back };
 }
 
-const api = (method, path, { session, bearer, origin, body, accept } = {}) =>
-  fetch(URL_ + path, {
-    method,
-    redirect: "manual",
-    headers: {
-      ...(session ? { cookie: `__Host-pando_session=${session}` } : {}),
-      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
-      ...(origin ? { origin } : {}),
-      ...(body ? { "content-type": "application/json" } : {}),
-      ...(accept ? { accept } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+const api = (method, path, { session, bearer, origin, body, accept } = {}) => {
+  const headers = {};
+
+  if (session) headers.cookie = `__Host-pando_session=${session}`;
+
+  if (origin) headers.origin = origin;
+
+  if (accept) headers.accept = accept;
+
+  return send(URL_, method, path, { secret: bearer, body, headers, redirect: "manual" });
+};
 
 const id = Date.now().toString(36);
 
@@ -197,7 +196,11 @@ try {
 
   const ws = (origin) =>
     new Promise((resolve) => {
-      const s = new WebSocket(`${URL_.replace(/^http/, "ws")}/v1/monorepos/ana-${id}/br-${id}/events`, { headers: { cookie: `__Host-pando_session=${session}`, ...(origin ? { origin } : {}) } });
+      const headers = { cookie: `__Host-pando_session=${session}` };
+
+      if (origin) headers.origin = origin;
+
+      const s = new WebSocket(`${URL_.replace(/^http/, "ws")}/v1/monorepos/ana-${id}/br-${id}/events`, { headers });
 
       const done = (v) => {
         try {

@@ -1,0 +1,31 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/merge (checks not green)",
+  "status": 412,
+  "body": {
+    "error": {
+      "code": "checks_not_green",
+      "message": "checks are failure on ba71f481ee1a; wait, or merge with force",
+      "checks": {
+        "sha": "ba71f481ee1ab00636098c82a31011bfa503d07d",
+        "state": "failure",
+        "required": [
+          "ci/test"
+        ],
+        "missing": [],
+        "statuses": [
+          {
+            "sha": "ba71f481ee1ab00636098c82a31011bfa503d07d",
+            "context": "ci/test",
+            "state": "failure",
+            "target_url": null,
+            "description": "2 tests failed",
+            "creator": "rec-musyuiou",
+            "app": null,
+            "created_at": "2026-10-03T22:31:13.998Z"
+          }
+        ]
+      }
+    }
+  }
+}

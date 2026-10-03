@@ -1,12 +1,17 @@
-// The routes web slice 1 reads: each one's path and the schema of its 200
-// body. Names are api-v1.yaml's operationIds. Path segments are encoded
-// here, so callers pass plain values.
-import { FullName, Login, MonorepoName } from "./ids.ts";
-import { MonorepoList, MonorepoSummaryList } from "./monorepo.ts";
+// The routes the web reads and writes: each one's path, its method when not
+// GET, and the schema of its 200 body. Names are api-v1.yaml's operationIds.
+// Path segments are encoded here, so callers pass plain values; a branch's
+// `/` is sent as %2F.
+import { BranchCommits, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
+import { Checks } from "./checks.ts";
+import { CiBuildList } from "./ci.ts";
+import { FullName, Login, MonorepoName, RepoName } from "./ids.ts";
+import { MonorepoEntry, MonorepoList, MonorepoSummaryList } from "./monorepo.ts";
 import { EventsPage } from "./feed.ts";
-import { MetaHistory, MetaTree } from "./meta.ts";
+import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { NeedsPage } from "./needs.ts";
-import { Me } from "./user.ts";
+import { MachineList, MemberList, Repo, RepoList } from "./repo.ts";
+import { Me, SignedOut } from "./user.ts";
 
 const query = (params: URLSearchParams): string => {
   const text = params.toString();
@@ -14,7 +19,14 @@ const query = (params: URLSearchParams): string => {
   return text === "" ? "" : `?${text}`;
 };
 
-const metaBase = (owner: Login, name: MonorepoName): string => `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/meta`;
+const monorepoBase = (owner: Login, name: MonorepoName): string => `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+
+const metaBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/meta`;
+
+const repoBase = (owner: Login, name: MonorepoName, repo: RepoName): string => `${monorepoBase(owner, name)}/repos/${encodeURIComponent(repo)}`;
+
+const branchBase = (owner: Login, name: MonorepoName, repo: RepoName, branch: string): string =>
+  `${repoBase(owner, name, repo)}/branches/${encodeURIComponent(branch)}`;
 
 /** GET /v1/user. A 401 here means: show the sign-in button. */
 export const me = { path: "/v1/user", response: Me };
@@ -91,4 +103,74 @@ export const metaRawPath = (owner: Login, name: MonorepoName, path: string, vers
   if (version !== null) params.set("v", String(version));
 
   return `/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/raw/${path.split("/").map(encodeURIComponent).join("/")}${query(params)}`;
+};
+
+/** POST /v1/logout with `Accept: application/json` and Pando's own Origin: the session ends; open logout_url to end WorkOS's too. */
+export const logout = { method: "POST", path: "/v1/logout", response: SignedOut } as const;
+
+/** GET /v1/monorepos/{owner}/{monorepo}: the monorepo and the person's role in it; an old name answers with the current one. */
+export const getMonorepo = (owner: Login, name: MonorepoName) => ({ path: monorepoBase(owner, name), response: MonorepoEntry });
+
+/** GET .../repos: every code repo. */
+export const listRepos = (owner: Login, name: MonorepoName) => ({ path: `${monorepoBase(owner, name)}/repos`, response: RepoList });
+
+/** GET .../repos/{repo}: one repo, with its required_checks. */
+export const getRepo = (owner: Login, name: MonorepoName, repo: RepoName) => ({ path: repoBase(owner, name, repo), response: Repo });
+
+/** GET .../members. */
+export const listMembers = (owner: Login, name: MonorepoName) => ({ path: `${monorepoBase(owner, name)}/members`, response: MemberList });
+
+/** GET .../machines: the Machines tab. */
+export const listMachines = (owner: Login, name: MonorepoName) => ({ path: `${monorepoBase(owner, name)}/machines`, response: MachineList });
+
+/** POST .../meta/restore with {path, version}: a root file written back as it was. */
+export const restore = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${metaBase(owner, name)}/restore`, response: Restored }) as const;
+
+/** GET .../repos/{repo}/branches?state=open|merged|all; `cursor` is a page's next_cursor. */
+export const listBranches = (owner: Login, name: MonorepoName, repo: RepoName, state: "open" | "merged" | "all", cursor: string | null) => {
+  const params = new URLSearchParams({ state });
+
+  if (cursor !== null) params.set("cursor", cursor);
+
+  return { path: `${repoBase(owner, name, repo)}/branches${query(params)}`, response: BranchList };
+};
+
+/** GET .../branches/{branch}. */
+export const getBranch = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({ path: branchBase(owner, name, repo, branch), response: Branch });
+
+/** GET .../branches/{branch}/commits: the branch's own commits, newest first. */
+export const branchCommits = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({
+  path: `${branchBase(owner, name, repo, branch)}/commits`,
+  response: BranchCommits,
+});
+
+/** GET .../branches/{branch}/reviews: oldest first. */
+export const listReviews = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({
+  path: `${branchBase(owner, name, repo, branch)}/reviews`,
+  response: ReviewList,
+});
+
+/**
+ * POST .../branches/{branch}/merge with {expected_head}: MergeResult. Refused:
+ * 412 checks_not_green (ErrorBody with `checks`), 409 head_moved or conflicts
+ * (with `paths`). `force` merges past red or missing checks.
+ */
+export const mergeBranch = (owner: Login, name: MonorepoName, repo: RepoName, branch: string, force: boolean) =>
+  ({ method: "POST", path: `${branchBase(owner, name, repo, branch)}/merge?force=${force ? "1" : "0"}`, response: MergeResult }) as const;
+
+/** GET .../repos/{repo}/commits/{ref}/status: a commit's combined status. */
+export const combinedStatus = (owner: Login, name: MonorepoName, repo: RepoName, ref: string) => ({
+  path: `${repoBase(owner, name, repo)}/commits/${encodeURIComponent(ref)}/status`,
+  response: Checks,
+});
+
+/** GET .../ci/builds, newest first; narrowed to one branch (and repo) when given. */
+export const listCiBuilds = (owner: Login, name: MonorepoName, repo: RepoName | null, branch: string | null) => {
+  const params = new URLSearchParams();
+
+  if (repo !== null) params.set("repo", repo);
+
+  if (branch !== null) params.set("branch", branch);
+
+  return { path: `${monorepoBase(owner, name)}/ci/builds${query(params)}`, response: CiBuildList };
 };

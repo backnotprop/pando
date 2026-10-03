@@ -20,6 +20,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -36,11 +37,7 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`.replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<token>"));
 };
 
-const call = async (method, path, secret, body) => {
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-
-  return { status: res.status, json: await res.json().catch(() => null) };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const waitFor = async (pred, ms = 30_000) => {
   const end = Date.now() + ms;
@@ -190,12 +187,12 @@ try {
   r = await call("POST", `${base}/branches/feat/merge?force=1`, S);
   check("merge", r.status === 200);
   const merged = await waitFor(() => got.flaky.find((x) => x.event === "merged" && x.body?.merge_commit === r.json?.sha && tries.get(x.delivery) === 3));
-  check("the merged event is delivered (after its two failures)", !!merged && typeof merged.body.seq === "number");
+  check("the merged event is delivered (after its two failures)", !!merged && Number.isInteger(merged.body.seq));
   const n0 = got.flaky.length;
   r = await call("POST", `${base}/hooks/${flaky}/redeliver?since=0`, S);
   check("replay from seq 0 queues every delivery of the hook (main's first push, the branch push, the merge)", r.status === 202 && r.json?.queued === 3, JSON.stringify(r.json?.queued));
   const replayed = await waitFor(() => got.flaky.length >= n0 + 3 && got.flaky.slice(n0));
-  check("the replayed deliveries arrive, in their seqs", replayed && replayed.every((x) => x.valid && typeof x.body.seq === "number"), replayed ? replayed.map((x) => x.body.seq).join(",") : "none");
+  check("the replayed deliveries arrive, in their seqs", replayed && replayed.every((x) => x.valid && Number.isInteger(x.body.seq)), replayed ? replayed.map((x) => x.body.seq).join(",") : "none");
   r = await call("POST", `${base}/hooks/${flaky}/redeliver?since=${merged.body.seq}`, S);
   check("replay from the newest seq queues nothing", r.status === 202 && r.json?.queued === 0);
 
@@ -215,13 +212,13 @@ try {
     git(["commit", "-qm", "crash"], src);
     const pushed = git(["push", "-q", url, "crash"], src).status === 0;
     const crashHead = git(["rev-parse", "HEAD"], src).stdout.trim();
-    const sent = (n) => got.ok.filter((x) => x.body?.head === crashHead && x.event === "push");
+    const sent = () => got.ok.filter((x) => x.body?.head === crashHead && x.event === "push");
     check("crash armed (HOOKS_TEST), the only hook left is one that answers 200, the push lands", arm.status === 200 && arm.json?.crash === true && !!once && pushed, `lease ${lease} ms`);
     const two = await waitFor(() => sent().length >= 2 && sent(), lease + 30_000);
     const gap = two ? two[1].at - two[0].at : null;
     check(
       "the object died after the receiver had it; after the lease the alarm sent it again: same delivery, same seq, signed",
-      !!two && two[0].delivery === two[1].delivery && two[0].body.seq === two[1].body.seq && typeof two[0].body.seq === "number" && two.every((x) => x.valid) && gap >= lease - 1_000,
+      !!two && two[0].delivery === two[1].delivery && two[0].body.seq === two[1].body.seq && Number.isInteger(two[0].body.seq) && two.every((x) => x.valid) && gap >= lease - 1_000,
       two ? `${gap} ms apart, seq ${two[0].body.seq}` : `${sent().length} POSTs`,
     );
 

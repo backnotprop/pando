@@ -147,6 +147,8 @@ describe("Buildkite's rate limit", () => {
     expect(rateWaitMs(new Response("", { status: 200, headers: { "ratelimit-remaining": "3" } }))).toBeNull();
   });
   it("a connection makes at most READS_PER_MIN calls a minute, and waits when told", () => {
+    // SAFETY: the constructor only stores its four arguments, and permit() reads and writes only the
+    // store's in-memory rate map (ci/store.ts); nothing here reaches ctx, env, sql or the host.
     const store = new CiStore({} as DurableObjectState, {} as never, {} as SqlStorage, {} as never);
     const t = 1_000_000;
 

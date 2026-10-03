@@ -1,5 +1,9 @@
-// The pando-feed queue consumer (C25). Messages come from monorepo objects
-// (events, summary ticks) and from membership changes (member):
+// Writing members' feeds (C25), for two callers:
+// - FeedDrain, the Worker entrypoint each monorepo object calls (by
+//   ctx.exports RPC) to drain its outbox at once: events and summary ticks;
+// - the pando-feed queue consumer: membership changes (member), and any
+//   events or summaries still queued from before the outbox drained by RPC.
+// Message kinds:
 // - events: one message per burst of activity in a small monorepo, with its
 //   member list; one FeedObject call per member's feed per batch.
 // - summary: a monorepo's line changed; one call per member's feed.
@@ -12,6 +16,7 @@
 // idempotent (pointers are unique on (monorepo, seq); older summaries are
 // dropped).
 
+import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
 import { accounts } from "../accounts/auth";
 import { monorepoStub } from "../monorepo/session";
@@ -27,63 +32,90 @@ export function feedStub(env: Env, login: string): DurableObjectStub<FeedObject>
 /** Feed calls at once in one invocation. */
 const PARALLEL = 20;
 
-export async function handleFeedBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<void> {
-  // Per hop (timing.ts line): queue_delay_ms, the longest a message of this batch waited in pando-feed;
-  // event_age_ms, the oldest line's age since its monorepo recorded it (a push's includes the facts job).
-  const t = Date.now();
+/** Per hop (timing.ts line): event_age_ms, the oldest line's age since its monorepo recorded it (a push's includes the facts job). */
+function ageFields(msgs: FeedMessage[], t: number): Record<string, number> {
   let age = 0;
-  for (const m of batch.messages) {
-    if (m.body.type !== "events") continue;
-    for (const e of m.body.events) age = Math.max(age, t - Date.parse(e.at));
+  let lines = 0;
+  for (const m of msgs) {
+    if (m.type !== "events") continue;
+    lines += m.events.length;
+    for (const e of m.events) age = Math.max(age, t - Date.parse(e.at));
   }
+  return lines ? { lines, event_age_ms: age } : {};
+}
+
+export async function handleFeedBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<void> {
+  // queue_delay_ms: the longest a message of this batch waited in pando-feed.
+  const t = Date.now();
   const fields = {
     route: "feed",
     messages: batch.messages.length,
     queue_delay_ms: Math.max(0, ...batch.messages.map((m) => t - m.timestamp.getTime())),
-    ...(age ? { event_age_ms: age } : {}),
+    ...ageFields(batch.messages.map((m) => m.body), t),
   };
-  await timed("queue", fields, () => runBatch(batch, env));
+  await timed("queue", fields, async () => {
+    const ok = await fanOut(env, batch.messages.map((m) => m.body));
+    batch.messages.forEach((msg, i) => (ok[i] ? msg.ack() : msg.retry({ delaySeconds: Math.min(60, 5 * msg.attempts) })));
+  });
 }
 
-async function runBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<void> {
-  const failed = new Set<Message<FeedMessage>>();
+/**
+ * The monorepo objects' drain (C25-LIVE-HOME.md): one call per drain of up to
+ * 100 outbox rows. Answers per message whether every feed took it; the object
+ * deletes those rows and retries the rest.
+ */
+export class FeedDrain extends WorkerEntrypoint<Env> {
+  async deliver(msgs: FeedMessage[]): Promise<{ ok: boolean[]; error: string | null }> {
+    const fields = { route: "feed.drain", monorepo: msgs[0]?.monorepo ?? null, messages: msgs.length, ...ageFields(msgs, Date.now()) };
+    let error: string | null = null;
+    const ok = await timed("drain", fields, () =>
+      fanOut(this.env, msgs, (err) => {
+        error ??= err instanceof Error ? err.message : String(err);
+      }),
+    );
+    return { ok, error };
+  }
+}
+
+/** Deliver messages; one answer per message (true: done; false: try again, every write is idempotent). */
+export async function fanOut(env: Env, msgs: FeedMessage[], onError?: (err: unknown) => void): Promise<boolean[]> {
+  const ok = msgs.map(() => true);
+  const fail = (i: number, what: string, err: unknown) => {
+    ok[i] = false;
+    onError?.(err);
+    console.error(`feed: ${what} failed:`, err instanceof Error ? err.message : String(err));
+  };
   // Events: group by person, then by monorepo, so each feed gets one call.
-  const perLogin = new Map<string, { msgs: Message<FeedMessage>[]; groups: Map<string, FeedEvent[]> }>();
-  for (const msg of batch.messages) {
-    const b = msg.body;
-    if (b.type !== "events") continue;
+  const perLogin = new Map<string, { msgs: number[]; groups: Map<string, FeedEvent[]> }>();
+  msgs.forEach((b, i) => {
+    if (b.type !== "events") return;
     for (const login of b.members) {
-      const p = perLogin.get(login) ?? { msgs: [] as Message<FeedMessage>[], groups: new Map<string, FeedEvent[]>() };
-      p.msgs.push(msg);
+      const p = perLogin.get(login) ?? { msgs: [] as number[], groups: new Map<string, FeedEvent[]>() };
+      p.msgs.push(i);
       p.groups.set(b.monorepo, [...(p.groups.get(b.monorepo) ?? []), ...b.events]);
       perLogin.set(login, p);
     }
-  }
+  });
   const w0 = Date.now();
   await pool([...perLogin], PARALLEL, async ([login, p]) => {
     try {
       await feedStub(env, login).addEvents([...p.groups].map(([monorepo, events]) => ({ monorepo, events })));
     } catch (err) {
-      console.error(`feed: events to ${login} failed:`, err instanceof Error ? err.message : String(err));
-      for (const m of p.msgs) failed.add(m);
+      for (const i of p.msgs) fail(i, `events to ${login}`, err);
     }
   });
   if (perLogin.size) note({ feed_write_ms: Date.now() - w0, feeds: perLogin.size });
   // Summaries and memberships, one message at a time (each fans out or reads on its own).
-  for (const msg of batch.messages) {
-    const b = msg.body;
+  for (let i = 0; i < msgs.length; i++) {
+    const b = msgs[i];
     try {
       if (b.type === "summary") await summary(env, b);
       else if (b.type === "member") await member(env, b.monorepo, b.login);
     } catch (err) {
-      console.error(`feed: ${b.type} for ${b.monorepo} failed:`, err instanceof Error ? err.message : String(err));
-      failed.add(msg);
+      fail(i, `${b.type} for ${b.monorepo}`, err);
     }
   }
-  for (const msg of batch.messages) {
-    if (failed.has(msg)) msg.retry({ delaySeconds: Math.min(60, 5 * msg.attempts) });
-    else msg.ack();
-  }
+  return ok;
 }
 
 async function summary(env: Env, b: Extract<FeedMessage, { type: "summary" }>): Promise<void> {

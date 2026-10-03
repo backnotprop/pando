@@ -30,6 +30,7 @@ export { Objects } from "./objects";
 export { AccountsObject } from "./accounts/object";
 export { MetaLayerObject } from "./live/object";
 export { FeedObject } from "./feed/object";
+export { FeedDrain } from "./feed/consumer";
 export type { Env };
 
 const META_RE = /^\/v1\/monorepos\/[^/]+\/[^/]+\/meta(\/|$)/;

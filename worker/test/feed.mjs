@@ -3,7 +3,7 @@
 // started with the test overrides (the split at 2 members instead of 100, a
 // 0.5 s summary tick, and the test route):
 //
-//   npx wrangler dev --port 8811 --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1 > /tmp/feed-dev.log 2>&1
+//   npx wrangler dev --port 8811 --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1 --var FEED_RETRY_MS:200,400,600,800 > /tmp/feed-dev.log 2>&1
 //   PANDO_URL=http://localhost:8811 PANDO_DEV_LOG=/tmp/feed-dev.log node test/feed.mjs
 //
 // With PANDO_DEV_LOG (the dev server's output), the run fails on any workerd
@@ -285,6 +285,56 @@ try {
   const n0 = (await debugFeed(login.ana)).pointers[ID[O]];
   await deliver({ type: "member", monorepo: ID[O], login: login.ana });
   check("a repeated join keeps the lines it has", (await debugFeed(login.ana)).pointers[ID[O]] === n0, `${n0}`);
+
+  // ── The outbox (C25-LIVE-HOME.md): retries, the dead row, a crash mid-drain ──
+  const outbox = async (m) => (await call("GET", `/v1/_feed/test?monorepo=${m}`, BOOT)).json?.outbox;
+  const arm = (set) => call("POST", "/v1/_feed/test", BOOT, { outbox: { monorepo: ID[T], ...set } });
+  const report = (wid) => call("PUT", `/v1/monorepos/${login.ana}/${T}/worktrees/${wid}`, A, { repo: ".", branch: wid, path: `worktrees/${wid}`, machine: "ana-mbp", kind: "sparse" });
+  const lineFor = (wid, ms = 10_000) => waitFor(() => live.frames.find((f) => f.type === "event" && f.event?.monorepo_id === ID[T] && f.event.summary?.worktree === wid), ms);
+  const ptrT = async () => (await debugFeed(login.ana)).pointers[ID[T]] ?? 0;
+  {
+    // A line, the normal way: at once.
+    let t0 = Date.now();
+    await report(`wo_now_${id}`);
+    check("outbox: a line reaches the person's socket at once (one RPC, no queue)", !!(await lineFor(`wo_now_${id}`, 5000)), `${Date.now() - t0} ms`);
+    // Two failed drains, then delivered on the third try (retries 200 ms, 400 ms on this server).
+    await arm({ fail: 2 });
+    t0 = Date.now();
+    await report(`wo_retry_${id}`);
+    const tries = await waitFor(async () => (await outbox(ID[T]))?.rows?.find((r) => r.attempts >= 1), 5000);
+    let got = await lineFor(`wo_retry_${id}`, 10_000);
+    const ms = Date.now() - t0;
+    check("outbox: two failed drains are tried again on the schedule, and the line arrives", !!tries && !!got && ms >= 500, `${ms} ms; error "${tries?.error}"`);
+    check("outbox: the delivered row is gone", !!(await waitFor(async () => (await outbox(ID[T]))?.live === 0, 5000)));
+    // Every try fails: dead after the 5th, kept, never in the feed.
+    const before = await ptrT();
+    await arm({ fail: 50 });
+    await report(`wo_dead_${id}`);
+    const dead = await waitFor(async () => {
+      const o = await outbox(ID[T]);
+      return o?.dead >= 1 && o.live === 0 ? o : null;
+    }, 15_000);
+    await arm({ fail: 0 });
+    const row = dead?.rows?.find((r) => r.dead_at);
+    check("outbox: a row that fails every try is dead after the 5th and kept", row?.attempts === 5 && /failed drain/.test(row.error ?? ""), JSON.stringify(row));
+    check("outbox: a dead row's line is not in the feed", (await ptrT()) === before && !live.frames.some((f) => f.event?.summary?.worktree === `wo_dead_${id}`));
+    // The object dies after the change is acknowledged and before its drain call: the alarm drains it.
+    await arm({ crash: "before" });
+    t0 = Date.now();
+    let r = await report(`wo_crash1_${id}`);
+    const logged = (await call("GET", `/v1/monorepos/${login.ana}/${T}/events?limit=20`, A)).json?.events?.some((e) => e.kind === "worktree.reported" && e.key === `wo_crash1_${id}`);
+    check("crash before the drain: the change was recorded and acknowledged", r.status === 200 && logged, `${r.status}`);
+    got = await lineFor(`wo_crash1_${id}`, 15_000);
+    check("crash before the drain: the line still arrives (the alarm set with the row drains it)", !!got, `${Date.now() - t0} ms`);
+    // The object dies after its drain call delivered, before deleting the rows: the retry delivers again, the feed keeps one copy.
+    const n0 = await ptrT();
+    await arm({ crash: "after" });
+    r = await report(`wo_crash2_${id}`);
+    got = await lineFor(`wo_crash2_${id}`, 15_000);
+    const drained = await waitFor(async () => (await outbox(ID[T]))?.live === 0, 15_000);
+    await sleep(1000);
+    check("crash after the drain: delivered once to the socket's feed, redelivered without a second copy, outbox empty", r.status === 200 && !!got && !!drained && (await ptrT()) === n0 + 1, `${n0} -> ${await ptrT()}`);
+  }
 
   // ── Presence: the follower socket's hello ──
   const f1 = openSocket(`/v1/monorepos/${login.ana}/${S}/events?topics=main`, A);

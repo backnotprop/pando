@@ -80,6 +80,9 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 	if err := InstallHook(ctx, gitDir, s.Identity); err != nil {
 		return err
 	}
+	if err := WriteAgentHeader(ctx, gitDir, s.CloneURL, s.Identity.Agent); err != nil {
+		return err
+	}
 	if s.ReadOnly {
 		return setWritable(dst, false)
 	}

@@ -210,6 +210,56 @@ func CredentialEnv(cloneURL string) []string {
 	return env
 }
 
+// AgentHeader names the agent working through a credential, on API calls
+// and on pushes through the git door (the Worker records it; on a merge it
+// becomes merged_agent). It is the name in the Pando-Agent trailer.
+const AgentHeader = "X-Pando-Agent"
+
+// CleanAgent keeps an agent name safe for an HTTP header: printable ASCII
+// only, trimmed, at most 100 characters.
+func CleanAgent(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r >= 0x20 && r < 0x7f {
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	return out
+}
+
+// AgentHeaderArgs is the agent header as `git -c` arguments for one git
+// command, scoped to the Pando host; nil without an agent or for a
+// non-http(s) remote.
+func AgentHeaderArgs(cloneURL, agent string) []string {
+	scope, agent := credentialScope(cloneURL), CleanAgent(agent)
+	if scope == "" || agent == "" {
+		return nil
+	}
+	return []string{"-c", "http." + scope + "/.extraHeader=" + AgentHeader + ": " + agent}
+}
+
+// WriteAgentHeader stores the agent header in a worktree's git config,
+// for the Pando host only, so its pushes through the door name the agent.
+// With no agent it removes the header.
+func WriteAgentHeader(ctx context.Context, gitDir, cloneURL, agent string) error {
+	scope := credentialScope(cloneURL)
+	if scope == "" {
+		return nil
+	}
+	g := gitx.Cmd{Env: []string{"GIT_DIR=" + gitDir}}
+	key := "http." + scope + "/.extraHeader"
+	_, _ = g.Run(ctx, "config", "--unset-all", key)
+	if agent = CleanAgent(agent); agent == "" {
+		return nil
+	}
+	_, err := g.Run(ctx, "config", "--add", key, AgentHeader+": "+agent)
+	return err
+}
+
 // WriteCredentialConfig stores credentialConfig in a git folder's config so
 // git inside the worktree (push, fetch, lazy blob fetches) finds the token.
 func WriteCredentialConfig(ctx context.Context, gitDir, cloneURL string) error {

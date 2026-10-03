@@ -142,6 +142,9 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 		if err := InstallHook(ctx, gd, s.Identity); err != nil {
 			return err
 		}
+		if err := WriteAgentHeader(ctx, gd, s.CloneURL, s.Identity.Agent); err != nil {
+			return err
+		}
 	}
 	logPath := filepath.Join(state, "daemon.log")
 	var logStart int64

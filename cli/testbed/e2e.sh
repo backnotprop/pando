@@ -114,6 +114,9 @@ case "$url" in
       [ "$v" = "HTTP/1.1" ] && [ "$b" = "104857600" ] && ok "$(basename "$w"): http.version HTTP/1.1, http.postBuffer 104857600 for the Pando host" || fail "$(basename "$w"): version=$v postBuffer=$b"
     done
     [ -z "$(git -C "$wt" config --get-urlmatch http.version https://github.com/x/y.git)" ] && ok "other hosts keep git's defaults" || fail "settings leaked to other hosts"
+    [ "$(git -C "$wt" config --get-urlmatch http.extraheader "$url")" = "X-Pando-Agent: agent-7" ] && ok "feat-x pushes carry X-Pando-Agent: agent-7, to the Pando host only" || fail "agent header: $(git -C "$wt" config --get-urlmatch http.extraheader "$url")"
+    [ -z "$(git -C "$wt" config --get-urlmatch http.extraheader https://github.com/x/y.git)" ] || fail "agent header leaked to another host"
+    [ -z "$(git -C /work/acme/worktrees/main config --get-urlmatch http.extraheader "$url")" ] && ok "main, made with no agent, sends none" || fail "main has an agent header"
     ;;
   *) echo "  note the HTTP settings apply to http(s) servers; this run uses $url" ;;
 esac

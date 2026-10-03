@@ -72,7 +72,7 @@ let me = null; // the owner of everything made here (namespaces: owner/name)
 try {
   S = HOME_CRED
     ? readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim()
-    : (await call("POST", "/v1/users", BOOT, { login: `hl-${id}`, credential_name: "hl-mbp" })).json?.credential?.secret;
+    : (await call("POST", "/v1/users", BOOT, { login: `feedload-${id}`, credential_name: "feedload-mbp" })).json?.credential?.secret;
   me = (await call("GET", "/v1/user", S)).json?.login;
   const names = Array.from({ length: N }, (_, i) => `hl${i}-${id}`);
   const clone = {};
@@ -218,5 +218,18 @@ try {
     if (r.status !== 204) console.log(`delete ${m}: ${r.status}`);
   });
   console.log(`deleted ${made.length} monorepos in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  // Deleting a monorepo clears it from the person's home and log (leave messages).
+  if (made.length && S) {
+    const gone = new Set(made.map((m) => `${me}/${m}`));
+    let left = null;
+    for (let i = 0; i < 30; i++) {
+      const ev = (await call("GET", "/v1/events?limit=200", S)).json?.events ?? [];
+      const ms = (await call("GET", "/v1/monorepos?summary=1", S)).json?.monorepos ?? [];
+      left = { lines: ev.filter((e) => gone.has(e.monorepo)).length, monorepos: ms.filter((m) => gone.has(m.full_name)).length };
+      if (!left.lines && !left.monorepos) break;
+      await sleep(1000);
+    }
+    console.log(`after delete, left on the home: ${JSON.stringify(left)}`);
+  }
   rmSync(work, { recursive: true, force: true });
 }

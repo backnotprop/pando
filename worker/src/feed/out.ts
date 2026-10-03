@@ -41,8 +41,14 @@ type Outgoing =
   | { t: "event"; event: FeedEvent }
   | { t: "summary"; summary: Summary; needs_changed: NeedChange[]; needs_more: boolean };
 
+/** Log a background failure with its stack (a promise left unhandled shows only "internal error"). */
+function logged(what: string): (err: unknown) => void {
+  return (err) => console.error(`feed: ${what} failed:`, err instanceof Error ? (err.stack ?? err.message) : String(err));
+}
+
 export class FeedOut {
-  private flushing = false;
+  /** The one flush in progress, if any (single flight: two flushes would send the same rows twice). */
+  private flushing: Promise<void> | null = null;
 
   constructor(
     private ctx: DurableObjectState,
@@ -186,24 +192,39 @@ export class FeedOut {
     this.queue({ t: "event", event });
   }
 
-  private queue(o: Outgoing): void {
+  /** Add to the outbox. `send`: start a flush after this turn (a burst goes out together); the alarm flushes itself. */
+  private queue(o: Outgoing, send = true): void {
     this.sql.exec("INSERT INTO feed_outbox (body) VALUES (?)", JSON.stringify(o));
-    if (this.flushing) return;
-    this.flushing = true;
-    // After this turn, so a burst (publishMany) goes out together.
-    this.ctx.waitUntil(Promise.resolve().then(() => this.flush()).finally(() => (this.flushing = false)));
+    if (send && !this.flushing) this.ctx.waitUntil(Promise.resolve().then(() => this.flush()));
   }
 
-  /** Send the outbox to pando-feed: events in messages of 50 with the member list, summaries one each. */
-  async flush(): Promise<void> {
+  /** Send the outbox; one flush at a time. Never rejects. */
+  flush(): Promise<void> {
+    if (!this.flushing) {
+      this.flushing = this.flushNow()
+        .catch((err) => {
+          logged("sending the outbox")(err);
+          return false;
+        })
+        .then((ok) => {
+          this.flushing = null;
+          // A row added while the last round was sending goes now (a failed send waits for the alarm).
+          if (ok && this.monorepo() && this.row("SELECT id FROM feed_outbox LIMIT 1")) this.ctx.waitUntil(this.flush());
+        });
+    }
+    return this.flushing;
+  }
+
+  /** Send the outbox to pando-feed: events in messages of 50 with the member list, summaries one each. False when a send failed. */
+  private async flushNow(): Promise<boolean> {
     const name = this.monorepo();
     if (!name || !this.env.FEED_QUEUE) {
       this.sql.exec("DELETE FROM feed_outbox");
-      return;
+      return true;
     }
     for (let round = 0; round < 50; round++) {
       const rows = this.rows<{ id: number; body: string }>("SELECT id, body FROM feed_outbox ORDER BY id LIMIT ?", OUTBOX_BATCH);
-      if (!rows.length) return;
+      if (!rows.length) return true;
       const members = this.members();
       const large = this.isLarge();
       const msgs: FeedMessage[] = [];
@@ -227,11 +248,12 @@ export class FeedOut {
         for (let i = 0; i < msgs.length; i += 10) await this.env.FEED_QUEUE.sendBatch(msgs.slice(i, i + 10).map((body) => ({ body })));
       } catch (err) {
         console.error("feed: sending to pando-feed failed; the alarm retries:", err instanceof Error ? err.message : String(err));
-        await this.alarmAtMost(Date.now() + 30_000);
-        return;
+        this.armAt(Date.now() + 30_000);
+        return false;
       }
       this.sql.exec("DELETE FROM feed_outbox WHERE id <= ?", rows[rows.length - 1].id);
     }
+    return true; // 50 rounds of 100; the rest goes on the next flush
   }
 
   /**
@@ -353,6 +375,8 @@ export class FeedOut {
 
   /** A socket closed: its machine and worktrees stop counting. */
   gone(ws: WebSocket): void {
+    // Sockets of a deleted monorepo close after its storage is gone: nothing to count.
+    if (!this.monorepo()) return;
     try {
       const sid = (ws.deserializeAttachment() as { sid?: string } | null)?.sid;
       if (sid && this.sql.exec("DELETE FROM feed_presence WHERE sid = ?", sid).rowsWritten) this.scheduleSummary();
@@ -461,20 +485,31 @@ export class FeedOut {
     const due = Number(this.get("tick_due") ?? 0);
     const next = soon ? Date.now() : Math.max(Date.now(), Number(this.get("tick_last") ?? 0) + this.tickMs());
     if (due && due <= next) return;
+    if (!this.monorepo()) return;
     this.set("tick_due", String(next));
-    this.ctx.waitUntil(this.alarmAtMost(next));
+    this.armAt(next);
   }
 
-  private async alarmAtMost(t: number): Promise<void> {
-    const cur = await this.ctx.storage.getAlarm();
-    if (cur === null || cur > t) await this.ctx.storage.setAlarm(t);
+  /**
+   * Ask for the object's alarm at `t` unless one of ours is due sooner. The
+   * time is kept here, not read back with getAlarm: no storage call is left
+   * running in the background. The object's other alarm user (hook
+   * re-sends, 30 s) may move it; alarm() then re-arms whatever is still due.
+   */
+  private armAt(t: number): void {
+    const cur = Number(this.get("alarm_at") ?? 0);
+    if (cur > Date.now() && cur <= t) return;
+    this.set("alarm_at", String(t));
+    this.ctx.storage.setAlarm(t).catch(logged("setting the alarm"));
   }
 
   /** The object's alarm, after its own work: a due summary tick, and any outbox left by a failed send. */
   async alarm(): Promise<void> {
+    this.set("alarm_at", null);
+    if (!this.monorepo()) return;
     const due = Number(this.get("tick_due") ?? 0);
     if (due && due <= Date.now() + 50) this.tick();
-    else if (due) await this.alarmAtMost(due);
+    else if (due) this.armAt(due);
     if (this.row("SELECT id FROM feed_outbox LIMIT 1")) await this.flush();
   }
 
@@ -498,6 +533,6 @@ export class FeedOut {
     this.set("summary_last", JSON.stringify(same));
     this.set("needs_last", JSON.stringify(needsNow));
     if (!this.get("members_at")) return; // no feed has joined yet
-    this.queue({ t: "summary", summary: s, needs_changed: changed.slice(0, 50), needs_more: changed.length > 50 });
+    this.queue({ t: "summary", summary: s, needs_changed: changed.slice(0, 50), needs_more: changed.length > 50 }, false);
   }
 }

@@ -13,7 +13,7 @@
 
 import type { Env } from "../env";
 import { HttpError } from "../http";
-import { timed, timedStub } from "../timing";
+import { currentTiming, note, timed, timedStub } from "../timing";
 import { withRepo } from "./artifacts";
 import { requiredKept } from "./checks";
 import { commitReader, compareWith, type CommitReader } from "./graph";
@@ -80,7 +80,13 @@ export async function handleFactsBatch(batch: MessageBatch<FactsMessage>, env: E
   const run = async (msg: Message<FactsMessage>) => {
     try {
       const b = msg.body;
-      await timed("queue", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, attempt: msg.attempts }, () => runFacts(env, b));
+      await timed("queue", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () =>
+        runFacts(env, b).finally(() => {
+          // The facts themselves, apart from the push's line (push_summary_ms).
+          const t = currentTiming();
+          if (t) t.fields.facts_job_ms = Date.now() - t.start - Number(t.fields.push_summary_ms ?? 0);
+        }),
+      );
       msg.ack();
     } catch (err) {
       if (err instanceof MainMoved) {
@@ -103,7 +109,11 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
   const stub = stubOf(env, m.monorepo);
   const [r, info] = await Promise.all([stub.getRepo(m.repo), stub.info()]);
   if (!r || !info) return { computed: 0, abandoned: true };
-  if (m.push) await sendPushSummary(env, stub, r, m.push, m.type === "branch" ? m.head : m.main, m.type === "sweep");
+  if (m.push) {
+    const t0 = Date.now();
+    await sendPushSummary(env, stub, r, m.push, m.type === "branch" ? m.head : m.main, m.type === "sweep");
+    note({ push_summary_ms: Date.now() - t0 }); // the push's line leaves for the feed here; the facts themselves follow
+  }
   if (m.type === "branch") {
     const main = await stub.currentMain(m.repo);
     if (!main) return { computed: 0, abandoned: true };

@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,7 +124,9 @@ func createMonorepo(t *testing.T, server, token, name string) {
 		t.Fatalf("creating monorepo %s: %d %s", name, resp.StatusCode, out)
 	}
 	remote.server = server
-	remote.created = append(remote.created, name)
+	if !slices.Contains(remote.created, name) {
+		remote.created = append(remote.created, name)
+	}
 	t.Logf("made monorepo %s on %s", name, server)
 }
 

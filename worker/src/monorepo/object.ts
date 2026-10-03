@@ -560,8 +560,9 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Known sizes of objects in a repo. Objects never change, so entries never expire. */
   objectSizes(repo: string, oids: string[]): Record<string, number> {
     const out: Record<string, number> = {};
-    for (let i = 0; i < oids.length; i += 100) {
-      const chunk = oids.slice(i, i + 100);
+    // Durable Object SQLite binds at most 100 variables: the repo plus 90 ids.
+    for (let i = 0; i < oids.length; i += 90) {
+      const chunk = oids.slice(i, i + 90);
       const rows = this.rows<{ oid: string; size: number }>(
         `SELECT oid, size FROM object_sizes WHERE repo = ? AND oid IN (${chunk.map(() => "?").join(",")})`,
         repo, ...chunk,

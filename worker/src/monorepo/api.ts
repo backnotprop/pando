@@ -484,7 +484,8 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
   await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
-  const view = (await branchViews(c, r, [b.name], "all", { inline: 1, graceMs: 0 })).branches[0];
+  // Its facts come from the queue (a branch.updated event); the answer says stale until then.
+  const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
   return c.json(view, 201);
 });
 
@@ -516,7 +517,9 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
   const r = await repoOf(c);
   const method = c.req.method;
   if (rest === "" && method === "GET") {
-    const v = (await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0];
+    // Stored facts at once; computed here only when stale for over 30 s, or with ?fresh=1.
+    const fresh = c.req.query("fresh") === "1";
+    const v = (await branchViews(c, r, [branch], "all", fresh ? { inline: 1, graceMs: 0 } : { inline: 1 })).branches[0];
     if (!v) throw new HttpError(404, "not_found", `no branch ${branch}`);
     return c.json(v);
   }
@@ -529,7 +532,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
     unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head, c.get("identity")));
-    return c.json((await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0]);
+    return c.json((await branchViews(c, r, [branch], "all", { inline: 0 })).branches[0]);
   }
   if (rest === "" && method === "DELETE") return deleteBranch(c, r, branch);
   if (rest === "diff" && method === "GET") return diff(c, r, branch);

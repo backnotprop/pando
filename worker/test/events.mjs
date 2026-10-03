@@ -199,7 +199,13 @@ try {
       await new Promise((res) => setTimeout(res, 300));
     }
   }
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, {}, { "x-pando-agent": "agent-1" });
+  // The branch moved since the caller looked: a merge naming the older head is refused.
+  const parentA = git(["rev-parse", "HEAD~1"], src).out.trim();
+  r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, { expected_head: parentA });
+  check("a merge naming an older head is refused (409 head_moved)", r.status === 409 && r.json?.error?.code === "head_moved", `${r.status} ${r.json?.error?.code}`);
+  r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, { expected_head: "0".repeat(40) });
+  check("and one naming a head the branch never had", r.status === 409 && r.json?.error?.code === "head_moved");
+  r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, { expected_head: headA }, { "x-pando-agent": "agent-1" });
   const mergeSha = r.json?.sha;
   check("merge feat/a (as agent-1)", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
   e = await find(ev, (x) => x.kind === "merged");

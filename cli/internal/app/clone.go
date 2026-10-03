@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"pando/internal/config"
@@ -82,13 +83,10 @@ func Clone(e *Env, args []string) error {
 		}
 	}
 
-	failed := 0
-	for _, r := range root.Repos {
-		if _, err := addWorktree(e, root, r.Path, "main", "", *kind, nil); err != nil {
-			e.warnf("%s: %v", r.Path, err)
-			failed++
-		}
-	}
+	// Every repo's read-only main, cloneParallel at a time: 20 repos one
+	// after another took 107 to 132 s (load test C22). Each line says when
+	// one is ready.
+	failed := mountMains(e, root, *kind)
 	if m.Kind == config.KindMonorepo {
 		ptrs, err := refs.List(dir)
 		if err != nil {
@@ -144,4 +142,39 @@ func mountReference(e *Env, root *config.Root, p refs.Pointer, kind string) erro
 	}
 	e.printf("%s: reference at %s, read-only, %s, ready in %.1fs\n", p.Path, short(p.Commit), drv.Kind(), time.Since(start).Seconds())
 	return nil
+}
+
+// cloneParallel is how many read-only mains pando clone mounts at once.
+const cloneParallel = 6
+
+// mountMains makes every repo's read-only main, cloneParallel at a time,
+// and returns how many failed.
+func mountMains(e *Env, root *config.Root, kind string) int {
+	if len(root.Repos) > 1 {
+		e.printf("Mounting %d repos' main, %d at a time\n", len(root.Repos), min(cloneParallel, len(root.Repos)))
+	}
+	start := time.Now()
+	sem := make(chan struct{}, cloneParallel)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	failed := 0
+	for _, r := range root.Repos {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(path string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if _, err := addWorktree(e, root, path, "main", "", kind, nil); err != nil {
+				e.warnf("%s: %v", path, err)
+				mu.Lock()
+				failed++
+				mu.Unlock()
+			}
+		}(r.Path)
+	}
+	wg.Wait()
+	if len(root.Repos) > 1 {
+		e.printf("%d of %d mains ready in %.1fs\n", len(root.Repos)-failed, len(root.Repos), time.Since(start).Seconds())
+	}
+	return failed
 }

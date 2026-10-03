@@ -62,6 +62,7 @@ func localOnlyName(name string) bool {
 // root, with / separators.
 type Rules struct {
 	root   string
+	first  bool            // pando init's first upload: .pando/ (but not .pando/local/) goes too
 	extra  []ignorePattern // local_only from .pando/pando.toml
 	tomlMt int64           // mtime of pando.toml when read, to reload on change
 }
@@ -122,7 +123,11 @@ func (r *Rules) SkipDir(rel string) bool {
 		return true // code repos
 	}
 	if parts[0] == ".pando" {
-		// Only reference pointers are live inside .pando/.
+		// Only reference pointers are live inside .pando/ (all of it but
+		// .pando/local/ on the first upload).
+		if r.first {
+			return len(parts) >= 2 && parts[1] == "local"
+		}
 		return len(parts) >= 2 && parts[1] != "references"
 	}
 	if localDirs[parts[len(parts)-1]] {
@@ -141,7 +146,7 @@ func (r *Rules) SkipDir(rel string) bool {
 
 // SyncFile reports whether a file at rel, in a folder the scan entered, syncs.
 func (r *Rules) SyncFile(rel string) bool {
-	if refusal(rel) != "" {
+	if why := refusal(rel); why != "" && !(why == "protected" && r.first) {
 		return false
 	}
 	return !r.extraMatch(rel, false)
@@ -192,7 +197,7 @@ func refusal(rel string) string {
 		if len(parts) > 1 && parts[1] == "local" {
 			return "local_only"
 		}
-		if !(len(parts) > 2 && parts[1] == "references" && strings.HasSuffix(rel, ".toml")) {
+		if !(len(parts) > 2 && parts[1] == "references") {
 			return "protected"
 		}
 	case "projects":

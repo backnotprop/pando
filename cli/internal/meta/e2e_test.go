@@ -69,6 +69,7 @@ type machine struct {
 	cancel context.CancelFunc
 	done   chan error
 	logw   *tlog
+	hooks  Hooks
 }
 
 // newMachine makes a folder that is a Pando monorepo root (root.json) and
@@ -96,6 +97,7 @@ func (m *machine) start() {
 	if err != nil {
 		m.t.Fatal(err)
 	}
+	e.hooks = m.hooks
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel, m.done = cancel, make(chan error, 1)
 	go func() { m.done <- e.Run(ctx) }()
@@ -273,35 +275,7 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 func TestE2EServerRefuses(t *testing.T) {
 	server := testServer(t)
 	mono := newMonorepo(t)
-	ctx := context.Background()
-	u := strings.Replace(server, "http", "ws", 1) + "/v1/monorepos/" + url.PathEscape(mono) + "/meta/socket"
-	c, _, err := websocket.Dial(ctx, u, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-	c.SetReadLimit(64 << 20)
-	send := func(v any) {
-		b, _ := json.Marshal(v)
-		if err := c.Write(ctx, websocket.MessageText, b); err != nil {
-			t.Fatal(err)
-		}
-	}
-	next := func(typ string) serverMsg {
-		for {
-			_, b, err := c.Read(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var m serverMsg
-			json.Unmarshal(b, &m)
-			if m.Type == typ || typ == "" {
-				return m
-			}
-		}
-	}
-	send(helloMsg{Type: "hello", Author: "Raw <raw@example.com>", Machine: "raw"})
-	next("caught_up")
+	send, next := rawSocket(t, server, mono)
 	body := []byte("x = 1\n")
 	for i, c := range []struct{ path, reason string }{
 		{".pando/pando.toml", "protected"},
@@ -542,7 +516,7 @@ func TestE2ECloneDownload(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server)), 0o644)
 	t.Setenv("PANDO_MACHINE", "carl")
 	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
-	if err := Download(context.Background(), carl); err != nil {
+	if err := Clone(context.Background(), carl); err != nil {
 		t.Fatal(err)
 	}
 	for p, body := range files {
@@ -554,6 +528,164 @@ func TestE2ECloneDownload(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(carl, "gone.md")); err == nil {
 		t.Error("a deleted file came down")
 	}
+}
+
+// rawSocket is a bare client of the object, with no client-side checks.
+func rawSocket(t *testing.T, server, mono string) (send func(any), next func(string) serverMsg) {
+	t.Helper()
+	ctx := context.Background()
+	u := strings.Replace(server, "http", "ws", 1) + "/v1/monorepos/" + url.PathEscape(mono) + "/meta/socket"
+	c, _, err := websocket.Dial(ctx, u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	c.SetReadLimit(64 << 20)
+	send = func(v any) {
+		b, _ := json.Marshal(v)
+		if err := c.Write(ctx, websocket.MessageText, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next = func(typ string) serverMsg {
+		for {
+			_, b, err := c.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m serverMsg
+			json.Unmarshal(b, &m)
+			if m.Type == typ || typ == "" {
+				return m
+			}
+		}
+	}
+	send(helloMsg{Type: "hello", Author: "Raw <raw@example.com>", Machine: "raw"})
+	next("caught_up")
+	return send, next
+}
+
+// pando init's first upload carries .pando/pando.toml and the pointers; after
+// it, .pando/ is protected again and a second init is refused.
+func TestE2EInitFirstUpload(t *testing.T) {
+	server := testServer(t)
+	mono := newMonorepo(t)
+	t.Setenv("PANDO_MACHINE", "ana")
+	t.Setenv("PANDO_AUTHOR", "Ana <ana@example.com>")
+	root := t.TempDir()
+	files := map[string]string{
+		".pando/local/root.json":                    fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server),
+		".pando/pando.toml":                         "local_only = [\"scratch/\"]\n",
+		".pando/references/research/infra/lib.toml": "url = \"https://example.com/lib.git\"\n",
+		"AGENTS.md":                                 "agents\n",
+		"decisions/RULINGS.md":                      "rulings\n",
+		"scratch/mine.md":                           "local by pando.toml\n",
+		"web/node_modules/x.js":                     "local by default\n",
+	}
+	for p, body := range files {
+		os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755)
+		os.WriteFile(filepath.Join(root, p), []byte(body), 0o644)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := Init(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := client(server, mono).Status(ctx)
+	if st["files"].(float64) != 4 {
+		t.Errorf("after init the server holds %v files, want 4", st["files"])
+	}
+
+	b := newMachine(t, "ben", server, mono)
+	for _, p := range []string{".pando/pando.toml", ".pando/references/research/infra/lib.toml", "AGENTS.md", "decisions/RULINGS.md"} {
+		waitContent(t, b, p, files[p])
+	}
+	for _, p := range []string{"scratch/mine.md", "web/node_modules/x.js"} {
+		if _, ok := b.read(p); ok {
+			t.Errorf("%s reached ben", p)
+		}
+	}
+
+	// The window is closed: .pando/pando.toml is protected again.
+	send, next := rawSocket(t, server, mono)
+	body := []byte("local_only = []\n")
+	send(saveMsg{Type: "save", ID: "p", Path: ".pando/pando.toml", Base: 3, SHA: gitSHA(body), Bytes: body})
+	if m := next(""); m.Reason != "protected" {
+		t.Errorf("a live save of .pando/pando.toml after init: %+v", m)
+	}
+	// And a second init is refused.
+	err := client(server, mono).initAction(ctx, "start")
+	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "not_empty" {
+		t.Errorf("a second init: %v", err)
+	}
+}
+
+func TestE2EReferencesHook(t *testing.T) {
+	server := testServer(t)
+	mono := newMonorepo(t)
+	var mu sync.Mutex
+	var calls [][]string
+	a := newMachine(t, "ana", server, mono)
+	b := &machine{t: t, name: "ben", root: t.TempDir(), server: server, mono: mono}
+	b.hooks.References = func(root string, pointers []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if root != b.root {
+			t.Errorf("hook root %s", root)
+		}
+		calls = append(calls, pointers)
+	}
+	b.start()
+
+	a.write(".pando/references/research/infra/lib.toml", "commit = \"aaaa\"\n")
+	waitFor(t, "the hook for the new pointer", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(calls) == 1 && len(calls[0]) == 1 && calls[0][0] == ".pando/references/research/infra/lib.toml"
+	})
+	a.write("notes.md", "not a pointer\n")
+	a.write(".pando/references/research/infra/lib.toml", "commit = \"bbbb\"\n")
+	waitContent(t, b, "notes.md", "not a pointer\n")
+	waitFor(t, "the hook for the updated pointer", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(calls) == 2 && len(calls[1]) == 1
+	})
+	os.Remove(a.path(".pando/references/research/infra/lib.toml"))
+	waitFor(t, "the hook for the removed pointer", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(calls) == 3
+	})
+}
+
+func TestE2ESyncOnce(t *testing.T) {
+	server := testServer(t)
+	mono := newMonorepo(t)
+	a := newMachine(t, "ana", server, mono)
+	a.write("from-ana.md", "ana\n")
+	waitFor(t, "ana's save on the server", func() bool {
+		s, err := client(server, mono).Status(context.Background())
+		return err == nil && s["files"].(float64) == 1
+	})
+
+	// An agent's sandbox: no daemon, just pando meta sync --once.
+	sb := &machine{t: t, name: "sandbox", root: t.TempDir(), server: server, mono: mono}
+	sb.write("from-sandbox.md", "sandbox\n")
+	e, err := New(sb.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.untilSynced = true
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := e.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := sb.read("from-ana.md"); got != "ana\n" {
+		t.Errorf("sandbox has from-ana.md %q", got)
+	}
+	waitContent(t, a, "from-sandbox.md", "sandbox\n")
 }
 
 // ---- a TCP proxy that can be cut ----
@@ -752,5 +884,49 @@ func TestE2ECommitsAfterQuiet(t *testing.T) {
 	st, _ := c.Status(ctx)
 	if st["uncommitted"].(float64) != 0 || st["commit_error"] != nil {
 		t.Errorf("status: %v", st)
+	}
+}
+
+func TestE2EInitCommits(t *testing.T) {
+	server := artifactsServer(t)
+	b := make([]byte, 4)
+	rand.Read(b)
+	mono := "e2e-init-" + hex.EncodeToString(b)
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	t.Setenv("PANDO_MACHINE", "ana")
+	t.Setenv("PANDO_AUTHOR", "Ana <ana@example.com>")
+	root := t.TempDir()
+	for p, body := range map[string]string{
+		".pando/local/root.json": fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server),
+		".pando/pando.toml":      "local_only = []\n",
+		"AGENTS.md":              "agents\n",
+		"decisions/RULINGS.md":   "rulings\n",
+	} {
+		os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755)
+		os.WriteFile(filepath.Join(root, p), []byte(body), 0o644)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := Init(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	var l []gitCommit
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		json.Unmarshal(metaRepo(t, server, mono, "log", nil), &l)
+		if len(l) > 0 {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if len(l) != 1 || !strings.HasPrefix(l[0].Message, "Start the meta layer\n") {
+		t.Fatalf("log after init: %+v", l)
+	}
+	t.Logf("commit %s:\n%s", l[0].Hash[:10], l[0].Message)
+	var r struct{ Content *string }
+	json.Unmarshal(metaRepo(t, server, mono, "read", map[string]string{"path": ".pando/pando.toml"}), &r)
+	if r.Content == nil || *r.Content != "local_only = []\n" {
+		t.Errorf(".pando/pando.toml in git: %v", r.Content)
 	}
 }

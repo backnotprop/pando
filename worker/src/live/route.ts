@@ -5,6 +5,7 @@
 //   GET  /v1/monorepos/{monorepo}/meta/file
 //   POST /v1/monorepos/{monorepo}/meta/restore
 //   GET  /v1/monorepos/{monorepo}/meta/status
+//   POST /v1/monorepos/{monorepo}/meta/init      pando init's first upload
 //
 // The Worker checks the credential first, then passes the user as `identity`.
 // Without one the object takes the author from the client's hello.
@@ -20,7 +21,7 @@ export interface MetaIdentity {
   email?: string;
 }
 
-const ROUTE = /^\/v1\/monorepos\/([^/]+)\/meta\/(socket|history|file|restore|status)$/;
+const ROUTE = /^\/v1\/monorepos\/([^/]+)\/meta\/(socket|history|file|restore|status|init)$/;
 const NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?!-)){0,62}$/; // Pando names forbid "--"
 
 // metaRoute returns the monorepo name when the request is a meta layer route.

@@ -179,6 +179,16 @@ func (c *Client) Restore(ctx context.Context, path string, version int64, author
 	return &r, json.NewDecoder(resp.Body).Decode(&r)
 }
 
+// initAction opens ("start") or closes ("done") pando init's first upload.
+func (c *Client) initAction(ctx context.Context, action string) error {
+	resp, err := c.do(ctx, http.MethodPost, c.url("init", nil), map[string]string{"action": action})
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
 // Status is the object's summary: head, files, uncommitted, sockets.
 func (c *Client) Status(ctx context.Context) (map[string]any, error) {
 	var s map[string]any

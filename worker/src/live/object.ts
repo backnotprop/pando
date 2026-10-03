@@ -15,6 +15,9 @@ const RETRY_MIN_MS = 30_000;
 const RETRY_MAX_MS = 600_000;
 const PAGE_BYTES = 4 * 1024 * 1024; // catch-up page size
 const PAGE_ROWS = 1000;
+const INIT_WINDOW_MS = 30 * 60_000; // pando init's first upload, at most this long
+const COMMIT_FILES = 1000; // one commit holds at most this many files
+const COMMIT_BYTES = 24 * 1024 * 1024; // and about this many bytes (gitwrite packs in memory)
 
 type Op = "save" | "delete" | "rename";
 type Source = "live" | "restore" | "main";
@@ -155,6 +158,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return this.restore(request);
       case "status":
         return json(this.status());
+      case "init":
+        if (request.method !== "POST") return fail(405, "method_not_allowed", "use POST");
+        return this.init(request);
     }
     return fail(404, "not_found", "no such meta layer route");
   }
@@ -288,6 +294,40 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     return json({ path, version, sha: target.deleted ? null : target.sha, restored_from: target.version });
   }
 
+  // pando init's first upload. "start" opens a window, only on an empty meta
+  // layer, in which .pando/ files (pando.toml, ...) may be saved like any
+  // other: the first commit of a meta layer is not a live edit. "done" closes
+  // it and commits everything at once.
+  private async init(request: Request): Promise<Response> {
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return fail(400, "invalid_input", "send JSON");
+    }
+    if (body?.action === "start") {
+      if (!this.initializing() && this.head() > 0) {
+        return fail(409, "not_empty", "this meta layer already has files: use pando clone");
+      }
+      this.setKv("init_started", String(Date.now()));
+      return json({ initializing: true, head: this.head() });
+    }
+    if (body?.action === "done") {
+      if (!this.initializing()) return fail(409, "not_initializing", "no first upload is open");
+      this.setKv("init_started", null);
+      this.setKv("init_commit", "1");
+      this.sql.exec("UPDATE pending SET due = ?", Date.now());
+      await this.scheduleCommit();
+      return json({ initializing: false, head: this.head() });
+    }
+    return fail(400, "invalid_input", 'action is "start" or "done"');
+  }
+
+  private initializing(): boolean {
+    const started = int(this.kv("init_started"), 0);
+    return started > 0 && Date.now() - started < INIT_WINDOW_MS;
+  }
+
   private status() {
     const files = this.sql.exec<any>("SELECT COUNT(*) AS n FROM files WHERE deleted = 0").one().n as number;
     const uncommitted = this.sql.exec<any>("SELECT COUNT(*) AS n FROM pending").one().n as number;
@@ -415,9 +455,15 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     };
     const who = { author: att.author, machine: att.machine, agent: att.agent };
 
+    // During pando init's first upload, .pando/ (but not .pando/local/) may be saved.
+    const check = (p: string) => {
+      const bad = checkPath(p);
+      return bad?.reason === "protected" && this.initializing() ? null : bad;
+    };
+
     if (msg.type === "save") {
       const path = str(msg.path);
-      const badPath = checkPath(path);
+      const badPath = check(path);
       if (badPath) return refuse(msg.path, badPath);
       const bytes = msg.decoded as Uint8Array | undefined;
       if (!bytes) return refuse(path, { reason: "bad_sha", status: 400, message: "bytes missing or not base64" });
@@ -440,7 +486,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
     if (msg.type === "delete") {
       const path = str(msg.path);
-      const badPath = checkPath(path);
+      const badPath = check(path);
       if (badPath) return refuse(msg.path, badPath);
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
@@ -648,47 +694,52 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // ---- commits after quiet ----
 
   private async scheduleCommit(): Promise<void> {
-    if (!gitWriter(this.env)) return; // versions wait, uncommitted, until gitwrite is wired
+    if (!gitWriter(this.env)) return; // no Artifacts binding: versions are kept, not committed
+    if (this.initializing()) return; // pando init commits everything when it is done
     const next = this.sql.exec<any>("SELECT MIN(due) AS due FROM pending").one().due as number | null;
     if (next === null) return;
     const set = await this.ctx.storage.getAlarm();
     if (set === null || set > next) await this.ctx.storage.setAlarm(next);
   }
 
+  // One commit per alarm, so each gets its own CPU budget; the next alarm is
+  // set right away while more is due.
   async alarm(): Promise<void> {
     const writer = gitWriter(this.env);
-    if (!writer) return;
+    if (!writer || this.initializing()) return;
     const due = this.sql
       .exec<any>("SELECT path, version FROM pending WHERE due <= ? ORDER BY version", Date.now() + GROUP_MS)
       .toArray() as { path: string; version: number }[];
+    if (!due.length) return this.scheduleCommit();
 
-    // Paths due together with the same author, machine and agent share a commit.
-    const groups = new Map<string, VersionRow[]>();
+    // Paths due together with the same author, machine and agent share a
+    // commit, up to COMMIT_FILES files and about COMMIT_BYTES bytes.
+    const first = this.row(due[0].version);
+    const key = (r: VersionRow) => JSON.stringify([r.author, r.machine, r.agent]);
+    const rows: VersionRow[] = [];
+    let bytes = 0;
     for (const p of due) {
-      const r = this.row(p.version);
-      const key = JSON.stringify([r.author, r.machine, r.agent]);
-      groups.set(key, [...(groups.get(key) ?? []), r]);
+      const r = p.version === first.version ? first : this.row(p.version);
+      if (key(r) !== key(first)) continue;
+      if (rows.length && (rows.length >= COMMIT_FILES || bytes + (r.size ?? 0) > COMMIT_BYTES)) break;
+      rows.push(r);
+      bytes += r.size ?? 0;
     }
-    let failed = false;
-    for (const rows of groups.values()) {
-      try {
-        await this.commitRows(writer, rows);
-      } catch (e) {
-        failed = true;
-        this.setKv("commit_error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-      }
-    }
-    if (failed) {
+    try {
+      await this.commitRows(writer, rows, this.kv("init_commit") === "1");
+    } catch (e) {
+      this.setKv("commit_error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
       const retry = Math.min(int(this.kv("retry_ms"), RETRY_MIN_MS) * (this.kv("retry_ms") ? 2 : 1), RETRY_MAX_MS);
       this.setKv("retry_ms", String(retry));
       await this.ctx.storage.setAlarm(Date.now() + retry);
       return;
     }
     this.setKv("retry_ms", null);
+    if (this.sql.exec<any>("SELECT COUNT(*) AS n FROM pending").one().n === 0) this.setKv("init_commit", null);
     await this.scheduleCommit();
   }
 
-  private async commitRows(writer: GitWriter, rows: VersionRow[]): Promise<void> {
+  private async commitRows(writer: GitWriter, rows: VersionRow[], first: boolean): Promise<void> {
     const changes: FileChange[] = rows.map((r) =>
       r.deleted || !r.sha ? { path: r.path, delete: true } : { path: r.path, content: new Uint8Array(this.blob(r.sha)) },
     );
@@ -696,7 +747,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const author = { ...parsePerson(last.author), date: new Date(last.at) };
     const repoName = this.kv("meta_repo") ?? this.kv("monorepo");
     if (!repoName) throw new Error("the object does not know its monorepo yet");
-    const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows), author };
+    const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first), author };
     let res = await writer.commit(repoName, "main", opts);
     if (res.status === "ref_moved") {
       res = await writer.commit(repoName, "main", { ...opts, parent: res.actual });
@@ -724,12 +775,14 @@ function verb(r: VersionRow): string {
   return r.deleted ? "Delete" : "Save";
 }
 
-export function commitMessage(rows: VersionRow[]): string {
+export function commitMessage(rows: VersionRow[], first = false): string {
   let title: string;
   let body = "";
   const renameTo = rows.find((r) => r.op === "rename" && !r.deleted);
   const renameFrom = renameTo && rows.find((r) => r.op === "rename" && r.deleted && r.path === renameTo.moved);
-  if (rows.length === 1) {
+  if (first) {
+    title = "Start the meta layer";
+  } else if (rows.length === 1) {
     const r = rows[0];
     if (r.source === "restore") title = `Restore ${r.path} to version ${r.restored_from}`;
     else if (r.deleted) title = `Delete ${r.path}`;
@@ -738,7 +791,11 @@ export function commitMessage(rows: VersionRow[]): string {
     title = `Rename ${renameFrom.path} to ${renameTo.path}`;
   } else {
     title = `Save ${rows.length} files`;
-    body = rows.map((r) => `${verb(r)} ${r.path}`).join("\n") + "\n\n";
+  }
+  if (rows.length > 1 && !(rows.length === 2 && renameTo && renameFrom)) {
+    const listed = rows.slice(0, 50).map((r) => `${verb(r)} ${r.path}`);
+    if (rows.length > 50) listed.push(`and ${rows.length - 50} more`);
+    body = listed.join("\n") + "\n\n";
   }
   const last = rows[rows.length - 1];
   const trailers = [

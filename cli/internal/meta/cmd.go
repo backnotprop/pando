@@ -1,12 +1,14 @@
 package meta
 
-// Entry points for cli/cmd/pando/main.go (owned by the cli lane):
+// Entry points for the cli lane (cli/cmd/pando/main.go and cli/internal/app):
 //
-//	pando meta sync               CmdSync     the live sync, in the foreground
-//	pando history <path>          CmdHistory
-//	pando restore <path> --to X   CmdRestore
-//	pando resolve [<path>]        CmdResolve
-//	pando clone (after root.json) Download    the first download of the meta layer
+//	pando clone, after root.json:  Clone(ctx, root)         the first download of the meta layer
+//	pando init, after root.json:   Init(ctx, root)          the first upload, .pando/ included
+//	the daemon:                    Sync(ctx, root, hooks)   the live sync until ctx ends
+//	pando meta sync [--once]:      CmdSync(args, hooks)
+//	pando history <path>:          CmdHistory(args)
+//	pando restore <path> --to X:   CmdRestore(args)
+//	pando resolve [<path>]:        CmdResolve(args)
 //
 // Each Cmd takes the arguments after its command name and returns an exit code.
 
@@ -27,18 +29,58 @@ import (
 	"time"
 )
 
-// Download fetches the meta layer into root, which already holds
-// .pando/local/root.json. pando clone calls it.
-func Download(ctx context.Context, root string) error {
-	cfg, err := LoadConfig(root)
-	if err != nil {
-		return err
-	}
-	e, err := New(cfg)
+// Clone downloads the meta layer into root, which already holds
+// .pando/local/root.json, and returns. It does not call Hooks.References:
+// the caller sets up references after it.
+func Clone(ctx context.Context, root string) error {
+	e, err := engineFor(root)
 	if err != nil {
 		return err
 	}
 	return e.CatchUp(ctx)
+}
+
+// Init uploads the meta layer at root (which already holds
+// .pando/local/root.json) to a new, empty monorepo: every file the live sync
+// carries, plus .pando/pando.toml and the rest of .pando/ except .pando/local/.
+// It returns once the server has all of it; the server then commits it as
+// "Start the meta layer".
+func Init(ctx context.Context, root string) error {
+	e, err := engineFor(root)
+	if err != nil {
+		return err
+	}
+	c := NewClient(e.cfg)
+	if err := c.initAction(ctx, "start"); err != nil {
+		return fmt.Errorf("starting the first upload: %w", err)
+	}
+	e.rules.first = true
+	e.untilSynced = true
+	if err := e.Run(ctx); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return c.initAction(ctx, "done")
+}
+
+// Sync runs the live sync for root until ctx ends.
+func Sync(ctx context.Context, root string, hooks Hooks) error {
+	e, err := engineFor(root)
+	if err != nil {
+		return err
+	}
+	e.hooks = hooks
+	return e.Run(ctx)
+}
+
+func engineFor(root string) (*Engine, error) {
+	cfg, err := LoadConfig(root)
+	if err != nil {
+		return nil, err
+	}
+	return New(cfg)
 }
 
 // parseArgs parses flags placed before, between or after positional args.
@@ -86,16 +128,18 @@ func metaPath(root, arg string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-func setup(name string, args []string, stderr io.Writer) (*flag.FlagSet, *string, []string, error) {
+func setup(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "the monorepo root (default: found from the current folder)")
-	return fs, root, args, nil
+	return fs, root
 }
 
-// CmdSync runs the live sync until interrupted.
-func CmdSync(args []string) int {
-	fs, rootFlag, _, _ := setup("sync", args, os.Stderr)
+// CmdSync runs the live sync until interrupted; with --once, until this
+// machine's changes are all on the server and it has every other change.
+func CmdSync(args []string, hooks Hooks) int {
+	fs, rootFlag := setup("sync", os.Stderr)
+	once := fs.Bool("once", false, "send and receive what is waiting, then exit")
 	if _, err := parseArgs(fs, args); err != nil {
 		return 2
 	}
@@ -104,16 +148,13 @@ func CmdSync(args []string) int {
 		fmt.Fprintln(os.Stderr, "pando:", err)
 		return 1
 	}
-	cfg, err := LoadConfig(root)
+	e, err := engineFor(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pando:", err)
 		return 1
 	}
-	e, err := New(cfg)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "pando:", err)
-		return 1
-	}
+	e.hooks = hooks
+	e.untilSynced = *once
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := e.Run(ctx); err != nil {
@@ -129,7 +170,7 @@ func CmdHistory(args []string) int {
 }
 
 func cmdHistory(args []string, stdout, stderr io.Writer) int {
-	fs, rootFlag, _, _ := setup("history", args, stderr)
+	fs, rootFlag := setup("history", stderr)
 	limit := fs.Int("limit", 50, "how many versions")
 	asJSON := fs.Bool("json", false, "print JSON")
 	pos, err := parseArgs(fs, args)
@@ -216,7 +257,7 @@ func CmdRestore(args []string) int {
 }
 
 func cmdRestore(args []string, stdout, stderr io.Writer) int {
-	fs, rootFlag, _, _ := setup("restore", args, stderr)
+	fs, rootFlag := setup("restore", stderr)
 	to := fs.String("to", "", "a version number, a time today (10:42), or a date and time (2026-10-03 10:42)")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
@@ -310,7 +351,7 @@ func CmdResolve(args []string) int {
 }
 
 func cmdResolve(args []string, stdout, stderr io.Writer) int {
-	fs, rootFlag, _, _ := setup("resolve", args, stderr)
+	fs, rootFlag := setup("resolve", stderr)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
@@ -372,7 +413,7 @@ func cmdResolve(args []string, stdout, stderr io.Writer) int {
 
 // CmdStatus prints the object's summary (a debugging aid).
 func CmdStatus(args []string) int {
-	fs, rootFlag, _, _ := setup("status", args, os.Stderr)
+	fs, rootFlag := setup("status", os.Stderr)
 	if _, err := parseArgs(fs, args); err != nil {
 		return 2
 	}
@@ -392,9 +433,13 @@ func CmdStatus(args []string) int {
 	return 0
 }
 
-// CmdDownload is Download as a command, for setting up a folder by hand.
-func CmdDownload(args []string) int {
-	fs, rootFlag, _, _ := setup("download", args, os.Stderr)
+// CmdClone and CmdInit are Clone and Init as commands, for the pando-meta dev
+// binary and for setting up a folder by hand.
+func CmdClone(args []string) int { return cmdRoot("clone", args, Clone) }
+func CmdInit(args []string) int  { return cmdRoot("init", args, Init) }
+
+func cmdRoot(name string, args []string, run func(context.Context, string) error) int {
+	fs, rootFlag := setup(name, os.Stderr)
 	if _, err := parseArgs(fs, args); err != nil {
 		return 2
 	}
@@ -405,7 +450,7 @@ func CmdDownload(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := Download(ctx, root); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(ctx, root); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "pando:", err)
 		return 1
 	}

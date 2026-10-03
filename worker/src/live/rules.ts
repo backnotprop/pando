@@ -72,8 +72,7 @@ export function checkPath(path: unknown): Refusal | null {
     }
     // Reference pointers are live (formats.md, section 4); the rest of
     // .pando/ changes only through a reviewed branch.
-    const pointer = parts[1] === "references" && parts.length > 2 && path.endsWith(".toml");
-    if (!pointer) {
+    if (!(parts[1] === "references" && parts.length > 2)) {
       return { reason: "protected", status: 403, message: ".pando/ changes only through a reviewed branch" };
     }
   }

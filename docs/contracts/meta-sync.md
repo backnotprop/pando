@@ -35,7 +35,7 @@ The object refuses, and the client never sends:
 | Rule | Paths | `reason` | `status` |
 | --- | --- | --- | --- |
 | Machine only | `.pando/local/**` (see `formats.md`, section 3) | `local_only` | 403 |
-| Protected | the rest of `.pando/**` (changes only through a reviewed branch), except reference pointers `.pando/references/**.toml`, which are live | `protected` | 403 |
+| Protected | the rest of `.pando/**` (changes only through a reviewed branch, or in `pando init`'s first upload), except reference pointers `.pando/references/**`, which are live | `protected` | 403 |
 | Code | `projects/**` (code repos are not live) | `not_meta` | 403 |
 | Local only | dependencies and build output: any `node_modules/`, `.pnpm-store/`, `dist/`, `build/`, `.wrangler/`, `.next/`, `.cache/`, `__pycache__/`, `.venv/` folder; event captures `*.ndjson`, `*.jsonl`; secrets: `.env*`, `.dev.vars*`, `.secrets/`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.mobileprovision`, `*.provisionprofile`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`; noise: `.git/`, `.DS_Store`, `*.swp`, `*~`, `.#*`; Pando's own files: `*.conflict-local-*`, `.*.pando-tmp-*` | `local_only` | 403 |
 | Too large | more than 1.5 MiB (1,572,864 bytes) | `too_large` | 413 |
@@ -192,6 +192,24 @@ above:
 - **Refused.** A refused change is dropped and not retried until the file
   changes again.
 
+## The first upload (`pando init`)
+
+`pando init` in a folder that is not a git repo uploads the folder's meta
+layer to the new, empty monorepo. The first commit of a meta layer is not a
+live edit, so it may carry `.pando/pando.toml` and the rest of `.pando/`
+(never `.pando/local/`).
+
+1. `POST /v1/monorepos/{monorepo}/meta/init` with `{"action": "start"}`
+   opens the window. Only on an empty meta layer: otherwise 409
+   `not_empty` ("use pando clone").
+2. The client sends every file as ordinary `save` messages (base version 0).
+   While the window is open the object accepts `.pando/` paths and makes no
+   commits.
+3. `{"action": "done"}` closes the window. Everything uploaded is committed
+   at once, titled `Start the meta layer`.
+
+A window left open closes by itself after 30 minutes.
+
 ## History and restore (HTTP)
 
 All under `/v1/monorepos/{monorepo}/meta/`.
@@ -244,9 +262,11 @@ gitwrite's `commitChanges` (see `gitwrite.md`). Paths that become due within
 2 seconds of each other and share an author, machine and agent go in one
 commit.
 
+- A commit holds at most 1,000 files and about 24 MiB, so a big first
+  upload becomes several commits.
 - Message: `Save decisions/HISTORY.md` (also `Delete <path>`,
   `Rename <from> to <path>`, `Restore <path> to version <n>`; several paths:
-  `Save 3 files`, listed in the body), then the who-made-it trailers from
+  `Save 3 files`, the first 50 listed in the body), then the who-made-it trailers from
   `formats.md` section 6 (`Pando-Agent` when set, `Pando-Machine`; a save
   has no worktree) and `Pando-Version: <n>`.
 - Author: whoever made the latest change, at the time they made it. The

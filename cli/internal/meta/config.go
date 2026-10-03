@@ -161,7 +161,9 @@ func defaultMachine() string {
 
 func defaultAuthor() string {
 	get := func(key string) string {
-		out, err := exec.Command("git", "config", "--get", key).Output()
+		cmd := exec.Command("git", "-c", "credential.helper=", "config", "--get", key)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1") // never Apple's keychain helper
+		out, err := cmd.Output()
 		if err != nil {
 			return ""
 		}

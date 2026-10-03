@@ -16,7 +16,8 @@ func TestRefusal(t *testing.T) {
 		".pando/references/research/x.toml":          "",
 		".pando/pando.toml":                          "protected",
 		".pando/other/file.md":                       "protected",
-		".pando/references/x.md":                     "protected",
+		".pando/references/x.md":                     "",
+		".pando/references":                          "protected",
 		".pando/local/root.json":                     "local_only",
 		"projects/web/README.md":                     "not_meta",
 		"a/node_modules/x/index.js":                  "local_only",
@@ -136,7 +137,8 @@ func TestGitSHA(t *testing.T) {
 		t.Skip("no git")
 	}
 	for _, body := range []string{"", "# Hello\n", strings.Repeat("line\n", 1000)} {
-		cmd := exec.Command("git", "hash-object", "--stdin")
+		cmd := exec.Command("git", "-c", "credential.helper=", "hash-object", "--stdin")
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
 		cmd.Stdin = strings.NewReader(body)
 		out, err := cmd.Output()
 		if err != nil {

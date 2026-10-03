@@ -48,6 +48,19 @@ type Engine struct {
 	events chan event
 	done   chan struct{}
 	lock   *os.File
+
+	untilSynced bool // return from Run once everything here is sent
+	hooks       Hooks
+	refsChanged map[string]bool // pointers written this pass
+	hookBusy    chan struct{}   // one hook call at a time
+}
+
+// Hooks let the caller react to what the engine writes.
+type Hooks struct {
+	// References is called after the engine wrote or removed reference
+	// pointers (.pando/references/**) that came from another machine, with
+	// their paths. It runs in its own goroutine, one call at a time.
+	References func(root string, pointers []string)
 }
 
 type seen struct {
@@ -80,16 +93,18 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	return &Engine{
-		cfg:      cfg,
-		rules:    rules,
-		cache:    map[string]*seen{},
-		missing:  map[string]int{},
-		frozen:   map[string]Frozen{},
-		held:     map[string]*serverMsg{},
-		byFrom:   map[string]*Op{},
-		inflight: map[string]*Op{},
-		events:   make(chan event, 256),
-		done:     make(chan struct{}),
+		cfg:         cfg,
+		rules:       rules,
+		cache:       map[string]*seen{},
+		missing:     map[string]int{},
+		frozen:      map[string]Frozen{},
+		held:        map[string]*serverMsg{},
+		byFrom:      map[string]*Op{},
+		inflight:    map[string]*Op{},
+		events:      make(chan event, 256),
+		done:        make(chan struct{}),
+		refsChanged: map[string]bool{},
+		hookBusy:    make(chan struct{}, 1),
 	}, nil
 }
 
@@ -113,9 +128,26 @@ func (e *Engine) Run(ctx context.Context) error {
 			// A scan takes at most a tenth of the time: on a big tree the
 			// passes space out instead of using more of a core.
 			took := e.tick(ctx)
+			if e.untilSynced && e.synced() {
+				return nil
+			}
 			timer.Reset(max(e.cfg.Poll, 10*took))
 		}
 	}
+}
+
+// synced reports whether everything here is on the server: online, nothing
+// queued or in flight, nothing still changing or waiting to count as deleted.
+func (e *Engine) synced() bool {
+	if !e.live || len(e.st.Outbox) > 0 || len(e.inflight) > 0 || len(e.missing) > 0 {
+		return false
+	}
+	for _, c := range e.cache {
+		if !c.firstMove.IsZero() {
+			return false
+		}
+	}
+	return true
 }
 
 // CatchUp downloads every change since this machine last synced (all of the
@@ -407,6 +439,7 @@ func (e *Engine) tick(ctx context.Context) time.Duration {
 	if e.dirty {
 		e.saveState()
 	}
+	e.callHooks()
 	return took
 }
 
@@ -802,6 +835,7 @@ func (e *Engine) freeConflictName(rel string) string {
 
 // writeCurrent makes the local file the object's current state.
 func (e *Engine) writeCurrent(rel string, cur *Current) {
+	e.noteWrite(rel)
 	if cur.Deleted {
 		if err := removeFile(e.cfg.Root, e.abs(rel)); err != nil {
 			e.cfg.Log.Printf("could not remove %s: %v", rel, err)
@@ -835,6 +869,34 @@ func (e *Engine) adopt(rel string, version int64, sha string) {
 	}
 	delete(e.held, rel)
 	e.dirty = true
+}
+
+func (e *Engine) noteWrite(rel string) {
+	if strings.HasPrefix(rel, ".pando/references/") {
+		e.refsChanged[rel] = true
+	}
+}
+
+// callHooks hands this pass's pointer changes to Hooks.References.
+func (e *Engine) callHooks() {
+	if len(e.refsChanged) == 0 || e.hooks.References == nil {
+		return
+	}
+	select {
+	case e.hookBusy <- struct{}{}:
+	default:
+		return // the last call is still running; these wait for the next pass
+	}
+	paths := make([]string, 0, len(e.refsChanged))
+	for p := range e.refsChanged {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	e.refsChanged = map[string]bool{}
+	go func() {
+		defer func() { <-e.hookBusy }()
+		e.hooks.References(e.cfg.Root, paths)
+	}()
 }
 
 // ---- changes from other machines ----
@@ -875,6 +937,8 @@ func (e *Engine) move(m *serverMsg) bool {
 		return false
 	}
 	removeFile(e.cfg.Root, e.abs(from)) // only empties folders now
+	e.noteWrite(from)
+	e.noteWrite(to)
 	e.st.Files[from] = &FileState{Version: m.FromVersion}
 	e.adopt(to, m.Version, m.SHA)
 	delete(e.cache, from)
@@ -946,6 +1010,7 @@ func (e *Engine) applyOne(m *serverMsg) {
 		return
 	}
 	delete(e.held, p)
+	e.noteWrite(p)
 	if m.Deleted {
 		if err := removeFile(e.cfg.Root, abs); err != nil {
 			e.cfg.Log.Printf("could not remove %s: %v", p, err)

@@ -1,6 +1,7 @@
 // pando-meta runs the meta layer commands on their own, for testing the live
 // lane before they are wired into the pando command. The same commands will
-// be `pando meta sync`, `pando history`, `pando restore`, `pando resolve`.
+// be `pando meta sync`, `pando history`, `pando restore`, `pando resolve`,
+// and Init and Clone run inside `pando init` and `pando clone`.
 //
 //	go run ./internal/meta/cmd/pando-meta sync --root <folder>
 package main
@@ -14,16 +15,17 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: pando-meta sync|download|history|restore|resolve|status [args]")
+		fmt.Fprintln(os.Stderr, "usage: pando-meta sync|init|clone|history|restore|resolve|status [args]")
 		os.Exit(2)
 	}
 	cmds := map[string]func([]string) int{
-		"sync":     meta.CmdSync,
-		"download": meta.CmdDownload,
-		"history":  meta.CmdHistory,
-		"restore":  meta.CmdRestore,
-		"resolve":  meta.CmdResolve,
-		"status":   meta.CmdStatus,
+		"sync":    func(a []string) int { return meta.CmdSync(a, meta.Hooks{}) },
+		"init":    meta.CmdInit,
+		"clone":   meta.CmdClone,
+		"history": meta.CmdHistory,
+		"restore": meta.CmdRestore,
+		"resolve": meta.CmdResolve,
+		"status":  meta.CmdStatus,
 	}
 	run, ok := cmds[os.Args[1]]
 	if !ok {

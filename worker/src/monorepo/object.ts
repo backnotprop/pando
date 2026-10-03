@@ -180,6 +180,9 @@ export class MonorepoObject extends DurableObject<Env> {
     this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS deliveries_once ON deliveries (hook_id, event, seq)");
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
+    // The CI service that reported a status (ci/statustoken.ts), stamped by Pando.
+    const scols = this.rows<{ name: string }>("PRAGMA table_info(statuses)").map((c) => c.name);
+    if (!scols.includes("app")) this.sql.exec("ALTER TABLE statuses ADD COLUMN app TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.feed.ensureSchema();
   }
@@ -506,22 +509,35 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Statuses and the gate ────────────────────────────────────────────────
 
-  addStatus(repo: string, sha: string, s: { state: StatusRecord["state"]; context: string; target_url: string | null; description: string | null }, identity: Identity): StatusRecord {
+  /**
+   * A status. A member's shows them as creator, with no app. `stamp` is set
+   * only by Pando: a verified status token (ci/statustoken.ts) or a CI
+   * integration (ci/store.ts); the event then has no actor, since no person
+   * posted it.
+   */
+  addStatus(
+    repo: string,
+    sha: string,
+    s: { state: StatusRecord["state"]; context: string; target_url: string | null; description: string | null },
+    identity: Identity | null,
+    stamp: { app: string | null; creator: string } | null = null,
+  ): StatusRecord {
     const at = now();
-    const creator = identity.login;
+    const creator = stamp?.creator ?? identity?.login ?? "pando";
+    const app = stamp?.app ?? null;
     this.sql.exec(
-      "INSERT INTO statuses (repo, sha, context, state, target_url, description, creator, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      repo, sha, s.context, s.state, s.target_url, s.description, creator, at,
+      "INSERT INTO statuses (repo, sha, context, state, target_url, description, creator, app, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      repo, sha, s.context, s.state, s.target_url, s.description, creator, app, at,
     );
-    const status = { sha, ...s, creator, created_at: at };
+    const status: StatusRecord = { sha, ...s, creator, app, created_at: at };
     // Branches at this commit have new checks; clients holding them refetch (the event names the sha).
-    this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(identity), row: status });
+    this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(stamp ? null : identity), row: status });
     return status;
   }
 
   statuses(repo: string, sha: string): StatusRecord[] {
     return this.rows<StatusRecord>(
-      "SELECT sha, context, state, target_url, description, creator, created_at FROM statuses WHERE repo = ? AND sha = ? ORDER BY id",
+      "SELECT sha, context, state, target_url, description, creator, app, created_at FROM statuses WHERE repo = ? AND sha = ? ORDER BY id",
       repo, sha,
     );
   }

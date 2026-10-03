@@ -144,9 +144,10 @@ tags:
       first ask and kept forever. Every other v2 command goes to Artifacts
       unchanged.
 
-      Clone and fetch also accept the 30-minute read token from a hook
-      delivery (`read_token`), so CI clones from `clone_url` with no
-      credential of its own.
+      Clone and fetch also accept the read token from a hook delivery
+      (`read_token` for a web hook, 30 minutes; `PANDO_READ_TOKEN` for a
+      Buildkite build, at least 24 hours so Buildkite's Retry can still
+      clone), so CI clones from `clone_url` with no credential of its own.
 
       Only members of the monorepo get through.
 
@@ -1409,7 +1410,21 @@ paths:
     post:
       operationId: createStatus
       summary: Report a commit status (GitHub's body)
+      description: |
+        With a member's credential, the status shows that member as
+        `creator` and has `app` null, whatever the body says.
+
+        With a status token (`PANDO_STATUS_TOKEN` in a Buildkite build's
+        env, `status_token` in a web hook's payload), Pando stamps `app` from
+        the hook that delivered it (`buildkite`, a web hook's own `app`, or
+        null) and `creator` `app:<slug>` (`hook:<hook id>` when null). A
+        status token posts statuses for its one commit in its one repo, for
+        24 hours, on this route only: no other route and no git.
       tags: [statuses]
+      security:
+        - credential: []
+        - session: []
+        - statusToken: []
       requestBody:
         required: true
         content:
@@ -1428,6 +1443,16 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Status" }
+        "401":
+          description: "`unauthorized`: not a credential, or a status token that is not valid. `status_token_expired`: older than 24 hours. `status_tokens_off`: the Worker secret PANDO_STATUS_SECRET is not set."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: "`status_token_scope`: the token is for another commit, repo or monorepo. `status_token_route` (on any other route): a status token works here only."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/commits/{ref}/status:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -1463,9 +1488,14 @@ paths:
         with the Worker secret `BUILDKITE_API_TOKEN`, for `push` events (by
         default) on branches that are not deleted. The build gets `commit`,
         `branch`, `message`, and `env`: `PANDO_CLONE_URL`, `PANDO_READ_TOKEN`
-        (30 minutes, read only, this repo), `PANDO_STATUS_URL`,
-        `PANDO_MONOREPO`, `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`,
-        `PANDO_DELIVERY`.
+        (read only, this repo, at least 24 hours: Buildkite's Retry reruns a
+        job with this env), `PANDO_STATUS_URL`, `PANDO_STATUS_TOKEN` (posts
+        checks on this commit for 24 hours, stamped `buildkite`; see
+        createStatus; `pando status <state>` uses it), `PANDO_MONOREPO`,
+        `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`, `PANDO_DELIVERY`,
+        `PANDO_SEQ`. Its `meta_data` has `pando_delivery`, `pando_monorepo`
+        (the id) and `pando_repo`, which Pando's Buildkite webhook uses to map
+        the build back (the `ci` tag).
       tags: [hooks]
       requestBody:
         required: true
@@ -1494,6 +1524,10 @@ paths:
                   properties:
                     organization: { type: string }
                     pipeline: { type: string }
+                app:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{0,38}$"
+                  description: "For `web`: the CI service behind it (`github-actions`, `circleci`, ...), stamped as `app` on statuses posted with its deliveries' status tokens. Not `buildkite` (that is the `buildkite` type's)."
       responses:
         "201":
           description: Created
@@ -1728,6 +1762,10 @@ components:
       type: http
       scheme: bearer
       description: The Worker secret PANDO_BOOTSTRAP.
+    statusToken:
+      type: http
+      scheme: bearer
+      description: "A status token, `pst1.<payload>.<signature>`: one per hook delivery, signed with the Worker secret PANDO_STATUS_SECRET, good for createStatus on one commit in one repo for 24 hours."
   parameters:
     owner:
       name: owner
@@ -1891,7 +1929,8 @@ components:
             - review: `verdict`, `comments` (a count), `head`.
             - status: `context`, `state`, `description`, `target_url`, `sha`,
               `duration_s` (from the run's first `pending` to this state; null
-              without one).
+              without one), `app` (the CI service that reported it, null when
+              a member posted it; `actor` is then that member, else null).
             - worktree.reported, worktree.removed: `path`, `worktree` (its id).
             - meta.saved: `path`, `version`, `deleted`.
     FeedSummary:
@@ -2074,7 +2113,12 @@ components:
         state: { $ref: "#/components/schemas/StatusState" }
         target_url: { type: [string, "null"] }
         description: { type: [string, "null"] }
-        creator: { type: string }
+        creator:
+          type: string
+          description: "The member who posted it (a login); `app:<slug>` for a status posted with a status token or by a CI integration; `hook:<hook id>` for a status token from a web hook with no app."
+        app:
+          type: [string, "null"]
+          description: "The CI service that reported it (`buildkite`, `github-actions`, ...), stamped by Pando from a status token or a CI integration, never from the body or `target_url`. Null when a member posted it with their own credential. The web shows the service's mark for a slug it knows."
         created_at: { type: string, format: date-time }
     Checks:
       type: object
@@ -2206,6 +2250,9 @@ components:
           properties:
             organization: { type: string }
             pipeline: { type: string }
+        app:
+          type: [string, "null"]
+          description: "The app its status tokens stamp: `buildkite` for a buildkite hook, a web hook's own `app`, or null."
         active: { type: boolean }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
@@ -2281,4 +2328,8 @@ components:
         read_token_expires_at: { type: string, format: date-time }
         status_url:
           type: string
-          description: "`POST` a commit status here for `head` (needs a member's credential)."
+          description: "`POST` a commit status here for `head`, with `status_token` or a member's credential."
+        status_token:
+          type: string
+          description: "Posts statuses for `head` in this repo for 24 hours, stamped with the hook's `app` (see createStatus). Absent when the Worker secret PANDO_STATUS_SECRET is not set or the branch was deleted."
+        status_token_expires_at: { type: string, format: date-time }

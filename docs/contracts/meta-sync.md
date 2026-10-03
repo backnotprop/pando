@@ -213,12 +213,13 @@ changed since I last looked").
 `commit` is the meta layer commit that carries the version, or `null` until
 it is committed.
 
-**`GET file?path=<path>&version=<version>`**: the bytes of that version
-(`version` defaults to the current one). Headers `X-Pando-Version` and
-`X-Pando-Sha`. 404 when the path is absent at that version.
+**`GET file?path=<path>&version=<version>`**: the bytes of the path as it
+was at that version, that is its latest change at or before it (`version`
+defaults to now). Headers `X-Pando-Version` (the change's own version) and
+`X-Pando-Sha`. 404 when the path is absent then.
 
 **`POST restore`** with `{"path": "...", "version": 420, "author": "...", "machine": "..."}`:
-writes version 420's bytes back as a new change on top of the current one
+writes the path as it was at version 420 back as a new change on top of the current one
 (`source: "restore"`, `restored_from: 420`), broadcast to every socket,
 including the machine that asked. History is never rewritten. Restoring a
 delete removes the file. Answers `{"path", "version", "sha", "restored_from"}`,
@@ -274,10 +275,15 @@ wins), and is broadcast. This is the only way `.pando/**` changes.
 
 ## Identity
 
-Until the Worker authenticates requests, the object takes `author` and
-`machine` from `hello` (and from the `restore` body). When it does, the
-Worker sets `X-Pando-Author` and `X-Pando-Machine` on the forwarded request
-and the object uses those instead.
+Every request, the WebSocket upgrade included, carries
+`Authorization: Bearer <pando token>` (`api-v1.yaml`). The Worker checks the
+token and passes who it is to the object: the author is the token's name and
+email, and an agent token's name is also the `agent`. The machine is always
+the client's own word, from `hello` or the `restore` body. Until the Worker
+checks tokens, the object takes `author` and `agent` from `hello` too.
+
+Errors on the HTTP routes have the `/v1` shape:
+`{"error": {"code": "...", "message": "..."}}`.
 
 ## Later (M7): large files and binaries through R2
 

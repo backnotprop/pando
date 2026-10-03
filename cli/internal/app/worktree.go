@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -424,15 +422,18 @@ func unsaved(e *Env, dir string) string {
 // refreshMain moves this machine's read-only main of a repo to the
 // server's main, after a merge.
 func refreshMain(e *Env, root *config.Root, repo string) {
-	// One refresh of this folder's mains at a time, across processes (the
-	// follower, background followers started by merges in quick
-	// succession): a second waits, then pulls whatever is newest.
-	if lk, err := os.OpenFile(filepath.Join(config.LocalDir(root.Dir), "refresh.lock"), os.O_CREATE|os.O_RDWR, 0o644); err == nil {
-		defer lk.Close()
-		if syscall.Flock(int(lk.Fd()), syscall.LOCK_EX) == nil {
-			defer syscall.Flock(int(lk.Fd()), syscall.LOCK_UN)
-		}
+	// Waits for a refresh already running for this repo (see coalesce.go),
+	// then moves main to whatever is newest.
+	lk, err := lockRefresh(root, repo, true)
+	if err == nil {
+		defer lk.release()
 	}
+	refreshMainLocked(e, root, repo)
+}
+
+// refreshMainLocked moves a repo's read-only mains here; the caller holds
+// the repo's refresh lock.
+func refreshMainLocked(e *Env, root *config.Root, repo string) {
 	ws, _ := root.LoadWorktrees()
 	entry, _ := root.Repo(repo)
 	for _, w := range ws {

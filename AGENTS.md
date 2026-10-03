@@ -17,6 +17,14 @@ do not add to it. Do not run `oxlint --fix` across the repo: the
 `require-readable-spacing` fix touches nearly every file, and the
 coordinator lands it as one commit. Do not disable or weaken a rule to pass.
 
+# The API contract
+
+`packages/contract` (`@pando/contract`, an npm workspace) holds Effect Schema
+for the /v1 API. `web` imports it as `@pando/contract`. When you change a
+response the contract covers, change its schema too, re-record
+(`packages/contract/scripts/record.mjs`, against a local wrangler dev) and run
+`npm run check -w @pando/contract` and `npm run typecheck -w @pando/contract`.
+
 # Learning more about Effect
 
 This repository uses the Effect Typescript library.

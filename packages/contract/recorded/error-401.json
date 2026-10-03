@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "GET /v1/user (no credential)",
+  "status": 401,
+  "body": {
+    "error": {
+      "code": "unauthorized",
+      "message": "send Authorization: Bearer <credential>, or sign in"
+    }
+  }
+}

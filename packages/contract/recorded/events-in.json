@@ -1,0 +1,46 @@
+{
+  "schema": "EventsPage",
+  "route": "GET /v1/events?limit=2&in=<owner/name>",
+  "status": 200,
+  "body": {
+    "events": [
+      {
+        "monorepo_id": "m_9a76490c5f6fa954",
+        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "seq": 22,
+        "at": "2026-10-03T21:21:56.503Z",
+        "kind": "meta.saved",
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "Ana Lima",
+        "machine": "ana-mbp",
+        "summary": {
+          "path": "docs/deep/notes.md",
+          "version": 3,
+          "deleted": false
+        }
+      },
+      {
+        "monorepo_id": "m_9a76490c5f6fa954",
+        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "seq": 21,
+        "at": "2026-10-03T21:21:56.503Z",
+        "kind": "meta.saved",
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "Ana Lima",
+        "machine": "ana-mbp",
+        "summary": {
+          "path": "docs/guide.md",
+          "version": 2,
+          "deleted": false
+        }
+      }
+    ],
+    "next": "MjAyNi0xMC0wM1QyMToyMTo1Ni41MDNafG1fOWE3NjQ5MGM1ZjZmYTk1NHwyMQ",
+    "from_logs": false,
+    "skipped": []
+  }
+}

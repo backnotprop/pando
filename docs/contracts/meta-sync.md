@@ -333,7 +333,7 @@ When a path has had no change for 10 seconds, the object commits it to the
 meta layer's `main` (the Artifacts repo `<id>--meta`) through
 gitwrite's `commitChanges` (see `gitwrite.md`), one commit at a time
 through the repo's write gate. Which paths share a commit is one Worker
-setting, `META_COMMIT_SHAPE`:
+setting, `META_COMMIT_GROUPING`:
 
 - `author` (the default today): paths due within 2 seconds of each other
   that share an author, machine and agent go in one commit.

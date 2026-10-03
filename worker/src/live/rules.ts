@@ -80,8 +80,8 @@ export function localOnlyDir(name: string): boolean {
 }
 
 // checkPath returns why a path may not be saved live, or null when it may.
-export function checkPath(path: unknown): Refusal | null {
-  if (typeof path !== "string" || path.length === 0 || path.length > 1024) {
+export function checkPath(path: string): Refusal | null {
+  if (path.length === 0 || path.length > 1024) {
     return { reason: "bad_path", status: 400, message: "a path is 1 to 1,024 bytes" };
   }
 

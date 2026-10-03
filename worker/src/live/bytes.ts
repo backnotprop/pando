@@ -39,5 +39,5 @@ export async function gitBlobSha(bytes: Uint8Array): Promise<string> {
 }
 
 export function exactBuffer(u8: Uint8Array): ArrayBuffer {
-  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+  return u8.slice().buffer;
 }

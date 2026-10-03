@@ -3,6 +3,7 @@
 // layer's Artifacts repo `<monorepo>--meta`.
 import { commitChanges, type Change, type CommitOptions, type CommitResult } from "../gitwrite";
 import { timedArtifacts } from "../timing";
+import type { Env } from "../env";
 import { repoToken } from "../monorepo/artifacts";
 
 export type { Change as FileChange };
@@ -21,7 +22,7 @@ export interface CommitEnv {
   //   and agent is one commit;
   // "window": everything due is one commit; the last saver is its author and
   //   the others are Co-authored-by trailers (ARCHITECTURE C7, owner question 8).
-  META_COMMIT_SHAPE?: string;
+  META_COMMIT_GROUPING?: string;
 }
 
 // gitWriter is null when the Worker has no Artifacts binding (a local test
@@ -38,7 +39,8 @@ export function gitWriter(env: CommitEnv): GitWriter | null {
           artifacts: timedArtifacts(artifacts),
           name,
           // The monorepo object's cached write token for this repo, when there is a monorepo object to ask.
-          write: env.MONOREPO ? { token: (fresh) => repoToken(env as never, name, "write", "", "object", fresh) } : undefined,
+          // SAFETY: with source "object", repoToken reads only env.MONOREPO (it asks the monorepo object for the token), checked just here.
+          write: env.MONOREPO ? { token: (fresh) => repoToken(env as Env, name, "write", "", "object", fresh) } : undefined,
         },
         branch,
         opts,

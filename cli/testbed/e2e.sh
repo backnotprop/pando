@@ -224,6 +224,18 @@ case "$SERVER" in http*)
   slow=$(echo "$out" | sed -n 's/.*moved \([0-9]*\) ms after.*/\1/p' | awk '$1 > 5000' | wc -l)
   [ "$(echo "$out" | grep -c 'moved [0-9]* ms after')" = 3 ] && [ "$slow" = 0 ] \
     && ok "3 merges: the follower's main moved within 5 s of each (was up to 15 s by polling)" || fail "follow: $out"
+
+  step "a burst of 20 merges costs each machine at most 2 fetches of main"
+  out=$(PANDO_BIN=pando /testbed/burst.sh "$SERVER" 2>&1)
+  echo "$out" | grep -E '^(20 merges|machine)' | sed 's/^/  /'
+  secs=$(echo "$out" | sed -n 's/^20 merges in \([0-9]*\) s.*/\1/p')
+  bound=$((2 + ${secs:-0} / 10))   # 2 per burst, plus at most 1 per 10 s it lasts
+  for m in a b; do
+    n=$(echo "$out" | sed -n "s/^machine $m: \([0-9]*\) fetches.*/\1/p")
+    [ -n "$n" ] && [ "$n" -ge 1 ] && [ "$n" -le "$bound" ] && ok "machine $m (works in the repo): $n fetches for 20 merges in ${secs} s (at most $bound)" || fail "machine $m fetches: $out"
+  done
+  echo "$out" | grep -q "a_at_last=yes b_at_last=yes" && ok "machines a and b end with main at the last merge" || fail "burst: $out"
+  echo "$out" | grep -q "^machine c: 0 fetches" && echo "$out" | grep -q c_main_unchanged=yes && ok "machine c (no worktree in the repo): 0 fetches; its main waits for the safety net" || fail "machine c: $out"
   ;;
 esac
 

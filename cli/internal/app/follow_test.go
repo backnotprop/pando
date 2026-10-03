@@ -139,7 +139,12 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 	if err := (worktree.Sparse{}).Add(context.Background(), spec); err != nil {
 		t.Fatal(err)
 	}
-	root.SaveWorktrees([]config.Worktree{{ID: "wt_1", Repo: ".", Branch: "main", Path: "worktrees/main", Kind: "sparse", ReadOnly: true}})
+	// A branch worktree here too: this machine works in the repo, so it
+	// follows each merge.
+	root.SaveWorktrees([]config.Worktree{
+		{ID: "wt_1", Repo: ".", Branch: "main", Path: "worktrees/main", Kind: "sparse", ReadOnly: true},
+		{ID: "wt_2", Repo: ".", Branch: "feat", Path: "worktrees/feat", Kind: "sparse"},
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -169,9 +174,10 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 
 	// Heads first, then the socket from heads' seq.
 	waitFor("the first subscription", queries(1))
-	if fs.headsN.Load() != 1 || query(0) != "since=5&topics=main%3Aacme" {
-		t.Fatalf("heads reads %d, query %q: want one read, then since=5", fs.headsN.Load(), query(0))
+	if fs.headsN.Load() < 1 || query(0) != "since=5&topics=main%3Aacme" {
+		t.Fatalf("heads reads %d, query %q: want a read, then since=5", fs.headsN.Load(), query(0))
 	}
+	reads := fs.headsN.Load()
 
 	// A merge lands on the server: main moves, and the stream says so.
 	os.WriteFile(filepath.Join(seed, "b.txt"), []byte("b\n"), 0o644)
@@ -184,7 +190,7 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 	fs.send <- fmt.Sprintf(`{"type":"event","seq":6,"at":"2026-10-03T14:29:39.578Z","kind":"default_head.updated","collection":"default_heads","key":"acme","op":"upsert","repo":"acme","actor":"pat","machine":"box","agent":null,"row":{"repo":"acme","default_branch":"main","default_head":%q},"before":"0000000000000000000000000000000000000000","head":%q}`, newHead, newHead)
 	took := waitFor("main to move", func() bool { got, _ := gitOut(mainDir, "rev-parse", "HEAD"); return got == newHead })
 	t.Logf("main moved %s after the frame", took.Round(time.Millisecond))
-	if fs.headsN.Load() != 1 || fs.lists.Load() != 0 {
+	if fs.headsN.Load() != reads || fs.lists.Load() != 0 {
 		t.Fatal("an event should move main with no read")
 	}
 	if os.WriteFile(filepath.Join(mainDir, "x"), []byte("x"), 0o644) == nil {
@@ -194,16 +200,16 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 	// The socket drops: heads is read again, and the socket resumes from 6.
 	fs.hangUp <- struct{}{}
 	waitFor("the reconnect", queries(2))
-	if fs.headsN.Load() != 2 || query(1) != "since=6&topics=main%3Aacme" {
-		t.Fatalf("heads reads %d, query %q: want a second read, then since=6", fs.headsN.Load(), query(1))
+	if fs.headsN.Load() != reads+1 || query(1) != "since=6&topics=main%3Aacme" {
+		t.Fatalf("heads reads %d, query %q: want one more read, then since=6", fs.headsN.Load(), query(1))
 	}
 
 	// A resync: read heads once more and resume from its seq.
 	fs.seq.Store(40)
 	fs.send <- `{"type":"resync","seq":40,"oldest_seq":30}`
 	waitFor("the subscription after the resync", queries(3))
-	if fs.headsN.Load() != 3 || query(2) != "since=40&topics=main%3Aacme" {
-		t.Fatalf("heads reads %d, query %q: want a third read, then since=40", fs.headsN.Load(), query(2))
+	if fs.headsN.Load() != reads+2 || query(2) != "since=40&topics=main%3Aacme" {
+		t.Fatalf("heads reads %d, query %q: want one more read, then since=40", fs.headsN.Load(), query(2))
 	}
 
 	// The monorepo is deleted (close 4404): the follower stops.

@@ -83,7 +83,8 @@ func followMains(e *Env, root *config.Root) int64 {
 	return 0
 }
 
-// moveMain refreshes a repo's read-only main here when it is not at head.
+// moveMain asks for a repo's read-only main here to move, unless it is at
+// head already or past it (an older frame arriving late).
 func moveMain(e *Env, root *config.Root, repo, head string) {
 	if head == "" {
 		return
@@ -93,10 +94,16 @@ func moveMain(e *Env, root *config.Root, repo, head string) {
 		if w.Repo != repo || w.Branch != "main" || !w.ReadOnly {
 			continue
 		}
-		if local, err := gitx.In(root.Abs(w.Path)).Run(e.Ctx, "rev-parse", "HEAD"); err == nil && local != head {
-			refreshMain(e, root, repo)
+		g := gitx.Cmd{Dir: root.Abs(w.Path), Env: []string{"GIT_NO_LAZY_FETCH=1"}}
+		local, err := g.Run(e.Ctx, "rev-parse", "HEAD")
+		if err != nil || local == head {
 			return
 		}
+		if _, err := g.Run(e.Ctx, "merge-base", "--is-ancestor", head, local); err == nil {
+			return
+		}
+		requestMainRefresh(e, root, repo)
+		return
 	}
 }
 
@@ -108,6 +115,27 @@ func mainsHere(root *config.Root) map[string]string {
 	for _, w := range ws {
 		if w.Branch == "main" && w.ReadOnly {
 			out[repoName(root, w.Repo)] = w.Repo
+		}
+	}
+	return out
+}
+
+// workedHere is mainsHere narrowed to the repos this machine works in: it
+// has a branch worktree there too. Only those follow each merge; the other
+// mains move on the safety-net read of heads (and when a worktree is added
+// there, which changes this set and so resubscribes, with a fresh read).
+func workedHere(root *config.Root) map[string]string {
+	ws, _ := root.LoadWorktrees()
+	branches := map[string]bool{}
+	for _, w := range ws {
+		if w.Branch != "main" {
+			branches[w.Repo] = true
+		}
+	}
+	out := map[string]string{}
+	for name, path := range mainsHere(root) {
+		if branches[path] {
+			out[name] = path
 		}
 	}
 	return out
@@ -185,11 +213,19 @@ func (f *follower) run(ctx context.Context, safety time.Duration) {
 		return
 	}
 	fails := 0
+	f.catchUp()
+	lastSafety := time.Now()
 	for ctx.Err() == nil {
-		names := sortedKeys(mainsHere(f.root))
+		names := sortedKeys(workedHere(f.root))
 		var wait time.Duration
 		if len(names) == 0 {
-			wait = followPing // nothing to follow yet; look again soon
+			// No repo worked in here: no subscription; the mains move on
+			// the safety-net read alone.
+			if time.Since(lastSafety) >= safety {
+				f.catchUp()
+				lastSafety = time.Now()
+			}
+			wait = followPing
 		} else {
 			f.catchUp() // on every (re)connect
 			up, err := f.subscribe(ctx, names, safety)
@@ -320,7 +356,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 				lastRead = time.Now()
 			}
 			// A main added or removed here: subscribe again for the new set.
-			if now := sortedKeys(mainsHere(f.root)); strings.Join(now, ",") != strings.Join(names, ",") {
+			if now := sortedKeys(workedHere(f.root)); strings.Join(now, ",") != strings.Join(names, ",") {
 				conn.Close(websocket.StatusNormalClosure, "")
 				return time.Since(started), nil
 			}
@@ -344,8 +380,10 @@ func (f *follower) handle(fr frame, want map[string]bool) {
 		if !want[name] {
 			return
 		}
-		if path, ok := mainsHere(f.root)[name]; ok {
-			moveMain(f.e, f.root, path, fr.Row.DefaultHead)
+		if path, ok := workedHere(f.root)[name]; ok {
+			// In the background: frames keep coming while a refresh runs,
+			// and coalesce (coalesce.go).
+			go moveMain(f.e, f.root, path, fr.Row.DefaultHead)
 		}
 	case "caught_up":
 		seq := fr.Seq

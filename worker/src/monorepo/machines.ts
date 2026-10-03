@@ -14,19 +14,38 @@
 //   they act (a merge, a restore), never a hello.
 
 import { now } from "../http";
+import { isRecord, isTextList, parseJson } from "../parse";
 import type { PushNumbers, StoredPointer } from "../feed/shape";
-import type { StreamEvent } from "./types";
+import type { EventSocketAttachment, StreamEvent } from "./types";
 
 type Row = Record<string, SqlStorageValue>;
 
+/** A machines row, as stored. */
+type MachineDbRow = {
+  login: string;
+  credential_id: string;
+  name: string;
+  kind: string | null;
+  connected: number;
+  connected_at: string | null;
+  /** The latest activity, JSON (onEvent writes it). */
+  last: string | null;
+  last_at: string | null;
+  /** Worktree ids, a JSON list. */
+  worktrees: string;
+  published_at: number;
+  updated_at: string;
+};
+
+/** A socket's attachment. One from before a field existed lacks it, so every field may be missing. */
+export function attachmentOf(ws: WebSocket): Partial<EventSocketAttachment> | null {
+  // SAFETY: every WebSocket on the monorepo object is accepted by its event
+  // socket route, which serializes an EventSocketAttachment.
+  return ws.deserializeAttachment() as Partial<EventSocketAttachment> | null;
+}
+
 /** Activity alone republishes a machine's row at most this often. */
 const ACTIVITY_REPUBLISH_MS = 60_000;
-
-/** Who acted, as publish() receives it (never stored in the event's body). */
-export interface Via {
-  credential_id: string;
-  credential_kind: string | null;
-}
 
 export interface MachineRow {
   login: string;
@@ -47,8 +66,8 @@ export class Machines {
     private publish: (e: StreamEvent) => number,
   ) {}
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
   ensureSchema(): void {
@@ -61,12 +80,12 @@ export class Machines {
 
   /** After an event is published: an activity line made through a credential updates its machine. */
   onEvent(seq: number, at: string, e: StreamEvent, line: StoredPointer | null): void {
-    const via = e.via as Via | undefined;
+    const via = e.via;
 
     if (!line || !via?.credential_id || !e.actor) return;
-    const name = (e.machine as string | null) ?? via.credential_id;
+    const name = e.machine ?? via.credential_id;
     const last = JSON.stringify({ seq, at, kind: line.kind, repo: line.repo, repo_path: line.repo_path, branch: line.branch, summary: line.summary });
-    const old = this.get(e.actor as string, via.credential_id);
+    const old = this.get(e.actor, via.credential_id);
     this.sql.exec(
       `INSERT INTO machines (login, credential_id, name, kind, last, last_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (login, credential_id) DO UPDATE SET name = excluded.name, kind = COALESCE(excluded.kind, machines.kind),
@@ -74,15 +93,17 @@ export class Machines {
       e.actor, via.credential_id, name, via.credential_kind, last, at, now(),
     );
 
-    if (!old || old.name !== name || Date.now() - old.published_at >= ACTIVITY_REPUBLISH_MS) this.announce(e.actor as string, via.credential_id);
+    if (!old || old.name !== name || Date.now() - old.published_at >= ACTIVITY_REPUBLISH_MS) this.announce(e.actor, via.credential_id);
   }
 
   /** A push's commit count and head title arrived (the facts job): the machine whose latest activity it is shows them. */
   pushSummary(seq: number, summary: PushNumbers): void {
     for (const r of this.rows<{ login: string; credential_id: string; last: string }>("SELECT login, credential_id, last FROM machines WHERE json_extract(last, '$.seq') = ?", seq)) {
-      const last = JSON.parse(r.last) as { summary: Record<string, unknown> | null };
-      last.summary = { ...(last.summary ?? {}), ...summary };
-      this.sql.exec("UPDATE machines SET last = ? WHERE login = ? AND credential_id = ?", JSON.stringify(last), r.login, r.credential_id);
+      const last = parseJson(r.last);
+
+      if (!isRecord(last)) continue;
+      const merged = { ...last, summary: { ...(isRecord(last.summary) ? last.summary : null), ...summary } };
+      this.sql.exec("UPDATE machines SET last = ? WHERE login = ? AND credential_id = ?", JSON.stringify(merged), r.login, r.credential_id);
     }
   }
 
@@ -103,10 +124,10 @@ export class Machines {
 
   /** A socket closed (after the feed dropped its presence): disconnected when it was the machine's last. */
   gone(ws: WebSocket, live: Set<string>): void {
-    let att: { login?: string; cid?: string } | null;
+    let att: Partial<EventSocketAttachment> | null;
 
     try {
-      att = ws.deserializeAttachment() as { login?: string; cid?: string } | null;
+      att = attachmentOf(ws);
     } catch {
       return;
     }
@@ -131,7 +152,7 @@ export class Machines {
       }
     }
 
-    return this.rows<Record<string, unknown>>("SELECT * FROM machines ORDER BY last_at IS NULL, last_at DESC, connected DESC, name").map((r) => this.view(r));
+    return this.rows<MachineDbRow>("SELECT * FROM machines ORDER BY last_at IS NULL, last_at DESC, connected DESC, name").map((r) => this.view(r));
   }
 
   private connectedSockets(login: string, cid: string, live: Set<string>, except: WebSocket | null): number {
@@ -141,7 +162,7 @@ export class Machines {
       if (ws === except || ws.readyState !== WebSocket.OPEN) continue;
 
       try {
-        const a = ws.deserializeAttachment() as { login?: string; cid?: string; sid?: string } | null;
+        const a = attachmentOf(ws);
 
         if (a?.login === login && a.cid === cid && a.sid && live.has(a.sid)) n++;
       } catch {
@@ -158,8 +179,9 @@ export class Machines {
     )[0] ?? null;
   }
 
-  private view(r: Record<string, unknown>): MachineRow {
-    const ids = JSON.parse((r.worktrees as string) || "[]") as string[];
+  private view(r: MachineDbRow): MachineRow {
+    const listed = parseJson(r.worktrees || "[]");
+    const ids = isTextList(listed) ? listed : [];
 
     const known = new Map(
       (ids.length
@@ -171,22 +193,23 @@ export class Machines {
     );
 
     return {
-      login: r.login as string,
-      credential_id: r.credential_id as string,
-      name: r.name as string,
-      kind: (r.kind as string | null) ?? null,
+      login: r.login,
+      credential_id: r.credential_id,
+      name: r.name,
+      kind: r.kind,
       connected: r.connected === 1,
-      connected_at: (r.connected_at as string | null) ?? null,
-      last_activity: r.last ? JSON.parse(r.last as string) : null,
+      connected_at: r.connected_at,
+      // onEvent writes it: {seq, at, kind, repo, repo_path, branch, summary}.
+      last_activity: r.last ? JSON.parse(r.last) : null,
       worktrees: ids.map((id) => ({ id, repo: known.get(id)?.repo ?? null, branch: known.get(id)?.branch ?? null, path: known.get(id)?.path ?? null })),
-      updated_at: r.updated_at as string,
+      updated_at: r.updated_at,
     };
   }
 
   /** Publish the row as `machine.updated` (after the event that changed it has gone out). */
   private announce(login: string, cid: string): void {
     this.sql.exec("UPDATE machines SET published_at = ? WHERE login = ? AND credential_id = ?", Date.now(), login, cid);
-    const r = this.rows<Record<string, unknown>>("SELECT * FROM machines WHERE login = ? AND credential_id = ?", login, cid)[0];
+    const r = this.rows<MachineDbRow>("SELECT * FROM machines WHERE login = ? AND credential_id = ?", login, cid)[0];
 
     if (!r) return;
     const row = this.view(r);

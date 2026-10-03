@@ -202,9 +202,14 @@ func Logout(e *Env, args []string) error {
 // Auth is `pando auth status`.
 func Auth(e *Env, args []string) error {
 	if len(args) == 0 || args[0] != "status" {
-		return UsageError{"pando auth status"}
+		return UsageError{"pando auth status [--server <url>]"}
 	}
-	serverURL := e.serverURL("")
+	fs := flags("auth status")
+	srv := fs.String("server", "", "the server (default: the configured one)")
+	if _, err := parse(fs, args[1:]); err != nil {
+		return err
+	}
+	serverURL := e.serverURL(*srv)
 	if serverURL == "" {
 		e.printf("No server configured. Run pando login --server <url>.\n")
 		return nil

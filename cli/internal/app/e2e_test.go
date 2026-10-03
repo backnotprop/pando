@@ -165,6 +165,23 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	if !strings.Contains(out, "A  src/oauth.go") {
 		t.Fatalf("diff:\n%s", out)
 	}
+	// Plannotator, through a stand-in that keeps the patch it is given.
+	fake, _ := filepath.Abs("../../testbed/fake-plannotator.sh")
+	patch := filepath.Join(h.base, "review.patch")
+	t.Setenv("PANDO_PLANNOTATOR", fake)
+	t.Setenv("FAKE_PLANNOTATOR_PATCH", patch)
+	t.Setenv("FAKE_PLANNOTATOR_DECISION", "annotated")
+	out = h.ok(wt, "review")
+	if !strings.Contains(out, "Posted a request for changes") {
+		t.Fatalf("review through plannotator:\n%s", out)
+	}
+	if b, _ := os.ReadFile(patch); !strings.Contains(string(b), "+++ b/src/oauth.go") {
+		t.Fatalf("plannotator did not get the patch:\n%s", b)
+	}
+	t.Setenv("FAKE_PLANNOTATOR_DECISION", "dismissed")
+	if out = h.ok(wt, "review"); !strings.Contains(out, "nothing posted") {
+		t.Fatalf("dismissed review:\n%s", out)
+	}
 	t.Setenv("PANDO_AGENT", "agent-2")
 	out = h.ok(wt, "review", "--approve", "-m", "Reads well.")
 	if !strings.Contains(out, "Posted an approval") {

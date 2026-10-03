@@ -262,12 +262,10 @@ func Review(e *Env, args []string) error {
 			return fmt.Errorf("plannotator answered %q", d.Decision)
 		}
 	}
-	if agent != "" && in.Verdict != "comment" {
-		// Approval belongs to a person; an agent's verdict is a comment
-		// that says what it would have been.
-		word := map[string]string{"approve": "Approved", "request_changes": "Changes requested"}[in.Verdict]
-		in.Body = strings.TrimSpace(word + " (agent " + agent + "):\n\n" + in.Body)
-		in.Verdict = "comment"
+	if agent != "" {
+		// Agents act as the person (like gh); the body says which agent did.
+		word := map[string]string{"comment": "Comment", "approve": "Approved", "request_changes": "Changes requested"}[in.Verdict]
+		in.Body = strings.TrimSpace(in.Body + "\n\n" + word + " by agent " + agent + ".")
 	}
 	rv, err := srv.CreateReview(e.Ctx, root.Name, name, branch, in)
 	if err != nil {

@@ -1,0 +1,184 @@
+# XcodeGen spec for Pando.app: the host app, its FSKit file system extension,
+# and the broker helper. The Xcode project is generated, not committed:
+#
+#     brew install xcodegen      # once
+#     cd mac && xcodegen generate
+#
+# Unsigned build (no Apple account needed):
+#
+#     xcodebuild -project Pando.xcodeproj -scheme Pando -configuration Release \
+#       -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+#
+# Signed build: drop CODE_SIGNING_ALLOWED=NO once the two provisioning
+# profiles named below are installed (see README.md, "The owner's Apple steps").
+#
+# Derived from Oak's macos/OakFS/project.yml (Apache 2.0, see NOTICE).
+
+name: Pando
+options:
+  bundleIdPrefix: ai.plannotator.pando
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # The bundle id prefix, in one place. Every id derives from it:
+    #   host app   $(PANDO_BUNDLE_PREFIX)             ai.plannotator.pando
+    #   extension  $(PANDO_BUNDLE_PREFIX).extension   ai.plannotator.pando.extension
+    #   broker     $(PANDO_BUNDLE_PREFIX).broker      ai.plannotator.pando.broker
+    # The broker's bundle id is also its mach service name: the extension's
+    # Info.plist (PandoBrokerMachService), its sandbox exception, the broker's
+    # own Info.plist and the LaunchAgent all use $(PANDO_BUNDLE_PREFIX).broker.
+    # Not yet confirmed by the owner; change it here only.
+    PANDO_BUNDLE_PREFIX: ai.plannotator.pando
+    DEVELOPMENT_TEAM: "TX8NWU7D68" # the owner's team
+    # Manual signing with Developer ID and explicit provisioning profiles (set
+    # per target below). Automatic or command-line signing strips the
+    # restricted com.apple.developer.fskit.fsmodule entitlement and embeds no
+    # profile, and then the extension does not load.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Developer ID Application"
+    # Hardened runtime, a secure timestamp and no get-task-allow: what
+    # notarization needs. CODE_SIGNING_ALLOWED=NO builds skip all of it.
+    ENABLE_HARDENED_RUNTIME: YES
+    OTHER_CODE_SIGN_FLAGS: "--timestamp"
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: "NO"
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  Pando:
+    type: application
+    platform: macOS
+    sources:
+      - path: HostApp
+      # Apache 2.0 section 4: the licences and the attribution notices travel
+      # with the binary, in Contents/Resources.
+      - path: NOTICE
+        buildPhase: resources
+      - path: LICENSE-oak-Apache-2.0
+        buildPhase: resources
+      - path: ../LICENSE
+        buildPhase: resources
+    info:
+      path: HostApp/Info.plist
+      properties:
+        CFBundleDisplayName: Pando
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "Pando. Apache License 2.0; notices in Contents/Resources/NOTICE."
+    entitlements:
+      path: HostApp/HostApp.entitlements
+      properties: {}
+    settings:
+      base:
+        PRODUCT_NAME: Pando
+        PRODUCT_BUNDLE_IDENTIFIER: $(PANDO_BUNDLE_PREFIX)
+        PROVISIONING_PROFILE_SPECIFIER: "Pando Developer ID"
+        # actool compiles the icon and merges CFBundleIconName and
+        # CFBundleIconFile into the final Info.plist.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: PandoExtension
+        embed: true # into Contents/Extensions
+      - target: pando-broker
+        embed: true
+        codeSign: false # signed by its own target, with hardened runtime
+        copy:
+          destination: executables # Contents/MacOS/pando-broker
+
+  PandoExtension:
+    # FSKit modules are ExtensionKit extensions. This product type embeds the
+    # .appex in Contents/Extensions (not Contents/PlugIns) and applies the
+    # provisioning profile that carries com.apple.developer.fskit.fsmodule.
+    type: extensionkit-extension
+    platform: macOS
+    sources:
+      - path: Extension
+    info:
+      path: Extension/Info.plist
+      properties:
+        # System Settings lists the extension by this name.
+        CFBundleDisplayName: Pando
+        CFBundleName: Pando
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The broker's mach service; WireClient.swift reads it from here.
+        PandoBrokerMachService: $(PANDO_BUNDLE_PREFIX).broker
+        # Every FSKit key must sit inside EXAppExtensionAttributes, not at the
+        # top level; otherwise `mount -t pando` finds no extension.
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.fskit.fsmodule
+          # getopt syntax for the options FSKit forwards to loadResource.
+          FSActivateOptionSyntax:
+            shortOptions: "o:"
+          # `/sbin/mount -F -t pando <state dir> <mount point>` selects this
+          # extension by its short name.
+          FSShortName: pando
+          # A path URL volume (the mount's state folder), not a block device.
+          FSSupportsBlockResources: false
+          FSSupportsPathURLs: true
+          # The state folder arrives as a security-scoped URL.
+          FSRequiresSecurityScopedPathURLResources: true
+    entitlements:
+      path: Extension/Extension.entitlements
+      # xcodegen writes this file from these properties on every generate.
+      properties:
+        # FSKit modules run in the App Sandbox.
+        com.apple.security.app-sandbox: true
+        # Marks the extension as an FSKit module; it must come from the
+        # extension's provisioning profile.
+        com.apple.developer.fskit.fsmodule: true
+        # The sandbox blocks mach lookups; this lets the extension reach the
+        # broker, which relays to the mount's daemon socket.
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(PANDO_BUNDLE_PREFIX).broker
+    settings:
+      base:
+        PRODUCT_NAME: PandoExtension
+        PRODUCT_MODULE_NAME: PandoExtension
+        PRODUCT_BUNDLE_IDENTIFIER: $(PANDO_BUNDLE_PREFIX).extension
+        PROVISIONING_PROFILE_SPECIFIER: "Pando Extension Developer ID"
+    dependencies:
+      - sdk: FSKit.framework
+
+  pando-broker:
+    # The broker: vends the mach service $(PANDO_BUNDLE_PREFIX).broker and
+    # relays the extension's frames to each mount's daemon socket. Started on
+    # demand by launchd through a per-user LaunchAgent the pando command
+    # writes. Not sandboxed (it opens unix sockets in the user's home); signed
+    # with Developer ID and hardened runtime; needs no provisioning profile.
+    type: tool
+    platform: macOS
+    sources:
+      - path: Broker
+    info:
+      path: Broker/Info.plist
+      properties:
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleName: pando-broker
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        PandoBrokerMachService: $(PANDO_BUNDLE_PREFIX).broker
+    settings:
+      base:
+        PRODUCT_NAME: pando-broker
+        PRODUCT_BUNDLE_IDENTIFIER: $(PANDO_BUNDLE_PREFIX).broker
+        # A command-line tool has no bundle; its Info.plist is linked into the
+        # binary so Bundle.main can read it and codesign takes its identifier.
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        SKIP_INSTALL: YES
+
+schemes:
+  Pando:
+    build:
+      targets:
+        Pando: all
+    run:
+      config: Debug
+    archive:
+      config: Release

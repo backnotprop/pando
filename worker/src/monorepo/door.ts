@@ -264,10 +264,24 @@ async function receivePack(
   let bytes: Uint8Array = new Uint8Array(0);
   let res: Response | null = null;
   let busy = false;
-  const send = async () => {
+  // A failed call (thrown, or Artifacts answering 5xx): its reason, for the log; git gets a plain refusal.
+  let failed: string | null = null;
+  let fakeFail = env.DOOR_TEST === "1" && req.headers.get("x-pando-test-fail") === "1";
+  const send = async (): Promise<{ res: Response | null; bytes: Uint8Array; busy: boolean; failed: string | null }> => {
+    try {
+      return await sendOnce();
+    } catch (err) {
+      return { res: null, bytes: new Uint8Array(0), busy: false, failed: err instanceof Error ? err.message : String(err) };
+    }
+  };
+  const sendOnce = async () => {
     if (fakeBusy) {
       fakeBusy = false;
-      return { res: null, bytes: pkt("ERR artifacts_git_receive_pack_busy (test)\n"), busy: true };
+      return { res: null, bytes: pkt("ERR artifacts_git_receive_pack_busy (test)\n"), busy: true, failed: null };
+    }
+    if (fakeFail) {
+      fakeFail = false;
+      throw new Error("door test: a failed Artifacts call");
     }
     if (buffered.all) note({ push_bytes: buffered.bytes.byteLength });
     const r = await gitRequest(env, repo, "/git-receive-pack", "write", {
@@ -282,18 +296,24 @@ async function receivePack(
     const b = new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => r.arrayBuffer()));
     // Busy: Artifacts' code, and no pack taken (a branch could be named like the code).
     const refusedBusy = isBusy(new TextDecoder().decode(b.subarray(0, 512))) && parseReport(b, section.caps).unpack !== "ok";
-    return { res: r, bytes: b, busy: refusedBusy };
+    return { res: r, bytes: b, busy: refusedBusy, failed: r.status >= 500 ? `Artifacts answered ${r.status}` : null };
   };
   try {
-    ({ res, bytes, busy } = await send());
-    if (busy && buffered.all) {
-      // Artifacts was mid-push with others: wait a moment and send the same pack again, once, in the same slot.
+    ({ res, bytes, busy, failed } = await send());
+    if ((busy || failed) && buffered.all) {
+      // Busy (mid-push with others) or failed: wait a moment and send the same pack again, once, in the same slot.
+      // A replay cannot apply twice: each ref update names the old head it expects.
+      const why = busy ? "busy_retry" : "fail_retry";
+      if (failed) console.warn(`receive-pack on ${repo.artifacts_name} failed, retrying once: ${failed}`);
       await new Promise((r) => setTimeout(r, BUSY_WAIT_MS[0] + Math.random() * (BUSY_WAIT_MS[1] - BUSY_WAIT_MS[0])));
-      ({ res, bytes, busy } = await send());
-      note({ busy_retry: busy ? "failed" : "ok" });
+      ({ res, bytes, busy, failed } = await send());
+      note({ [why]: busy || failed ? "failed" : "ok" });
     } else if (busy) {
       if (!res) await drain(section.rest); // the test's unsent large push
       note({ busy_retry: "too_large" });
+    } else if (failed) {
+      note({ fail_retry: "too_large" });
+      await drain(section.rest).catch(() => undefined); // whatever git still sends
     }
   } finally {
     clearInterval(renew);
@@ -301,6 +321,12 @@ async function receivePack(
   }
   // Still busy: a plain message, not Artifacts' code.
   if (busy) return busyRefusal(section, `Pando: ${repo.name} is busy with other pushes right now; push again`);
+  // Failed: never a bare 500 to git. Nothing was recorded; the person pushes again.
+  if (failed) {
+    console.error(`receive-pack on ${repo.artifacts_name} failed: ${failed}`);
+    note({ push_error: failed.slice(0, 200) });
+    return busyRefusal(section, `Pando: ${repo.name} couldn't take this push right now; push again`, "couldn't take it; push again");
+  }
   const headers = { "content-type": res!.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
   if (!res!.ok) return new Response(bytes, { status: res!.status, headers });
 
@@ -314,8 +340,8 @@ async function receivePack(
 }
 
 /** Every ref refused with `message` (side-band aware: git prints it, then "! [remote rejected] ... (busy; push again)"). */
-function busyRefusal(section: { commands: import("./pktline").RefCommand[]; caps: Set<string> }, message: string): Response {
-  const reasons = new Map(section.commands.map((c) => [c.ref, "busy; push again"]));
+function busyRefusal(section: { commands: import("./pktline").RefCommand[]; caps: Set<string> }, message: string, reason = "busy; push again"): Response {
+  const reasons = new Map(section.commands.map((c) => [c.ref, reason]));
   return new Response(refusal(section.commands, reasons, section.caps, message), {
     headers: { "content-type": "application/x-git-receive-pack-result", "cache-control": "no-cache" },
   });

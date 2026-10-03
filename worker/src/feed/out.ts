@@ -635,7 +635,17 @@ export class FeedOut {
     const p = this.presence();
     const counts = { ready: 0, conflicts: 0, failing: 0 };
     for (const n of needs) counts[n.state]++;
-    return { last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts, members: this.memberCount(), large: this.isLarge(), at: now() };
+    // "2 projects, 5 open branches": counted from the object's own records (no Artifacts call).
+    const code = "NOT (r.name = 'meta' AND r.artifacts_name LIKE '%--meta')";
+    const repos = this.row<{ n: number }>(`SELECT COUNT(*) AS n FROM repos r WHERE ${code}`)!.n;
+    const open = this.row<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM branches b JOIN repos r ON r.name = b.repo
+       WHERE ${code} AND b.deleted_at IS NULL AND b.head IS NOT NULL AND (b.merged_head IS NULL OR b.merged_head != b.head) AND b.name != r.default_branch`,
+    )!.n;
+    return {
+      last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts,
+      members: this.memberCount(), large: this.isLarge(), repos, open_branches: open, at: now(),
+    };
   }
 
   private tickMs(): number {

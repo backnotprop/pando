@@ -297,6 +297,7 @@ export class MonorepoObject extends DurableObject<Env> {
         "INSERT INTO repos (name, path, artifacts_name, remote, default_branch, description, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         r.name, r.path, r.artifacts_name, r.remote, r.default_branch, r.description, r.created_at, r.created_by,
       );
+      this.feed.scheduleSummary(); // the home's "N projects" changed, with no event to say so
       return r;
     });
   }

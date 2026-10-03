@@ -536,6 +536,16 @@ try {
   const ms = r.json?.monorepos ?? [];
   const ordered = ms.every((m, i) => i === 0 || (ms[i - 1].last_activity_at ?? "") >= (m.last_activity_at ?? ""));
   check("GET /v1/monorepos?summary=1: every monorepo, most recently active first, with its line", ms.length === 5 && ordered && ms.every((m) => m.role && "machines_active" in m && "needs" in m), ms.map((m) => `${m.name.slice(0, 2)}:${m.last_activity_at?.slice(11, 19)}`).join(" "));
+  {
+    // The line's "N projects, M open branches", from the monorepo's own records: S has feat/x and c2 open (c1 merged), T none.
+    const line = await waitFor(async () => {
+      const list = (await call("GET", "/v1/monorepos?summary=1", A)).json?.monorepos ?? [];
+      const s1 = list.find((m) => m.name === S);
+      const t1 = list.find((m) => m.name === T);
+      return s1?.repos === 1 && s1.open_branches === 2 && t1?.repos === 1 && t1.open_branches === 0 ? { s1, t1 } : null;
+    }, 15_000);
+    check("summary: repos and open_branches per monorepo (S: 1 project, 2 open branches; T: 1, 0)", !!line);
+  }
   r = await call("GET", "/v1/monorepos", A);
   check("GET /v1/monorepos without summary is unchanged", r.json?.monorepos?.length === 5 && !("needs" in r.json.monorepos[0]));
 } catch (err) {

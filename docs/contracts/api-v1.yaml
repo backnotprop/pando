@@ -2647,7 +2647,7 @@ components:
     FeedSummary:
       type: object
       description: A monorepo's one line on the home.
-      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, at]
+      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, repos, open_branches, at]
       properties:
         last_activity_at: { type: [string, "null"], format: date-time, description: Its newest activity line. }
         worktrees_active: { type: integer, description: Worktrees named in the hellos of open follower sockets. }
@@ -2661,6 +2661,8 @@ components:
             failing: { type: integer }
         members: { type: integer }
         large: { type: boolean, description: "More than 100 members: its lines are read on demand, not copied to feeds." }
+        repos: { type: integer, description: "Its projects (code repos; the meta layer's own repo is not counted). A plain repo has 1." }
+        open_branches: { type: integer, description: "Open branches across those projects (not merged, not deleted, main not counted)." }
         at: { type: string, format: date-time, description: When the monorepo computed it. }
     MonorepoSummary:
       allOf:
@@ -2679,6 +2681,8 @@ components:
                 failing: { type: integer }
             members: { type: [integer, "null"] }
             large: { type: [boolean, "null"] }
+            repos: { type: [integer, "null"] }
+            open_branches: { type: [integer, "null"] }
     NeedRow:
       type: object
       required: [monorepo, monorepo_id, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]

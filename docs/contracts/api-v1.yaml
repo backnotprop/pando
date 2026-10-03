@@ -2400,8 +2400,8 @@ webhooks:
         the raw body with the hook's secret; GitHub's scheme under another
         name).
 
-        Deliveries run on a queue: at least once and not in order, like
-        GitHub's. The body's `seq` is the event stream's sequence number:
+        Deliveries leave as soon as the change is recorded (no queue):
+        at least once and not in order, like GitHub's. The body's `seq` is the event stream's sequence number:
         drop a seq you have seen, and sort by it. A try that does not get a
         2xx within 10 seconds is retried after 10 s, 1 min, 5 min and 30 min
         (5 tries over about 36 minutes); then the delivery is dead until an

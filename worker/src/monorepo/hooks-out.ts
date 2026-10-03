@@ -3,8 +3,9 @@
 // written in the same step as the change; the object hands due rows at once to
 // the HooksDrain Worker entrypoint (hooks.ts) by RPC, which POSTs and answers
 // each result; the object records it. The alarm is only the retry timer
-// (10 s, 60 s, 5 min, 30 min, then dead). pando-hooks measured p50 1.2 s and
-// up to 4.5 s in the queue alone at one push every 5 s.
+// (10 s, 60 s, 5 min, 30 min, then dead). The pando-hooks queue this replaced
+// took p50 1.2 s and up to 4.5 s on its own; through the outbox a hook
+// reaches its receiver p50 0.15 s after git push returns (C25-LIVE-HOME.md).
 //
 // Each delivery is its own call, so a slow receiver holds only itself. A row
 // handed to a call is leased (`sent_at`), so concurrent drains never send it

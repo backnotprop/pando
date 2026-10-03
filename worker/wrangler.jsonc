@@ -47,25 +47,12 @@
   // by RPC (FactsDrain, HooksDrain), not by queue. The consumers are this Worker's queue().
   "queues": {
     "producers": [
-      // Hook deliveries before the outbox (C9): message = {monorepo, delivery_id}. Unused since
-      // C25 step 3; kept bound for leftover messages until the outbox is measured on pando-dev.
-      { "binding": "HOOKS", "queue": "pando-hooks" },
       // The home's activity feed (C25): membership changes. Lines and summaries drain by RPC (FeedDrain); kept until that is measured on pando-dev.
       { "binding": "FEED_QUEUE", "queue": "pando-feed" },
       // The file pages (FILES.md): a folder's last commits finished off the request.
       { "binding": "HISTORY_QUEUE", "queue": "pando-history" }
     ],
     "consumers": [
-      {
-        "queue": "pando-hooks",
-        "max_batch_size": 10,
-        "max_batch_timeout": 1,
-        // A leftover message only wakes its monorepo's outbox (hooks-out.ts), which sends and retries.
-        "max_retries": 4,
-        "max_concurrency": 10,
-        "dead_letter_queue": "pando-hooks-dlq"
-      },
-      { "queue": "pando-hooks-dlq", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3 },
       {
         "queue": "pando-feed",
         "max_batch_size": 100,

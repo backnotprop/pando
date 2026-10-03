@@ -14,7 +14,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
 import { redact } from "../http";
-import { note, timed, timedStub } from "../timing";
+import { note, timed } from "../timing";
 import type { HookJob, HookResult } from "./hooks-out";
 import { deliveryReadToken, withRepo } from "./artifacts";
 import { CI_READ_REUSE_MS, CI_READ_TTL_S, pandoBuildEnv } from "../ci/buildkite";
@@ -30,13 +30,6 @@ const TIMEOUT_MS = 10_000;
 /** A read token is reused for this long (it lives 30 minutes, so a receiver gets at least 5). */
 const READ_TOKEN_REUSE_MS = 25 * 60_000;
 const readTokens = new Map<string, { token: string; expiresAt: string; at: number }>();
-
-/** A pando-hooks message (sent before the outbox; the queue stays bound until the outbox is measured). */
-export interface DeliveryMessage {
-  /** The monorepo's id (for one made before namespaces, its old name). */
-  monorepo: string;
-  delivery_id: string;
-}
 
 /** A read token for one repo: `ci` (Buildkite) lives CI_READ_TTL_S, `web` 30 minutes. Reused per isolate. */
 export async function readToken(env: Env, artifactsName: string, kind: "web" | "ci" = "web"): Promise<{ token: string; expiresAt: string }> {
@@ -92,24 +85,6 @@ async function deliverOne(env: Env, j: HookJob): Promise<HookResult> {
   const r = await attempt(env, j.hook, j.delivery_id, p, (kind) => readToken(env, j.artifacts_name, kind), j.due);
   note({ receiver_ms: Date.now() - t0, receiver_code: r.code, delivered: r.ok });
   return { ...r, ms: Date.now() - t0 };
-}
-
-/**
- * The pando-hooks consumer, for messages sent before the outbox: the outbox
- * now sends every delivery, so a message only wakes its monorepo's outbox.
- */
-export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
-  const monorepos = new Set(batch.messages.map((m) => m.body.monorepo));
-  await Promise.all([...monorepos].map((m) => timedStub(env.MONOREPO.getByName(m)).sendDueDeliveries().catch(() => {})));
-  batch.ackAll();
-}
-
-/** The pando-hooks-dlq consumer, for messages sent before the outbox: mark the deliveries dead. */
-export async function handleDeadDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
-  for (const msg of batch.messages) {
-    await env.MONOREPO.getByName(msg.body.monorepo).markDead(msg.body.delivery_id);
-    msg.ack();
-  }
 }
 
 export interface HookRow {

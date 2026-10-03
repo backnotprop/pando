@@ -841,16 +841,6 @@ export class MonorepoObject extends DurableObject<Env> {
     return id;
   }
 
-  /** Send the due deliveries now (the pando-hooks consumer, for messages sent before the outbox). */
-  sendDueDeliveries(): Promise<void> {
-    return this.hooksOut.sendDue();
-  }
-
-  /** The pando-hooks-dlq consumer, for messages sent before the outbox: the delivery gave up. */
-  markDead(id: string): void {
-    this.sql.exec("UPDATE deliveries SET status = 'dead', next_attempt_at = NULL WHERE id = ? AND status != 'delivered'", id);
-  }
-
   /** Send one delivery again (same row, same seq; new attempts are added). */
   redeliver(repo: string, deliveryId: string): Promise<Outcome<Record<string, unknown>>> {
     return this.guard(async () => {

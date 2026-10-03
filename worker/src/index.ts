@@ -21,7 +21,6 @@ import { objectsClient } from "./objects";
 import { monorepoStub } from "./monorepo/session";
 import { signin } from "./accounts/signin";
 import { factsTestRoute } from "./monorepo/facts";
-import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./monorepo/hooks";
 import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
 import type { FeedMessage } from "./feed/shape";
@@ -71,7 +70,7 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
-  /** The queues: last commits (monorepo/files.ts), hook messages from before the outbox (monorepo/hooks.ts), the feed. */
+  /** The queues: last commits (monorepo/files.ts) and the feed. */
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === "pando-history") {
       return handleHistoryBatch(batch as MessageBatch<HistoryMessage>, env, ctx, {
@@ -79,8 +78,6 @@ export default {
         mergesFor: (id, repo) => (shas) => monorepoStub(env, id).mergedBranches(repo, shas),
       });
     }
-    if (batch.queue === "pando-hooks") return handleDeliveries(batch as MessageBatch<DeliveryMessage>, env);
-    if (batch.queue === "pando-hooks-dlq") return handleDeadDeliveries(batch as MessageBatch<DeliveryMessage>, env);
     if (batch.queue === "pando-feed") return handleFeedBatch(batch as MessageBatch<FeedMessage>, env);
     console.error(`a batch from an unknown queue ${batch.queue}; acked`);
     batch.ackAll();

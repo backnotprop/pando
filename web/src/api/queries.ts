@@ -1,7 +1,8 @@
 // Every server read as a TanStack Query option, keyed so the live socket can
 // patch or invalidate it: ["m", owner, name, ...] holds one monorepo's data,
 // ["m", owner, name, "meta", ...] its root files.
-import { type FullName, MetaHistory, Routes } from "@pando/contract";
+import { type FullName, MetaHistory, type RepoName, Routes } from "@pando/contract";
+import type * as Schema from "effect/Schema";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { get, getText } from "./client";
 import type { MonorepoRef } from "./names";
@@ -48,29 +49,33 @@ export const activityQuery = (inMonorepo: FullName | null) =>
     getNextPageParam: (page) => page.next ?? undefined,
   });
 
-export const monorepoQuery = (m: MonorepoRef) =>
-  queryOptions({ queryKey: key(m), queryFn: () => get(P.Monorepo, base(m)), staleTime: 60_000 });
+/** Reads a route the contract names: its path and the schema of its answer. */
+const read = <A, I>(route: { path: string; response: Schema.Codec<A, I> }) => get(route.response, route.path);
+
+export const monorepoQuery = (m: MonorepoRef) => queryOptions({ queryKey: key(m), queryFn: () => read(Routes.getMonorepo(m.owner, m.name)), staleTime: 60_000 });
 
 export const reposQuery = (m: MonorepoRef) =>
-  queryOptions({ queryKey: [...key(m), "repos"], queryFn: () => get(P.Repos, `${base(m)}/repos`).then((r) => r.repos) });
+  queryOptions({ queryKey: [...key(m), "repos"], queryFn: () => read(Routes.listRepos(m.owner, m.name)).then((r) => r.repos) });
 
 /** Each code repo's main head and when it last moved (the projects rows' time). */
 export const headsQuery = (m: MonorepoRef) =>
   queryOptions({ queryKey: [...key(m), "heads"], queryFn: () => get(P.Heads, `${base(m)}/heads`).then((r) => r.heads) });
 
-export const openBranchesQuery = (m: MonorepoRef, repo: string) =>
+/** A repo's open branches, counted on the first page (100). */
+export const openBranchesQuery = (m: MonorepoRef, repo: RepoName) =>
   queryOptions({
     queryKey: [...key(m), "branches", repo],
-    queryFn: () => get(P.BranchNames, `${base(m)}/repos/${enc(repo)}/branches?state=open&limit=500`).then((r) => r.branches.length),
+    queryFn: () => read(Routes.listBranches(m.owner, m.name, repo, "open", null)).then((r) => r.branches.length),
   });
 
 export const membersQuery = (m: MonorepoRef) =>
-  queryOptions({ queryKey: [...key(m), "members"], queryFn: () => get(P.Members, `${base(m)}/members`).then((r) => r.members.length) });
+  queryOptions({ queryKey: [...key(m), "members"], queryFn: () => read(Routes.listMembers(m.owner, m.name)).then((r) => r.members.length) });
 
+/** Machines connected now (the Machines tab's count). */
 export const machinesQuery = (m: MonorepoRef) =>
   queryOptions({
     queryKey: [...key(m), "machines"],
-    queryFn: () => get(P.Machines, `${base(m)}/machines`).then((r) => r.machines.filter((x) => x.connected).length),
+    queryFn: () => read(Routes.listMachines(m.owner, m.name)).then((r) => r.machines.filter((x) => x.connected).length),
   });
 
 /** One folder of root files: its files, and its subfolders (with their newest save, once the API has it). */
@@ -124,4 +129,3 @@ export const fileQuery = (m: MonorepoRef, path: string, version: number | null) 
     staleTime: version === null ? 0 : Infinity,
   });
 
-export const restorePath = (m: MonorepoRef) => `${base(m)}/meta/restore`;

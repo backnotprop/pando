@@ -5,7 +5,7 @@ import type { NeedRow } from "@pando/contract";
 import { useQueries, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../api/names";
-import type { Repo } from "../../../api/pending";
+import type { Repo } from "@pando/contract";
 import { activityQuery, fileQuery, headsQuery, latestQuery, monorepoQuery, needsQuery, openBranchesQuery, reposQuery, treeQuery } from "../../../api/queries";
 import { MiniActivity } from "../../../ui/activity";
 import { Empty, Lnk, SectionHead } from "../../../ui/controls";
@@ -66,7 +66,7 @@ function Side({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
                   className="-mx-2.5 grid min-h-10 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-air"
                 >
                   <RepoIcon className="block size-4 text-bark-dim" />
-                  <span className="font-mono text-[13px] leading-[normal] text-bark">{r.path}</span>
+                  <span className="font-mono text-[13px] leading-[16px] text-bark">{r.path}</span>
                   <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{open[i] === undefined ? "" : `${open[i]} open`}</span>
                 </Link>
               </li>
@@ -92,7 +92,7 @@ function MiniNeeds({ rows }: { rows: readonly NeedRow[] }) {
             className="-mx-2.5 grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2.5 py-[5px] hover:bg-air"
           >
             <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden text-[13px] whitespace-nowrap">
-              <span className="font-mono text-[12.5px] leading-[normal] text-bark">{n.branch}</span>
+              <span className="font-mono text-[12.5px] leading-[15px] text-bark">{n.branch}</span>
               <NeedState row={n} />
             </span>
             <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{n.repo_path.split("/").pop()}</span>
@@ -133,7 +133,7 @@ function Root({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
             </Lnk>
           ) : null}
           {total === null ? null : (
-            <span className="font-mono text-[13px] leading-[normal] text-ash">
+            <span className="font-mono text-[13px] leading-[16px] text-ash">
               {total} open branch{total === 1 ? "" : "es"}
             </span>
           )}

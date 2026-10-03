@@ -11,8 +11,8 @@ export const Route = createFileRoute("/$owner/$name/activity")({
     const { monorepo } = Route.useRouteContext();
     const log = useSuspenseInfiniteQuery(activityQuery(monorepo.full));
     const events = log.data.pages.flatMap((p) => p.events);
-    const more = log.hasNextPage && !log.isFetchingNextPage ? () => void log.fetchNextPage() : null;
+    const older = { more: log.hasNextPage, loading: log.isFetchingNextPage, load: () => void log.fetchNextPage() };
 
-    return <div className="max-w-[960px]">{events.length ? <ActivityList events={events} withMonorepo={false} more={more} /> : <Empty>Nothing yet.</Empty>}</div>;
+    return <div className="max-w-[960px]">{events.length ? <ActivityList events={events} withMonorepo={false} older={older} /> : <Empty>Nothing yet.</Empty>}</div>;
   },
 });

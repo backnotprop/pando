@@ -78,6 +78,8 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(log.getByRole("link", { name: "feature-live" }).first()).toBeVisible({ timeout: 30_000 });
       await expect(log.getByText(`from ${machine().name}`).first()).toBeVisible();
       expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(before);
+      // A new person's log fits on one page: it ends, with no "Older" to load.
+      await expect(page.getByText("No older activity.")).toBeVisible();
     });
 
     await test.step("open the monorepo: the root folder, Clone, the README", async () => {

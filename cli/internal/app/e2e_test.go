@@ -87,6 +87,26 @@ func (h *harness) git(dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// chmodTree adds or removes permission bits under dir, .git left alone.
+func chmodTree(dir string, bits os.FileMode, add bool) {
+	filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		m := info.Mode().Perm()
+		if add {
+			m |= bits
+		} else {
+			m &^= bits
+		}
+		os.Chmod(p, m)
+		return nil
+	})
+}
+
 func TestMonorepoEndToEnd(t *testing.T) {
 	h := newHarness(t)
 	ws := filepath.Join(h.base, "ws")
@@ -170,6 +190,28 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	if len(ws2) != 2 {
 		t.Fatalf("local worktrees: %+v", ws2)
 	}
+	// A second machine's read-only main follows the merge.
+	other := filepath.Join(h.base, "other")
+	h.ok(h.base, "clone", "ws", other, "--server", h.server)
+	otherMain := filepath.Join(other, "projects/app/worktrees/main")
+	// As if this machine cloned before the merge: main one commit back.
+	chmodTree(otherMain, 0o200, true)
+	h.git(otherMain, "reset", "-q", "--hard", "HEAD~1")
+	chmodTree(otherMain, 0o222, false)
+	if _, err := os.Stat(filepath.Join(otherMain, "src/oauth.go")); err == nil {
+		t.Fatal("setup: main should be before the merge")
+	}
+	h.ok(other, "worktree", "follow", "--once")
+	if _, err := os.Stat(filepath.Join(otherMain, "src/oauth.go")); err != nil {
+		t.Fatal("the other machine's main did not follow the merge")
+	}
+	if st := h.git(otherMain, "status", "--porcelain"); st != "" {
+		t.Fatalf("main after following: %q", st)
+	}
+	if os.WriteFile(filepath.Join(otherMain, "y"), []byte("y"), 0o644) == nil {
+		t.Fatal("main is writable after following")
+	}
+
 	out = h.ok(clone, "status")
 	if !strings.Contains(out, "projects/app/worktrees/agent-1-oauth") {
 		t.Fatalf("status:\n%s", out)

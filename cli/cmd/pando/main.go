@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"pando/internal/app"
 	"pando/internal/meta"
@@ -23,6 +25,17 @@ var metaCommands = map[string]func([]string) int{
 	"resolve": meta.CmdResolve,
 	"meta": func(args []string) int {
 		if len(args) > 0 && args[0] == "sync" {
+			// The one daemon of a monorepo: the meta layer, and its
+			// read-only mains following merges.
+			if !hasFlag(args[1:], "once") {
+				dir, _ := os.Getwd()
+				if r := flagValue(args[1:], "root"); r != "" {
+					dir = r
+				}
+				ctx, stop := context.WithCancel(context.Background())
+				defer stop()
+				app.StartFollower(ctx, dir, 15*time.Second)
+			}
 			return meta.CmdSync(args[1:], meta.Hooks{References: app.ReferencesHook})
 		}
 		if len(args) > 0 && args[0] == "status" {
@@ -31,6 +44,27 @@ var metaCommands = map[string]func([]string) int{
 		fmt.Fprintln(os.Stderr, "usage: pando meta sync [--once] | status")
 		return 2
 	},
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == "-"+name || a == "--"+name || strings.HasPrefix(a, "--"+name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func flagValue(args []string, name string) string {
+	for i, a := range args {
+		if (a == "-"+name || a == "--"+name) && i+1 < len(args) {
+			return args[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, "--"+name+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 var metaUsage = []string{
@@ -46,7 +80,7 @@ var commands = []app.Command{
 	{Name: "auth", Usage: "auth status                                               who this machine is signed in as", Run: app.Auth},
 	{Name: "init", Usage: "init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder", Run: app.Init},
 	{Name: "clone", Usage: "clone <name> [folder]                                     set up a Pando repo or monorepo on this machine", Run: app.Clone},
-	{Name: "worktree", Usage: "worktree add <repo> <branch> | list | remove <path>      one branch, one folder, one agent", Run: app.Worktree},
+	{Name: "worktree", Usage: "worktree add <repo> <branch> | list | remove <path> | follow   one branch, one folder, one agent", Run: app.Worktree},
 	{Name: "branch", Usage: "branch list [--repo <path>] [--all]                       branches with ahead, behind and checks", Run: app.Branch},
 	{Name: "diff", Usage: "diff [<branch>] [--json | --patch] [paths...]             the branch diff against main", Run: app.Diff},
 	{Name: "review", Usage: "review [<branch>] [-m <comment>]                          review in Plannotator, or comment", Run: app.Review},

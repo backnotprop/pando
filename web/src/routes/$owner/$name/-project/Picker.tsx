@@ -14,8 +14,11 @@ import { stateOf } from "./state";
 
 const QUIET = { ready: "text-bark-dim", bad: "text-rust", wait: "text-ash", merged: "text-ash" };
 
-const item =
-  "flex h-[34px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13.5px] text-bark-dim outline-none hover:bg-pop-hi hover:text-bark focus-visible:bg-pop-hi data-current:bg-pop-hi";
+const row = "flex w-full items-center rounded-md px-2.5 text-left text-[13.5px] text-bark-dim outline-none hover:bg-pop-hi hover:text-bark focus-visible:bg-pop-hi";
+
+const item = `${row} h-[34px] gap-2.5 data-current:bg-pop-hi`;
+
+const footer = `${row} h-8 gap-3`;
 
 /** `at(branch)` is where picking a branch goes: this same folder or file on that branch. */
 export function BranchPicker({ repo, gitRef, at }: { repo: Repo; gitRef: string | null; at: (ref: string | null) => AppLink }) {
@@ -67,7 +70,7 @@ export function BranchPicker({ repo, gitRef, at }: { repo: Repo; gitRef: string 
               })}
             </nav>
             <hr className="mx-1 my-1.5 border-t border-rootline" />
-            <Link {...branchesLink(monorepo.full, repo.path)} className={`${item} h-8`}>
+            <Link {...branchesLink(monorepo.full, repo.path)} className={footer}>
               View all branches
             </Link>
           </Popover.Popup>

@@ -69,7 +69,7 @@ function Side({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
               <li key={r.path} className="border-t border-rule-faint first:border-t-0">
                 <Link
                   {...repoLink(monorepo.full, r.path)}
-                  className="-mx-2.5 grid min-h-10 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-air"
+                  className="-mx-2.5 grid min-h-10 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-air focus-visible:bg-air"
                 >
                   <RepoIcon className="block size-4 text-bark-dim" />
                   <span className="font-mono text-[13px] leading-[16px] text-bark">{r.path}</span>
@@ -95,7 +95,7 @@ function MiniNeeds({ rows }: { rows: readonly NeedRow[] }) {
         <li key={`${n.repo}:${n.branch}`} className="border-t border-rule-faint first:border-t-0">
           <Link
             {...branchLink(n.monorepo, n.repo_path, n.branch)}
-            className="-mx-2.5 grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2.5 py-[5px] hover:bg-air"
+            className="-mx-2.5 grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2.5 py-[5px] hover:bg-air focus-visible:bg-air"
           >
             <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden text-[13px] whitespace-nowrap">
               <span className="font-mono text-[12.5px] leading-[15px] text-bark">{n.branch}</span>

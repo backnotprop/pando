@@ -10,6 +10,7 @@ import { Avatar } from "./Avatar";
 import { Chevron, Mark } from "./Icons";
 import { type AppLink, monoLink, repoLink } from "./paths";
 import { MenuHeading, MenuLink, MenuPopup, MenuRule, menuItem } from "./menu";
+import { EXACT } from "./TabBar";
 import { ago, since, useNow } from "./time";
 
 const lastSeen = (at: string, clock: number) => (since(at, clock) === "now" ? "now" : ago(at, clock));
@@ -131,7 +132,7 @@ export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
             </span>
             {c.monorepo ? (
               <>
-                <Link {...monoLink(c.monorepo)} className={`${crumbLink} inline-flex items-center gap-2`}>
+                <Link {...monoLink(c.monorepo)} activeOptions={EXACT} className={`${crumbLink} inline-flex items-center gap-2`}>
                   <Avatar name={c.label} org size={18} />
                   {c.label}
                 </Link>
@@ -139,7 +140,7 @@ export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
               </>
             ) : c.link ? (
               <>
-                <Link {...c.link} className={crumbLink}>
+                <Link {...c.link} activeOptions={EXACT} className={crumbLink}>
                   {c.label}
                 </Link>
                 {c.project ? <ProjectSwitcher full={full(crumbs)} current={c.project} /> : null}

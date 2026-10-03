@@ -273,6 +273,8 @@ test("fidelity shots of slice 1 beside the prototype", async ({ page, browser })
       await pair(page, proto, "activity", "/ramos/pando/activity");
     } else {
       await pair(page, proto, "branch", "/ramos/pando/projects/pando/branches/web-api");
+      await pair(page, proto, "branches", "/ramos/pando/projects/pando/branches");
+      await pair(page, proto, "activity", "/ramos/pando/activity");
     }
 
     await proto.close();

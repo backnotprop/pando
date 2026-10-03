@@ -94,6 +94,14 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {
       await page.goto(`${project}/branches`);
+      // Exactly one current tab per bar: Branches (not Code too), and Open.
+      const repoTabs = page.getByRole("navigation", { name: "projects/web" }).locator('[aria-current="page"]');
+      const listTabs = page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]');
+
+      await expect(repoTabs).toHaveCount(1);
+      await expect(repoTabs).toHaveText(/^Branches/);
+      await expect(listTabs).toHaveCount(1);
+      await expect(listTabs).toHaveText(/^Open/);
       const open = page.getByRole("list", { name: "Open branches" });
 
       await expect(open.getByRole("link", { name: /feature/ })).toBeVisible();
@@ -117,6 +125,8 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await page.getByRole("button", { name: "Merge", exact: true }).click();
       await expect(page.getByText("Merged into main")).toBeVisible({ timeout: 30_000 });
       await page.goto(`${project}/branches?tab=merged`);
+      await expect(page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]')).toHaveCount(1);
+      await expect(page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]')).toHaveText(/^Merged/);
       await expect(page.getByRole("list", { name: "Merged branches" }).getByRole("link", { name: /Two is better|feature/ })).toBeVisible();
     });
 

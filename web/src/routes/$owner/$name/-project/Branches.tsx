@@ -43,11 +43,11 @@ export function Who({ person, machine }: { person: string | null; machine: strin
   );
 }
 
-export function StateWord({ b, mark = true }: { b: Branch; mark?: boolean }) {
+export function StateWord({ b, mark = true, className = "" }: { b: Branch; mark?: boolean; className?: string }) {
   const s = stateOf(b);
 
   return (
-    <span className={`text-[13px] whitespace-nowrap ${toneClass[s.tone]}`}>
+    <span className={`text-[13px] whitespace-nowrap ${toneClass[s.tone]} ${className}`}>
       {mark && s.app === "buildkite" ? <CheckMark /> : null}
       {s.text}
     </span>
@@ -74,7 +74,7 @@ function Open({ repo }: { repo: Repo }) {
       <ul aria-label="Open branches">
         {branches.map((b) => (
           <li key={b.name} className="border-t border-rule-faint">
-            <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air`}>
+            <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air focus-visible:bg-air`}>
               <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
                 <span className="font-mono text-[13.5px] leading-[16px] text-bark">{b.name}</span>
                 {b.title ? <span className="text-[13px] text-ash">{b.title}</span> : null}
@@ -82,9 +82,7 @@ function Open({ repo }: { repo: Repo }) {
               <span className="narrow:hidden">
                 <Who person={b.author} machine={b.pushed_machine} />
               </span>
-              <span className="phone:hidden">
-                <StateWord b={b} mark={false} />
-              </span>
+              <StateWord b={b} mark={false} className="phone:hidden" />
               <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{b.updated_at ? since(b.updated_at, clock) : ""}</span>
             </Link>
           </li>
@@ -115,7 +113,7 @@ function Merged({ repo }: { repo: Repo }) {
       <ul aria-label="Merged branches">
         {branches.map((b) => (
           <li key={`${b.name}:${b.merge_commit ?? ""}`} className="border-t border-rule-faint">
-            <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air`}>
+            <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air focus-visible:bg-air`}>
               <span className="font-mono text-[13.5px] leading-[16px] text-bark-dim">{b.merge_commit?.slice(0, 7) ?? ""}</span>
               <span className="overflow-hidden text-[13.5px] text-ellipsis whitespace-nowrap text-bark-dim">{b.title ?? `Merge branch '${b.name}'`}</span>
               <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-bark-dim phone:hidden">{b.merged_by ?? ""}</span>

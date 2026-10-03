@@ -12,7 +12,7 @@ import {
   type TreeEntry,
 } from "./objects";
 import { GitWriteError, isSha, OpenRepo, type GitRepo, type Stats } from "./repo";
-import { checkBranchName, checkSignature } from "./validate";
+import { checkBranchName, checkMessage, checkPresent, checkSignature } from "./validate";
 
 export interface MergeOptions {
   base: string;
@@ -36,7 +36,7 @@ export const MERGE_BASE_BUDGET = 5_000;
 export async function mergeCommit(repo: GitRepo, opts: MergeOptions): Promise<MergeResult> {
   checkBranchName(opts?.base, "base");
 
-  if (typeof opts.head !== "string" || !opts.head) throw new GitWriteError("invalid_input", "head is required");
+  checkPresent(opts.head, "head");
 
   if (!isSha(opts.head)) checkBranchName(opts.head, "head");
 
@@ -44,9 +44,7 @@ export async function mergeCommit(repo: GitRepo, opts: MergeOptions): Promise<Me
     throw new GitWriteError("invalid_input", "baseSha must be a full lowercase sha");
   }
 
-  if (typeof opts.message !== "string" || !opts.message.trim()) {
-    throw new GitWriteError("invalid_input", "message is required");
-  }
+  checkMessage(opts.message);
 
   checkSignature(opts.author, "author");
   const committer = opts.committer ?? opts.author;

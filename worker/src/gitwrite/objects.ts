@@ -71,7 +71,7 @@ export async function makeObject(type: ObjectType, data: Uint8Array): Promise<Gi
 }
 
 export function blobObject(content: string | Uint8Array): Promise<GitObject> {
-  return makeObject("blob", typeof content === "string" ? enc.encode(content) : content);
+  return makeObject("blob", content instanceof Uint8Array ? content : enc.encode(content));
 }
 
 // Git orders tree entries by the bytes of their names, comparing a tree's name

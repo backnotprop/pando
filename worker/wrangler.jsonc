@@ -27,8 +27,21 @@
   ],
   "r2_buckets": [
     // For the live lane's large files (M7).
-    { "binding": "BLOBS", "bucket_name": "pando-dev-blobs" }
+    { "binding": "BLOBS", "bucket_name": "pando-dev-blobs" },
+    // The file pages' computed answers (FILES.md): last commits per folder, a
+    // path's history pages, walk checkpoints. A 90-day lifecycle rule ends them.
+    { "binding": "CACHE", "bucket_name": "pando-dev-cache" }
   ],
+  // Workers Caching (FILES.md, the spike's shape A): only the Objects
+  // entrypoint (git objects by hash, the repo in every key) is cached; the
+  // default entrypoint never is, whatever a handler's Cache-Control says.
+  "cache": { "enabled": true, "cross_version_cache": true },
+  "exports": {
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    "Objects": { "type": "worker", "cache": { "enabled": true } },
+    // The feed's drain (RPC only, which is never cached); listed off so it stays so.
+    "FeedDrain": { "type": "worker", "cache": { "enabled": false } }
+  },
   // Branch facts (ahead, behind, mergeable) computed on change: a sweep per new
   // main head, a job per pushed branch. The consumer is this Worker's queue().
   "queues": {
@@ -37,7 +50,9 @@
       // Hook deliveries (C9): message = {monorepo, delivery_id}; the row is in the monorepo object.
       { "binding": "HOOKS", "queue": "pando-hooks" },
       // The home's activity feed (C25): membership changes. Lines and summaries drain by RPC (FeedDrain); kept until that is measured on pando-dev.
-      { "binding": "FEED_QUEUE", "queue": "pando-feed" }
+      { "binding": "FEED_QUEUE", "queue": "pando-feed" },
+      // The file pages (FILES.md): a folder's last commits finished off the request.
+      { "binding": "HISTORY_QUEUE", "queue": "pando-history" }
     ],
     "consumers": [
       {
@@ -66,6 +81,14 @@
         "max_retries": 5,
         "max_concurrency": 10,
         "dead_letter_queue": "pando-feed-dlq"
+      },
+      {
+        "queue": "pando-history",
+        "max_batch_size": 5,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "max_concurrency": 5,
+        "dead_letter_queue": "pando-history-dlq"
       }
     ]
   },

@@ -18,7 +18,7 @@
 // The service:
 //   POST /v1/integrations/buildkite/{connection}   Buildkite's webhooks (wired in index.ts)
 //
-// Details fetched from the service are cached in R2 (BLOBS, ci/<monorepo id>/...)
+// Details fetched from the service are cached in R2 (CACHE, pando-dev-cache, ci/<monorepo id>/...; 90-day expiry)
 // once settled (finished over 30 s ago), and for 10 s while running. Every
 // REST call asks the monorepo object for a permit first (Buildkite's limits).
 
@@ -142,7 +142,7 @@ function cacheKey(c: C, ref: CiRef, what: string): string {
 
 /** A cached detail, if complete or fresh enough. */
 async function fromCache(env: Env, key: string): Promise<{ text: string; meta: Record<string, string> } | null> {
-  const obj = await env.BLOBS.get(key);
+  const obj = await env.CACHE.get(key);
   if (!obj) return null;
   const meta = obj.customMetadata ?? {};
   if (meta.complete !== "1" && Date.now() - Date.parse(meta.fetched_at ?? "") > RUNNING_TTL_MS) {
@@ -153,7 +153,7 @@ async function fromCache(env: Env, key: string): Promise<{ text: string; meta: R
 }
 
 async function toCache(env: Env, key: string, text: string, meta: Record<string, string>): Promise<void> {
-  await env.BLOBS.put(key, text, { customMetadata: meta }).catch((err) => console.warn("ci: caching a detail failed:", err instanceof Error ? err.message : String(err)));
+  await env.CACHE.put(key, text, { customMetadata: meta }).catch((err) => console.warn("ci: caching a detail failed:", err instanceof Error ? err.message : String(err)));
 }
 
 /** A finished detail never changes, so the browser may keep it; a running one is re-read. */
@@ -423,8 +423,8 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     // Its cached details.
     const prefix = `ci/${c.get("m")}/${id}/`;
     for (let more = true; more; ) {
-      const listed = await c.env.BLOBS.list({ prefix, limit: 1000 });
-      if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
+      const listed = await c.env.CACHE.list({ prefix, limit: 1000 });
+      if (listed.objects.length) await c.env.CACHE.delete(listed.objects.map((o) => o.key));
       more = listed.truncated;
     }
     return c.body(null, 204);

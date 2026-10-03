@@ -57,6 +57,8 @@ export async function repoTokenEntry(
     entry = { token: t.plaintext, expiresAt: Date.parse(t.expiresAt) || Date.now() + TOKEN_TTL_SECONDS * 1000 };
   } else {
     const got = await timedStub(env.MONOREPO.getByName(monorepoOf(name))).artifactsToken(name, scope, generation, fresh);
+    // A monorepo deleted moments ago, still in this isolate's caches: not a server error.
+    if (!got) throw new HttpError(404, "not_found", "this monorepo was deleted");
     // A mint inside the object is Artifacts time on this request's line.
     if (got.mint_ms) addArtifacts("createToken (in the object)", name, Date.now() - got.mint_ms, Date.now());
     entry = { token: got.token, expiresAt: got.expiresAt };

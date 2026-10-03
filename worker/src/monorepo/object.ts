@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   created_at TEXT NOT NULL, last_attempt_at TEXT, next_attempt_at TEXT);
 CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries (status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS deliveries_hook ON deliveries (hook_id, created_at);
+CREATE TABLE IF NOT EXISTS object_sizes (repo TEXT NOT NULL, oid TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (repo, oid));
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL, machine TEXT NOT NULL,
   agent TEXT, kind TEXT NOT NULL, reported_by TEXT NOT NULL,
@@ -552,6 +553,28 @@ export class MonorepoObject extends DurableObject<Env> {
       delay === undefined ? "failed" : "pending", attempts, result.code, result.error, at,
       delay === undefined ? null : new Date(Date.now() + delay).toISOString(), d.id,
     );
+  }
+
+  // ── Object sizes (git protocol v2 object-info) ───────────────────────────
+
+  /** Known sizes of objects in a repo. Objects never change, so entries never expire. */
+  objectSizes(repo: string, oids: string[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (let i = 0; i < oids.length; i += 100) {
+      const chunk = oids.slice(i, i + 100);
+      const rows = this.rows<{ oid: string; size: number }>(
+        `SELECT oid, size FROM object_sizes WHERE repo = ? AND oid IN (${chunk.map(() => "?").join(",")})`,
+        repo, ...chunk,
+      );
+      for (const r of rows) out[r.oid] = r.size;
+    }
+    return out;
+  }
+
+  recordObjectSizes(repo: string, entries: [string, number][]): void {
+    for (const [oid, size] of entries) {
+      this.sql.exec("INSERT OR IGNORE INTO object_sizes (repo, oid, size) VALUES (?, ?, ?)", repo, oid, size);
+    }
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import { ZERO } from "./names";
 import { drain, parseReport, prepend, readCommandSection, refusal } from "./pktline";
 import type { Identity, RepoEvent, RepoRecord } from "./types";
 import { monorepoStub } from "./session";
+import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
 import { authenticate, identityOf } from "../accounts/auth";
 
 const DOOR_RE = /^\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/;
@@ -79,12 +80,32 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   const repo = await stub.getRepo(repoName);
   if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
 
+  const v2 = /version=2/.test(req.headers.get("git-protocol") ?? "");
+  if (v2 && service === "git-upload-pack" && action === "info/refs") {
+    // Artifacts' v2 advertisement, plus object-info, which the door answers itself.
+    const res = await gitRequest(env, repo, `/info/refs${url.search}`, "read", { method: "GET", headers: passHeaders(req, ["accept", "git-protocol"]) });
+    if (!res.ok) return relay(res);
+    const body = withObjectInfo(new Uint8Array(await res.arrayBuffer()));
+    return new Response(body, { headers: { "content-type": res.headers.get("content-type") ?? "application/x-git-upload-pack-advertisement", "cache-control": "no-cache" } });
+  }
+  let uploadBody: ReadableStream<Uint8Array> | null = req.body;
+  if (v2 && action === "git-upload-pack" && req.body) {
+    const gzip = (req.headers.get("content-encoding") ?? "").toLowerCase() === "gzip";
+    const peeked = await peekCommand(req.body, gzip);
+    if (peeked.objectInfo) {
+      return new Response(await answerObjectInfo(env, stub, repo, peeked.objectInfo), {
+        headers: { "content-type": "application/x-git-upload-pack-result", "cache-control": "no-cache" },
+      });
+    }
+    uploadBody = peeked.body;
+  }
+
   if (service === "git-upload-pack" || action === "info/refs") {
     const scope = service === "git-upload-pack" ? "read" : "write";
     const res = await gitRequest(env, repo, action === "info/refs" ? `/info/refs${url.search}` : `/${action}`, scope, {
       method: req.method,
       headers: passHeaders(req, ["content-type", "content-encoding", "accept", "git-protocol"]),
-      body: req.method === "POST" ? req.body : undefined,
+      body: req.method === "POST" ? uploadBody : undefined,
     });
     return relay(res);
   }

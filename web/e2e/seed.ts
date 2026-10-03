@@ -9,10 +9,11 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Page } from "@playwright/test";
+import { STANDIN_PORT, WORKER_PORT } from "./ports.ts";
 
-export const BASE = "http://localhost:8813";
+export const BASE = `http://localhost:${WORKER_PORT}`;
 
-const STANDIN = "http://127.0.0.1:8814";
+const STANDIN = `http://127.0.0.1:${STANDIN_PORT}`;
 
 export interface Person {
   id: string;

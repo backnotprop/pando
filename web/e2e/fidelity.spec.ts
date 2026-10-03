@@ -4,7 +4,7 @@
 // each slice 1 screen next to the prototype's own route, at the prototype's
 // settings (2x, dark, reduced motion, 1.5 s after load), into e2e/shots/.
 //
-//   npm run shots      (worker on 8813 with this lane's state; the persona `ramos` is local to it)
+//   npm run shots      (the Worker with this worktree's own state; the persona `ramos` is local to it)
 import { expect, test, type Page } from "@playwright/test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BASE, browserPost, Machine, nextSignIn, saveRootFiles } from "./seed";
@@ -171,6 +171,15 @@ test("fidelity shots of slice 1 beside the prototype", async ({ page, browser })
   test.setTimeout(300_000);
   await nextSignIn(ramos);
   await page.goto("/login");
+
+  // The sign-in page has no prototype screen: shot alone, at both widths.
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    await settle(page);
+    await page.screenshot({ path: `${SHOTS}sign-in-${width}-real.png` });
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("link", { name: "Sign in" }).click();
   await expect(page).toHaveURL(`${BASE}/`);
   await seed(page);

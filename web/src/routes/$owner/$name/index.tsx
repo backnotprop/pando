@@ -6,7 +6,7 @@ import { useQueries, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstac
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../api/names";
 import type { Repo } from "../../../api/pending";
-import { activityQuery, fileQuery, latestQuery, monorepoQuery, needsQuery, openBranchesQuery, reposQuery, treeQuery } from "../../../api/queries";
+import { activityQuery, fileQuery, headsQuery, latestQuery, monorepoQuery, needsQuery, openBranchesQuery, reposQuery, treeQuery } from "../../../api/queries";
 import { MiniActivity } from "../../../ui/activity";
 import { Empty, Lnk, SectionHead } from "../../../ui/controls";
 import { RepoIcon } from "../../../ui/Icons";
@@ -27,6 +27,7 @@ export const Route = createFileRoute("/$owner/$name/")({
       tree.head ? queryClient.ensureQueryData(latestQuery(monorepo, tree.head)) : null,
       readme ? queryClient.ensureQueryData(fileQuery(monorepo, readme, null)) : null,
       queryClient.ensureQueryData(needsQuery(monorepo.full)),
+      queryClient.ensureQueryData(headsQuery(monorepo)),
       queryClient.ensureInfiniteQueryData(activityQuery(monorepo.full)),
     ]);
   },
@@ -119,7 +120,8 @@ function Root({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
   const readme = readmeOf("", tree.files);
   const full = monorepo.full;
   const total = open.every((n) => n !== undefined) ? open.reduce<number>((a, n) => a + (n ?? 0), 0) : null;
-  const rows = folderRows(full, "", tree.folders, tree.files, repos);
+  const heads = useSuspenseQuery(headsQuery(monorepo)).data;
+  const rows = folderRows(full, "", tree.folders, tree.files, heads);
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_300px] items-start gap-14 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">

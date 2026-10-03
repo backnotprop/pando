@@ -113,15 +113,18 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
   return (
     <Page crumbs={owner ? [{ label: owner }] : []}>
       <div className="grid grid-cols-[300px_minmax(0,1fr)] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
-        <aside className="sticky top-7 flex min-h-[calc(100vh-140px)] flex-col narrow:static narrow:min-h-0">
-          {owner ? (
-            <h1 className="mb-6 flex items-center gap-3.5 font-mono text-[24px] leading-[30px] tracking-[-.01em]">
-              <Avatar name={owner} size={36} />
-              {owner}
-            </h1>
-          ) : null}
-          <SectionHead title="Monorepos" count={mine.length} />
-          <MonorepoList lines={mine} />
+        {/* On a phone the aside dissolves into the column, so What's new can follow the activity. */}
+        <aside className="sticky top-7 flex min-h-[calc(100vh-140px)] flex-col narrow:static narrow:min-h-0 phone:contents">
+          <div>
+            {owner ? (
+              <h1 className="mb-6 flex items-center gap-3.5 font-mono text-[24px] leading-[30px] tracking-[-.01em]">
+                <Avatar name={owner} size={36} />
+                {owner}
+              </h1>
+            ) : null}
+            <SectionHead title="Monorepos" count={mine.length} />
+            <MonorepoList lines={mine} />
+          </div>
           <HomeFoot />
         </aside>
         <section aria-label="Needs you and activity">

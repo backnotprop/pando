@@ -54,7 +54,7 @@ function sfFonts(): Plugin {
 
 // `npm run dev` serves the app here and sends the API to a local `wrangler dev`
 // (PANDO_DEV_WORKER). Writes and sockets must carry the Worker's own Origin.
-const worker = process.env.PANDO_DEV_WORKER ?? "http://localhost:8813";
+const worker = process.env.PANDO_DEV_WORKER ?? "http://localhost:8871";
 
 export default defineConfig({
   plugins: [sfFonts(), tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), tailwindcss()],

@@ -1,7 +1,7 @@
 // A folder's rows from the root files' tree: folders first, then files, each
 // alphabetical; at the root, `projects` for the monorepo's code repos.
 import type { MetaFolder, MetaVersion } from "@pando/contract";
-import type { Repo } from "../../../../api/pending";
+import type { Head } from "../../../../api/pending";
 import { blobLink, repoLink, treeLink } from "../../../../ui/paths";
 import type { Row } from "./FileList";
 
@@ -11,7 +11,10 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
 
 const base = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-export function folderRows(full: string, dir: string, folders: readonly MetaFolder[], files: readonly MetaVersion[], repos: readonly Repo[]): Row[] {
+/** When main last moved, in ms; the newest of several heads. */
+const movedAt = (heads: readonly Head[]) => heads.reduce<number | null>((a, h) => (h.updated_at && (a === null || Date.parse(h.updated_at) > a) ? Date.parse(h.updated_at) : a), null);
+
+export function folderRows(full: string, dir: string, folders: readonly MetaFolder[], files: readonly MetaVersion[], heads: readonly Head[]): Row[] {
   const dirs: Row[] = folders.map((f) => ({
     kind: "dir",
     name: f.name,
@@ -20,7 +23,8 @@ export function folderRows(full: string, dir: string, folders: readonly MetaFold
     at: f.last?.at ?? null,
   }));
 
-  if (!dir && repos.length) dirs.push({ kind: "dir", name: "projects", link: treeLink(full, "projects"), change: "", at: null });
+  // The change text (main's head title) waits for the heads route to carry it; one read per project is too many.
+  if (!dir && heads.length) dirs.push({ kind: "dir", name: "projects", link: treeLink(full, "projects"), change: "", at: movedAt(heads) });
 
   const rows: Row[] = files.map((v) => ({
     kind: "file",
@@ -34,8 +38,8 @@ export function folderRows(full: string, dir: string, folders: readonly MetaFold
 }
 
 /** `projects/`: one row per code repo, each opening its project page. */
-export const projectRows = (full: string, repos: readonly Repo[]): Row[] =>
-  repos.map((r): Row => ({ kind: "project", name: base(r.path), link: repoLink(full, r.path), change: "", at: null })).sort(byName);
+export const projectRows = (full: string, heads: readonly Head[]): Row[] =>
+  heads.map((h): Row => ({ kind: "project", name: base(h.path), link: repoLink(full, h.path), change: "", at: movedAt([h]) })).sort(byName);
 
 /** The newest file in a folder: the folder page's latest-change bar. */
 export const newest = (files: readonly MetaVersion[]) => files.reduce<MetaVersion | null>((a, v) => (!a || v.at > a.at ? v : a), null);

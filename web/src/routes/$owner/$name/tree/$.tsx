@@ -2,7 +2,7 @@
 // `projects/` lists the monorepo's code repos.
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { fileQuery, reposQuery, treeQuery } from "../../../../api/queries";
+import { fileQuery, headsQuery, treeQuery } from "../../../../api/queries";
 import { Empty } from "../../../../ui/controls";
 import { tabLink, treeLink } from "../../../../ui/paths";
 import { FileList, Readme, type Row, versionBar } from "../-code/FileList";
@@ -12,7 +12,7 @@ export const Route = createFileRoute("/$owner/$name/tree/$")({
   loader: async ({ context: { queryClient, monorepo }, params }) => {
     const dir = params._splat ?? "";
 
-    if (dir === "projects") return void (await queryClient.ensureQueryData(reposQuery(monorepo)));
+    if (dir === "projects") return void (await queryClient.ensureQueryData(headsQuery(monorepo)));
     const tree = await queryClient.ensureQueryData(treeQuery(monorepo, dir));
 
     if (!tree.files.length && !tree.folders.length) throw notFound();
@@ -25,10 +25,10 @@ export const Route = createFileRoute("/$owner/$name/tree/$")({
 
 function Projects() {
   const { monorepo } = Route.useRouteContext();
-  const repos = useSuspenseQuery(reposQuery(monorepo)).data;
+  const heads = useSuspenseQuery(headsQuery(monorepo)).data;
   const up: Row = { kind: "up", name: "..", link: treeLink(monorepo.full, ""), change: "", at: null };
 
-  return repos.length ? <FileList bar={null} rows={[up, ...projectRows(monorepo.full, repos)]} /> : <Empty>No projects yet.</Empty>;
+  return heads.length ? <FileList bar={null} rows={[up, ...projectRows(monorepo.full, heads)]} /> : <Empty>No projects yet.</Empty>;
 }
 
 function Files({ dir }: { dir: string }) {

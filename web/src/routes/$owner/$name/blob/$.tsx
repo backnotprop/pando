@@ -93,9 +93,10 @@ function FilePage() {
       ) : null}
       <div className="overflow-hidden rounded-[10px] border border-rootline">
         <ChangeBar who={saverOf(entry)} title={what} id={`on ${entry.machine}`} at={entry.at} history={historyLink(full, path)} />
-        <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4">
-          <span className="mr-auto overflow-hidden font-mono text-[12.5px] leading-[normal] text-ellipsis whitespace-nowrap text-ash">{name}</span>
-          <span className="flex flex-wrap gap-1.5">
+        {/* On a phone: the name on its own line, the four tools on one row below (design review, 2026-10-03). */}
+        <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pb-2.5">
+          <span className="mr-auto overflow-hidden font-mono text-[12.5px] leading-[normal] text-ellipsis whitespace-nowrap text-ash phone:basis-full">{name}</span>
+          <span className="flex flex-wrap gap-1.5 phone:flex-nowrap">
             <a href={raw} className={tool}>
               Raw
             </a>

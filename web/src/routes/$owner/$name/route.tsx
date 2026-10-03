@@ -1,13 +1,14 @@
 // A monorepo's frame: the breadcrumb (from the address), its name with its
 // avatar, and its tabs. Every page under /{owner}/{name} renders inside.
-import { createFileRoute, Link, notFound, Outlet, useLocation } from "@tanstack/react-router";
+import { createFileRoute, notFound, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
 import { machinesQuery, membersQuery, monorepoQuery } from "../../../api/queries";
 import { Avatar } from "../../../ui/Avatar";
 import { Page } from "../../../ui/pages";
-import { type AppLink, blobLink, monoLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { blobLink, monoLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { Tab, TabBar } from "../../../ui/TabBar";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -47,19 +48,6 @@ function pathCrumbs(full: string, rest: string[]): Crumb[] {
   return kind ? [{ label: kind }] : [];
 }
 
-function Tab({ link, current, label, count }: { link: AppLink; current: boolean; label: string; count?: number | undefined }) {
-  return (
-    <Link
-      {...link}
-      aria-current={current ? "page" : undefined}
-      className="-mb-px flex items-baseline gap-2 border-b-[1.5px] border-transparent pb-[11px] text-[14px] text-ash hover:text-bark aria-[current=page]:border-bark aria-[current=page]:text-bark"
-    >
-      {label}
-      {count ? <span className="font-mono text-[12.5px] leading-[normal] text-ash">{count}</span> : null}
-    </Link>
-  );
-}
-
 function MonorepoFrame() {
   const { monorepo } = Route.useRouteContext();
   const info = Route.useLoaderData();
@@ -88,14 +76,14 @@ function MonorepoFrame() {
           </span>
         </h1>
       </div>
-      <nav aria-label={full} className="mt-[22px] mb-7 flex gap-7 border-b border-rootline phone:overflow-x-auto">
+      <TabBar label={full}>
         <Tab link={monoLink(full)} current={tab === "code"} label="Code" />
         <Tab link={tabLink(full, "activity")} current={tab === "activity"} label="Activity" />
         {info.kind === "monorepo" ? <Tab link={tabLink(full, "machines")} current={tab === "machines"} label="Machines" count={machines} /> : null}
         {info.kind === "monorepo" ? <Tab link={tabLink(full, "ci")} current={tab === "ci"} label="CI" /> : null}
         <Tab link={tabLink(full, "members")} current={tab === "members"} label="Members" count={members} />
         <Tab link={tabLink(full, "settings")} current={tab === "settings"} label="Settings" />
-      </nav>
+      </TabBar>
       <Outlet />
     </Page>
   );

@@ -30,3 +30,10 @@ export const Restored = Schema.Union([Schema.Struct({ version: Count }), Schema.
 
 /** POST /v1/logout with Accept: application/json. */
 export const SignedOut = Schema.Struct({ signed_out: Schema.Boolean, logout_url: Schema.String });
+
+/** GET .../heads: each code repo's main head as Pando last moved it. */
+export const Heads = Schema.Struct({
+  heads: Schema.Array(Schema.Struct({ repo: Schema.String, path: Schema.String, head: Schema.NullOr(Schema.String), updated_at: Schema.NullOr(Schema.String) })),
+});
+
+export type Head = (typeof Heads.Type)["heads"][number];

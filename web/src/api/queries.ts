@@ -54,6 +54,10 @@ export const monorepoQuery = (m: MonorepoRef) =>
 export const reposQuery = (m: MonorepoRef) =>
   queryOptions({ queryKey: [...key(m), "repos"], queryFn: () => get(P.Repos, `${base(m)}/repos`).then((r) => r.repos) });
 
+/** Each code repo's main head and when it last moved (the projects rows' time). */
+export const headsQuery = (m: MonorepoRef) =>
+  queryOptions({ queryKey: [...key(m), "heads"], queryFn: () => get(P.Heads, `${base(m)}/heads`).then((r) => r.heads) });
+
 export const openBranchesQuery = (m: MonorepoRef, repo: string) =>
   queryOptions({
     queryKey: [...key(m), "branches", repo],

@@ -3,11 +3,12 @@
 // page (signing in whoever the test named with POST /_next), the code
 // exchange (checking the PKCE verifier), and the session logout.
 //
-//   node e2e/workos.ts        (Playwright starts it; port 8814, worker/.dev.vars points here)
+//   node e2e/workos.ts        (Playwright starts it on STANDIN_PORT; worker/.dev.vars points here)
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { STANDIN_PORT } from "./ports.ts";
 
-const PORT = Number(process.env.WORKOS_STANDIN_PORT ?? 8814);
+const PORT = STANDIN_PORT;
 
 interface Person {
   id: string;

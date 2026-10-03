@@ -110,7 +110,9 @@ func Host(server string) string {
 	return strings.NewReplacer("/", "_", ":", "_").Replace(server)
 }
 
-func safeHost(server string) string { return strings.NewReplacer("/", "_", ":", "_").Replace(Host(server)) }
+func safeHost(server string) string {
+	return strings.NewReplacer("/", "_", ":", "_").Replace(Host(server))
+}
 
 // CredentialPath is ~/.pando/credentials/<host>: this machine's credential
 // for one server, mode 600.

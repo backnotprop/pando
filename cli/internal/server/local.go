@@ -37,11 +37,15 @@ type localMono struct {
 	Repos     []localRepo `json:"repos"`
 }
 
-func (l *Local) monoDir(m string) string          { return filepath.Join(l.Base, m) }
-func (l *Local) repoDir(m, name string) string    { return filepath.Join(l.monoDir(m), "repos", name+".git") }
-func (l *Local) cloneURL(m, name string) string   { return "file://" + l.repoDir(m, name) }
-func apiErr(status int, code, msg string) error   { return &APIError{Status: status, Code: code, Message: msg} }
-func notFound(what string) error                  { return apiErr(404, "not_found", what+" not found") }
+func (l *Local) monoDir(m string) string { return filepath.Join(l.Base, m) }
+func (l *Local) repoDir(m, name string) string {
+	return filepath.Join(l.monoDir(m), "repos", name+".git")
+}
+func (l *Local) cloneURL(m, name string) string { return "file://" + l.repoDir(m, name) }
+func apiErr(status int, code, msg string) error {
+	return &APIError{Status: status, Code: code, Message: msg}
+}
+func notFound(what string) error { return apiErr(404, "not_found", what+" not found") }
 func (l *Local) login() string {
 	if u := strings.ToLower(os.Getenv("USER")); u != "" {
 		return u

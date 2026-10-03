@@ -119,13 +119,13 @@ type ReviewIn struct {
 }
 
 type Review struct {
-	ID         string `json:"id"`
-	Branch     string `json:"branch"`
-	Head       string `json:"head"`
-	Verdict    string `json:"verdict"`
-	Body       string `json:"body"`
-	Author     string `json:"author"`
-	CreatedAt  string `json:"created_at"`
+	ID        string `json:"id"`
+	Branch    string `json:"branch"`
+	Head      string `json:"head"`
+	Verdict   string `json:"verdict"`
+	Body      string `json:"body"`
+	Author    string `json:"author"`
+	CreatedAt string `json:"created_at"`
 }
 
 type MergeResult struct {

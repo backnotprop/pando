@@ -552,7 +552,8 @@ export class FeedOut {
       case "meta.saved":
         // Files a merge brought in are the merge's line already.
         if (row.source === "main") return null;
-        actor = actor ?? nameOf(row.author);
+        // The saver's login, as on every other line; versions saved before logins were kept have only a name.
+        actor = actor ?? row.login ?? nameOf(row.author);
         summary = { path: e.key ?? row.path ?? null, version: row.version ?? null, deleted: !!row.deleted };
         break;
       default:
@@ -726,9 +727,14 @@ export class FeedOut {
       else if (b.facts_head === b.head && b.facts_main === r.default_head && r.default_head && b.mergeable === "clean" && checks.state === "success") state = "ready";
 
       if (!state || (only && !only.has(state))) continue;
+      const bad = checks.statuses.filter((s) => s.state === "failure" || s.state === "error");
       out.push({
         repo: b.repo, repo_path: r.path, branch: b.name, title: b.title, head: b.head, author: b.creator, pushed_machine: b.pushed_machine, state,
-        checks: { state: checks.state, failing: checks.statuses.filter((s) => s.state === "failure" || s.state === "error").map((s) => s.context) },
+        checks: {
+          state: checks.state,
+          failing: bad.map((s) => s.context),
+          failing_apps: Object.fromEntries(bad.map((s) => [s.context, s.app ?? null])),
+        },
         updated_at: b.updated_at,
       });
     }

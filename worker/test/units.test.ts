@@ -137,7 +137,7 @@ describe("merge base, ahead and behind", () => {
 
 describe("the merge gate", () => {
   const st = (context: string, state: StatusRecord["state"]): StatusRecord => ({
-    sha: A, context, state, target_url: null, description: null, creator: "x", created_at: "",
+    sha: A, context, state, target_url: null, description: null, creator: "x", app: null, created_at: "",
   });
 
   it("passes with no statuses and no required checks", () => {

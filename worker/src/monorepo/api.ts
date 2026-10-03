@@ -2,7 +2,9 @@
 
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
-import { agentHeader, HttpError, toErrorResponse } from "../http";
+import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
+import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
+import { ciRoutes } from "../ci/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredKept } from "./checks";
@@ -36,8 +38,10 @@ import { monoreposSummary } from "../feed/routes";
 
 type Stub = DurableObjectStub<MonorepoObject>;
 // m: the monorepo's id (storage); full: its owner/name (what people see).
-type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string; full: string };
+// stamp: set only for a request carrying a status token (ci/statustoken.ts).
+type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string; full: string; stamp?: StatusStamp };
 type C = Context<{ Bindings: Env; Variables: Vars }>;
+export type ApiVars = Vars;
 
 export const api = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -256,6 +260,21 @@ const authed = async (c: C, next: () => Promise<void>) => {
   const asked = `${c.req.param("o")}/${c.req.param("m")}`;
   const ref = monorepoRef(c.req.param("o"), c.req.param("m"));
   if (!ref) throw new HttpError(404, "not_found", `no monorepo ${asked}`);
+  const bearer = credential(c.req.raw);
+  if (isStatusToken(bearer)) {
+    // A status token (FILES.md section 4): one route, one repo, one commit; no user.
+    const info = await accounts(c.env).resolve(ref);
+    if (!info) throw new HttpError(404, "not_found", `no monorepo ${ref.owner}/${ref.name}`);
+    const stamp = await authorizeStatusToken(c.env, c.req.raw, bearer!, info.id);
+    c.set("m", info.id);
+    c.set("full", info.full_name);
+    c.set("stub", monorepoStub(c.env, info.id));
+    c.set("info", info);
+    c.set("stamp", stamp);
+    c.set("identity", { login: stamp.creator, name: null, email: null, credential_id: "status-token", credential_name: stamp.creator, role: "member", agent: null });
+    note({ monorepo: info.full_name, monorepo_id: info.id, status_token: stamp.creator });
+    return next();
+  }
   const auth = await authenticateRequest(c.env, c.req.raw, ref);
   if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
   if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${ref.owner}/${ref.name}`);
@@ -309,12 +328,14 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
       if (artifactsCode(err) !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
     }
   }
-  // The meta layer's large files in R2.
-  let more = true;
-  while (more) {
-    const listed = await c.env.BLOBS.list({ prefix: `meta/${m}/`, limit: 1000 });
-    if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
-    more = listed.truncated;
+  // The meta layer's large files in R2, and CI details cached there (ci/routes.ts).
+  for (const prefix of [`meta/${m}/`, `ci/${m}/`]) {
+    let more = true;
+    while (more) {
+      const listed = await c.env.BLOBS.list({ prefix, limit: 1000 });
+      if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
+      more = listed.truncated;
+    }
   }
   // The live meta layer: closes its sockets and clears its storage, so the name starts clean.
   if (c.get("info").kind === "monorepo") await c.env.META.get(c.env.META.idFromName(m)).destroy();
@@ -847,6 +868,8 @@ api.post("/v1/monorepos/:o/:m/repos/:r/statuses/:sha", async (c) => {
       description: str(b.description, "description", { optional: true, max: 1000 }) ?? null,
     },
     c.get("identity"),
+    // A member's own credential stamps nothing: `app` is null and the creator is the member, whatever the body says.
+    c.get("stamp") ?? null,
   );
   return c.json(s, 201);
 });
@@ -881,6 +904,13 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
     url = str(b.url, "url", { max: 2000 })!;
     if (!/^https?:\/\//.test(url)) bad("url must be http(s)");
     secret = str(b.secret, "secret", { max: 500 })!;
+    // The CI service behind it (github-actions, circleci, ...): stamped on statuses posted with its deliveries' status tokens.
+    const app = str(b.app, "app", { optional: true, max: 39 });
+    if (app !== undefined) {
+      if (!APP_SLUG.test(app)) bad("app: a slug such as github-actions (a-z, 0-9, '-')");
+      if (app === "buildkite") bad("app buildkite is for buildkite hooks; register type buildkite");
+      config = { app };
+    }
   } else {
     const bk = (b.buildkite ?? {}) as Record<string, unknown>;
     config = { organization: str(bk.organization, "buildkite.organization", { max: 200 })!, pipeline: str(bk.pipeline, "buildkite.pipeline", { max: 200 })! };
@@ -924,6 +954,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
   const r = await repoOf(c);
   return c.json(unwrap(await c.get("stub").redeliver(r.name, c.req.param("id"))), 202);
 });
+
+// ── CI (ci/routes.ts): the CI tab's reads and actions, and connections ──
+
+ciRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

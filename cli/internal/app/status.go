@@ -4,19 +4,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 
 	"pando/internal/config"
 	"pando/internal/gitx"
 	"pando/internal/refs"
+	"pando/internal/server"
 )
 
-// Status is `pando status`: this Pando folder, its repos and worktrees on
-// this machine, its references, and whether the server answers.
+// Status is `pando status`. With no arguments: this Pando folder, its repos
+// and worktrees on this machine, its references, and whether the server
+// answers. With a state: a commit status from a CI step (postStatus).
 func Status(e *Env, args []string) error {
-	if _, err := parse(flags("status"), args); err != nil {
+	fs := flags("status")
+	context := fs.String("context", "", "the check's name (default ci)")
+	targetURL := fs.String("target-url", "", "a link for the check (default $BUILDKITE_BUILD_URL)")
+	description := fs.String("description", "", "a short line for the check")
+	pos, err := parse(fs, args)
+	if err != nil {
 		return err
+	}
+	if len(pos) > 0 {
+		return postStatus(e, pos, *context, *targetURL, *description)
+	}
+	if *context != "" || *targetURL != "" || *description != "" {
+		return UsageError{"--context, --target-url and --description go with a state: pando status success --context ci"}
 	}
 	root, err := e.root()
 	if err != nil {
@@ -111,4 +125,47 @@ func referenceState(e *Env, root *config.Root, p refs.Pointer) string {
 		return "here"
 	}
 	return "here at " + short(head)
+}
+
+var statusStates = map[string]bool{"pending": true, "success": true, "failure": true, "error": true}
+
+var statusSHA = regexp.MustCompile(`/statuses/([0-9a-f]{40})$`)
+
+// postStatus is `pando status <state>` in a CI step that Pando started: it
+// posts to PANDO_STATUS_URL (which names the commit) with
+// PANDO_STATUS_TOKEN, and Pando stamps the CI service on the check. The
+// token is never printed.
+func postStatus(e *Env, pos []string, context, targetURL, description string) error {
+	if len(pos) != 1 || !statusStates[pos[0]] {
+		return UsageError{"the state is pending, success, failure or error"}
+	}
+	token := os.Getenv("PANDO_STATUS_TOKEN")
+	statusURL := os.Getenv("PANDO_STATUS_URL")
+	if token == "" || statusURL == "" {
+		return fmt.Errorf("PANDO_STATUS_URL and PANDO_STATUS_TOKEN are not set: pando status <state> runs in a CI build that Pando started, which has both")
+	}
+	if context == "" {
+		context = "ci"
+	}
+	if targetURL == "" {
+		targetURL = os.Getenv("BUILDKITE_BUILD_URL")
+	}
+	sha := ""
+	if m := statusSHA.FindStringSubmatch(statusURL); m != nil {
+		sha = m[1]
+	}
+	// The token is for one commit. Say so when this checkout is elsewhere.
+	if head, err := gitx.In(e.Cwd).Run(e.Ctx, "rev-parse", "HEAD"); err == nil && sha != "" && head != sha {
+		e.warnf("this checkout is at %s; the status goes to %s, the commit this build is for", short(head), short(sha))
+	}
+	st, err := server.PostStatusTo(e.Ctx, statusURL, token, server.StatusIn{State: pos[0], Context: context, TargetURL: targetURL, Description: description})
+	if err != nil {
+		return err
+	}
+	by := st.Creator
+	if st.App != "" {
+		by = st.App
+	}
+	e.printf("%s: %s on %s (reported as %s)\n", st.Context, st.State, short(st.SHA), by)
+	return nil
 }

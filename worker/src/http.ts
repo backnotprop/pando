@@ -46,6 +46,7 @@ export function redact(s: string): string {
   return s
     .replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>")
     .replace(/pando_[a-f0-9]{20,}/g, "<pando-token>")
+    .replace(/pst1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "<status-token>")
     .replace(/\/\/[^/@\s]+@/g, "//<credentials>@");
 }
 

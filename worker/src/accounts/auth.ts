@@ -1,22 +1,36 @@
 // Who is calling: a credential (Bearer, or the git Basic password) resolved
-// by the accounts object, with the caller's role in one monorepo.
+// by accounts on D1 (store.ts), with the caller's role in one monorepo.
 
 import type { Env } from "../env";
 import { timedStub } from "../timing";
 import { credential, HttpError } from "../http";
 import { hashToken } from "../monorepo/session";
 import type { Identity } from "../monorepo/types";
-import type { Auth } from "./object";
+import { Accounts, confirmed, type Auth } from "./store";
 
 const CACHE_MS = 15_000;
-/** An unknown credential is answered from cache this long (bad tokens stop reaching the accounts object). */
+/** An unknown credential is answered from cache this long (bad tokens stop reaching the database). */
 const UNKNOWN_MS = 5_000;
 const cache = new Map<string, { at: number; auth: AuthResult | null }>();
 
 export type AuthResult = Auth;
 
-export function accounts(env: Env) {
-  return timedStub(env.ACCOUNTS.getByName("accounts"));
+let copiedHere = false;
+
+/**
+ * C8's one-time copy of the AccountsObject's rows into D1, awaited before an
+ * isolate's first query (the object answers at once after the first time).
+ * A flag, not a shared promise: a promise must not cross requests. Goes after
+ * launch with the object.
+ */
+async function copied(env: Env): Promise<void> {
+  if (copiedHere) return;
+  await timedStub(env.ACCOUNTS.getByName("accounts")).copyToD1();
+  copiedHere = true;
+}
+
+export function accounts(env: Env): Accounts {
+  return new Accounts(env.ACCOUNTS_DB, () => copied(env));
 }
 
 /**
@@ -25,13 +39,9 @@ export function accounts(env: Env) {
  * member. A miss is never cached, because another isolate may create the
  * monorepo or add the member a moment later and this isolate would keep
  * answering 404 or 403. A revoked credential or removed member is therefore
- * seen within CACHE_MS.
+ * seen within CACHE_MS plus D1's replica lag.
  */
-export function cacheable(auth: Auth | null, monorepo: string | null): boolean {
-  if (!auth) return false;
-  if (monorepo === null) return true;
-  return auth.monorepo !== null && auth.role !== null;
-}
+export const cacheable = confirmed;
 
 /** The caller, or null for an unknown or revoked credential. Successes are cached briefly per isolate. */
 export async function authenticate(env: Env, secret: string, monorepo: string | null): Promise<AuthResult | null> {
@@ -39,7 +49,7 @@ export async function authenticate(env: Env, secret: string, monorepo: string | 
   const key = `${hash}\n${monorepo ?? ""}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < (hit.auth ? CACHE_MS : UNKNOWN_MS)) return hit.auth;
-  const auth = (await accounts(env).authenticate(hash, monorepo)) as AuthResult | null;
+  const auth = await accounts(env).authenticate(hash, monorepo);
   if (cacheable(auth, monorepo) || auth === null) {
     // Successes for CACHE_MS; an unknown credential for UNKNOWN_MS (C3). Never a
     // missing monorepo or a non-member: another isolate may fix that any moment.

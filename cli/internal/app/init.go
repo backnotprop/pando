@@ -360,22 +360,41 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		}
 		return fmt.Errorf("main is not pushed. Push older history first on a side branch, in pieces under 100 MB: git -C %s push pando <older commit>:refs/heads/import, then run pando init again", p.Checkout)
 	}
-	// A repo made a moment ago can be "not found" at the git door for a few
-	// seconds (seen on pando-dev), so that one error is retried briefly.
-	var err2 error
-	for wait := time.Second; ; wait *= 2 {
-		_, err2 = g.Run(e.Ctx, "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
-		if err2 == nil || !strings.Contains(err2.Error(), "not found") || wait > 16*time.Second {
-			break
+	// Two failures are retried. A repo made a moment ago can be "not found"
+	// at the git door for a few seconds: retried for up to half a minute.
+	// A transport failure mid-push (about 1 in 10 for a 12 MiB push in our
+	// measurements): retried once. Before a retry, if main did land and only
+	// the answer was lost, that counts as pushed; pushing main again would be
+	// refused.
+	push := func() error {
+		_, err := g.Run(e.Ctx, "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
+		return err
+	}
+	landed := func() bool {
+		out, _ := g.Run(e.Ctx, "ls-remote", "pando", "refs/heads/main")
+		f := strings.Fields(out)
+		return len(f) > 0 && f[0] == p.Head
+	}
+	err = push()
+	transportRetried := false
+	for wait := time.Second; err != nil; wait *= 2 {
+		switch {
+		case landed():
+			err = nil
+			continue
+		case strings.Contains(err.Error(), "not found") && wait <= 16*time.Second:
+		case transportFailure(err) && !transportRetried:
+			transportRetried = true
+			e.warnf("%s: the push broke off (%s); trying once more", p.Path, firstLine(err))
+		default:
+			return err
 		}
 		select {
 		case <-e.Ctx.Done():
 			return e.Ctx.Err()
 		case <-time.After(wait):
 		}
-	}
-	if err2 != nil {
-		return err2
+		err = push()
 	}
 	e.printf("%-44s pushed %s %s as main\n", p.Path, p.MainBranch, short(p.Head))
 	return nil
@@ -426,4 +445,34 @@ func excludeInRepo(e *Env, dir string) error {
 	}
 	text += "# Pando (formats.md, section 1)\n" + strings.Join(add, "\n") + "\n"
 	return os.WriteFile(p, []byte(text), 0o644)
+}
+
+// transportFailure reports whether a git push broke off in transit (the
+// connection, TLS, or a pack cut short), as opposed to the server refusing
+// it ("main is protected", a declined hook), which carries none of these.
+func transportFailure(err error) bool {
+	msg := err.Error()
+	for _, s := range []string{
+		"RPC failed", "unexpected disconnect", "remote end hung up", "early EOF", "unpacker error",
+		"SSL", "TLS", "Connection reset", "connection reset", "broken pipe", "Broken pipe",
+		"Operation timed out", "Could not resolve host", "Failed to connect",
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstLine(err error) string {
+	var ge *gitx.Error
+	msg := err.Error()
+	if errors.As(err, &ge) && strings.TrimSpace(ge.Stderr) != "" {
+		msg = ge.Stderr
+	}
+	msg = strings.TrimSpace(msg)
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		msg = msg[:i]
+	}
+	return msg
 }

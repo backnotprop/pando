@@ -78,6 +78,8 @@ export interface RepoEvent {
   /** The pusher's credential name (the machine), and the agent if one said so. */
   machine?: string | null;
   agent?: string | null;
+  /** The event stream's seq for this change; deliveries are keyed by (hook, event, seq). */
+  seq?: number | null;
 }
 
 /** One entry of the event stream (api-v1.yaml, EventEnvelope). */

@@ -464,8 +464,7 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   const reason = result[ref];
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
-  const events = await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
-  c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
+  await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
   const view = (await branchViews(c, r, [b.name], "all", { inline: 1, graceMs: 0 })).branches[0];
   return c.json(view, 201);
 });
@@ -572,8 +571,7 @@ async function deleteBranch(c: C, r: RepoRecord, branch: string): Promise<Respon
   const cmd = { old: head, new: ZERO, ref };
   const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [cmd]));
   if (result[ref] !== null) throw new HttpError(409, "branch_not_deleted", `Artifacts refused: ${result[ref] ?? "no report"}`);
-  const events = await c.get("stub").recordPush(r.name, c.get("identity"), [cmd]);
-  c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
+  await c.get("stub").recordPush(r.name, c.get("identity"), [cmd], {}, new URL(c.req.url).origin);
   return c.body(null, 204);
 }
 
@@ -777,6 +775,14 @@ api.get("/v1/monorepos/:m/repos/:r/hooks/:id/deliveries", async (c) => {
   return c.json({ deliveries: await c.get("stub").listDeliveries(r.name, c.req.param("id")) });
 });
 
+api.post("/v1/monorepos/:m/repos/:r/hooks/:id/redeliver", async (c) => {
+  owner(c, "replay hooks");
+  const r = await repoOf(c);
+  const since = Number(c.req.query("since"));
+  if (!Number.isSafeInteger(since) || since < 0) bad("since: the seq to replay after (a whole number)");
+  return c.json(unwrap(await c.get("stub").replayHook(r.name, c.req.param("id"), since)), 202);
+});
+
 api.post("/v1/monorepos/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c) => {
   owner(c, "redeliver hooks");
   const r = await repoOf(c);
@@ -822,24 +828,5 @@ api.delete("/v1/monorepos/:m/worktrees/:id", async (c) => {
   return c.body(null, 204);
 });
 
-/** Fill in each event's merge base, then hand the events to the monorepo object for delivery. */
-async function enqueueWithBases(c: C, r: RepoRecord, events: RepoEvent[]): Promise<void> {
-  if (!events.length) return;
-  try {
-    const main = branchesOf(await listRefs(c.env, r)).get(r.default_branch);
-    if (main) {
-      await withRepo(c.env, r.artifacts_name, async (repo) => {
-        const read = commitReader(repo);
-        for (const e of events) {
-          if (e.head === ZERO || e.branch === r.default_branch) continue;
-          e.base = (await compareWith(read, main, e.head).catch(() => null))?.mergeBase ?? null;
-        }
-      });
-    }
-    await c.get("stub").enqueue(events, new URL(c.req.url).origin);
-  } catch (err) {
-    console.error("queueing hook events failed:", err instanceof Error ? err.message : String(err));
-  }
-}
 
 export type { BranchRecord };

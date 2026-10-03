@@ -1287,6 +1287,37 @@ paths:
                   deliveries:
                     type: array
                     items: { $ref: "#/components/schemas/Delivery" }
+  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}/redeliver:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: hook_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: replayHook
+      summary: Replay a hook from a seq, after an outage (owners)
+      description: Every delivery of this hook with a seq above `since` goes back on the queue, oldest first, at most 1,000. Only changes made while the hook existed have deliveries.
+      tags: [hooks]
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued: { type: integer }
+                  ids:
+                    type: array
+                    items: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{monorepo}/repos/{repo}/hooks/deliveries/{delivery_id}/redeliver:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -1297,7 +1328,8 @@ paths:
         schema: { type: string }
     post:
       operationId: redeliver
-      summary: Send a delivery again, as a new delivery with a fresh read token (owners)
+      summary: Send a delivery again (owners)
+      description: The same delivery (same id and seq) goes back on the queue, with a fresh read token; its attempts continue.
       tags: [hooks]
       responses:
         "202":
@@ -1393,8 +1425,15 @@ webhooks:
         Headers: `X-Pando-Event` (the event), `X-Pando-Delivery` (the
         delivery id), `X-Pando-Signature-256: sha256=<hex>` (HMAC-SHA256 of
         the raw body with the hook's secret; GitHub's scheme under another
-        name). A delivery that does not get a 2xx within 10 seconds is retried
-        after 10 s, 1 min, 5 min and 30 min, then marked failed.
+        name).
+
+        Deliveries run on a queue: at least once and not in order, like
+        GitHub's. The body's `seq` is the event stream's sequence number:
+        drop a seq you have seen, and sort by it. A try that does not get a
+        2xx within 10 seconds is retried after 10 s, 1 min, 5 min and 30 min
+        (5 tries over about 36 minutes); then the delivery is dead until an
+        owner redelivers it or replays the hook. Delivery records are kept for
+        the latest 1,000 per hook, with each one's last 10 tries.
       requestBody:
         content:
           application/json:
@@ -1775,13 +1814,28 @@ components:
         id: { type: string }
         hook_id: { type: string }
         event: { $ref: "#/components/schemas/HookEvent" }
-        status: { type: string, enum: [pending, delivered, failed] }
+        seq: { type: [integer, "null"], description: "The event stream's seq for the change. One delivery per (hook, event, seq): a retry, a redeliver or a replay reuses it." }
+        status:
+          type: string
+          enum: [queued, retrying, delivered, failed, dead]
+          description: "`queued`: waiting for its first try. `retrying`: the last try failed; `next_attempt_at` says when the next is. `failed`: the fifth try failed. `dead`: it reached the dead-letter queue (redeliver to try again)."
         attempts: { type: integer }
         response_code: { type: [integer, "null"] }
         error: { type: [string, "null"] }
         created_at: { type: string, format: date-time }
         last_attempt_at: { type: [string, "null"], format: date-time }
         next_attempt_at: { type: [string, "null"], format: date-time }
+        recent_attempts:
+          type: array
+          description: The last 10 tries, newest first.
+          items:
+            type: object
+            properties:
+              n: { type: integer }
+              at: { type: string, format: date-time }
+              response_code: { type: [integer, "null"] }
+              error: { type: [string, "null"] }
+              ms: { type: integer }
     Worktree:
       type: object
       required: [id, repo, branch, path, machine, kind, reported_by, created_at, last_seen_at]
@@ -1814,6 +1868,7 @@ components:
         description: { type: [string, "null"] }
         author: { type: [string, "null"], description: The branch's author (a user). }
         pusher: { type: string, description: "The user who pushed; for `merged`, who merged." }
+        seq: { type: [integer, "null"], description: "The event stream's seq for this change: drop repeats, sort by it." }
         merge_commit: { type: string, description: Only for `merged`. }
         diff_url: { type: string }
         clone_url: { type: string, description: The git door URL. Clone it with `read_token`. }

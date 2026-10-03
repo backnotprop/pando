@@ -11,18 +11,18 @@
       "type": "event",
       "landed": 1,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 1,
-        "at": "2026-10-03T21:21:50.922Z",
+        "at": "2026-10-03T21:52:48.989Z",
         "kind": "push",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "main",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
-          "head": "89d5567097c42088b92d59257efc74296be05dc5",
+          "head": "7b35a964d7bf3d15476ee09d0a8fd337441cd45d",
           "before": null,
           "commits": 1,
           "head_title": "First commit"
@@ -33,18 +33,18 @@
       "type": "event",
       "landed": 5,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 10,
-        "at": "2026-10-03T21:21:54.223Z",
+        "at": "2026-10-03T21:52:52.903Z",
         "kind": "branch.deleted",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "chore/gone",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
-          "before": "68bf8b53c44cee50ca8cb9cf74ad4bfedde35fec"
+          "before": "b9b4aa0e07c66d61c41f6576e838bdcf9c775557"
         }
       }
     },
@@ -52,22 +52,22 @@
       "type": "event",
       "landed": 9,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 14,
-        "at": "2026-10-03T21:21:54.242Z",
+        "at": "2026-10-03T21:52:52.925Z",
         "kind": "status",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
           "context": "ci/test",
           "state": "success",
           "description": null,
           "target_url": "https://ci.example/builds/1",
-          "sha": "9dc98dae5ff2ed27ca47ea4841afb0f35f399f6d",
+          "sha": "61af03349f556fdc868bea21d352443bd81c5aa7",
           "duration_s": 0,
           "app": null
         }
@@ -77,18 +77,18 @@
       "type": "event",
       "landed": 10,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 7,
-        "at": "2026-10-03T21:21:53.681Z",
+        "at": "2026-10-03T21:52:52.249Z",
         "kind": "branch.opened",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "chore/gone",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
-          "head": "68bf8b53c44cee50ca8cb9cf74ad4bfedde35fec",
+          "head": "b9b4aa0e07c66d61c41f6576e838bdcf9c775557",
           "before": null,
           "commits": 1,
           "head_title": "A branch to delete"
@@ -99,20 +99,20 @@
       "type": "event",
       "landed": 11,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 15,
-        "at": "2026-10-03T21:21:54.770Z",
+        "at": "2026-10-03T21:52:53.518Z",
         "kind": "review",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
           "verdict": "approve",
           "comments": 0,
-          "head": "9dc98dae5ff2ed27ca47ea4841afb0f35f399f6d"
+          "head": "61af03349f556fdc868bea21d352443bd81c5aa7"
         }
       }
     },
@@ -120,21 +120,21 @@
       "type": "event",
       "landed": 12,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 16,
-        "at": "2026-10-03T21:21:55.637Z",
+        "at": "2026-10-03T21:52:54.473Z",
         "kind": "merged",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/merge-me",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
-          "merge_commit": "b288f44dd74840e61e71be238324df3710858d78",
+          "merge_commit": "057a40430fd2222d471dd92b9be140fc871c1d68",
           "forced": false,
           "title": null,
-          "head": "cb59df09f2cd306714bdf9b843babdda531e8cbd"
+          "head": "dd8f2676fa5c29bf98ec6b6244fcbdd18142efb3"
         }
       }
     },
@@ -142,19 +142,19 @@
       "type": "event",
       "landed": 13,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 18,
-        "at": "2026-10-03T21:21:55.643Z",
+        "at": "2026-10-03T21:52:54.481Z",
         "kind": "worktree.reported",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-muswdcxb",
+        "actor": "rec-musxh5dd",
         "machine": "ana-mbp",
         "summary": {
           "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
-          "worktree": "wt-muswdcxb"
+          "worktree": "wt-musxh5dd"
         }
       }
     },
@@ -162,10 +162,10 @@
       "type": "event",
       "landed": 16,
       "event": {
-        "monorepo_id": "m_9a76490c5f6fa954",
-        "monorepo": "rec-muswdcxb/rec-muswdcxb",
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
         "seq": 22,
-        "at": "2026-10-03T21:21:56.503Z",
+        "at": "2026-10-03T21:52:55.343Z",
         "kind": "meta.saved",
         "repo": "meta",
         "repo_path": ".",
@@ -181,10 +181,10 @@
     },
     {
       "type": "summary",
-      "monorepo": "rec-muswdcxb/rec-muswdcxb",
-      "monorepo_id": "m_9a76490c5f6fa954",
+      "monorepo": "rec-musxh5dd/rec-musxh5dd",
+      "monorepo_id": "m_38bf1e02c818ded4",
       "summary": {
-        "last_activity_at": "2026-10-03T21:21:56.503Z",
+        "last_activity_at": "2026-10-03T21:52:55.343Z",
         "worktrees_active": 0,
         "machines_active": 0,
         "needs": {
@@ -194,13 +194,15 @@
         },
         "members": 1,
         "large": false,
-        "at": "2026-10-03T21:22:01.504Z"
+        "repos": 1,
+        "open_branches": 2,
+        "at": "2026-10-03T21:53:00.345Z"
       }
     },
     {
       "type": "needs",
-      "monorepo": "rec-muswdcxb/rec-muswdcxb",
-      "monorepo_id": "m_9a76490c5f6fa954",
+      "monorepo": "rec-musxh5dd/rec-musxh5dd",
+      "monorepo_id": "m_38bf1e02c818ded4",
       "changed": [
         {
           "repo": "projects-web",

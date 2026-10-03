@@ -74,3 +74,21 @@ export const metaFilePath = (owner: Login, name: MonorepoName, path: string, ver
 
   return `${metaBase(owner, name)}/file${query(params)}`;
 };
+
+/** A large monorepo's activity socket: its event stream with `topics=feed` (frames: MonorepoFeedFrame). `feedSince`: the last `n` seen. */
+export const monorepoFeedSocketPath = (owner: Login, name: MonorepoName, feedSince: number | null): string => {
+  const params = new URLSearchParams({ topics: "feed" });
+
+  if (feedSince !== null) params.set("feed_since", String(feedSince));
+
+  return `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/events${query(params)}`;
+};
+
+/** GET /{owner}/{name}/raw/{path}?v=<version>: a root file's bytes (no schema; members only). `version` null: now. Path segments keep their slashes. */
+export const metaRawPath = (owner: Login, name: MonorepoName, path: string, version: number | null): string => {
+  const params = new URLSearchParams();
+
+  if (version !== null) params.set("v", String(version));
+
+  return `/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/raw/${path.split("/").map(encodeURIComponent).join("/")}${query(params)}`;
+};

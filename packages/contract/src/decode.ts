@@ -5,7 +5,7 @@
 //   fail it, so drift between the Worker and this package is caught there.
 import * as Schema from "effect/Schema";
 
-import { ActivityFrame } from "./feed.ts";
+import { ActivityFrame, MonorepoFeedFrame } from "./feed.ts";
 
 /** Runtime, for clients: unknown fields are ignored. Answers a Result (success, or a Schema.SchemaError). */
 export const decodeResponse = <A, I>(schema: Schema.Codec<A, I>) => Schema.decodeUnknownResult(schema, { onExcessProperty: "ignore" });
@@ -22,3 +22,6 @@ export const decodeStrict = <A, I>(schema: Schema.Codec<A, I>) => Schema.decodeU
  * malformed. Skip a None; never close the socket over it.
  */
 export const decodeActivityFrame = Schema.decodeUnknownOption(Schema.fromJsonString(ActivityFrame), { onExcessProperty: "ignore" });
+
+/** One text frame from a monorepo's `?topics=feed` socket, the same way: Some(frame), or None to skip. */
+export const decodeMonorepoFeedFrame = Schema.decodeUnknownOption(Schema.fromJsonString(MonorepoFeedFrame), { onExcessProperty: "ignore" });

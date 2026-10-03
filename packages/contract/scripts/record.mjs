@@ -186,6 +186,10 @@ try {
   await waitFor(() => live.open, 10_000);
   live.ws.send(JSON.stringify({ type: "hello", since: 0 }));
 
+  const monorepoFeed = openSocket(`/v1/monorepos/${full}/events?topics=feed`, secret);
+
+  sockets.push(monorepoFeed);
+
   // Code: main, then four branches: ready, failing, merged, and one to delete.
   const src = join(work, "web");
 
@@ -314,6 +318,27 @@ try {
   }
 
   record("activity-frames.json", "ActivityFrame[]", "GET /v1/events (WebSocket)", 101, frames);
+
+  // The monorepo's own socket on the feed topic: live lines, a replay after feed_since=1, and feed_resync for an n it never reached.
+  const replay = openSocket(`/v1/monorepos/${full}/events?topics=feed&feed_since=1`, secret);
+  const beyond = openSocket(`/v1/monorepos/${full}/events?topics=feed&feed_since=999999`, secret);
+
+  sockets.push(replay, beyond);
+  await waitFor(() => replay.frames.some((f) => f.type === "caught_up") && beyond.frames.some((f) => f.type === "feed_resync"), 10_000);
+
+  const feedFrames = [];
+  const feedKept = new Set();
+
+  for (const frame of [...monorepoFeed.frames, ...replay.frames, ...beyond.frames]) {
+    const key = frame.type === "feed" ? `feed:${frame.event.kind}` : frame.type;
+
+    if (feedKept.has(key)) continue;
+
+    feedKept.add(key);
+    feedFrames.push(frame);
+  }
+
+  record("monorepo-feed-frames.json", "MonorepoFeedFrame[]", "GET /v1/monorepos/{owner}/{monorepo}/events?topics=feed[&feed_since=] (WebSocket)", 101, feedFrames);
 
   const metaPath = `/v1/monorepos/${full}/meta`;
 

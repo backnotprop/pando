@@ -4,7 +4,7 @@
 // monorepo; `at` is milliseconds since 1970, unlike the ISO times elsewhere.
 import * as Schema from "effect/Schema";
 
-import { Count, Sha } from "./ids.ts";
+import { Count, Login, Sha } from "./ids.ts";
 
 export const MetaOp = Schema.Literals(["save", "delete", "rename"]);
 
@@ -22,6 +22,8 @@ export const MetaVersion = Schema.Struct({
   deleted: Schema.Boolean,
   /** `Name <email>`. */
   author: Schema.String,
+  /** The saver's Pando login; null before 2026-10-03 or without a credential. */
+  login: Schema.NullOr(Login),
   machine: Schema.String,
   agent: Schema.NullOr(Schema.String),
   /** Milliseconds since 1970. */
@@ -39,8 +41,8 @@ export const MetaVersion = Schema.Struct({
 
 export interface MetaVersion extends Schema.Schema.Type<typeof MetaVersion> {}
 
-/** A folder with how many files it holds (on a `dir=` listing's first page). */
-export const MetaFolder = Schema.Struct({ name: Schema.String, files: Count });
+/** A folder with how many files it holds and its newest change (on a `dir=` listing's first page). */
+export const MetaFolder = Schema.Struct({ name: Schema.String, files: Count, last: MetaVersion });
 
 export interface MetaFolder extends Schema.Schema.Type<typeof MetaFolder> {}
 

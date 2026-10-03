@@ -29,8 +29,10 @@ import (
 // seq (GET /events?topics=main:<repo>&since=<seq>, a WebSocket) and moves
 // main when a default_heads frame says so. It reads heads again on every
 // reconnect, on a resync frame, and every 5 minutes as a safety net; backs
-// off after failures; and stops when the monorepo is deleted (close 4404). A
-// server without the stream (501), or a file:// server, is read every 15 s.
+// off after failures; and stops when the monorepo is deleted (close 4404, or
+// a reconnect answered 404) or this user is no longer a member (a reconnect
+// answered 403). A server without the stream (501), or a file:// server, is
+// read every 15 s.
 // A server without /heads (404) is read through the branch list instead.
 
 const (
@@ -203,6 +205,45 @@ type errStop struct{ why string }
 
 func (e errStop) Error() string { return e.why }
 
+// errGone is the server refusing the socket because this monorepo is not
+// there for this caller any more: 404 not_found (deleted) or 403
+// not_a_member (removed from it), as the Worker's members-only check
+// answers. The follower stops on the second in a row, so one answer from a
+// database replica that has not seen a new monorepo yet does not stop it.
+type errGone struct{ why string }
+
+func (e errGone) Error() string { return e.why }
+
+// goneAnswer reads a refused upgrade: errGone for the Worker's answers for
+// a deleted monorepo or a caller who is no longer a member, else nil. (401,
+// a revoked credential, is retried: pando login writes a new one, and each
+// try reads it again.)
+func goneAnswer(root *config.Root, resp *http.Response) error {
+	if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusForbidden {
+		return nil
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if resp.Body != nil {
+		_ = json.NewDecoder(resp.Body).Decode(&body) // the first 1,024 bytes, kept by websocket.Dial
+	}
+	switch {
+	case resp.StatusCode == http.StatusNotFound && body.Error.Code == "not_found":
+		return errGone{"the monorepo " + root.FullName() + " was deleted on the server; stopped following"}
+	case resp.StatusCode == http.StatusForbidden && body.Error.Code == "not_a_member":
+		why := body.Error.Message
+		if why == "" {
+			why = "not a member of " + root.FullName()
+		}
+		return errGone{why + "; stopped following"}
+	}
+	return nil
+}
+
 // catchUp reads heads, moves mains, and resumes the stream from that read.
 func (f *follower) catchUp() {
 	if seq := followMains(f.e, f.root); seq > f.last {
@@ -216,7 +257,7 @@ func (f *follower) run(ctx context.Context, safety time.Duration) {
 		f.pollEvery(ctx, followFilePoll)
 		return
 	}
-	fails := 0
+	fails, gone := 0, 0
 	f.catchUp()
 	lastSafety := time.Now()
 	for ctx.Err() == nil {
@@ -243,6 +284,13 @@ func (f *follower) run(ctx context.Context, safety time.Duration) {
 				if stop.why == streamOff {
 					f.pollEvery(ctx, followFilePoll)
 				}
+				return
+			}
+			var g errGone
+			if !errors.As(err, &g) {
+				gone = 0
+			} else if gone++; gone >= 2 {
+				f.e.warnf("follow: %s", g.why)
 				return
 			}
 			if up >= time.Minute {
@@ -284,6 +332,11 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 		if resp != nil && resp.StatusCode == http.StatusNotImplemented {
 			return 0, errStop{streamOff}
 		}
+		if resp != nil {
+			if err := goneAnswer(f.root, resp); err != nil {
+				return 0, err
+			}
+		}
 		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
 			return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 		}
@@ -313,12 +366,35 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 		}
 	}()
 
+	// ended is why the socket ended: the server's 4404 (the monorepo was
+	// deleted) stops the follower.
+	ended := func(err error) (time.Duration, error) {
+		if websocket.CloseStatus(err) == 4404 {
+			return time.Since(started), errStop{"the monorepo " + f.root.FullName() + " was deleted on the server; stopped following"}
+		}
+		return time.Since(started), err
+	}
+	// writeFailed is why a write failed. Once the server has closed the
+	// socket (4404 right after it opened, say) a write fails with no reason
+	// given; the read side has the reason, a moment later.
+	writeFailed := func(err error) (time.Duration, error) {
+		select {
+		case rerr := <-readErr:
+			f.debugf("write error: %v; read error: %v", err, rerr)
+			if websocket.CloseStatus(rerr) != -1 {
+				err = rerr
+			}
+		case <-time.After(2 * time.Second):
+		}
+		return ended(err)
+	}
+
 	// Presence (C25): say which branch worktrees this machine has here, now
 	// and whenever they change. Presence lives with the socket, so every
 	// new socket says it again.
 	ids := branchWorktreeIDs(f.root)
 	if err := f.hello(ctx, conn, ids); err != nil {
-		return time.Since(started), err
+		return writeFailed(err)
 	}
 	wtFile := filepath.Join(config.LocalDir(f.root.Dir), "worktrees.json")
 	wtStamp := fileStamp(wtFile)
@@ -335,10 +411,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 			return time.Since(started), nil
 		case err := <-readErr:
 			f.debugf("read error: %v", err)
-			if websocket.CloseStatus(err) == 4404 {
-				return time.Since(started), errStop{"the monorepo " + f.root.FullName() + " was deleted on the server; stopped following"}
-			}
-			return time.Since(started), err
+			return ended(err)
 		case data := <-frames:
 			heard = time.Now()
 			if string(data) == "pong" {
@@ -366,7 +439,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 			err := conn.Write(wctx, websocket.MessageText, []byte("ping"))
 			c()
 			if err != nil {
-				return time.Since(started), err
+				return writeFailed(err)
 			}
 			if time.Since(lastRead) >= safety {
 				f.catchUp()
@@ -391,7 +464,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 				if now := branchWorktreeIDs(f.root); strings.Join(now, ",") != strings.Join(ids, ",") {
 					ids = now
 					if err := f.hello(ctx, conn, ids); err != nil {
-						return time.Since(started), err
+						return writeFailed(err)
 					}
 				}
 			}

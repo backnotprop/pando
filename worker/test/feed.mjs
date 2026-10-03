@@ -496,6 +496,7 @@ try {
     return x?.branches?.some((b) => b.branch === "feat/x") ? x : null;
   });
   check("needs you: a failed check moves feat/x to failing", n?.branches?.find((b) => b.branch === "feat/x")?.checks?.failing?.[0] === "ci");
+  check("needs you: failing_apps names who reported each failing check (null: a member posted it)", JSON.stringify(n?.branches?.find((b) => b.branch === "feat/x")?.checks?.failing_apps) === JSON.stringify({ ci: null }), JSON.stringify(n?.branches?.find((b) => b.branch === "feat/x")?.checks));
 
   const sm = await waitFor(async () => {
     const m = (await call("GET", "/v1/monorepos?summary=1", A)).json?.monorepos?.find((x) => x.name === S);

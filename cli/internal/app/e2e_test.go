@@ -59,7 +59,9 @@ func newHarness(t *testing.T) *harness {
 	prev := startFollowOnce
 	t.Cleanup(func() { startFollowOnce = prev })
 	startFollowOnce = func(root *config.Root) error {
+		refreshesRunning.Add(1) // counted from here, for the cleanup below
 		go func() {
+			defer refreshesRunning.Add(-1)
 			e, err := NewEnv(context.Background(), strings.NewReader(""), io.Discard, io.Discard)
 			if err == nil {
 				followMains(e, root)
@@ -67,6 +69,18 @@ func newHarness(t *testing.T) *harness {
 		}()
 		return nil
 	}
+	// A refresh of main still running in the background (one pando merge
+	// started, or a follower's) makes main read-only again as it ends. Let
+	// it end before the folders are made writable and removed (cleanups run
+	// last first, so this runs before the chmod at the top).
+	t.Cleanup(func() {
+		for start := time.Now(); refreshesRunning.Load() > 0; time.Sleep(20 * time.Millisecond) {
+			if time.Since(start) > 30*time.Second {
+				t.Errorf("a refresh of main was still running 30 s after the test")
+				return
+			}
+		}
+	})
 	return &harness{t: t, base: base, server: "file://" + filepath.Join(base, "server")}
 }
 

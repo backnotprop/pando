@@ -90,7 +90,7 @@ const lineFields = {
   repo: Schema.NullOr(RepoName),
   repo_path: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
-  /** The person (a login); for meta.saved, the author's name. */
+  /** The person (a login); a meta.saved line from before versions kept the login has the author's name. */
   actor: Schema.NullOr(Schema.String),
   /** The credential's name: the machine or sandbox. */
   machine: Schema.NullOr(Schema.String),

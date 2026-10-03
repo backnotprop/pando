@@ -15,8 +15,17 @@ export interface Identity {
   agent?: string | null;
 }
 
-export interface MonorepoInfo {
-  name: string;
+/** A monorepo as the API shows it (accounts): permanent id, and owner/name as its label. */
+export type { MonorepoInfo } from "../accounts/store";
+
+/**
+ * The monorepo object's own record. `id` keys its storage (Artifacts names,
+ * the meta layer object, R2, queue messages); for a monorepo made before
+ * namespaces it is the old name. `label` is owner/name, for payloads and logs.
+ */
+export interface ObjectInfo {
+  id: string;
+  label: string;
   kind: Kind;
   created_at: string;
 }

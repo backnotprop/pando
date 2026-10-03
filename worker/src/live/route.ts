@@ -1,17 +1,18 @@
 // The meta layer's routes, for worker/src/index.ts to call (see meta-sync.md):
 //
-//   GET  /v1/monorepos/{monorepo}/meta/socket    WebSocket
-//   GET  /v1/monorepos/{monorepo}/meta/history
-//   GET  /v1/monorepos/{monorepo}/meta/file
-//   POST /v1/monorepos/{monorepo}/meta/restore
-//   GET  /v1/monorepos/{monorepo}/meta/status    (with connections: who is connected now)
-//   GET  /v1/monorepos/{monorepo}/meta/tree      every current path, ?prefix= to narrow
-//   GET  /v1/monorepos/{monorepo}/meta/references   the reference pointers, parsed
-//   POST /v1/monorepos/{monorepo}/meta/init      pando init's first upload
-//   PUT, GET, HEAD /v1/monorepos/{monorepo}/meta/blobs/{sha256}   large files (blobs.ts)
+//   GET  /v1/monorepos/{owner}/{monorepo}/meta/socket    WebSocket
+//   GET  /v1/monorepos/{owner}/{monorepo}/meta/history
+//   GET  /v1/monorepos/{owner}/{monorepo}/meta/file
+//   POST /v1/monorepos/{owner}/{monorepo}/meta/restore
+//   GET  /v1/monorepos/{owner}/{monorepo}/meta/status    (with connections: who is connected now)
+//   GET  /v1/monorepos/{owner}/{monorepo}/meta/tree      every current path, ?prefix= to narrow
+//   GET  /v1/monorepos/{owner}/{monorepo}/meta/references   the reference pointers, parsed
+//   POST /v1/monorepos/{owner}/{monorepo}/meta/init      pando init's first upload
+//   PUT, GET, HEAD /v1/monorepos/{owner}/{monorepo}/meta/blobs/{sha256}   large files (blobs.ts)
 //
 // The Worker checks the credential first, then passes the user as `identity`.
 // Without one the object takes the author from the client's hello.
+import { monorepoRef } from "../monorepo/names";
 import { handleBlob } from "./blobs";
 import type { MetaLayerObject } from "./object";
 
@@ -26,15 +27,13 @@ export interface MetaIdentity {
   email?: string;
 }
 
-const ROUTE = /^\/v1\/monorepos\/([^/]+)\/meta\/(socket|history|file|restore|status|init|tree|references|blobs\/[^/]+)$/;
-const NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?!-)){0,62}$/; // Pando names forbid "--"
+const ROUTE = /^\/v1\/monorepos\/([^/]+)\/([^/]+)\/meta\/(socket|history|file|restore|status|init|tree|references|blobs\/[^/]+)$/;
 
-// metaRoute returns the monorepo name when the request is a meta layer route.
-export function metaRoute(request: Request): string | null {
+// metaRoute returns the path's owner and monorepo name (lower case) when the request is a meta layer route.
+export function metaRoute(request: Request): { owner: string; name: string } | null {
   const m = new URL(request.url).pathname.match(ROUTE);
   if (!m) return null;
-  const name = decodeURIComponent(m[1]);
-  return NAME.test(name) ? name : null;
+  return monorepoRef(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
 }
 
 function blobOid(request: Request): string | null {
@@ -42,11 +41,11 @@ function blobOid(request: Request): string | null {
   return m ? m[1] : null;
 }
 
-// routeMeta forwards a meta layer request to the monorepo's object, or returns
-// null when the request is not one.
-export async function routeMeta(request: Request, env: LiveEnv, identity?: MetaIdentity): Promise<Response | null> {
-  const monorepo = metaRoute(request);
-  if (!monorepo) return null;
+// routeMeta forwards a meta layer request to the object of the monorepo with
+// this id (the Worker resolved the path's owner/name), or returns null when
+// the request is not one. The id keys the object, R2 and the Artifacts repo.
+export async function routeMeta(request: Request, env: LiveEnv, monorepo: string, identity?: MetaIdentity): Promise<Response | null> {
+  if (!metaRoute(request)) return null;
   const oid = blobOid(request);
   if (oid !== null) return handleBlob(request, env.BLOBS, monorepo, oid);
   const headers = new Headers(request.headers);

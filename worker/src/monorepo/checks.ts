@@ -21,8 +21,8 @@ async function readConfig(env: Env, artifactsName: string): Promise<Record<strin
 }
 
 /** `repos."<repo path>".required_checks` from the right pando.toml (formats.md, section 2). */
-export async function requiredChecks(env: Env, monorepo: { name: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
-  const source = monorepo.kind === "repo" ? repo.artifacts_name : metaArtifactsName(monorepo.name);
+export async function requiredChecks(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
+  const source = monorepo.kind === "repo" ? repo.artifacts_name : metaArtifactsName(monorepo.id);
   const toml = await readConfig(env, source);
   const repos = toml?.repos as Record<string, { required_checks?: unknown }> | undefined;
   const list = repos?.[repo.path]?.required_checks;
@@ -49,8 +49,8 @@ export function combine(sha: string | null, required: string[], all: StatusRecor
  * pando.toml only when the object has none, which is after a merge or main's
  * first push in the repo that holds the file.
  */
-export async function requiredKept(env: Env, monorepo: { name: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
-  const stub = env.MONOREPO.getByName(monorepo.name);
+export async function requiredKept(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
+  const stub = env.MONOREPO.getByName(monorepo.id);
   const kept = await stub.storedRequired(repo.name);
   if (kept) return kept;
   const list = await requiredChecks(env, monorepo, repo);

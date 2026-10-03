@@ -44,9 +44,12 @@ const call = async (method, path, secret, body) =>
 
 const id = Date.now().toString(36);
 const M = `oi-${id}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 try {
   S = (await call("POST", "/v1/users", BOOT, { login: `oi-${id}` })).credential.secret;
-  const url = (await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" })).repos[0].clone_url;
+  const made = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
+  O = made.monorepo.owner;
+  const url = made.repos[0].clone_url;
   const src = join(work, "src");
   mkdirSync(join(src, "a/b"), { recursive: true });
   writeFileSync(join(src, "README.md"), "# object-info\n");
@@ -73,7 +76,7 @@ try {
     pkt("size\n"), ...[...blobs, ghost].map((o) => pkt(`oid ${o}\n`)), Buffer.from("0000"),
   ]);
   const post = async (body, extra = {}) => {
-    const r = await fetch(`${URL_}/${M}/${M}.git/git-upload-pack`, {
+    const r = await fetch(`${URL_}/${O}/${M}.git/git-upload-pack`, {
       method: "POST",
       headers: { authorization: `Bearer ${S}`, "git-protocol": "version=2", "content-type": "application/x-git-upload-pack-request", ...extra },
       body,
@@ -121,7 +124,7 @@ try {
 } catch (err) {
   check("no exception", false, String(err?.stack ?? err));
 } finally {
-  if (S) await fetch(`${URL_}/v1/monorepos/${M}?confirm=${M}`, { method: "DELETE", headers: { authorization: `Bearer ${S}` } });
+  if (S) await fetch(`${URL_}/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, { method: "DELETE", headers: { authorization: `Bearer ${S}` } });
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

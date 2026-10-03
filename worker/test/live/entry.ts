@@ -7,7 +7,7 @@
 // makes, reads and deletes the meta layer repo of a test monorepo. It only
 // touches repos named e2e-*--meta.
 import { commitChanges } from "../../src/gitwrite";
-import { routeMeta, type LiveEnv } from "../../src/live/route";
+import { metaRoute, routeMeta, type LiveEnv } from "../../src/live/route";
 export { MetaLayerObject } from "../../src/live/object";
 
 interface Env extends LiveEnv {
@@ -90,6 +90,9 @@ export default {
       if (!/^e2e-[a-z0-9-]+$/.test(monorepo)) return Response.json({ error: "test monorepos are e2e-*" }, { status: 400 });
       return Response.json(await env.META.get(env.META.idFromName(monorepo)).destroy());
     }
-    return (await routeMeta(request, env)) ?? new Response("not found\n", { status: 404 });
+    // Paths are /v1/monorepos/{owner}/{name}/meta/... (namespaces); with no
+    // accounts here, the test monorepo's name keys its object, as /test/* do.
+    const ref = metaRoute(request);
+    return (ref && (await routeMeta(request, env, ref.name))) || new Response("not found\n", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

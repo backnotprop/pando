@@ -151,14 +151,14 @@ try {
   check("a write from another origin (even same-site) is refused", r.status === 403 && (await r.json()).error?.code === "bad_origin");
   r = await api("POST", "/v1/monorepos", { session, body: { name: `br3-${id}` } });
   check("a write with no Origin is refused", r.status === 403);
-  r = await api("GET", `/v1/monorepos/br-${id}/meta/tree`, { session, origin: "https://other.plannotator.workers.dev" });
+  r = await api("GET", `/v1/monorepos/ana-${id}/br-${id}/meta/tree`, { session, origin: "https://other.plannotator.workers.dev" });
   check("a read needs no Origin check (and the meta routes take the cookie)", r.status === 200, `${r.status}`);
-  r = await api("POST", `/v1/monorepos/br-${id}/meta/restore`, { session, origin: "https://other.plannotator.workers.dev", body: { path: "x", version: 1 } });
+  r = await api("POST", `/v1/monorepos/ana-${id}/br-${id}/meta/restore`, { session, origin: "https://other.plannotator.workers.dev", body: { path: "x", version: 1 } });
   check("a meta layer write from another origin is refused", r.status === 403);
 
   const ws = (origin) =>
     new Promise((resolve) => {
-      const s = new WebSocket(`${URL_.replace(/^http/, "ws")}/v1/monorepos/br-${id}/events`, { headers: { cookie: `__Host-pando_session=${session}`, ...(origin ? { origin } : {}) } });
+      const s = new WebSocket(`${URL_.replace(/^http/, "ws")}/v1/monorepos/ana-${id}/br-${id}/events`, { headers: { cookie: `__Host-pando_session=${session}`, ...(origin ? { origin } : {}) } });
       const done = (v) => {
         try {
           s.close();
@@ -176,7 +176,7 @@ try {
   r = await api("GET", "/v1/user", { bearer: session });
   check("the session secret does not work as a Bearer token", r.status === 401);
   const door = (args) => spawnSync("git", ["-c", "credential.helper=", ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0" } });
-  const cloneUrl = `${URL_}/br-${id}/meta.git`;
+  const cloneUrl = `${URL_}/ana-${id}/br-${id}/meta.git`;
   let g = door(["-c", `http.extraHeader=Cookie: __Host-pando_session=${session}`, "ls-remote", cloneUrl]);
   check("the git door ignores the cookie", g.status !== 0);
   g = door(["-c", `http.extraHeader=Authorization: Bearer ${session}`, "ls-remote", cloneUrl]);
@@ -191,7 +191,7 @@ try {
   check("return_to on another host becomes /", s2.location === "/", s2.location);
   me = await (await api("GET", "/v1/user", { session: s2.session })).json();
   check("the picture is refreshed on the next sign-in", me.picture_url === P2, String(me.picture_url));
-  r = await api("GET", `/v1/monorepos/br-${id}/members`, { session: s2.session });
+  r = await api("GET", `/v1/monorepos/ana-${id}/br-${id}/members`, { session: s2.session });
   const am = (await r.json()).members?.find((m) => m.login === `ana-${id}`);
   check(
     "a member carries name, picture and last_active_at (from their credentials' last use)",
@@ -243,7 +243,7 @@ try {
   for (const m of made) {
     // The monorepo's owner is ana: sign in once more to delete it.
     const s = await signIn({ id: `user_ana_${id}`, email: `ana-${id}@pando.invalid`, email_verified: true, first_name: "Ana" }, "/");
-    const r = await api("DELETE", `/v1/monorepos/${m}?confirm=${m}`, { session: s.session, origin: ORIGIN });
+    const r = await api("DELETE", `/v1/monorepos/ana-${id}/${m}?confirm=ana-${id}/${m}`, { session: s.session, origin: ORIGIN });
     check(`delete ${m}`, r.status === 204, `${r.status}`);
     await api("POST", "/v1/logout", { session: s.session, origin: ORIGIN, accept: "application/json" });
   }

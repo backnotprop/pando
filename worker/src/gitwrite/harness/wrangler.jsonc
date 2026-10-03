@@ -1,0 +1,10 @@
+// Test harness for gitwrite. Runs only under `wrangler dev` on this machine,
+// with the Artifacts binding pointed at the remote pando-spike namespace.
+// It is never deployed. See run.mjs.
+{
+  "name": "pando-gitwrite-harness",
+  "main": "index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "pando-spike", "remote": true }]
+}

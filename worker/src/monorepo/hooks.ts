@@ -1,20 +1,21 @@
 // Hooks out: the signed JSON POST (`web`) and Buildkite's create-build call
-// (`buildkite`), delivered from the pando-hooks queue (C9).
+// (`buildkite`), sent by the HooksDrain entrypoint (C9, C25-LIVE-HOME.md step 3).
 //
 // The monorepo object writes each delivery row in the same step as the change
-// and sends its id to the queue. This consumer reads the row, adds a read
-// token for the one repo (web: 30 minutes, cached per repo for 25; Buildkite:
-// 25 hours, cached for 1, so Retry in Buildkite can still clone a day later)
-// and a status token for the one commit (ci/statustoken.ts), POSTs, and
-// reports the attempt to the object. A failure is retried by the queue after
-// 10 s, 60 s, 5 min and 30 min; then the message goes to pando-hooks-dlq,
-// whose consumer marks the delivery dead. Deliveries are at least once and
-// unordered: payloads carry `seq`, so a receiver can drop repeats.
-// Payloads are stored without any token.
+// and hands due rows at once to HooksDrain by RPC (hooks-out.ts). HooksDrain
+// adds a read token for the one repo (web: 30 minutes, cached per repo for 25;
+// Buildkite: 25 hours, cached for 1, so Retry in Buildkite can still clone a
+// day later) and a status token for the one commit (ci/statustoken.ts), POSTs,
+// and answers each result; the object records it and retries a failure after
+// 10 s, 60 s, 5 min and 30 min, then marks the delivery dead. Deliveries are
+// at least once and unordered: payloads carry `seq`, so a receiver can drop
+// repeats. Payloads are stored without any token.
 
+import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
 import { redact } from "../http";
 import { note, timed, timedStub } from "../timing";
+import type { HookJob, HookResult } from "./hooks-out";
 import { deliveryReadToken, withRepo } from "./artifacts";
 import { CI_READ_REUSE_MS, CI_READ_TTL_S, pandoBuildEnv } from "../ci/buildkite";
 import { mintStatusToken, type StatusClaims } from "../ci/statustoken";
@@ -30,15 +31,11 @@ const TIMEOUT_MS = 10_000;
 const READ_TOKEN_REUSE_MS = 25 * 60_000;
 const readTokens = new Map<string, { token: string; expiresAt: string; at: number }>();
 
+/** A pando-hooks message (sent before the outbox; the queue stays bound until the outbox is measured). */
 export interface DeliveryMessage {
   /** The monorepo's id (for one made before namespaces, its old name). */
   monorepo: string;
   delivery_id: string;
-}
-
-function retryDelays(env: Env): number[] {
-  const v = env.HOOK_RETRY_DELAYS?.split(",").map((x) => Number(x.trim()));
-  return v && v.length && v.every((n) => Number.isInteger(n) && n >= 0 && n <= 43_200) ? v : RETRY_DELAYS_S;
 }
 
 /** A read token for one repo: `ci` (Buildkite) lives CI_READ_TTL_S, `web` 30 minutes. Reused per isolate. */
@@ -60,53 +57,54 @@ async function statusToken(env: Env, hook: HookRow, p: StoredPayload): Promise<{
   return mintStatusToken(env.PANDO_STATUS_SECRET, claims);
 }
 
-/** The pando-hooks consumer: deliveries 6 at a time. */
-export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
-  const delays = retryDelays(env);
-  await pool([...batch.messages], 6, (msg) =>
-    timed("queue", { route: "hooks.delivery", monorepo_id: msg.body.monorepo, delivery: msg.body.delivery_id, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () => deliverOne(env, msg, delays)),
-  );
-}
-
-async function deliverOne(env: Env, msg: Message<DeliveryMessage>, delays: number[]): Promise<void> {
-  {
-    const stub = timedStub(env.MONOREPO.getByName(msg.body.monorepo));
-    let d;
-    try {
-      d = await stub.deliveryToSend(msg.body.delivery_id);
-    } catch (err) {
-      msg.retry({ delaySeconds: 5 });
-      return;
-    }
-    if (!d || d.status === "delivered") {
-      msg.ack(); // gone, or already delivered (a repeat of the same message)
-      return;
-    }
-    const p = d.payload;
-    p.monorepo_id ??= msg.body.monorepo; // rows from before namespaces
-    if (p.base === null && p.head !== ZERO && p.event !== "merged") {
-      // The merge base with main, computed here (the object makes no Artifacts reads).
-      try {
-        const main = await stub.currentMain(p.repo);
-        if (main) p.base = (await withRepo(env, d.artifacts_name, (repo) => compareWith(commitReader(repo), main, p.head))).mergeBase;
-      } catch {
-        p.base = null;
-      }
-    }
-    note({ repo: p.repo, event: p.event, hook_type: d.hook.type, seq: p.seq ?? null });
-    const t0 = Date.now();
-    const r = await attempt(env, d.hook, msg.body.delivery_id, p, (kind) => readToken(env, d.artifacts_name, kind));
-    note({ receiver_ms: Date.now() - t0, receiver_code: r.code, delivered: r.ok });
-    const n = msg.attempts; // 1 on the first try
-    const retryIn = r.ok ? null : (delays[n - 1] ?? null);
-    await stub.recordAttempt(msg.body.delivery_id, { ...r, ms: Date.now() - t0 }, n, retryIn).catch(() => {});
-    if (r.ok) msg.ack();
-    else if (retryIn !== null) msg.retry({ delaySeconds: retryIn });
-    else msg.retry(); // out of retries: the queue moves it to pando-hooks-dlq
+/**
+ * The hooks drain: the monorepo object's outbox calls this by RPC with due
+ * deliveries (one per call today), sent 6 at once. Answers each try's result,
+ * in order; never throws for a receiver's failure.
+ */
+export class HooksDrain extends WorkerEntrypoint<Env> {
+  async run(jobs: HookJob[]): Promise<HookResult[]> {
+    const out: HookResult[] = jobs.map(() => ({ ok: false, code: null, error: "not sent", ms: 0 }));
+    await pool(jobs.map((_, i) => i), 6, async (i) => {
+      const j = jobs[i];
+      out[i] = await timed(
+        "drain",
+        { route: "hooks.delivery", monorepo_id: j.monorepo, delivery: j.delivery_id, attempt: j.attempt, delivery_wait_ms: Math.max(0, Date.now() - j.due) },
+        () => deliverOne(this.env, j),
+      ).catch((err) => ({ ok: false, code: null, error: redact(err instanceof Error ? err.message : String(err)).slice(0, 300), ms: 0 }));
+    });
+    return out;
   }
 }
 
-/** The pando-hooks-dlq consumer: mark the deliveries dead (visible in the API; redeliver to try again). */
+async function deliverOne(env: Env, j: HookJob): Promise<HookResult> {
+  const p = j.payload;
+  if (p.base === null && p.head !== ZERO && p.event !== "merged" && j.main) {
+    // The merge base with main, computed here (the object makes no Artifacts reads).
+    try {
+      p.base = (await withRepo(env, j.artifacts_name, (repo) => compareWith(commitReader(repo), j.main!, p.head))).mergeBase;
+    } catch {
+      p.base = null;
+    }
+  }
+  note({ repo: p.repo, event: p.event, hook_type: j.hook.type, seq: p.seq ?? null });
+  const t0 = Date.now();
+  const r = await attempt(env, j.hook, j.delivery_id, p, (kind) => readToken(env, j.artifacts_name, kind), j.due);
+  note({ receiver_ms: Date.now() - t0, receiver_code: r.code, delivered: r.ok });
+  return { ...r, ms: Date.now() - t0 };
+}
+
+/**
+ * The pando-hooks consumer, for messages sent before the outbox: the outbox
+ * now sends every delivery, so a message only wakes its monorepo's outbox.
+ */
+export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
+  const monorepos = new Set(batch.messages.map((m) => m.body.monorepo));
+  await Promise.all([...monorepos].map((m) => timedStub(env.MONOREPO.getByName(m)).sendDueDeliveries().catch(() => {})));
+  batch.ackAll();
+}
+
+/** The pando-hooks-dlq consumer, for messages sent before the outbox: mark the deliveries dead. */
 export async function handleDeadDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
   for (const msg of batch.messages) {
     await env.MONOREPO.getByName(msg.body.monorepo).markDead(msg.body.delivery_id);
@@ -178,11 +176,12 @@ export interface AttemptResult {
 }
 
 /** One delivery attempt. Never throws; never logs the token. */
-export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: StoredPayload, token: (kind: "web" | "ci") => Promise<{ token: string; expiresAt: string }>): Promise<AttemptResult> {
+export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: StoredPayload, token: (kind: "web" | "ci") => Promise<{ token: string; expiresAt: string }>, due?: number): Promise<AttemptResult> {
   try {
     const read = await token(hook.type === "buildkite" ? "ci" : "web");
     const status = await statusToken(env, hook, p);
     const u = urls(p);
+    if (due !== undefined) note({ post_wait_ms: Math.max(0, Date.now() - due) }); // from the row being due to the POST leaving
     if (hook.type === "web") {
       const { origin: _origin, plain: _plain, ...rest } = p;
       const body = JSON.stringify({

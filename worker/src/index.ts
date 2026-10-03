@@ -20,7 +20,7 @@ import { handleHistoryBatch, type HistoryMessage } from "./monorepo/files";
 import { objectsClient } from "./objects";
 import { monorepoStub } from "./monorepo/session";
 import { signin } from "./accounts/signin";
-import { factsTestRoute, handleFactsBatch, type FactsMessage } from "./monorepo/facts";
+import { factsTestRoute } from "./monorepo/facts";
 import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./monorepo/hooks";
 import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
@@ -34,6 +34,7 @@ export { MetaLayerObject } from "./live/object";
 export { FeedObject } from "./feed/object";
 export { FeedDrain } from "./feed/consumer";
 export { FactsDrain } from "./monorepo/facts";
+export { HooksDrain } from "./monorepo/hooks";
 export type { Env };
 
 const META_RE = /^\/v1\/monorepos\/[^/]+\/[^/]+\/meta(\/|$)/;
@@ -70,7 +71,7 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
-  /** The queues: branch facts (monorepo/facts.ts), hook deliveries and their dead letters (monorepo/hooks.ts). */
+  /** The queues: last commits (monorepo/files.ts), hook messages from before the outbox (monorepo/hooks.ts), the feed. */
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === "pando-history") {
       return handleHistoryBatch(batch as MessageBatch<HistoryMessage>, env, ctx, {
@@ -81,7 +82,8 @@ export default {
     if (batch.queue === "pando-hooks") return handleDeliveries(batch as MessageBatch<DeliveryMessage>, env);
     if (batch.queue === "pando-hooks-dlq") return handleDeadDeliveries(batch as MessageBatch<DeliveryMessage>, env);
     if (batch.queue === "pando-feed") return handleFeedBatch(batch as MessageBatch<FeedMessage>, env);
-    return handleFactsBatch(batch as MessageBatch<FactsMessage>, env);
+    console.error(`a batch from an unknown queue ${batch.queue}; acked`);
+    batch.ackAll();
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

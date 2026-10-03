@@ -231,7 +231,8 @@ changed since I last looked").
 ```
 
 `commit` is the meta layer commit that carries the version, or `null` until
-it is committed.
+it is committed. `large` is `{"oid", "size"}` when the version is a large
+file's pointer (then `size` and `sha` are the pointer's), else `null`.
 
 **`GET file?path=<path>&version=<version>`**: the bytes of the path as it
 was at that version, that is its latest change at or before it (`version`

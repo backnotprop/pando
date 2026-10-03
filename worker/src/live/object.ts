@@ -212,7 +212,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   private historyEntry(r: VersionRow) {
+    // A large file's version is its pointer: show the file's own size and hash.
+    const ptr = r.sha && !r.deleted && (r.size ?? 0) < 1024 ? parsePointer(new Uint8Array(this.blob(r.sha))) : null;
     return {
+      large: ptr ? { oid: ptr.oid, size: ptr.size } : null,
       version: r.version,
       path: r.path,
       op: r.op,

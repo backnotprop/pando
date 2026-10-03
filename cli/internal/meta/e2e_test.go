@@ -1095,6 +1095,11 @@ func TestE2ELargeFiles(t *testing.T) {
 		t.Fatalf("design/render.png on the server is not its pointer: %q", ptrText)
 	}
 	t.Logf("pointer:\n%s", ptrText)
+	h, err := env.client().History(ctx, env.p("design/render.png"), 1)
+	if err != nil || h.Versions[0].Large == nil || h.Versions[0].Large.Size != int64(len(render)) || h.Versions[0].Large.Oid != ptr.Oid {
+		t.Errorf("history of a large file: %+v %v", h, err)
+	}
+	t.Logf("pando history says: %s", describe(h.Versions[0]))
 
 	render2 := randomBinary(200 << 10)
 	a.write("design/render.png", render2)

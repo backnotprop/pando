@@ -251,8 +251,20 @@ func describe(v Version) string {
 		return "renamed to " + v.To
 	case v.Deleted:
 		return "delete"
+	case v.Large != nil:
+		return fmt.Sprintf("save, %s (large file)", humanBytes(v.Large.Size))
 	}
-	return fmt.Sprintf("save, %d bytes", v.Size)
+	return fmt.Sprintf("save, %s", humanBytes(v.Size))
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 10<<10:
+		return fmt.Sprintf("%d KB", n>>10)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 func loadFor(flagRoot string) (string, Config, error) {

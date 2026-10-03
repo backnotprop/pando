@@ -594,6 +594,9 @@ paths:
           `more`: over 50 changed, refetch listNeeds.
         - `{"type": "joined", "monorepo", "monorepo_id", "large"}`, `{"type": "left", "monorepo", "monorepo_id"}`:
           refetch the first page and the list.
+        - `{"type": "error", "message"}`: the frame sent was not understood
+          (anything but `hello` or the text `ping`). Nothing changed; the
+          socket stays open.
         Every frame's `monorepo` is the `owner/name` label (as the index last
         heard it; a rename shows within a minute) and `monorepo_id` the id.
         The text `ping` gets `pong`. Lines of large monorepos do not come
@@ -853,8 +856,8 @@ paths:
         `A-Z a-z 0-9 _ -`. `machine` is optional (default: the credential's
         name). Each hello replaces the last one of that socket; presence ends
         when the socket closes. Answer: `{"type": "hello_ok", "machine",
-        "worktrees", "machines_active", "worktrees_active"}`, or an `error`
-        frame.
+        "worktrees", "machines_active", "worktrees_active"}`, or
+        `{"type": "error", "message"}` (the socket stays open).
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
         latest `limit` with no `since`. With `Upgrade: websocket`: events after
@@ -2507,7 +2510,7 @@ components:
         pointed_to: { type: [string, "null"], description: "The `owner/name` it led to before." }
     User:
       type: object
-      required: [login, picture_url, created_at]
+      required: [login, name, email, picture_url, created_at]
       properties:
         login: { type: string }
         name: { type: [string, "null"] }

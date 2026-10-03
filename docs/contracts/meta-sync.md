@@ -246,9 +246,12 @@ changed since I last looked").
  "versions": [
    {"version": 432, "path": "decisions/HISTORY.md", "op": "save", "sha": "4b82...", "size": 9, "deleted": false,
     "author": "Ana <ana@example.com>", "login": "ana", "machine": "ana-mbp", "agent": null, "at": 1790000000000, "source": "live",
-    "from": null, "restored_from": null, "commit": "e1f0..."}
+    "from": null, "to": null, "restored_from": null, "commit": "e1f0..."}
  ]}
 ```
+
+A rename is two versions: on its delete side `to` is the new path, on its
+save side `from` is the old path; both are `null` on any other change.
 
 `commit` is the meta layer commit that carries the version, or `null` until
 it is committed. `login` is the saver's Pando login beside `author`, the

@@ -315,6 +315,20 @@ export async function walkHistory(w: Walker, start: string, path: string, limit:
   return { changes, next: walked >= WALK_MAX ? null : next, walked, budgetCut, capped: walked >= WALK_MAX };
 }
 
+
+/**
+ * If-None-Match, compared weakly (RFC 9110 13.1.2): Cloudflare's edge turns a
+ * strong ETag into W/"..." when it compresses the answer, and the browser
+ * sends that back. A list and "*" are allowed.
+ */
+export function matchesEtag(header: string | null, oid: string): boolean {
+  if (!header) return false;
+  return header.split(",").some((t) => {
+    const v = t.trim();
+    return v === "*" || v.replace(/^W\//, "") === `"${oid}"`;
+  });
+}
+
 // ── Raw ───────────────────────────────────────────────────────────────────
 
 const IMAGES: Record<string, string> = {
@@ -388,6 +402,7 @@ export async function resolveCommit(
   w: Walker,
   refHead: (ref: string) => Promise<string | null>,
   ref: string | null | undefined,
+  remember?: (sha: string) => Promise<unknown>,
 ): Promise<{ ref: string; commit: CommitMeta; pinned: boolean }> {
   const r = ref || w.repo.default_branch;
   let sha: string | null = null;
@@ -399,6 +414,8 @@ export async function resolveCommit(
       const { withRepo } = await import("./artifacts");
       const log = await withRepo(env, w.repo.artifacts_name, (repo) => repo.log({ ref: r, limit: 1 })).catch(() => []);
       sha = log[0]?.hash ?? null;
+      // Main not recorded yet (a repo from before heads were kept): keep it, so the next view skips Artifacts.
+      if (sha && r === w.repo.default_branch && remember) await remember(sha).catch(() => undefined);
     }
   }
   if (!sha) throw new HttpError(404, "not_found", `no ref ${r}`);

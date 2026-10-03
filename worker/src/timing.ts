@@ -163,7 +163,9 @@ export function timedRepo(repo: ArtifactsRepo, name: string): ArtifactsRepo {
       const v = Reflect.get(target, prop);
       // RPC stubs answer any property name with a remote method, so never call
       // .apply or .bind on one: Reflect.apply invokes it directly.
-      if (typeof v !== "function" || typeof prop === "symbol") return v;
+      if (typeof v !== "function") return v;
+      // Symbol methods (Symbol.dispose) run on the real handle, untimed.
+      if (typeof prop === "symbol") return (...args: unknown[]) => Reflect.apply(v as (...a: unknown[]) => unknown, target, args);
       return (...args: unknown[]) => timeArtifacts(String(prop), name, () => Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args));
     },
   }) as ArtifactsRepo;

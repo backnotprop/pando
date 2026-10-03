@@ -10,7 +10,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
-import { branchesOf, listRefs, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
+import { branchesOf, listRefs, repoToken, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, LEASE_MS, retryBusy, WriteGate } from "./gate";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
 import { combine, requiredChecks } from "./checks";
@@ -574,7 +574,12 @@ export class MonorepoObject extends DurableObject<Env> {
         retryBusy(
           () =>
             engine.mergeCommit(
-              { artifacts: timedArtifacts(this.env.ARTIFACTS), name: r.artifacts_name },
+              {
+                artifacts: timedArtifacts(this.env.ARTIFACTS),
+                name: r.artifacts_name,
+                // The object's cached write token for this one repo (C3), not one minted per push.
+                write: { remote: r.remote, token: (fresh) => repoToken(this.env, r.artifacts_name, "write", r.created_at, "local", fresh) },
+              },
               {
                 base: r.default_branch, head: h, baseSha, message,
                 author: { name: a.identity.name ?? a.identity.login, email },

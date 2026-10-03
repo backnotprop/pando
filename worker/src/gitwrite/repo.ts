@@ -1,11 +1,19 @@
 // Talking to one Artifacts repo: reads through the Workers binding, writes
-// through git's receive-pack with a write token minted for the one push.
+// through git's receive-pack. The token for the push is the caller's (`write`),
+// or one minted for the one push and revoked after it.
 import { concat, ZERO_SHA, type TreeEntry } from "./objects";
 import { timeArtifacts } from "../timing";
 
 export interface GitRepo {
   artifacts: Artifacts;
   name: string;
+  /**
+   * Optional: how to push without minting a token for each push. `token`
+   * gives a write token for this one repo, held by the caller and never
+   * sent outside the Worker (so it is not revoked here); `fresh` asks for a
+   * new one after Artifacts refused it. `remote` saves the info() lookup.
+   */
+  write?: { remote?: string; token: (fresh: boolean) => Promise<string> };
 }
 
 export type GitWriteErrorCode =
@@ -72,6 +80,7 @@ export class OpenRepo {
   private constructor(
     readonly name: string,
     private readonly handle: ArtifactsRepo,
+    private readonly write?: GitRepo["write"],
   ) {}
 
   static async open(repo: GitRepo): Promise<OpenRepo> {
@@ -79,7 +88,7 @@ export class OpenRepo {
       throw new GitWriteError("invalid_input", "repo needs { artifacts, name }");
     }
     const handle = await call(`open repo ${repo.name}`, () => repo.artifacts.get(repo.name));
-    return new OpenRepo(repo.name, handle);
+    return new OpenRepo(repo.name, handle, repo.write);
   }
 
   close(): void {
@@ -130,32 +139,48 @@ export class OpenRepo {
   // Send one ref update and its pack to receive-pack. Returns null on
   // success or the server's reason for refusing the update.
   async push(ref: string, oldSha: string | null, newSha: string, pack: Uint8Array): Promise<string | null> {
-    const info = await call("repo info", () => this.handle.info());
-    const token = await call("mint write token", () => this.handle.createToken("write", 120));
     this.stats.packBytes = pack.length;
-    try {
-      const line = `${oldSha ?? ZERO_SHA} ${newSha} ${ref}\0report-status agent=pando-gitwrite\n`;
-      const body = concat([pktLine(line), FLUSH, pack]);
-      let res: Response;
+    const line = `${oldSha ?? ZERO_SHA} ${newSha} ${ref}\0report-status agent=pando-gitwrite\n`;
+    const body = concat([pktLine(line), FLUSH, pack]);
+    const send = async (remote: string, token: string): Promise<Response> => {
       try {
         // Timed for the caller's pando.timing line (worker/src/timing.ts), when there is one.
-        res = await timeArtifacts("http POST git-receive-pack (gitwrite)", this.name, () => fetch(`${info.remote}/git-receive-pack`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token.plaintext}`,
-            "content-type": "application/x-git-receive-pack-request",
-            accept: "application/x-git-receive-pack-result",
-          },
-          body,
-        }));
+        return await timeArtifacts("http POST git-receive-pack (gitwrite)", this.name, () =>
+          fetch(`${remote}/git-receive-pack`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/x-git-receive-pack-request",
+              accept: "application/x-git-receive-pack-result",
+            },
+            body,
+          }),
+        );
       } catch (e) {
         throw new GitWriteError("artifacts", `receive-pack request failed: ${(e as Error).message}`);
       }
+    };
+    const report = async (res: Response): Promise<string | null> => {
       const bytes = new Uint8Array(await res.arrayBuffer());
-      if (!res.ok) {
-        throw new GitWriteError("artifacts", `receive-pack answered ${res.status}: ${preview(bytes)}`);
-      }
+      if (!res.ok) throw new GitWriteError("artifacts", `receive-pack answered ${res.status}: ${preview(bytes)}`);
       return readReport(bytes, ref);
+    };
+
+    if (this.write) {
+      // The caller's token for this repo: no mint, no revoke (it never leaves the Worker).
+      const remote = this.write.remote ?? (await call("repo info", () => this.handle.info())).remote;
+      let res = await send(remote, await call("caller's write token", () => this.write!.token(false)));
+      if (res.status === 401 || res.status === 403) {
+        await res.body?.cancel();
+        res = await send(remote, await call("caller's write token", () => this.write!.token(true)));
+      }
+      return report(res);
+    }
+
+    const info = await call("repo info", () => this.handle.info());
+    const token = await call("mint write token", () => this.handle.createToken("write", 120));
+    try {
+      return await report(await send(info.remote, token.plaintext));
     } finally {
       try {
         await this.handle.revokeToken(token.id);

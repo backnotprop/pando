@@ -293,6 +293,9 @@ func ensureMonorepo(e *Env, serverURL, mono, kind string) (srv server.Server, re
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if h, ok := s.(*server.HTTP); ok {
+		h.Agent = worktree.CleanAgent(e.agentFor(nil))
+	}
 	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
 	if err == nil {
 		e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
@@ -367,7 +370,10 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 	// the answer was lost, that counts as pushed; pushing main again would be
 	// refused.
 	push := func() error {
-		_, err := g.Run(e.Ctx, "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
+		// The agent header rides on this one push only; the person's own
+		// checkout keeps no Pando agent in its config.
+		args := append(worktree.AgentHeaderArgs(cloneURL, e.agentFor(nil)), "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
+		_, err := g.Run(e.Ctx, args...)
 		return err
 	}
 	landed := func() bool {

@@ -116,7 +116,8 @@ func worktreeAdd(e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	w, err := addWorktree(e, root, repo, pos[1], agentName(*agent), *kind, pos[2:])
+	e.Agent = agentName(*agent)
+	w, err := addWorktree(e, root, repo, pos[1], e.Agent, *kind, pos[2:])
 	if err != nil {
 		return err
 	}

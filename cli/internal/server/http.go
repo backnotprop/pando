@@ -18,6 +18,9 @@ type HTTP struct {
 	Base   string
 	token  string
 	Client *http.Client
+	// Agent, when set, goes out as X-Pando-Agent on every call: the agent
+	// acting through this credential (the Pando-Agent trailer's name).
+	Agent string
 }
 
 // NewHTTP makes an API client. The credential goes in the Authorization
@@ -66,6 +69,9 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	req.Header.Set("User-Agent", "pando-cli/0.1")
+	if h.Agent != "" {
+		req.Header.Set("X-Pando-Agent", h.Agent)
+	}
 	resp, err := h.Client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s %s: %w", r.method, h.Base+r.path, unwrapURLError(err))

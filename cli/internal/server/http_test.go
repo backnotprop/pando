@@ -45,3 +45,24 @@ func TestCreateBranchRetriesServerErrors(t *testing.T) {
 		t.Fatalf("a 400 is not retried: err %v calls %d", err, calls.Load())
 	}
 }
+
+func TestAgentHeaderOnAPICalls(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("X-Pando-Agent"))
+		w.Write([]byte(`{"name":"feat","head":"abc","state":"open","checks":{}}`))
+	}))
+	defer srv.Close()
+	h := NewHTTP(srv.URL, "tok")
+	h.Agent = "agent-3"
+	if _, err := h.GetBranch(context.Background(), "m", "r", "feat"); err != nil {
+		t.Fatal(err)
+	}
+	h.Agent = ""
+	if _, err := h.GetBranch(context.Background(), "m", "r", "feat"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "agent-3" || got[1] != "" {
+		t.Fatalf("X-Pando-Agent per call: %q", got)
+	}
+}

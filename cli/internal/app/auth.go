@@ -17,6 +17,7 @@ import (
 	"pando/internal/gitx"
 	"pando/internal/server"
 	"pando/internal/signin"
+	"pando/internal/worktree"
 )
 
 // obtainCredential is the one sign-in step: WorkOS CLI Auth run through the
@@ -371,6 +372,10 @@ func (e *Env) signedIn(flagServer string) (server.Server, string, error) {
 		return nil, "", err
 	}
 	s, err := server.Open(serverURL, tok)
+	if h, ok := s.(*server.HTTP); ok && err == nil {
+		root, _ := e.root()
+		h.Agent = worktree.CleanAgent(e.agentFor(root))
+	}
 	return s, serverURL, err
 }
 

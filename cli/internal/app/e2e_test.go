@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"pando/internal/config"
+	"pando/internal/server"
 )
 
 // The commands end to end against a file:// server with the sparse driver:
@@ -359,5 +361,47 @@ func TestTransportFailure(t *testing.T) {
 		if got := transportFailure(errors.New(msg)); got != want {
 			t.Errorf("%q: %v, want %v", msg, got, want)
 		}
+	}
+}
+
+func TestAgentFor(t *testing.T) {
+	h := newHarness(t)
+	root := &config.Root{Dir: h.base, Kind: "repo", Name: "acme", Server: "https://pando.example.com",
+		Repos: []config.RepoEntry{{Path: ".", Name: "acme"}}}
+	if err := root.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.SaveWorktrees([]config.Worktree{{ID: "wt_1", Repo: ".", Branch: "feat", Path: "worktrees/feat", Kind: "sparse", Agent: "agent-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	e, err := NewEnv(context.Background(), strings.NewReader(""), io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Cwd = filepath.Join(h.base, "worktrees", "feat", "src")
+	if got := e.agentFor(root); got != "agent-1" {
+		t.Fatalf("inside the worktree: %q", got)
+	}
+	t.Setenv("PANDO_AGENT", "agent-env")
+	if got := e.agentFor(root); got != "agent-env" {
+		t.Fatalf("PANDO_AGENT: %q", got)
+	}
+	e.Agent = "agent-flag"
+	if got := e.agentFor(root); got != "agent-flag" {
+		t.Fatalf("--agent: %q", got)
+	}
+	t.Setenv("PANDO_TOKEN", "pando_test")
+	s, err := e.open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hs, ok := s.(*server.HTTP); !ok || hs.Agent != "agent-flag" {
+		t.Fatalf("the API client carries no agent: %#v", s)
+	}
+	e.Agent = ""
+	t.Setenv("PANDO_AGENT", "")
+	e.Cwd = h.base
+	if got := e.agentFor(root); got != "" {
+		t.Fatalf("outside any worktree, no agent: %q", got)
 	}
 }

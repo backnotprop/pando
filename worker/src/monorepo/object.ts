@@ -25,6 +25,7 @@ import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
 import { FeedOut } from "../feed/out";
+import { Machines, type MachineRow } from "./machines";
 import type { FeedEvent, Key, NeedRow, NeedState, Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { CiStore, type CiRef, type IngestResult } from "../ci/store";
@@ -98,8 +99,12 @@ export const SCAN_MAX = 5_000;
 export const REF_BATCH_MAX = 200;
 
 /** Who did it, for an event: the user, the credential (machine) and the agent. */
-function who(by: Identity | null): { actor: string | null; machine: string | null; agent: string | null } {
-  return { actor: by?.login ?? null, machine: by?.credential_name ?? null, agent: by?.agent ?? null };
+/** Who did it, for an event. `via` (the credential) is for the Machines tab and never stored in the event's body. */
+function who(by: Identity | null): { actor: string | null; machine: string | null; agent: string | null; via?: { credential_id: string; credential_kind: string | null } } {
+  return {
+    actor: by?.login ?? null, machine: by?.credential_name ?? null, agent: by?.agent ?? null,
+    ...(by ? { via: { credential_id: by.credential_id, credential_kind: by.credential_kind ?? null } } : {}),
+  };
 }
 
 function randomId(prefix: string, bytes = 8): string {
@@ -147,6 +152,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private refRunners = new Set<string>();
   /** The home's activity feed (feed/out.ts, C25): activity marking, fan-out, presence, summary ticks. */
   private feed: FeedOut;
+  /** The Machines tab (machines.ts): one row per (login, credential). */
+  private machines: Machines;
   /** Branch facts jobs, drained by RPC (facts-out.ts). */
   private factsOut: FactsOut;
   /** Hook deliveries, sent by RPC (hooks-out.ts). */
@@ -158,6 +165,7 @@ export class MonorepoObject extends DurableObject<Env> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
+    this.machines = new Machines(ctx, this.sql, (e) => this.publish(e));
     this.factsOut = new FactsOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t));
     this.hooksOut = new HooksOut(
       ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t),
@@ -204,6 +212,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!scols.includes("app")) this.sql.exec("ALTER TABLE statuses ADD COLUMN app TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.feed.ensureSchema();
+    this.machines.ensureSchema();
     this.factsOut.ensureSchema();
     this.hooksOut.ensureSchema();
     this.ci.ensureSchema();
@@ -910,13 +919,13 @@ export class MonorepoObject extends DurableObject<Env> {
   publish(e: StreamEvent): number {
     if (!EVENT_STREAM) return 0;
     const at = now();
-    const { seq: _s, at: _a, ...rest } = e;
+    const { seq: _s, at: _a, via: _v, ...rest } = e;
     const body = JSON.stringify(rest);
     const tags = eventTags(e);
     const seq = this.sql.exec<{ seq: number }>(
       "INSERT INTO events (at, kind, body, tags) VALUES (?, ?, ?, ?) RETURNING seq", at, e.kind, body, ` ${tags.join(" ")} `,
     ).one().seq as number;
-    this.feed.onPublish(seq, at, e);
+    const line = this.feed.onPublish(seq, at, e);
     const frame = JSON.stringify({ type: "event", seq, at, ...rest });
     // Each socket subscribed to topics (acceptWebSocket tags); send once to every socket on any of this event's.
     const sent = new Set<WebSocket>();
@@ -931,6 +940,8 @@ export class MonorepoObject extends DurableObject<Env> {
         }
       }
     }
+    // After this event's frames: its machine's latest activity (may publish machine.updated).
+    this.machines.onEvent(seq, at, e, line);
     return seq;
   }
 
@@ -994,6 +1005,8 @@ export class MonorepoObject extends DurableObject<Env> {
       login: request.headers.get("x-pando-login") ?? "", connected_at: now(), topics,
       // For presence (C25): the socket's id, and the credential's name as the default machine.
       sid: randomId("ws_"), machine: request.headers.get("x-pando-machine") ?? "",
+      // For the Machines tab: the credential behind the socket.
+      cid: request.headers.get("x-pando-credential") ?? "", kind: request.headers.get("x-pando-credential-kind") ?? "",
     });
     // Replay, then live. Nothing here awaits, so no event can fall between the two.
     const sinceParam = url.searchParams.get("since");
@@ -1019,7 +1032,10 @@ export class MonorepoObject extends DurableObject<Env> {
     let reply: Record<string, unknown> = { type: "error", message: "this socket only sends; send the text ping to keep it open" };
     try {
       const m = typeof msg === "string" && msg.startsWith("{") ? (JSON.parse(msg) as Record<string, unknown>) : null;
-      if (m?.type === "hello") reply = this.feed.hello(ws, m);
+      if (m?.type === "hello") {
+        reply = this.feed.hello(ws, m);
+        if (reply.type === "hello_ok") this.machines.hello(ws.deserializeAttachment() ?? {}, (m.worktrees as string[] | undefined) ?? []);
+      }
     } catch {
       // not JSON
     }
@@ -1032,6 +1048,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     this.feed.gone(ws);
+    this.machines.gone(ws, this.feed.liveHelloSids());
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
     } catch {
@@ -1348,7 +1365,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** The branch-facts job's commit count and head title for a push: the push goes out to feeds. */
   feedPush(seq: number, summary: Record<string, unknown>): boolean {
-    return this.feed.push(seq, summary);
+    const sent = this.feed.push(seq, summary);
+    if (sent) this.machines.pushSummary(seq, summary);
+    return sent;
   }
 
   /** Activity events older than the cursor, newest first (fan-in for large monorepos and history past a feed's window). */
@@ -1359,6 +1378,11 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Open branches that need someone (ready, conflicts, failing), from stored facts. */
   needsYou(needs: NeedState[], limit: number): NeedRow[] {
     return this.feed.needs(new Set(needs)).slice(0, Math.min(Math.max(limit, 1), 500));
+  }
+
+  /** The Machines tab: one row per machine, latest activity first. */
+  machineRows(): MachineRow[] {
+    return this.machines.list(this.feed.liveHelloSids());
   }
 
   feedSummary(): Summary {

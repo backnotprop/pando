@@ -24,11 +24,13 @@ import type { BranchList, BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
-import { FeedOut } from "../feed/out";
+import { FeedOut, type HelloAnswer } from "../feed/out";
+import { isRecord, isText, isTextList, parseJson } from "../parse";
 import { Machines, type MachineRow } from "./machines";
-import type { FeedEvent, Key, NeedRow, NeedState, Summary } from "../feed/shape";
+import type { FeedEvent, Key, NeedRow, NeedState, PushNumbers, Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { CiStore, type CiRef, type IngestResult } from "../ci/store";
+import type { Json } from "../parse";
 import type {
   BranchRecord,
   Checks,
@@ -1035,7 +1037,7 @@ export class MonorepoObject extends DurableObject<Env> {
       "INSERT INTO events (at, kind, body, tags) VALUES (?, ?, ?, ?) RETURNING seq", at, e.kind, body, ` ${tags.join(" ")} `,
     ).one().seq as number;
 
-    const line = this.feed.onPublish(seq, at, e);
+    const line = this.feed.onPublish(seq, at, body);
     const frame = JSON.stringify({ type: "event", seq, at, ...rest });
     // Each socket subscribed to topics (acceptWebSocket tags); send once to every socket on any of this event's.
     const sent = new Set<WebSocket>();
@@ -1161,18 +1163,13 @@ export class MonorepoObject extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
     // The stream is one way, but for a follower's hello (presence, C25). Text "ping" is answered "pong" without waking the object.
-    let reply: Record<string, unknown> = { type: "error", message: "this socket only sends; send the text ping to keep it open" };
+    let reply: HelloAnswer = { type: "error", message: "this socket only sends; send the text ping to keep it open" };
+    const m = isText(msg) ? parseJson(msg) : null;
 
-    try {
-      const m = typeof msg === "string" && msg.startsWith("{") ? (JSON.parse(msg) as Record<string, unknown>) : null;
+    if (isRecord(m) && m.type === "hello") {
+      reply = this.feed.hello(ws, m);
 
-      if (m?.type === "hello") {
-        reply = this.feed.hello(ws, m);
-
-        if (reply.type === "hello_ok") this.machines.hello(ws.deserializeAttachment() ?? {}, (m.worktrees as string[] | undefined) ?? []);
-      }
-    } catch {
-      // not JSON
+      if (reply.type === "hello_ok") this.machines.hello(ws.deserializeAttachment() ?? {}, isTextList(m.worktrees) ? m.worktrees : []);
     }
 
     try {
@@ -1550,7 +1547,7 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** The branch-facts job's commit count and head title for a push: the push goes out to feeds. */
-  feedPush(seq: number, summary: Record<string, unknown>): boolean {
+  feedPush(seq: number, summary: PushNumbers): boolean {
     const sent = this.feed.push(seq, summary);
 
     if (sent) this.machines.pushSummary(seq, summary);
@@ -1596,11 +1593,11 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.ci.webhook(id, h, body, nowMs));
   }
 
-  ciIngestBuild(connection: string, build: unknown): Promise<Outcome<IngestResult>> {
+  ciIngestBuild(connection: string, build: Json | null): Promise<Outcome<IngestResult>> {
     return this.guard(() => this.ci.ingestBuild(connection, build));
   }
 
-  ciIngestJob(build: string, job: unknown) {
+  ciIngestJob(build: string, job: Json | null) {
     const j = this.ci.ingestJob(build, job);
 
     return j ? this.ci.jobView(j) : null;

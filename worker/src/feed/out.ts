@@ -21,13 +21,14 @@ import { now } from "../http";
 import { released } from "../timing";
 import { combine } from "../monorepo/checks";
 import { ZERO } from "../monorepo/names";
-import type { ObjectInfo, StatusRecord, StreamEvent } from "../monorepo/types";
+import type { ObjectInfo, StatusRecord } from "../monorepo/types";
+import { isRecord, isTextList, parseJson, type Json, type JsonObject } from "../parse";
 import {
-  FANOUT_MAX, HELLO_WORKTREES_MAX, MEMBERS_INLINE_MAX, nameOf, seqBound, TICK_LARGE_MS, TICK_SMALL_MS,
-  type FeedEvent, type FeedMessage, type Key, type NeedChange, type NeedRow, type NeedState, type StoredPointer, type Summary,
+  FANOUT_MAX, feedEventOf, flagOf, HELLO_WORKTREES_MAX, isNeedState, MEMBERS_INLINE_MAX, nameOf, needChangesOf, pushSummaryOf, seqBound,
+  storedPointerOf, summaryOf, textOf, TICK_LARGE_MS, TICK_SMALL_MS, wholeOf,
+  type FeedEvent, type FeedMessage, type Key, type LineSummary, type NeedChange, type NeedRow, type NeedState, type PushNumbers,
+  type StoredPointer, type Summary,
 } from "./shape";
-
-type Row = Record<string, SqlStorageValue>;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS feed_state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -58,9 +59,85 @@ type Outgoing =
   | { t: "event"; event: FeedEvent }
   | { t: "summary"; summary: Summary; needs_changed: NeedChange[]; needs_more: boolean };
 
+/** An outbox row as stored (its body is an Outgoing, as JSON). */
+type OutboxRow = { id: number; body: string; attempts: number };
+
+/** An outbox row as the test route shows it. */
+type OutboxRowView = { id: number; attempts: number; next_at: number | null; dead_at: number | null; error: string | null };
+
+export interface OutboxView {
+  live: number;
+  dead: number;
+  rows: OutboxRowView[];
+}
+
+/** Machines and worktrees with an open follower socket. */
+export interface Presence {
+  machines: number;
+  worktrees: number;
+}
+
+/** The answer to a follower's hello. */
+export type HelloAnswer =
+  | { type: "error"; message: string }
+  | { type: "hello_ok"; machine: string; worktrees: number; machines_active: number; worktrees_active: number };
+
+/** What fetch() keeps on each event socket (monorepo/object.ts). */
+interface SocketTag {
+  sid: string | null;
+  login: string | null;
+  machine: string | null;
+}
+
+/** A statuses row (state checked before it becomes a StatusRecord). */
+type StatusRow = {
+  repo: string; sha: string; context: string; state: string; target_url: string | null; description: string | null;
+  creator: string; app: string | null; created_at: string;
+};
+
+function isStatusState(s: string): s is StatusRecord["state"] {
+  return s === "pending" || s === "success" || s === "failure" || s === "error";
+}
+
+/** An outbox row's body. Null for a body this code did not write (the row is then dropped). */
+function outgoingOf(v: Json | null): Outgoing | null {
+  if (!isRecord(v)) return null;
+
+  if (v.t === "event") {
+    const event = feedEventOf(v.event);
+
+    return event ? { t: "event", event } : null;
+  }
+
+  if (v.t === "summary") {
+    const summary = summaryOf(v.summary);
+    const changed = needChangesOf(v.needs_changed);
+
+    return summary && changed ? { t: "summary", summary, needs_changed: changed, needs_more: v.needs_more === true } : null;
+  }
+
+  return null;
+}
+
+/** The tag fetch() serialized on an event socket; nulls when it has none. */
+function socketTagOf(ws: WebSocket): SocketTag {
+  let raw: Json | undefined;
+
+  try {
+    // The attachment is the JSON object fetch() gave serializeAttachment for this socket.
+    raw = ws.deserializeAttachment();
+  } catch {
+    raw = undefined;
+  }
+
+  if (!isRecord(raw)) return { sid: null, login: null, machine: null };
+
+  return { sid: textOf(raw.sid), login: textOf(raw.login), machine: textOf(raw.machine) };
+}
+
 /** Log a background failure with its stack (a promise left unhandled shows only "internal error"). */
-function logged(what: string): (err: unknown) => void {
-  return (err) => console.error(`feed: ${what} failed:`, err instanceof Error ? (err.stack ?? err.message) : String(err));
+function logged(what: string): (cause: unknown) => void {
+  return (cause) => console.error(`feed: ${what} failed:`, cause instanceof Error ? (cause.stack ?? cause.message) : String(cause));
 }
 
 export class FeedOut {
@@ -86,11 +163,12 @@ export class FeedOut {
     return m?.label ?? m?.id ?? "";
   }
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  /** Rows of a query, typed by the caller to the columns it selects. */
+  private rows<T extends Record<string, SqlStorageValue>>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
-  private row<T>(q: string, ...args: unknown[]): T | null {
+  private row<T extends Record<string, SqlStorageValue>>(q: string, ...args: SqlStorageValue[]): T | null {
     return this.rows<T>(q, ...args)[0] ?? null;
   }
 
@@ -141,15 +219,10 @@ export class FeedOut {
     );
 
     for (const r of old) {
-      let e: StreamEvent;
+      const ev = parseJson(r.body);
 
-      try {
-        e = { ...JSON.parse(r.body), kind: r.kind } as StreamEvent;
-      } catch {
-        continue;
-      }
-
-      const p = this.pointerOf(e, true);
+      if (!isRecord(ev)) continue;
+      const p = this.pointerOf({ ...ev, kind: r.kind }, true);
 
       if (p) this.sql.exec("UPDATE events SET feed = ?, feed_wait = 0 WHERE seq = ?", JSON.stringify(p), r.seq);
     }
@@ -192,14 +265,21 @@ export class FeedOut {
 
   // ── Activity: marking, and copying to feeds ──────────────────────────────
 
-  /** Called by publish() after each event is written; returns its feed line, if it is activity. Never throws. */
-  onPublish(seq: number, at: string, e: StreamEvent): StoredPointer | null {
+  /**
+   * Called by publish() after each event is written, with the event's JSON
+   * body as stored; returns its feed line, if it is activity. Never throws.
+   */
+  onPublish(seq: number, at: string, body: string): StoredPointer | null {
     try {
-      const p = this.pointerOf(e, false);
+      const ev = parseJson(body);
+
+      if (!isRecord(ev)) return null;
+      const p = this.pointerOf(ev, false);
+      const collection = textOf(ev.collection);
 
       if (p) {
         // A push waits for the branch-facts job (feedPush) to add its commit count and head title.
-        const wait = e.kind === "push" || e.kind === "branch.opened" ? 1 : 0;
+        const wait = p.kind === "push" || p.kind === "branch.opened" ? 1 : 0;
         this.sql.exec("UPDATE events SET feed = ?, feed_wait = ? WHERE seq = ?", JSON.stringify(p), wait, seq);
         this.set("last_activity_at", at);
 
@@ -207,7 +287,7 @@ export class FeedOut {
         this.scheduleSummary();
 
         return p;
-      } else if (e.collection === "branches" || e.collection === "statuses" || e.collection === "default_heads") {
+      } else if (collection === "branches" || collection === "statuses" || collection === "default_heads") {
         this.scheduleSummary(); // needs-you may have changed (facts stored, main moved)
       }
     } catch (err) {
@@ -217,13 +297,17 @@ export class FeedOut {
     return null;
   }
 
-  /** The branch-facts job's summary for a push (commit count, head title): the event goes out now. */
-  push(seq: number, summary: Record<string, unknown>): boolean {
+  /** The branch-facts job's numbers for a push (commit count, head title): the event goes out now. */
+  push(seq: number, numbers: PushNumbers): boolean {
     const r = this.row<{ at: string; feed: string | null; feed_wait: number | null }>("SELECT at, feed, feed_wait FROM events WHERE seq = ?", seq);
 
     if (!r?.feed || !r.feed_wait) return false; // unknown, or already sent
-    const p = JSON.parse(r.feed) as StoredPointer;
-    p.summary = { ...(p.summary ?? {}), ...summary };
+    const stored = parseJson(r.feed);
+    const line = storedPointerOf(stored);
+
+    if (!line || !isRecord(stored)) return false;
+    const base = pushSummaryOf(stored.summary) ?? { head: null, before: null, commits: null, head_title: null };
+    const p: StoredPointer = { ...line, summary: { ...base, ...numbers } };
     this.sql.exec("UPDATE events SET feed = ?, feed_wait = 0 WHERE seq = ?", JSON.stringify(p), seq);
     this.emit({ monorepo_id: this.monorepo() ?? "", monorepo: this.label(), seq, at: r.at, ...p });
 
@@ -276,7 +360,11 @@ export class FeedOut {
     const id = this.monorepo() ?? "";
     const label = this.label();
 
-    for (const r of rows) ws.send(JSON.stringify({ type: "feed", n: r.feed_n, event: { monorepo_id: id, monorepo: label, seq: r.seq, at: r.at, ...(JSON.parse(r.feed) as StoredPointer) } }));
+    for (const r of rows) {
+      const p = storedPointerOf(parseJson(r.feed));
+
+      if (p) ws.send(JSON.stringify({ type: "feed", n: r.feed_n, event: { monorepo_id: id, monorepo: label, seq: r.seq, at: r.at, ...p } }));
+    }
   }
 
   /**
@@ -291,8 +379,8 @@ export class FeedOut {
     if (send && !this.flushing) this.ctx.waitUntil(Promise.resolve().then(() => this.flush()));
   }
 
-  private dueRows(limit: number): { id: number; body: string; attempts: number }[] {
-    return this.rows("SELECT id, body, attempts FROM feed_outbox WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?", Date.now(), limit);
+  private dueRows(limit: number): OutboxRow[] {
+    return this.rows<OutboxRow>("SELECT id, body, attempts FROM feed_outbox WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?", Date.now(), limit);
   }
 
   /** Send the outbox; one flush at a time. Never rejects. */
@@ -352,7 +440,12 @@ export class FeedOut {
       };
 
       for (const r of rows) {
-        const o = JSON.parse(r.body) as Outgoing;
+        const o = outgoingOf(parseJson(r.body));
+
+        if (!o) {
+          drop.push(r.id); // not a row this code wrote
+          continue;
+        }
 
         if (o.t === "event") {
           events.push(o.event);
@@ -457,103 +550,113 @@ export class FeedOut {
   }
 
   /** Tests only: arm a crash or failures, and read the outbox. */
-  testOutbox(set: { crash?: "before" | "after"; fail?: number } = {}): { live: number; dead: number; rows: { id: number; attempts: number; next_at: number | null; dead_at: number | null; error: string | null }[] } {
+  testOutbox(set: { crash?: "before" | "after"; fail?: number } = {}): OutboxView {
     if (set.crash) this.set("test_crash", set.crash);
 
     if (set.fail !== undefined) this.set("test_fail", String(set.fail));
 
-    const rows = this.rows<{ id: number; attempts: number; next_at: number | null; dead_at: number | null; error: string | null }>(
-      "SELECT id, attempts, next_at, dead_at, error FROM feed_outbox ORDER BY id",
-    );
+    const rows = this.rows<OutboxRowView>("SELECT id, attempts, next_at, dead_at, error FROM feed_outbox ORDER BY id");
 
     return { live: rows.filter((r) => r.dead_at === null).length, dead: rows.filter((r) => r.dead_at !== null).length, rows };
   }
 
   /**
-   * The feed line for an event, or null when it is not activity. `old`: an
-   * event from before the feed (status changes cannot be told apart).
+   * The feed line for an event (its JSON body as publish() stores it), or null
+   * when it is not activity. `old`: an event from before the feed (status
+   * changes cannot be told apart).
    */
-  private pointerOf(e: StreamEvent, old: boolean): StoredPointer | null {
-    const row = (e.row ?? {}) as Record<string, any>;
-    let repo = (e.repo as string | null) ?? null;
+  private pointerOf(ev: JsonObject, old: boolean): StoredPointer | null {
+    const kind = textOf(ev.kind);
+    const row: JsonObject = isRecord(ev.row) ? ev.row : {};
+    let repo = textOf(ev.repo);
     let branch: string | null = null;
-    let summary: Record<string, unknown> | null = null;
-    let actor = (e.actor as string | null) ?? null;
+    let summary: LineSummary | null = null;
+    let actor = textOf(ev.actor);
+    const machine = textOf(ev.machine);
 
-    switch (e.kind) {
+    switch (kind) {
       case "push":
       case "branch.opened": {
-        if (e.collection === "default_heads") branch = row.default_branch ?? null;
-        else if (e.collection === "branches") branch = row.name ?? null;
+        const collection = textOf(ev.collection);
+
+        if (collection === "default_heads") branch = textOf(row.default_branch);
+        else if (collection === "branches") branch = textOf(row.name);
         else return null;
-        const head = (e.head as string | undefined) ?? row.head ?? row.default_head ?? null;
+        const head = textOf(ev.head) ?? textOf(row.head) ?? textOf(row.default_head);
 
         if (head === ZERO) return null;
-        summary = { head, before: e.before && e.before !== ZERO ? e.before : null, commits: null, head_title: null };
+        const before = textOf(ev.before);
+        summary = { head, before: before && before !== ZERO ? before : null, commits: null, head_title: null };
         break;
       }
 
       case "branch.deleted":
-        branch = row.name ?? null;
-        summary = { before: e.before ?? null };
+        branch = textOf(row.name);
+        summary = { before: textOf(ev.before) };
         break;
       case "merged": {
-        const m = (e.merge ?? {}) as Record<string, unknown>;
-        branch = row.name ?? null;
-        summary = { merge_commit: m.sha ?? row.merge_commit ?? null, forced: m.forced ?? row.forced ?? null, title: row.title ?? null, head: row.head ?? null };
+        const m: JsonObject = isRecord(ev.merge) ? ev.merge : {};
+        branch = textOf(row.name);
+        summary = { merge_commit: textOf(m.sha) ?? textOf(row.merge_commit), forced: flagOf(m.forced) ?? flagOf(row.forced), title: textOf(row.title), head: textOf(row.head) };
         break;
       }
 
       case "review":
-        branch = row.branch ?? null;
-        summary = { verdict: row.verdict ?? null, comments: Array.isArray(row.comments) ? row.comments.length : 0, head: row.head ?? null };
+        branch = textOf(row.branch);
+        summary = { verdict: textOf(row.verdict), comments: Array.isArray(row.comments) ? row.comments.length : 0, head: textOf(row.head) };
         break;
       case "status": {
-        if (!repo || !row.sha || !row.context) return null;
+        const sha = textOf(row.sha);
+        const context = textOf(row.context);
+        const state = textOf(row.state);
+
+        if (!repo || !sha || !context || !state) return null;
 
         const runs = this.rows<{ id: number; state: string; created_at: string }>(
           "SELECT id, state, created_at FROM statuses WHERE repo = ? AND sha = ? AND context = ? ORDER BY id DESC LIMIT 200",
-          repo, row.sha, row.context,
+          repo, sha, context,
         );
 
         // Only a change of state is activity (a CI posting "pending" twice is one line).
-        if (!old && runs.length > 1 && runs[1].state === row.state) return null;
+        if (!old && runs.length > 1 && runs[1].state === state) return null;
         let duration: number | null = null;
 
-        if (row.state !== "pending") {
+        if (state !== "pending") {
           // From the first "pending" of this run (after the previous finished state) to now.
           let start: string | null = null;
 
           for (let i = 1; i < runs.length && runs[i].state === "pending"; i++) start = runs[i].created_at;
 
-          if (start) duration = Math.max(0, Math.round((Date.parse(row.created_at) - Date.parse(start)) / 1000));
+          if (start) duration = Math.max(0, Math.round((Date.parse(textOf(row.created_at) ?? "") - Date.parse(start)) / 1000));
         }
 
         branch = this.row<{ name: string }>(
-          "SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1", repo, row.sha,
+          "SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1", repo, sha,
         )?.name ?? null;
         // app: the CI service that reported it (null: a member posted it, and `actor` is that member).
-        summary = { context: row.context, state: row.state, description: row.description ?? null, target_url: row.target_url ?? null, sha: row.sha, duration_s: duration, app: row.app ?? null };
+        summary = { context, state, description: textOf(row.description), target_url: textOf(row.target_url), sha, duration_s: duration, app: textOf(row.app) };
         break;
       }
 
       case "worktree.reported":
       case "worktree.removed": {
         // A report of a worktree already known only moves last_seen_at: not activity.
-        if (e.kind === "worktree.reported" && !old && row.created_at !== row.last_seen_at) return null;
-        const r = this.row<{ name: string }>("SELECT name FROM repos WHERE path = ?", row.repo ?? "");
-        repo = r?.name ?? null;
-        branch = row.branch ?? null;
-        summary = { path: row.path ?? null, worktree: row.id ?? null };
+        if (kind === "worktree.reported" && !old && textOf(row.created_at) !== textOf(row.last_seen_at)) return null;
+        const path = textOf(row.repo);
+        const r = this.row<{ name: string }>("SELECT name FROM repos WHERE path = ?", path ?? "");
 
-        return { kind: e.kind, repo, repo_path: row.repo ?? null, branch, actor, machine: row.machine ?? (e.machine as string | null) ?? null, summary };
+        return {
+          kind, repo: r?.name ?? null, repo_path: path, branch: textOf(row.branch), actor, machine: textOf(row.machine) ?? machine,
+          summary: { path: textOf(row.path), worktree: textOf(row.id) },
+        };
       }
 
       case "meta.saved":
         // Files a merge brought in are the merge's line already.
-        if (row.source === "main") return null;
-        actor = actor ?? nameOf(row.author);
-        summary = { path: e.key ?? row.path ?? null, version: row.version ?? null, deleted: !!row.deleted };
+        if (textOf(row.source) === "main") return null;
+        // The saver's login, as on every other line; versions saved before logins were kept have only a name.
+        actor = actor ?? textOf(row.login) ?? nameOf(textOf(row.author));
+        summary = { path: textOf(ev.key) ?? textOf(row.path), version: wholeOf(row.version), deleted: row.deleted === true };
         break;
       default:
         return null;
@@ -561,7 +664,7 @@ export class FeedOut {
 
     const repo_path = repo === "meta" ? "." : repo ? (this.row<{ path: string }>("SELECT path FROM repos WHERE name = ?", repo)?.path ?? null) : null;
 
-    return { kind: e.kind, repo, repo_path, branch, actor, machine: (e.machine as string | null) ?? null, summary };
+    return { kind, repo, repo_path, branch, actor, machine, summary };
   }
 
   // ── Reads: pages older than a key, and a join's backfill ─────────────────
@@ -580,82 +683,77 @@ export class FeedOut {
       : this.rows<{ seq: number; at: string; feed: string }>("SELECT seq, at, feed FROM events WHERE feed IS NOT NULL ORDER BY at DESC, seq DESC LIMIT ?", limit);
 
     const label = this.label();
+    const out: FeedEvent[] = [];
 
-    return rows.map((r) => ({ monorepo_id: name, monorepo: label, seq: r.seq, at: r.at, ...(JSON.parse(r.feed) as StoredPointer) }));
+    for (const r of rows) {
+      const p = storedPointerOf(parseJson(r.feed));
+
+      if (p) out.push({ monorepo_id: name, monorepo: label, seq: r.seq, at: r.at, ...p });
+    }
+
+    return out;
   }
 
   // ── Presence: the follower sockets' hello ────────────────────────────────
 
-  /** A follower said which machine it is and which worktrees it holds. Returns the frame to answer with. */
-  hello(ws: WebSocket, msg: Record<string, unknown>): Record<string, unknown> {
-    const att = (ws.deserializeAttachment() ?? {}) as { sid?: string; login?: string; machine?: string };
+  /** A follower said which machine it is and which worktrees it holds (its message, decoded). Returns the frame to answer with. */
+  hello(ws: WebSocket, msg: JsonObject): HelloAnswer {
+    const tag = socketTagOf(ws);
 
-    if (!att.sid) return { type: "error", message: "this socket cannot say hello; reconnect" };
-    const machine = typeof msg.machine === "string" && msg.machine.trim() ? msg.machine.trim().slice(0, 200) : att.machine;
+    if (!tag.sid) return { type: "error", message: "this socket cannot say hello; reconnect" };
+    const named = textOf(msg.machine)?.trim().slice(0, 200);
+    const machine = named || tag.machine;
 
     if (!machine) return { type: "error", message: "hello needs machine (a string)" };
     const ids = msg.worktrees ?? [];
 
-    if (!Array.isArray(ids) || ids.length > HELLO_WORKTREES_MAX || ids.some((x) => typeof x !== "string" || !WORKTREE_ID.test(x))) {
+    if (!isTextList(ids) || ids.length > HELLO_WORKTREES_MAX || ids.some((x) => !WORKTREE_ID.test(x))) {
       return { type: "error", message: `hello.worktrees: at most ${HELLO_WORKTREES_MAX} worktree ids (1 to 64 of A-Z a-z 0-9 _ -)` };
     }
 
     this.sql.exec(
       `INSERT INTO feed_presence (sid, login, machine, worktrees, at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (sid) DO UPDATE SET machine = excluded.machine, worktrees = excluded.worktrees, at = excluded.at`,
-      att.sid, att.login ?? null, machine, JSON.stringify([...new Set(ids as string[])]), now(),
+      tag.sid, tag.login, machine, JSON.stringify([...new Set(ids)]), now(),
     );
     this.scheduleSummary();
     const p = this.presence();
 
-    return { type: "hello_ok", machine, worktrees: (ids as string[]).length, machines_active: p.machines, worktrees_active: p.worktrees };
+    return { type: "hello_ok", machine, worktrees: ids.length, machines_active: p.machines, worktrees_active: p.worktrees };
   }
 
   /** A socket closed: its machine and worktrees stop counting. */
   gone(ws: WebSocket): void {
     // Sockets of a deleted monorepo close after its storage is gone: nothing to count.
     if (!this.monorepo()) return;
+    const sid = socketTagOf(ws).sid;
 
-    try {
-      const sid = (ws.deserializeAttachment() as { sid?: string } | null)?.sid;
+    if (sid && this.sql.exec("DELETE FROM feed_presence WHERE sid = ?", sid).rowsWritten) this.scheduleSummary();
+  }
 
-      if (sid && this.sql.exec("DELETE FROM feed_presence WHERE sid = ?", sid).rowsWritten) this.scheduleSummary();
-    } catch {
-      // no attachment
+  /** The ids of open event sockets. */
+  private openSids(): Set<string> {
+    const open = new Set<string>();
+
+    for (const ws of this.ctx.getWebSockets()) {
+      const sid = socketTagOf(ws).sid;
+
+      if (sid && ws.readyState === WebSocket.OPEN) open.add(sid);
     }
+
+    return open;
   }
 
   /** The ids of open sockets that said hello (for the Machines tab). */
   liveHelloSids(): Set<string> {
-    const open = new Set<string>();
-
-    for (const ws of this.ctx.getWebSockets()) {
-      try {
-        const sid = (ws.deserializeAttachment() as { sid?: string } | null)?.sid;
-
-        if (sid && ws.readyState === WebSocket.OPEN) open.add(sid);
-      } catch {
-        // no attachment
-      }
-    }
+    const open = this.openSids();
 
     return new Set(this.rows<{ sid: string }>("SELECT sid FROM feed_presence").map((r) => r.sid).filter((s) => open.has(s)));
   }
 
   /** Machines and worktrees with an open follower socket (rows of sockets gone without a close are dropped). */
-  presence(): { machines: number; worktrees: number } {
-    const live = new Set<string>();
-
-    for (const ws of this.ctx.getWebSockets()) {
-      try {
-        const sid = (ws.deserializeAttachment() as { sid?: string } | null)?.sid;
-
-        if (sid && ws.readyState === WebSocket.OPEN) live.add(sid);
-      } catch {
-        // no attachment
-      }
-    }
-
+  presence(): Presence {
+    const live = this.openSids();
     const machines = new Set<string>();
     const worktrees = new Set<string>();
 
@@ -666,8 +764,9 @@ export class FeedOut {
       }
 
       machines.add(r.machine);
+      const ids = parseJson(r.worktrees);
 
-      for (const id of JSON.parse(r.worktrees) as string[]) worktrees.add(id);
+      if (isTextList(ids)) for (const id of ids) worktrees.add(id);
     }
 
     return { machines: machines.size, worktrees: worktrees.size };
@@ -699,15 +798,16 @@ export class FeedOut {
     if (!branches.length) return [];
     const statuses = new Map<string, StatusRecord[]>();
 
-    for (const s of this.rows<StatusRecord & { repo: string }>(
+    for (const s of this.rows<StatusRow>(
       `SELECT s.repo, s.sha, s.context, s.state, s.target_url, s.description, s.creator, s.app, s.created_at FROM statuses s
        WHERE EXISTS (SELECT 1 FROM branches b WHERE b.repo = s.repo AND b.head = s.sha AND b.deleted_at IS NULL
                      AND (b.merged_head IS NULL OR b.merged_head != b.head))
        ORDER BY s.id`,
     )) {
+      if (!isStatusState(s.state)) continue;
       const k = `${s.repo}\n${s.sha}`;
       const l = statuses.get(k) ?? [];
-      l.push(s);
+      l.push({ sha: s.sha, context: s.context, state: s.state, target_url: s.target_url, description: s.description, creator: s.creator, app: s.app, created_at: s.created_at });
       statuses.set(k, l);
     }
 
@@ -717,7 +817,8 @@ export class FeedOut {
       const r = repos.get(b.repo);
 
       if (!r || b.name === r.default_branch) continue;
-      const required = r.required_checks ? (JSON.parse(r.required_checks) as string[]) : [];
+      const kept = r.required_checks ? parseJson(r.required_checks) : null;
+      const required = isTextList(kept) ? kept : [];
       const checks = combine(b.head, required, statuses.get(`${b.repo}\n${b.head}`) ?? []);
       let state: NeedState | null = null;
 
@@ -726,9 +827,14 @@ export class FeedOut {
       else if (b.facts_head === b.head && b.facts_main === r.default_head && r.default_head && b.mergeable === "clean" && checks.state === "success") state = "ready";
 
       if (!state || (only && !only.has(state))) continue;
+      const bad = checks.statuses.filter((s) => s.state === "failure" || s.state === "error");
       out.push({
         repo: b.repo, repo_path: r.path, branch: b.name, title: b.title, head: b.head, author: b.creator, pushed_machine: b.pushed_machine, state,
-        checks: { state: checks.state, failing: checks.statuses.filter((s) => s.state === "failure" || s.state === "error").map((s) => s.context) },
+        checks: {
+          state: checks.state,
+          failing: bad.map((s) => s.context),
+          failing_apps: Object.fromEntries(bad.map((s) => [s.context, s.app ?? null])),
+        },
         updated_at: b.updated_at,
       });
     }
@@ -820,21 +926,31 @@ export class FeedOut {
     const rows = this.needs();
     const s = this.summary(rows);
     const { at: _at, ...same } = s;
-    const needsNow: Record<string, NeedState> = {};
+    const needsNow = new Map<string, NeedState>();
 
-    for (const n of rows) needsNow[`${n.repo}\n${n.branch}`] = n.state;
-    const needsBefore = JSON.parse(this.get("needs_last") ?? "{}") as Record<string, NeedState>;
+    for (const n of rows) needsNow.set(`${n.repo}\n${n.branch}`, n.state);
+    const needsBefore = new Map<string, NeedState>();
+    const kept = parseJson(this.get("needs_last") ?? "{}");
+
+    if (isRecord(kept)) {
+      for (const [k, v] of Object.entries(kept)) {
+        const state = textOf(v);
+
+        if (state !== null && isNeedState(state)) needsBefore.set(k, state);
+      }
+    }
+
     const changed: NeedChange[] = [];
 
-    for (const k of new Set([...Object.keys(needsNow), ...Object.keys(needsBefore)])) {
-      if (needsNow[k] === needsBefore[k]) continue;
+    for (const k of new Set([...needsNow.keys(), ...needsBefore.keys()])) {
+      if (needsNow.get(k) === needsBefore.get(k)) continue;
       const [repo, branch] = k.split("\n");
-      changed.push({ repo, branch, state: needsNow[k] ?? null });
+      changed.push({ repo, branch, state: needsNow.get(k) ?? null });
     }
 
     if (JSON.stringify(same) === this.get("summary_last") && !changed.length) return;
     this.set("summary_last", JSON.stringify(same));
-    this.set("needs_last", JSON.stringify(needsNow));
+    this.set("needs_last", JSON.stringify(Object.fromEntries(needsNow)));
 
     if (!this.get("members_at")) return; // no feed has joined yet
     this.queue({ t: "summary", summary: s, needs_changed: changed.slice(0, 50), needs_more: changed.length > 50 }, false);

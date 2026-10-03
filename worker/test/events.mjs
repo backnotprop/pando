@@ -295,6 +295,16 @@ try {
   check("meta/tree lists the file in one call", r.json?.files?.some((f) => f.path === "notes/today.md" && f.size === bytes.length && f.version >= 1), `${r.status} ${(r.json?.files ?? []).map((f) => f.path).join(",")}`);
   // login beside the display name: on the event, the history and the tree
   checkS("meta.saved carries the saver's login beside the name", e?.row?.login === `ana-${id}` && /^Ana Lima/.test(e?.row?.author ?? ""), `${e?.row?.login} / ${e?.row?.author}`);
+  {
+    // The home's line for that save names the person by login, as every other line does.
+    const until = Date.now() + 10_000;
+    let line = null;
+    while (!line && Date.now() < until) {
+      line = (await call("GET", `/v1/events?in=${O}/${M}&limit=50`, A)).json?.events?.find((x) => x.kind === "meta.saved" && x.summary?.path === "notes/today.md") ?? null;
+      if (!line) await sleep(200);
+    }
+    checkS("the home's meta.saved line has the saver's login as actor", line?.actor === `ana-${id}`, `${line?.actor}`);
+  }
   const v1 = (await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s1"), 10_000))?.version;
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/history?path=notes/today.md`, A);
   check("meta history entries carry login", r.json?.versions?.[0]?.login === `ana-${id}`, JSON.stringify(r.json?.versions?.[0]?.login));

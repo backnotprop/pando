@@ -14,7 +14,7 @@
 //   they act (a merge, a restore), never a hello.
 
 import { now } from "../http";
-import type { StoredPointer } from "../feed/shape";
+import type { PushNumbers, StoredPointer } from "../feed/shape";
 import type { StreamEvent } from "./types";
 
 type Row = Record<string, SqlStorageValue>;
@@ -78,7 +78,7 @@ export class Machines {
   }
 
   /** A push's commit count and head title arrived (the facts job): the machine whose latest activity it is shows them. */
-  pushSummary(seq: number, summary: Record<string, unknown>): void {
+  pushSummary(seq: number, summary: PushNumbers): void {
     for (const r of this.rows<{ login: string; credential_id: string; last: string }>("SELECT login, credential_id, last FROM machines WHERE json_extract(last, '$.seq') = ?", seq)) {
       const last = JSON.parse(r.last) as { summary: Record<string, unknown> | null };
       last.summary = { ...(last.summary ?? {}), ...summary };

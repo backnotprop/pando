@@ -15,6 +15,8 @@
 // the label is added when a line is sent or read. Queue messages are internal
 // and their `monorepo` is the id.
 
+import { isRecord, isText, isWholeNumber, type Json } from "../parse";
+
 /** Monorepos with this many members or fewer copy their events into members' feeds (an owner limit). */
 export const FANOUT_MAX = 100;
 
@@ -82,7 +84,252 @@ export interface FeedEvent {
   actor: string | null;
   machine: string | null;
   /** Per kind: push {commits, head_title, head}; status {context, state, duration_s, app}; worktree.* {path}; and so on. */
-  summary: Record<string, unknown> | null;
+  summary: LineSummary | null;
+}
+
+// ── A line's summary, per kind (the shapes packages/contract/src/feed.ts declares) ──
+
+/** push, branch.opened. `commits` and `head_title` arrive a moment after the push (the facts job). */
+export interface PushSummary {
+  head: string | null;
+  before: string | null;
+  commits: number | null;
+  head_title: string | null;
+  /** A first push of main with more than 250 commits. */
+  commits_more?: boolean;
+}
+
+/** What the facts job adds to a push's summary. */
+export interface PushNumbers {
+  commits: number | null;
+  head_title: string | null;
+  commits_more?: boolean;
+}
+
+export interface BranchDeletedSummary {
+  before: string | null;
+}
+
+export interface MergedSummary {
+  merge_commit: string | null;
+  forced: boolean | null;
+  /** The branch's title. */
+  title: string | null;
+  head: string | null;
+}
+
+export interface ReviewSummary {
+  verdict: string | null;
+  comments: number;
+  head: string | null;
+}
+
+export interface StatusSummary {
+  context: string;
+  state: string;
+  description: string | null;
+  target_url: string | null;
+  sha: string;
+  duration_s: number | null;
+  /** The CI service that reported it; null when a member posted it. */
+  app: string | null;
+}
+
+export interface WorktreeSummary {
+  path: string | null;
+  worktree: string | null;
+}
+
+export interface MetaSavedSummary {
+  path: string | null;
+  version: number | null;
+  deleted: boolean;
+}
+
+export type LineSummary = PushSummary | BranchDeletedSummary | MergedSummary | ReviewSummary | StatusSummary | WorktreeSummary | MetaSavedSummary;
+
+// ── Decoding: JSON from storage, a queue, a socket or a test request, field by field ──
+
+export function textOf(v: Json | undefined): string | null {
+  return isText(v) ? v : null;
+}
+
+export function wholeOf(v: Json | undefined): number | null {
+  return isWholeNumber(v) ? v : null;
+}
+
+export function flagOf(v: Json | undefined): boolean | null {
+  return v === true || v === false ? v : null;
+}
+
+/** A push's summary (push, branch.opened). */
+export function pushSummaryOf(v: Json | undefined): PushSummary | null {
+  if (!isRecord(v)) return null;
+  const out: PushSummary = { head: textOf(v.head), before: textOf(v.before), commits: wholeOf(v.commits), head_title: textOf(v.head_title) };
+
+  if (v.commits_more === true) out.commits_more = true;
+
+  return out;
+}
+
+/** A line's summary for its kind; null when the kind has none or the JSON does not carry one. */
+export function lineSummaryOf(kind: string, v: Json | undefined): LineSummary | null {
+  if (!isRecord(v)) return null;
+
+  switch (kind) {
+    case "push":
+    case "branch.opened":
+      return pushSummaryOf(v);
+
+    case "branch.deleted":
+      return { before: textOf(v.before) };
+    case "merged":
+      return { merge_commit: textOf(v.merge_commit), forced: flagOf(v.forced), title: textOf(v.title), head: textOf(v.head) };
+    case "review":
+      return { verdict: textOf(v.verdict), comments: wholeOf(v.comments) ?? 0, head: textOf(v.head) };
+    case "status": {
+      const context = textOf(v.context);
+      const state = textOf(v.state);
+      const sha = textOf(v.sha);
+
+      if (context === null || state === null || sha === null) return null;
+
+      return { context, state, description: textOf(v.description), target_url: textOf(v.target_url), sha, duration_s: wholeOf(v.duration_s), app: textOf(v.app) };
+    }
+
+    case "worktree.reported":
+    case "worktree.removed":
+      return { path: textOf(v.path), worktree: textOf(v.worktree) };
+    case "meta.saved":
+      return { path: textOf(v.path), version: wholeOf(v.version), deleted: v.deleted === true };
+    default:
+      return null;
+  }
+}
+
+/** A stored line (the event without its monorepo, seq and at). */
+export function storedPointerOf(v: Json | undefined): StoredPointer | null {
+  if (!isRecord(v)) return null;
+  const kind = textOf(v.kind);
+
+  if (kind === null) return null;
+
+  return {
+    kind, repo: textOf(v.repo), repo_path: textOf(v.repo_path), branch: textOf(v.branch), actor: textOf(v.actor), machine: textOf(v.machine),
+    summary: lineSummaryOf(kind, v.summary),
+  };
+}
+
+/** A whole line, as a queue message or a test request carries it. */
+export function feedEventOf(v: Json | undefined): FeedEvent | null {
+  if (!isRecord(v)) return null;
+  const p = storedPointerOf(v);
+  const monorepoId = textOf(v.monorepo_id);
+  const seq = wholeOf(v.seq);
+  const at = textOf(v.at);
+
+  if (!p || monorepoId === null || seq === null || at === null) return null;
+
+  return { monorepo_id: monorepoId, monorepo: textOf(v.monorepo) ?? monorepoId, seq, at, ...p };
+}
+
+/** A monorepo's summary line, as stored or sent. */
+export function summaryOf(v: Json | undefined): Summary | null {
+  if (!isRecord(v) || !isRecord(v.needs)) return null;
+  const at = textOf(v.at);
+
+  if (at === null) return null;
+
+  return {
+    last_activity_at: textOf(v.last_activity_at),
+    worktrees_active: wholeOf(v.worktrees_active) ?? 0,
+    machines_active: wholeOf(v.machines_active) ?? 0,
+    needs: { ready: wholeOf(v.needs.ready) ?? 0, conflicts: wholeOf(v.needs.conflicts) ?? 0, failing: wholeOf(v.needs.failing) ?? 0 },
+    members: wholeOf(v.members) ?? 0,
+    large: v.large === true,
+    repos: wholeOf(v.repos) ?? 0,
+    open_branches: wholeOf(v.open_branches) ?? 0,
+    at,
+  };
+}
+
+export function isNeedState(v: string): v is NeedState {
+  return NEED_STATES.some((n) => n === v);
+}
+
+/** `needs=ready,failing`: the states asked for, or null when one is not a state. */
+export function needStatesOf(q: string): NeedState[] | null {
+  const parts = q.split(",").map((x) => x.trim()).filter(Boolean);
+  const states = parts.filter(isNeedState);
+
+  return states.length === parts.length ? states : null;
+}
+
+function needChangeOf(v: Json | undefined): NeedChange | null {
+  if (!isRecord(v)) return null;
+  const repo = textOf(v.repo);
+  const branch = textOf(v.branch);
+  const state = textOf(v.state);
+
+  if (repo === null || branch === null) return null;
+
+  return { repo, branch, state: state !== null && isNeedState(state) ? state : null };
+}
+
+function listOf<T>(v: Json | undefined, item: (x: Json) => T | null): T[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: T[] = [];
+
+  for (const x of v) {
+    const t = item(x);
+
+    if (t === null) return null;
+    out.push(t);
+  }
+
+  return out;
+}
+
+/** A list of needs-you changes, as stored in an outbox row or sent in a message. */
+export function needChangesOf(v: Json | undefined): NeedChange[] | null {
+  return listOf(v, needChangeOf);
+}
+
+/** A message for FeedDrain or the queue consumer (the test route decodes with this). */
+export function feedMessageOf(v: Json | undefined): FeedMessage | null {
+  if (!isRecord(v)) return null;
+  const monorepo = textOf(v.monorepo);
+
+  if (monorepo === null) return null;
+
+  switch (v.type) {
+    case "events": {
+      const members = listOf(v.members, textOf);
+      const events = listOf(v.events, feedEventOf);
+
+      return members && events ? { type: "events", monorepo, members, events } : null;
+    }
+
+    case "summary": {
+      const summary = summaryOf(v.summary);
+      const changed = needChangesOf(v.needs_changed);
+      // null: a large monorepo's members are read from its object instead.
+      const members = v.members === null ? null : listOf(v.members, textOf);
+
+      if (!summary || !changed || (members === null && v.members !== null)) return null;
+
+      return { type: "summary", monorepo, members, summary, needs_changed: changed, needs_more: v.needs_more === true };
+    }
+
+    case "member": {
+      const login = textOf(v.login);
+
+      return login === null ? null : { type: "member", monorepo, login };
+    }
+
+    default:
+      return null;
+  }
 }
 
 /** What a monorepo object stores per activity event: the event without its monorepo, seq and at. */
@@ -114,6 +361,13 @@ export interface NeedChange {
   state: NeedState | null;
 }
 
+/** `failing_apps`: for each failing context, the CI service that reported it (null when a member posted it). */
+export interface NeedChecks {
+  state: string;
+  failing: string[];
+  failing_apps: { [context: string]: string | null };
+}
+
 /** A branch that needs someone, from stored facts (no Artifacts call). */
 export interface NeedRow {
   /** The monorepo's owner/name and id (added by the routes). */
@@ -127,7 +381,8 @@ export interface NeedRow {
   author: string | null;
   pushed_machine: string | null;
   state: NeedState;
-  checks: { state: string; failing: string[] };
+  /** `failing_apps`: for each failing context, the CI service that reported it (null when a member posted it). */
+  checks: NeedChecks;
   updated_at: string | null;
 }
 
@@ -229,8 +484,8 @@ export function uncovered(after: string | null, boundary: string | null): boolea
 }
 
 /** The person's name from a meta layer author ("Ana Lima <ana@x>"). */
-export function nameOf(author: unknown): string | null {
-  if (typeof author !== "string" || !author) return null;
+export function nameOf(author: string | null): string | null {
+  if (!author) return null;
   const i = author.indexOf(" <");
 
   return (i > 0 ? author.slice(0, i) : author).trim() || null;

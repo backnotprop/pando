@@ -17,6 +17,11 @@ export function isText(v: unknown): v is string {
   return typeof v === "string";
 }
 
+/** A whole number, negative ones included, within 2^53 - 1 either way (an exit status can be -1). */
+export function isInteger(v: unknown): v is number {
+  return typeof v === "number" && Number.isSafeInteger(v);
+}
+
 /** A whole number from 0 to 2^53 - 1. */
 export function isWholeNumber(v: unknown): v is number {
   return Number.isSafeInteger(v) && typeof v === "number" && v >= 0;

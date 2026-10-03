@@ -127,7 +127,8 @@ export interface NeedRow {
   author: string | null;
   pushed_machine: string | null;
   state: NeedState;
-  checks: { state: string; failing: string[] };
+  /** `failing_apps`: for each failing context, the CI service that reported it (null when a member posted it). */
+  checks: { state: string; failing: string[]; failing_apps: { [context: string]: string | null } };
   updated_at: string | null;
 }
 

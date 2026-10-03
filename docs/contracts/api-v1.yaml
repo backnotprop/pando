@@ -2709,6 +2709,10 @@ components:
           properties:
             state: { type: string }
             failing: { type: array, items: { type: string }, description: Contexts that failed or errored. }
+            failing_apps:
+              type: object
+              description: "For each failing context, the CI service that reported it (`app`, for its mark), or null when a member posted it."
+              additionalProperties: { type: [string, "null"] }
         updated_at: { type: [string, "null"], format: date-time, description: The last push. }
     Commit:
       type: object

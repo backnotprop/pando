@@ -5,29 +5,29 @@
   "body": [
     {
       "type": "caught_up",
-      "seq": 8,
-      "feed_n": 5
+      "seq": 7,
+      "feed_n": 3
     },
     {
       "type": "feed",
-      "n": 6,
+      "n": 4,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
-        "seq": 9,
-        "at": "2026-10-03T22:00:53.310Z",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
+        "seq": 8,
+        "at": "2026-10-03T22:06:30.384Z",
         "kind": "status",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
-        "actor": "rec-musxrg89",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
           "context": "ci/test",
           "state": "pending",
           "description": null,
           "target_url": null,
-          "sha": "540150b0e6b96a29f38280e8633f321c3b5329d1",
+          "sha": "2beacfc7ba2f6547e99684cadfc5112bbbeb8156",
           "duration_s": null,
           "app": null
         }
@@ -35,23 +35,23 @@
     },
     {
       "type": "feed",
-      "n": 10,
+      "n": 8,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
-        "seq": 7,
-        "at": "2026-10-03T22:00:52.714Z",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
+        "seq": 5,
+        "at": "2026-10-03T22:06:29.762Z",
         "kind": "branch.opened",
         "repo": "projects-web",
         "repo_path": "projects/web",
-        "branch": "chore/gone",
-        "actor": "rec-musxrg89",
+        "branch": "feat/merge-me",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
-          "head": "c7ec59f3db36105a938dbaaec3d21535e4fd9ce5",
+          "head": "b6c4b091004029b0dcde1f1c9e3030065bd0c8f7",
           "before": null,
           "commits": 1,
-          "head_title": "A branch to delete"
+          "head_title": "Add the merged file"
         }
       }
     },
@@ -59,20 +59,20 @@
       "type": "feed",
       "n": 11,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
-        "seq": 15,
-        "at": "2026-10-03T22:00:53.972Z",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
+        "seq": 13,
+        "at": "2026-10-03T22:06:30.786Z",
         "kind": "review",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-musxrg89",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
           "verdict": "approve",
           "comments": 0,
-          "head": "f802fc5a4dd76b85e11ff2dd9181fc20a4f6a32b"
+          "head": "7918b49764cfbaabd29c111381ca231825d69184"
         }
       }
     },
@@ -80,21 +80,21 @@
       "type": "feed",
       "n": 12,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
         "seq": 16,
-        "at": "2026-10-03T22:00:54.904Z",
+        "at": "2026-10-03T22:06:31.282Z",
         "kind": "merged",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/merge-me",
-        "actor": "rec-musxrg89",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
-          "merge_commit": "2bfbf0c0a79ae02af45f6f479161e5c5f7d869ba",
+          "merge_commit": "d8e4a8e8ce95e410471c1a6360f58d93da775bec",
           "forced": false,
           "title": null,
-          "head": "46126a4b2e5383743acd6b52875b2354bca8217c"
+          "head": "b6c4b091004029b0dcde1f1c9e3030065bd0c8f7"
         }
       }
     },
@@ -102,19 +102,19 @@
       "type": "feed",
       "n": 13,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
         "seq": 18,
-        "at": "2026-10-03T22:00:54.917Z",
+        "at": "2026-10-03T22:06:31.287Z",
         "kind": "worktree.reported",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-musxrg89",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
           "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
-          "worktree": "wt-musxrg89"
+          "worktree": "wt-musxyr79"
         }
       }
     },
@@ -122,15 +122,15 @@
       "type": "feed",
       "n": 14,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
         "seq": 20,
-        "at": "2026-10-03T22:00:55.783Z",
+        "at": "2026-10-03T22:06:32.147Z",
         "kind": "meta.saved",
         "repo": "meta",
         "repo_path": ".",
         "branch": null,
-        "actor": "rec-musxrg89",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
           "path": "README.md",
@@ -141,20 +141,20 @@
     },
     {
       "type": "feed",
-      "n": 5,
+      "n": 3,
       "event": {
-        "monorepo_id": "m_e7e0e01beaeb5808",
-        "monorepo": "rec-musxrg89/rec-musxrg89",
-        "seq": 8,
-        "at": "2026-10-03T22:00:53.295Z",
+        "monorepo_id": "m_d889ed9b0400fc49",
+        "monorepo": "rec-musxyr79/rec-musxyr79",
+        "seq": 7,
+        "at": "2026-10-03T22:06:30.377Z",
         "kind": "branch.deleted",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "chore/gone",
-        "actor": "rec-musxrg89",
+        "actor": "rec-musxyr79",
         "machine": "ana-mbp",
         "summary": {
-          "before": "c7ec59f3db36105a938dbaaec3d21535e4fd9ce5"
+          "before": "76efe49b094aaadb4e1090cac590eb3a7c8661dc"
         }
       }
     },

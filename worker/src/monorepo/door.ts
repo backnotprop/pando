@@ -5,9 +5,7 @@
 
 import type { Env } from "../env";
 import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
-import { gitRequest, listRefs } from "./artifacts";
-import { compare } from "./graph";
-import { ZERO } from "./names";
+import { gitRequest } from "./artifacts";
 import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
 import { isBusy, LEASE_MS } from "./gate";
 import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
@@ -57,7 +55,7 @@ function countBytes(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array
   );
 }
 
-import type { Identity, RepoEvent, RepoRecord } from "./types";
+import type { Identity, RepoRecord } from "./types";
 import { cachedRepo, monorepoStub } from "./session";
 import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
 import { accounts, authenticate, identityOf } from "../accounts/auth";
@@ -79,15 +77,13 @@ function unauthorized(): Response {
 }
 
 function passHeaders(req: Request, names: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
+  return Object.fromEntries(
+    names.flatMap((n) => {
+      const v = req.headers.get(n);
 
-  for (const n of names) {
-    const v = req.headers.get(n);
-
-    if (v) out[n] = v;
-  }
-
-  return out;
+      return v ? [[n, v]] : [];
+    }),
+  );
 }
 
 function relay(res: Response, body: ReadableStream | null = res.body): Response {
@@ -110,7 +106,10 @@ function relayFrom(res: Response, op: string, repo: string | null, since: number
   return relayTimed(out, t, op, repo, since);
 }
 
-export async function handleDoor(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+/** A request as it arrives at the Worker: Cloudflare's incoming properties (colo...) on `cf`. */
+export type IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+
+export async function handleDoor(req: IncomingRequest, env: Env, ctx: ExecutionContext): Promise<Response> {
   const m = new URL(req.url).pathname.match(DOOR_RE);
 
   const t = startTiming("door", {
@@ -120,7 +119,7 @@ export async function handleDoor(req: Request, env: Env, ctx: ExecutionContext):
     repo: m ? (m[3] ?? m[2]).toLowerCase() : null,
     service: new URL(req.url).searchParams.get("service") ?? undefined,
     protocol: /version=2/.test(req.headers.get("git-protocol") ?? "") ? "v2" : "v0",
-    colo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
+    colo: req.cf?.colo,
   });
 
   return runTimed(t, async () => {
@@ -164,9 +163,9 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   if (/^art_v\d+_/.test(secret)) {
     if (service !== "git-upload-pack") return unauthorized();
     const info = await accounts(env).resolve(ref);
-    const shape = info && shapeProblem(info, repoName);
+    const misfit = info && urlKindProblem(info, repoName);
 
-    if (!info || shape) return errorJson(404, "not_found", shape ?? `no monorepo ${shown}`);
+    if (!info || misfit) return errorJson(404, "not_found", misfit ?? `no monorepo ${shown}`);
     const repo = await cachedRepo(env, info.id, repoName);
 
     if (!repo) return errorJson(404, "not_found", `no repo ${info.full_name}/${repoName}`);
@@ -189,9 +188,9 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${shown}`);
 
   if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${auth.monorepo.full_name}`);
-  const shape = shapeProblem(auth.monorepo, repoName);
+  const misfit = urlKindProblem(auth.monorepo, repoName);
 
-  if (shape) return errorJson(404, "not_found", shape);
+  if (misfit) return errorJson(404, "not_found", misfit);
   const id = auth.monorepo.id;
   note({ monorepo: auth.monorepo.full_name, monorepo_id: id });
   const stub = monorepoStub(env, id);
@@ -244,7 +243,7 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
 }
 
 /** A plain repo's git URL is /owner/name.git; a monorepo's repos are /owner/monorepo/repo.git. Why this one doesn't fit, or null. */
-function shapeProblem(m: MonorepoInfo, repoName: string | null): string | null {
+function urlKindProblem(m: MonorepoInfo, repoName: string | null): string | null {
   if (m.kind === "repo" && repoName !== null) return `${m.full_name} is a plain git repo: its URL is /${m.full_name}.git`;
 
   if (m.kind === "monorepo" && repoName === null) return `${m.full_name} is a monorepo: clone one of its repos, /${m.full_name}/<repo>.git`;

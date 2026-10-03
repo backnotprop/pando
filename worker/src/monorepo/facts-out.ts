@@ -31,6 +31,22 @@ const SAFETY_MS = 5_000;
 
 export type FactsJob = FactsMessage & { created: number };
 
+/** Each kind of message without its monorepo (Omit over a union, kind by kind). */
+type WithoutMonorepo<M> = M extends FactsMessage ? Omit<M, "monorepo"> : never;
+
+/** A facts job as the object asks for it: the message without the monorepo, which the outbox adds. */
+export type FactsRequest = WithoutMonorepo<FactsMessage>;
+
+/** One outbox row, for the tests. */
+type FactsOutboxRow = { attempts: number; next_at: number | null; dead_at: number | null; error: string | null };
+
+/** The outbox as it is (FACTS_TEST): rows still to go, dead rows, and each row. */
+export interface FactsOutboxState {
+  live: number;
+  dead: number;
+  rows: FactsOutboxRow[];
+}
+
 export class FactsOut {
   /** The one drain in progress (single flight: two would run the same jobs twice). */
   private flushing: Promise<void> | null = null;
@@ -48,8 +64,8 @@ export class FactsOut {
     this.sql.exec(FACTS_OUTBOX_SCHEMA);
   }
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
   private retryMs(): number[] {
@@ -59,11 +75,11 @@ export class FactsOut {
   }
 
   /** A facts job, written in the caller's step; drained after this turn (a burst goes out together). */
-  add(m: Omit<FactsMessage, "monorepo">): void {
+  add(m: FactsRequest): void {
     const id = this.info()?.id;
 
     if (!id) return;
-    const job: FactsJob = { ...m, monorepo: id, created: Date.now() } as FactsJob;
+    const job: FactsJob = { ...m, monorepo: id, created: Date.now() };
     this.sql.exec("INSERT INTO facts_outbox (body, created) VALUES (?, ?)", JSON.stringify(job), job.created);
     this.armAt(Date.now() + SAFETY_MS);
 
@@ -71,7 +87,7 @@ export class FactsOut {
   }
 
   private due(limit: number): { id: number; body: string }[] {
-    return this.rows("SELECT id, body FROM facts_outbox WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?", Date.now(), limit);
+    return this.rows<{ id: number; body: string }>("SELECT id, body FROM facts_outbox WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?", Date.now(), limit);
   }
 
   /** Drain the outbox; one drain at a time. Never rejects. */
@@ -110,7 +126,9 @@ export class FactsOut {
 
       try {
         if (this.testFail()) throw new Error("facts test: a failed drain");
-        const out = released(await this.ctx.exports.FactsDrain.run(rows.map((r) => JSON.parse(r.body) as FactsJob)));
+        // SAFETY: add() is the only writer of facts_outbox.body, always JSON.stringify of a FactsJob.
+        const jobs = rows.map((r) => JSON.parse(r.body) as FactsJob);
+        const out = released(await this.ctx.exports.FactsDrain.run(jobs));
         ok = out.ok;
         error = out.error;
       } catch (err) {
@@ -184,10 +202,10 @@ export class FactsOut {
   }
 
   /** Make the next `fail` drains fail; and the outbox as it is. */
-  test(set: { fail?: number } = {}): { live: number; dead: number; rows: { attempts: number; next_at: number | null; dead_at: number | null; error: string | null }[] } {
+  test(set: { fail?: number } = {}): FactsOutboxState {
     if (this.env.FACTS_TEST === "1" && set.fail !== undefined) this.testFails = set.fail;
 
-    const rows = this.rows<{ attempts: number; next_at: number | null; dead_at: number | null; error: string | null }>(
+    const rows = this.rows<FactsOutboxRow>(
       "SELECT attempts, next_at, dead_at, error FROM facts_outbox ORDER BY id",
     );
 

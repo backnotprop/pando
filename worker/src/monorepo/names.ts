@@ -4,6 +4,7 @@
 // A monorepo is `owner/name` (NAMESPACES.md): the name is unique within its
 // owner, and a permanent id keys everything stored (objects, Artifacts, R2,
 // queues). Monorepos made before namespaces keep their old name as their id.
+import { hasControl } from "../http";
 
 export const ZERO = "0".repeat(40);
 
@@ -32,14 +33,14 @@ export function validMonorepoName(name: unknown): name is string {
 }
 
 /** Why a namespace name can't be used, or null when it can (whether it is free is the database's to say). */
-export function namespaceProblem(name: unknown): "invalid" | "reserved" | null {
-  if (typeof name !== "string" || !NAMESPACE_RE.test(name)) return "invalid";
+export function namespaceProblem(name: string | null): "invalid" | "reserved" | null {
+  if (name === null || !NAMESPACE_RE.test(name)) return "invalid";
 
   return RESERVED_NAMESPACES.has(name) ? "reserved" : null;
 }
 
 export function validNamespace(name: unknown): name is string {
-  return namespaceProblem(name) === null;
+  return typeof name === "string" && namespaceProblem(name) === null;
 }
 
 /** A path's owner and monorepo name, matched case-insensitively (stored lower case). Null if either can't be a name. */
@@ -93,7 +94,7 @@ export function validBranchName(b: unknown): b is string {
 
   if (b.includes("..") || b.includes("//") || b.includes("@{")) return false;
 
-  if (/[\x00-\x20\x7f~^:?*[\\]/.test(b)) return false;
+  if (hasControl(b) || b.includes(" ") || /[~^:?*[\\]/.test(b)) return false;
 
   return b.split("/").every((seg) => seg.length > 0 && !seg.startsWith(".") && !seg.endsWith(".lock"));
 }

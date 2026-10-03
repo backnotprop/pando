@@ -1,6 +1,7 @@
 // Talking to one Artifacts repo: reads through the Workers binding, writes
 // through git's receive-pack. The token for the push is the caller's (`write`),
 // or one minted for the one push and revoked after it.
+import { hasCode } from "../parse";
 import { concat, ZERO_SHA, type TreeEntry } from "./objects";
 import { timeArtifacts } from "../timing";
 
@@ -47,10 +48,10 @@ export const isSha = (s: unknown): s is string => typeof s === "string" && SHA_R
 
 // Turn an Artifacts binding error into a GitWriteError. The message never
 // carries a token: none is ever passed to the binding calls wrapped here.
-function wrap(what: string, e: unknown): GitWriteError {
-  if (e instanceof GitWriteError) return e;
-  const code = (e as { code?: string })?.code;
-  const msg = (e as Error)?.message ?? String(e);
+function wrap(what: string, cause: unknown): GitWriteError {
+  if (cause instanceof GitWriteError) return cause;
+  const code = hasCode(cause) ? cause.code : undefined;
+  const msg = cause instanceof Error ? cause.message : String(cause);
 
   if (code === "NOT_FOUND") return new GitWriteError("not_found", `${what}: ${msg}`);
 
@@ -88,7 +89,7 @@ export class OpenRepo {
   ) {}
 
   static async open(repo: GitRepo): Promise<OpenRepo> {
-    if (!repo?.artifacts || typeof repo.name !== "string" || !repo.name) {
+    if (!repo?.artifacts || !repo.name) {
       throw new GitWriteError("invalid_input", "repo needs { artifacts, name }");
     }
 
@@ -98,11 +99,8 @@ export class OpenRepo {
   }
 
   close(): void {
-    // Symbol.dispose is not in the worker's TypeScript lib (ES2022), so look it up.
-    const dispose = (Symbol as unknown as { dispose?: symbol }).dispose;
-
     try {
-      if (dispose) (this.handle as unknown as Record<symbol, () => void>)[dispose]?.();
+      this.handle[Symbol.dispose]();
     } catch {
       // already released
     }
@@ -175,7 +173,7 @@ export class OpenRepo {
           }),
         );
       } catch (e) {
-        throw new GitWriteError("artifacts", `receive-pack request failed: ${(e as Error).message}`);
+        throw new GitWriteError("artifacts", `receive-pack request failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     };
 

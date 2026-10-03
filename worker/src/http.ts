@@ -1,23 +1,24 @@
 // Errors and credentials shared by the API and the git door.
+import type { RefusalExtra } from "./monorepo/types";
 
 export class HttpError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
-    public extra: Record<string, unknown> = {},
+    public extra: RefusalExtra = {},
   ) {
     super(message);
   }
 }
 
-export function errorJson(status: number, code: string, message: string, extra: Record<string, unknown> = {}): Response {
+export function errorJson(status: number, code: string, message: string, extra: RefusalExtra = {}): Response {
   return Response.json({ error: { code, message, ...extra } }, { status });
 }
 
-export function toErrorResponse(err: unknown): Response {
-  if (err instanceof HttpError) return errorJson(err.status, err.code, err.message, err.extra);
-  const message = err instanceof Error ? err.message : String(err);
+export function toErrorResponse(cause: unknown): Response {
+  if (cause instanceof HttpError) return errorJson(cause.status, cause.code, cause.message, cause.extra);
+  const message = cause instanceof Error ? cause.message : String(cause);
   console.error("internal error:", redact(message));
 
   return errorJson(500, "internal", redact(message));
@@ -61,9 +62,30 @@ export function now(): string {
   return new Date().toISOString();
 }
 
+/** A control character: below U+0020, or U+007F. */
+function isControl(code: number): boolean {
+  return code < 0x20 || code === 0x7f;
+}
+
+/** Whether a string holds a control character. */
+export function hasControl(s: string): boolean {
+  for (let i = 0; i < s.length; i++) if (isControl(s.charCodeAt(i))) return true;
+
+  return false;
+}
+
+/** The string with its control characters taken out. */
+export function withoutControl(s: string): string {
+  let out = "";
+
+  for (let i = 0; i < s.length; i++) if (!isControl(s.charCodeAt(i))) out += s[i];
+
+  return out;
+}
+
 /** The agent acting, from X-Pando-Agent (optional; agents act as their user). */
 export function agentHeader(req: Request): string | null {
-  const v = (req.headers.get("x-pando-agent") ?? "").replace(/[\x00-\x1f\x7f]/g, "").trim();
+  const v = withoutControl(req.headers.get("x-pando-agent") ?? "").trim();
 
   return v ? v.slice(0, 100) : null;
 }

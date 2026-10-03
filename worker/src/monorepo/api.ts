@@ -3,10 +3,11 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
+import { isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
 import { ciRoutes } from "../ci/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
-import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
+import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
@@ -30,11 +31,23 @@ import {
 } from "./names";
 import type { MonorepoObject } from "./object";
 import { cachedRepo, forgetRepos, hashToken, monorepoStub, newToken } from "./session";
-import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoEvent, RepoRecord, StatusRecord } from "./types";
+import type { BranchRecord, HookEvent, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, StatusRecord } from "./types";
+
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
 import { feedMembership, membersBeforeDelete } from "../feed/membership";
 import { monoreposSummary } from "../feed/routes";
+
+/** Which branches a list shows. */
+type BranchState = "open" | "merged" | "all";
+
+function isBranchState(v: string): v is BranchState {
+  return v === "open" || v === "merged" || v === "all";
+}
+
+function isStatusState(v: Json | undefined): v is StatusRecord["state"] {
+  return v === "pending" || v === "success" || v === "failure" || v === "error";
+}
 
 type Stub = DurableObjectStub<MonorepoObject>;
 
@@ -60,7 +73,7 @@ api.use("*", async (c, next) => {
     path,
     monorepo: m ? `${m[1]}/${m[2]}`.toLowerCase() : null,
     repo: m?.[3] ?? null,
-    colo: (c.req.raw as Request & { cf?: { colo?: string } }).cf?.colo,
+    colo: coloOf(c.req.raw),
   });
 
   try {
@@ -81,26 +94,40 @@ function bad(message: string): never {
   throw new HttpError(400, "bad_request", message);
 }
 
-async function body<T = Record<string, unknown>>(c: C): Promise<T> {
-  try {
-    const b = await c.req.json();
+/** The Cloudflare data center that took the request (Hono types the request without Cloudflare's incoming properties). */
+function coloOf(req: Request): string | undefined {
+  const colo = req.cf?.colo;
 
-    if (!b || typeof b !== "object" || Array.isArray(b)) bad("the body must be a JSON object");
-
-    return b as T;
-  } catch (err) {
-    if (err instanceof HttpError) throw err;
-    bad("the body must be JSON");
-  }
+  return isText(colo) ? colo : undefined;
 }
 
-function str(v: unknown, field: string, opts: { optional?: boolean; max?: number } = {}): string | undefined {
+/** What body() reads of a request: Hono's request, from either app. */
+interface JsonRequest {
+  json<T>(): Promise<T>;
+}
+
+/** The request body: a JSON object, else 400. */
+async function body(req: JsonRequest): Promise<JsonObject> {
+  let b: Json;
+
+  try {
+    b = await req.json<Json>();
+  } catch {
+    bad("the body must be JSON");
+  }
+
+  if (!isRecord(b)) bad("the body must be a JSON object");
+
+  return b;
+}
+
+function str(v: Json | undefined, field: string, opts: { optional?: boolean; max?: number } = {}): string | undefined {
   if (v === undefined || v === null) {
     if (opts.optional) return undefined;
     bad(`${field} is required`);
   }
 
-  if (typeof v !== "string" || (!opts.optional && v.length === 0)) bad(`${field} must be a string`);
+  if (!isText(v) || (!opts.optional && v.length === 0)) bad(`${field} must be a string`);
 
   if (v.length > (opts.max ?? 10_000)) bad(`${field} is too long`);
 
@@ -115,11 +142,20 @@ function owner(c: C, what: string): Identity {
   return id;
 }
 
-/** git URLs (NAMESPACES.md): /owner/monorepo/repo.git, or /owner/name.git for a plain repo. */
-function cloneUrl(c: C, repoName: string): string {
-  const origin = new URL(c.req.url).origin;
+/** Where a monorepo's git URLs live: the API's origin, its owner/name and its kind. */
+interface GitHome {
+  origin: string;
+  full: string;
+  kind: Kind;
+}
 
-  return c.get("info").kind === "repo" ? `${origin}/${c.get("full")}.git` : `${origin}/${c.get("full")}/${repoName}.git`;
+function homeOf(c: C): GitHome {
+  return { origin: new URL(c.req.url).origin, full: c.get("full"), kind: c.get("info").kind };
+}
+
+/** git URLs (NAMESPACES.md): /owner/monorepo/repo.git, or /owner/name.git for a plain repo. */
+function cloneUrl(home: GitHome, repoName: string): string {
+  return home.kind === "repo" ? `${home.origin}/${home.full}.git` : `${home.origin}/${home.full}/${repoName}.git`;
 }
 
 /** The raw path after /v1/monorepos/{o}/{m}/repos/{r}/{what}/, as sent (any case, an old name). */
@@ -127,15 +163,15 @@ function rawTail(c: C): string {
   return new URL(c.req.url).pathname.split("/").slice(8).join("/");
 }
 
-function repoView(c: C, r: RepoRecord, required?: string[]) {
+function repoView(home: GitHome, r: RepoRecord, required?: string[]) {
   return {
-    monorepo: c.get("full"),
+    monorepo: home.full,
     name: r.name,
     path: r.path,
     description: r.description,
     default_branch: r.default_branch,
-    clone_url: cloneUrl(c, r.name),
-    ...(required ? { required_checks: required } : {}),
+    clone_url: cloneUrl(home, r.name),
+    required_checks: required, // left out of the JSON when not asked for
     created_at: r.created_at,
     created_by: r.created_by,
   };
@@ -210,7 +246,7 @@ users.get("/v1/user", (c) => {
 
 users.post("/v1/user/credentials", async (c) => {
   const a = c.get("auth");
-  const b = await body(c as unknown as C);
+  const b = await body(c.req);
   const name = str(b.name, "name", { max: 200 })!;
   const kind = b.kind ?? "machine";
 
@@ -249,15 +285,15 @@ users.get("/v1/monorepos", async (c) => {
 
 users.post("/v1/monorepos", async (c) => {
   const a = c.get("auth");
-  const b = await body(c as unknown as C);
-  const name = typeof b.name === "string" ? b.name.toLowerCase() : null;
+  const b = await body(c.req);
+  const name = isText(b.name) ? b.name.toLowerCase() : null;
 
   if (!validMonorepoName(name)) bad("name: letters, digits, '.', '_', '-'; starts with a letter or digit; no '--'; at most 39 characters");
   const kind = b.kind ?? "monorepo";
 
   if (kind !== "monorepo" && kind !== "repo") bad("kind is monorepo or repo");
   // owner: your own namespace (organizations come later).
-  const ownerName = typeof b.owner === "string" ? b.owner.toLowerCase() : a.user.login;
+  const ownerName = isText(b.owner) ? b.owner.toLowerCase() : a.user.login;
 
   if (ownerName !== a.user.login) throw new HttpError(403, "not_your_namespace", `you can make monorepos under ${a.user.login} only (organizations come later)`);
   const acc = accounts(c.env);
@@ -291,7 +327,7 @@ users.post("/v1/monorepos", async (c) => {
     c.set("full", info.full_name);
     c.set("info", info);
 
-    return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView(c as unknown as C, r)), replaced_alias }, 201);
+    return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView({ origin: new URL(c.req.url).origin, full: info.full_name, kind: info.kind }, r)), replaced_alias }, 201);
   } catch (err) {
     await acc.releaseMonorepo(info.id);
     await stub.destroy();
@@ -351,7 +387,7 @@ api.get("/v1/monorepos/:o/:m", (c) => c.json({ ...c.get("info"), role: c.get("id
 // Rename or transfer: the label moves, the id and everything stored stay. The old name keeps working (an alias).
 api.patch("/v1/monorepos/:o/:m", async (c) => {
   owner(c, "rename or transfer a monorepo");
-  const b = await body(c);
+  const b = await body(c.req);
   const info = c.get("info");
   const to = monorepoRef(b.owner === undefined ? info.owner : String(b.owner), b.name === undefined ? info.name : String(b.name));
 
@@ -489,7 +525,7 @@ api.get("/v1/monorepos/:o/:m/members", async (c) => {
 
 api.put("/v1/monorepos/:o/:m/members/:login", async (c) => {
   const by = owner(c, "manage members");
-  const b = await body(c);
+  const b = await body(c.req);
 
   if (b.role !== "owner" && b.role !== "member") bad("role is owner or member");
   const out = unwrap(await accounts(c.env).putMember(c.get("m"), c.req.param("login"), b.role, by.login));
@@ -514,7 +550,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 api.post("/v1/monorepos/:o/:m/invites", async (c) => {
   const by = owner(c, "invite people");
-  const b = await body(c);
+  const b = await body(c.req);
   const email = str(b.email, "email", { max: 200 })!;
 
   if (!EMAIL_RE.test(email)) bad("email is not an email address");
@@ -547,7 +583,7 @@ api.delete("/v1/monorepos/:o/:m/invites/:email", async (c) => {
 
 api.post("/v1/monorepos/:o/:m/repos", async (c) => {
   const by = c.get("identity");
-  const b = await body(c);
+  const b = await body(c.req);
   const info = c.get("info");
 
   if (info.kind === "repo") throw new HttpError(409, "plain_repo", "a plain git repo has exactly one repo");
@@ -569,17 +605,17 @@ api.post("/v1/monorepos/:o/:m/repos", async (c) => {
     created_at: new Date().toISOString(), created_by: by.login,
   };
 
-  return c.json(repoView(c, unwrap(await stub.addRepo(rec))), 201);
+  return c.json(repoView(homeOf(c), unwrap(await stub.addRepo(rec))), 201);
 });
 
 api.get("/v1/monorepos/:o/:m/repos", async (c) => {
-  return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(c, r)) });
+  return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(homeOf(c), r)) });
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => {
   const r = await repoOf(c);
 
-  return c.json(repoView(c, r, await requiredKept(c.env, c.get("info"), r)));
+  return c.json(repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)));
 });
 
 // ── Branches ──────────────────────────────────────────────────────────────
@@ -593,7 +629,7 @@ async function branchViews(
   c: C,
   r: RepoRecord,
   names: string[] | null,
-  state: string,
+  state: BranchState,
   o: { limit?: number; cursor?: string | null; inline?: number; graceMs?: number } = {},
 ): Promise<BranchList> {
   const stub = c.get("stub");
@@ -607,8 +643,8 @@ async function branchViews(
   }
 
   const required = await requiredKept(c.env, c.get("info"), r);
-  const ask = { names: names ?? undefined, state: state as "open" | "merged" | "all", limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
-  let list = (await stub.branchRows(r.name, ask)) as BranchList;
+  const ask = { names: names ?? undefined, state, limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
+  let list: BranchList = await stub.branchRows(r.name, ask);
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);
 
   if (due.length && main) {
@@ -625,7 +661,7 @@ async function branchViews(
         }
       });
     });
-    list = (await stub.branchRows(r.name, ask)) as BranchList;
+    list = await stub.branchRows(r.name, ask);
   }
 
   return list;
@@ -635,7 +671,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const r = await repoOf(c);
   const state = c.req.query("state") ?? "open";
 
-  if (!["open", "merged", "all"].includes(state)) bad("state is open, merged or all");
+  if (!isBranchState(state)) bad("state is open, merged or all");
   const limit = Number(c.req.query("limit") ?? "100");
 
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) bad("limit is 1 to 500");
@@ -646,7 +682,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
 
 api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const r = await repoOf(c);
-  const b = await body(c);
+  const b = await body(c.req);
 
   if (!validBranchName(b.name) || b.name === r.default_branch) bad("name must be a valid git branch name other than the default branch");
   const from = str(b.from, "from", { optional: true }) ?? r.default_branch;
@@ -679,7 +715,13 @@ api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
 });
 
 /** /branches/<name>[/diff|/reviews|/merge], with the name raw or %2F-encoded. */
-function branchPath(c: C): { branch: string; rest: string } {
+/** A branch route's branch name, and what follows it (diff, reviews, merge, commits, or ""). */
+interface BranchPath {
+  branch: string;
+  rest: string;
+}
+
+function branchPath(c: C): BranchPath {
   let tail = rawTail(c);
   let rest = "";
 
@@ -720,7 +762,7 @@ api.all("/v1/monorepos/:o/:m/repos/:r/branches/*", async (c) => {
   }
 
   if (rest === "" && method === "PATCH") {
-    const b = await body(c);
+    const b = await body(c.req);
     const head = branchesOf(await listRefs(c.env, r)).get(branch);
 
     if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
@@ -884,7 +926,7 @@ async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
 
 async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
   const id = c.get("identity");
-  const b = await body(c);
+  const b = await body(c.req);
   const verdict = b.verdict;
 
   if (verdict !== "comment" && verdict !== "request_changes" && verdict !== "approve") bad("verdict is comment, request_changes or approve");
@@ -894,16 +936,16 @@ async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
   if (!Array.isArray(comments) || comments.length > 1000) bad("comments must be a list");
 
   const clean = comments.map((x, i) => {
-    if (!x || typeof x !== "object") bad(`comments[${i}] must be an object`);
-    const o = x as Record<string, unknown>;
-    const line = o.line;
+    if (!isRecord(x)) bad(`comments[${i}] must be an object`);
+    const line = x.line;
 
-    if (line !== undefined && (!Number.isInteger(line) || (line as number) < 0)) bad(`comments[${i}].line must be a line number`);
-    const side = o.side ?? "new";
+    if (line !== undefined && !isWholeNumber(line)) bad(`comments[${i}].line must be a line number`);
+    const side = x.side ?? "new";
 
     if (side !== "new" && side !== "old") bad(`comments[${i}].side is new or old`);
 
-    return { path: str(o.path, `comments[${i}].path`, { max: 1000 })!, ...(line !== undefined ? { line } : {}), side, body: str(o.body, `comments[${i}].body`, { max: 20_000 })! };
+    // line is left out of the stored JSON when it was not sent (stringify drops undefined).
+    return { path: str(x.path, `comments[${i}].path`, { max: 1000 })!, line, side, body: str(x.body, `comments[${i}].body`, { max: 20_000 })! };
   });
 
   let head = str(b.head, "head", { optional: true });
@@ -918,17 +960,22 @@ async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
 }
 
 async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
-  let b: Record<string, unknown> = {};
+  let b: JsonObject = {};
 
   if ((c.req.header("content-length") ?? "0") !== "0" || c.req.header("transfer-encoding")) {
     const text = await c.req.text();
 
     if (text.trim()) {
+      let sent: Json;
+
       try {
-        b = JSON.parse(text);
+        sent = JSON.parse(text);
       } catch {
         bad("the body must be JSON");
       }
+
+      if (!isRecord(sent)) bad("the body must be a JSON object");
+      b = sent;
     }
   }
 
@@ -958,8 +1005,14 @@ function intParam(v: string | undefined, dflt: number, max: number, name: string
   return n;
 }
 
-function walkerOf(c: C, r: RepoRecord): { w: files.Walker; obj: ReturnType<typeof objectsClient> } {
-  const obj = objectsClient(c.executionCtx);
+/** A request's walker over a repo, and the objects client it reads through. */
+interface RepoWalk {
+  w: files.Walker;
+  obj: ReturnType<typeof objectsClient>;
+}
+
+function walkerOf(c: C, r: RepoRecord): RepoWalk {
+  const obj = objectsClient();
 
   return { w: new files.Walker(obj, r, files.requestBudget(c.env)), obj };
 }
@@ -1016,14 +1069,12 @@ api.get("/v1/monorepos/:o/:m/repos/:r/history", async (c) => {
 
   const key = files.answerKey("hist", start, await files.sha1Hex(`${limit}\n${walked}\n${path}`));
 
-  type Page = { commits: files.CommitLine[]; next: string | null; capped: boolean };
-
-  const stored = await obj.json<Page>(`/answer/${r.artifacts_name}/${key}`);
+  const stored = await obj.json<files.HistoryPage>(`/answer/${r.artifacts_name}/${key}`);
 
   if (stored) return c.json({ ref, path, ...stored, complete_page: true });
   const stub = c.get("stub");
   const p = await files.walkHistory(w, start, path, limit, walked, (shas) => stub.mergedBranches(r.name, shas));
-  const page: Page = { commits: p.changes, next: p.next ? `${p.next}.${p.walked}` : null, capped: p.capped };
+  const page: files.HistoryPage = { commits: p.changes, next: p.next ? `${p.next}.${p.walked}` : null, capped: p.capped };
 
   // A page cut short by the budget is not kept: the next ask walks further.
   if (!p.budgetCut) await files.storeAnswer(c.env, r.artifacts_name, key, page);
@@ -1051,10 +1102,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/statuses/:sha", async (c) => {
   const sha = c.req.param("sha");
 
   if (!isSha(sha)) bad("sha must be a full 40-character sha");
-  const b = await body(c);
-  const state = b.state as StatusRecord["state"];
+  const b = await body(c.req);
+  const state = b.state;
 
-  if (!["pending", "success", "failure", "error"].includes(state)) bad("state is pending, success, failure or error");
+  if (!isStatusState(state)) bad("state is pending, success, failure or error");
 
   const s = await c.get("stub").addStatus(
     r.name,
@@ -1089,18 +1140,22 @@ api.get("/v1/monorepos/:o/:m/repos/:r/commits/*", async (c) => {
 
 // ── Hooks ─────────────────────────────────────────────────────────────────
 
-const EVENTS = ["push", "branch.opened", "merged"];
+const EVENTS: HookEvent[] = ["push", "branch.opened", "merged"];
+
+function isHookEvent(v: Json): v is HookEvent {
+  return v === "push" || v === "branch.opened" || v === "merged";
+}
 
 api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
   const by = owner(c, "register hooks");
   const r = await repoOf(c);
-  const b = await body(c);
+  const b = await body(c.req);
   const type = b.type;
 
   if (type !== "web" && type !== "buildkite") bad("type is web or buildkite");
-  const events = (b.events ?? (type === "web" ? EVENTS : ["push"])) as unknown[];
+  const events = b.events ?? (type === "web" ? EVENTS : ["push"]);
 
-  if (!Array.isArray(events) || !events.length || events.some((e) => !EVENTS.includes(e as string))) bad(`events: some of ${EVENTS.join(", ")}`);
+  if (!Array.isArray(events) || !events.length || !events.every(isHookEvent)) bad(`events: some of ${EVENTS.join(", ")}`);
   let url: string | null = null;
   let secret: string | null = null;
   let config: Record<string, string> | null = null;
@@ -1120,7 +1175,7 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
       config = { app };
     }
   } else {
-    const bk = (b.buildkite ?? {}) as Record<string, unknown>;
+    const bk = isRecord(b.buildkite) ? b.buildkite : {};
     config = { organization: str(bk.organization, "buildkite.organization", { max: 200 })!, pipeline: str(bk.pipeline, "buildkite.pipeline", { max: 200 })! };
     const apiUrl = str(bk.api_url, "buildkite.api_url", { optional: true, max: 500 });
 
@@ -1131,7 +1186,7 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
     }
   }
 
-  return c.json(await c.get("stub").addHook(r.name, { type, url, secret, events: events as string[], config }, by), 201);
+  return c.json(await c.get("stub").addHook(r.name, { type, url, secret, events, config }, by), 201);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
@@ -1198,7 +1253,7 @@ function worktreeId(c: C): string {
 
 api.put("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
   const id = worktreeId(c);
-  const b = await body(c);
+  const b = await body(c.req);
   const kind = b.kind;
 
   if (kind !== "fuse" && kind !== "sparse" && kind !== "fskit") bad("kind is fuse, sparse or fskit");

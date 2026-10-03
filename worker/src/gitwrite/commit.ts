@@ -12,7 +12,7 @@ import {
   type Signature,
 } from "./objects";
 import { GitWriteError, isSha, OpenRepo, type GitRepo, type Stats } from "./repo";
-import { checkBranchName, checkSignature, splitPath } from "./validate";
+import { checkBranchName, checkContent, checkMessage, checkPath, checkSignature, splitPath } from "./validate";
 
 export type Change =
   | { path: string; content: string | Uint8Array; mode?: "100644" | "100755" | "120000" }
@@ -48,7 +48,8 @@ function planChanges(changes: Change[]): Dir {
   const seen = new Set<string>();
 
   for (const ch of changes) {
-    const parts = splitPath(ch?.path);
+    checkPath(ch?.path);
+    const parts = splitPath(ch.path);
 
     if (seen.has(ch.path)) throw new GitWriteError("invalid_input", `${ch.path} appears twice`);
     seen.add(ch.path);
@@ -56,9 +57,7 @@ function planChanges(changes: Change[]): Dir {
     if ("delete" in ch) {
       if (ch.delete !== true) throw new GitWriteError("invalid_input", `${ch.path}: delete must be true`);
     } else {
-      if (typeof ch.content !== "string" && !(ch.content instanceof Uint8Array)) {
-        throw new GitWriteError("invalid_input", `${ch.path}: content must be a string or Uint8Array`);
-      }
+      checkContent(ch.content, ch.path);
 
       if (ch.mode !== undefined && !MODES.has(ch.mode)) {
         throw new GitWriteError("invalid_input", `${ch.path}: mode must be 100644, 100755 or 120000`);
@@ -95,9 +94,7 @@ export async function commitChanges(repo: GitRepo, branch: string, opts: CommitO
     throw new GitWriteError("invalid_input", "changes must be a non-empty list");
   }
 
-  if (typeof opts.message !== "string" || !opts.message.trim()) {
-    throw new GitWriteError("invalid_input", "message is required");
-  }
+  checkMessage(opts.message);
 
   checkSignature(opts.author, "author");
   const committer = opts.committer ?? opts.author;

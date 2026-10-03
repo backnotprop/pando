@@ -225,7 +225,7 @@ async function testMerge() {
 
   // Artifacts itself refuses a ref update with a stale old sha.
   r = await api("/raw-push", { name, ref: "refs/heads/main", old: main1, new: head });
-  check("Artifacts refuses a push with a stale old sha", typeof r.json.refused === "string", `refused: ${r.json.refused}`);
+  check("Artifacts refuses a push with a stale old sha", r.json.refused !== null && r.json.refused !== undefined, `refused: ${r.json.refused}`);
   check("main did not move", git(name, c, "ls-remote", "origin", "refs/heads/main").startsWith(merged));
 
   // Conflicts.

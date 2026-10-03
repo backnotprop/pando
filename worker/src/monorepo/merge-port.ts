@@ -14,8 +14,8 @@ export interface GitWrite {
 }
 
 /** The `code` of a GitWriteError, or null for any other error. */
-export function gitWriteCode(err: unknown): string | null {
-  return err instanceof GitWriteError ? err.code : null;
+export function gitWriteCode(cause: unknown): string | null {
+  return cause instanceof GitWriteError ? cause.code : null;
 }
 
 export const gitwrite: GitWrite | null = { mergeCommit };

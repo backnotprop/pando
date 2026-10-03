@@ -110,7 +110,59 @@ export interface StreamEvent {
   machine?: string | null;
   agent?: string | null;
   row: unknown;
-  [extra: string]: unknown;
+  /** push, branch.opened and default_heads events: the branch's head before and after. */
+  before?: string;
+  head?: string;
+  /** merged events: the merge. */
+  merge?: MergeResult;
+  /** The row holds only the stored fields; the facts follow in a later event. */
+  partial?: boolean;
+  /** machine.connected and machine.disconnected: the meta layer socket that came or went. */
+  connection?: MetaConnection;
+  /** Who acted, through which credential: publish() reads it for the Machines tab and never stores it. */
+  via?: Via;
+}
+
+/** A merge's result, as the merge route answers and merged events carry it. */
+export interface MergeResult {
+  status: "merged" | "up_to_date";
+  branch: string;
+  head: string;
+  sha: string;
+  base_before?: string;
+  merge_base?: string;
+  forced: boolean;
+  merged_by: string;
+}
+
+/** Who acted through which credential (publish() receives it; it is never stored in the event's body). */
+export interface Via {
+  credential_id: string;
+  credential_kind: string | null;
+}
+
+/** What the monorepo object keeps on each event socket (its event socket route writes it on accept). */
+export interface EventSocketAttachment {
+  login: string;
+  connected_at: string;
+  topics: string[];
+  /** The socket's id, for presence. */
+  sid: string;
+  /** The credential's name, the default machine. */
+  machine: string;
+  /** The credential behind the socket, and its kind (the Machines tab). */
+  cid: string;
+  kind: string;
+}
+
+/** A meta layer socket, as presence events carry it (live/object.ts). */
+export interface MetaConnection {
+  id: string;
+  author: string;
+  machine: string;
+  agent: string | null;
+  client: string | null;
+  connected_at: string | null;
 }
 
 export interface StatusRecord {
@@ -134,5 +186,19 @@ export interface Checks {
   statuses: StatusRecord[];
 }
 
-/** DO RPC results: errors travel as data, since RPC keeps only an error's message. */
-export type Outcome<T> = { ok: true; value: T } | { ok: false; status: number; code: string; message: string; extra?: Record<string, unknown> };
+/** What a refusal carries in its error body beside code and message (api-v1.yaml, errors). */
+export interface RefusalExtra {
+  /** A merge refused because required checks are not green: the head's checks. */
+  checks?: Checks;
+  /** A merge refused with a conflict: the paths changed differently on both sides. */
+  paths?: string[];
+  /** A CI service's rate limit: when to try again. */
+  retry_after_ms?: number;
+}
+
+/**
+ * DO RPC results: errors travel as data, since RPC keeps only an error's
+ * message. `extra` is a named, closed type: with `unknown` values the RPC stub
+ * types dropped the whole failure side (`!x.ok` narrowed to never).
+ */
+export type Outcome<T> = { ok: true; value: T } | { ok: false; status: number; code: string; message: string; extra?: RefusalExtra };

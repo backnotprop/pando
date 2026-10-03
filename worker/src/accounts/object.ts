@@ -71,8 +71,8 @@ export class AccountsObject extends DurableObject<Env> {
       const stmts: D1PreparedStatement[] = [];
 
       for (const { from, to, map } of COPY) {
-        for (const raw of this.sql.exec(`SELECT * FROM ${from}`).toArray()) {
-          const r = map(raw as Row);
+        for (const raw of this.sql.exec<Row>(`SELECT * FROM ${from}`).toArray()) {
+          const r = map(raw);
           const cols = Object.keys(r);
           stmts.push(
             db

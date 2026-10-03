@@ -176,8 +176,9 @@ tags:
       now; push again`, never a bare HTTP 500.
 
       Raw files (FILES.md section 3), GET or HEAD, beside the git door:
-      `/{owner}/{monorepo}/projects/{repo}/raw/{path}?ref=` for a
-      monorepo's project repo, `/{owner}/{name}/raw/{path}?ref=` for a plain
+      `/{owner}/{monorepo}/projects/{project}/raw/{path}?ref=` for a
+      monorepo's project (the repo at `projects/{project}`, named
+      `projects-{project}`), `/{owner}/{name}/raw/{path}?ref=` for a plain
       repo, and `/{owner}/{monorepo}/raw/{path}?v=` for a monorepo's own
       files (the meta layer; `v` is a meta layer version, meta-sync.md).
       Members only, by the session cookie or a Bearer credential. Served so

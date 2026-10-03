@@ -32,6 +32,12 @@ export function releaseDelay(env: { GATE_RELEASE_MS?: string }): number {
   return env.GATE_RELEASE_MS !== undefined && Number.isInteger(n) && n >= 0 && n <= 5000 ? n : RELEASE_DELAY_MS;
 }
 
+/** A repo's write gate right now: leases held and calls waiting. */
+export interface GateStats {
+  held: number;
+  waiting: number;
+}
+
 export class GateBusy extends Error {
   constructor(key: string, waitedMs: number) {
     super(`${key} has had ${WRITE_SLOTS} writes running for ${Math.round(waitedMs / 1000)} s; try again`);
@@ -161,7 +167,7 @@ export class WriteGate {
     }
   }
 
-  stats(key: string): { held: number; waiting: number } {
+  stats(key: string): GateStats {
     const g = this.gates.get(key);
 
     return { held: g?.held.size ?? 0, waiting: g?.waiters.length ?? 0 };
@@ -196,7 +202,7 @@ export function isBusy(text: string): boolean {
 }
 
 /** Run fn; when Artifacts says busy, try again up to `retries` times with jitter. */
-export async function retryBusy<T>(fn: () => Promise<T>, busy: (err: unknown) => boolean, retries = 3): Promise<T> {
+export async function retryBusy<T>(fn: () => Promise<T>, busy: (cause: unknown) => boolean, retries = 3): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();

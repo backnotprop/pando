@@ -9,7 +9,7 @@
 // path only as far as the hashes differ.
 
 import type { Env } from "../env";
-import { HttpError } from "../http";
+import { hasControl, HttpError } from "../http";
 import type { ObjectStats, ObjectsClient } from "../objects";
 import { prepend } from "./pktline";
 import type { RepoRecord } from "./types";
@@ -91,7 +91,10 @@ function lineOf(c: CommitMeta): CommitLine {
 }
 
 /** Reads through the cache, remembered for the walk; stops when its budget is spent. */
-export class Walker {
+/** What a walk needs of a repo: its name (cache keys) and its Artifacts name (reads). */
+export type WalkedRepo = Pick<RepoRecord, "name" | "artifacts_name">;
+
+export class Walker<R extends WalkedRepo = RepoRecord> {
   readonly stats: ObjectStats = { hits: 0, misses: 0 };
   private trees = new Map<string, TreeEntry[]>();
   private commits = new Map<string, CommitMeta>();
@@ -99,7 +102,7 @@ export class Walker {
 
   constructor(
     private obj: ObjectsClient,
-    readonly repo: RepoRecord,
+    readonly repo: R,
     private budget: Budget,
   ) {}
 
@@ -214,7 +217,7 @@ interface LastState {
  * commit that last changed it, the budget is spent, or WALK_MAX. `reuse`:
  * a complete answer for this folder at some commit; reaching it fills the rest.
  */
-async function walkLast(w: Walker, path: string, state: LastState, reuse: LastCommits | null, merges: Set<string>) {
+async function walkLast(w: Walker<WalkedRepo>, path: string, state: LastState, reuse: LastCommits | null, merges: Set<string>) {
   const open = new Set(state.open);
   let k: CommitMeta | null = state.next ? await w.commit(state.next) : null;
   let walked = state.walked;
@@ -279,7 +282,7 @@ async function labelMerges(lines: Iterable<CommitLine>, shas: Set<string>, merge
  */
 export async function lastCommits(
   env: Env,
-  w: Walker,
+  w: Walker<WalkedRepo>,
   obj: ObjectsClient,
   commit: CommitMeta,
   path: string,
@@ -393,9 +396,9 @@ export function matchesEtag(header: string | null, oid: string): boolean {
 
 // ── Raw ───────────────────────────────────────────────────────────────────
 
-const IMAGES: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", ico: "image/x-icon", bmp: "image/bmp",
-};
+const IMAGES = new Map([
+  ["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["avif", "image/avif"], ["ico", "image/x-icon"], ["bmp", "image/bmp"],
+]);
 
 /**
  * A raw file's response. Same origin as the app and its cookie, so nothing
@@ -415,7 +418,7 @@ export async function rawResponse(blob: Response, name: string, oid: string, pin
 
   if (!blob.body) {
     // An empty file.
-    headers.set("content-type", IMAGES[ext] ?? "text/plain; charset=utf-8");
+    headers.set("content-type", IMAGES.get(ext) ?? "text/plain; charset=utf-8");
 
     return new Response(null, { headers });
   }
@@ -441,7 +444,7 @@ export async function rawResponse(blob: Response, name: string, oid: string, pin
   }
 
   const binary = first.subarray(0, 8000).includes(0);
-  headers.set("content-type", IMAGES[ext] ?? (binary ? "application/octet-stream" : "text/plain; charset=utf-8"));
+  headers.set("content-type", IMAGES.get(ext) ?? (binary ? "application/octet-stream" : "text/plain; charset=utf-8"));
 
   if (head) {
     await reader.cancel();
@@ -466,7 +469,14 @@ export function answerKey(kind: "last" | "hist", commit: string, pathHash: strin
   return `${kind}/${commit}/${pathHash}`;
 }
 
-export async function storeAnswer(env: Env, artifacts: string, key: string, body: unknown): Promise<void> {
+/** A page of a path's history, as GET .../history answers and the answers store keeps it. */
+export interface HistoryPage {
+  commits: CommitLine[];
+  next: string | null;
+  capped: boolean;
+}
+
+export async function storeAnswer(env: Env, artifacts: string, key: string, body: LastCommits | HistoryPage): Promise<void> {
   await env.CACHE?.put(`answers/${artifacts}/${key}.json`, JSON.stringify(body), { httpMetadata: { contentType: "application/json" } });
 }
 
@@ -481,14 +491,14 @@ export async function resolveCommit(
   w: Walker,
   refHead: (ref: string) => Promise<string | null>,
   ref: string | null | undefined,
-  remember?: (sha: string) => Promise<unknown>,
+  remember?: (sha: string) => Promise<void>,
 ): Promise<{ ref: string; commit: CommitMeta; pinned: boolean }> {
   const r = ref || w.repo.default_branch;
   let sha: string | null = null;
 
   if (/^[0-9a-f]{40}$/.test(r)) sha = r;
   else {
-    if (r.length > 200 || /[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{/.test(r)) throw new HttpError(400, "bad_request", "ref: a branch name or a 40-character sha");
+    if (r.length > 200 || hasControl(r) || r.includes(" ") || /[~^:?*[\\]|\.\.|@\{/.test(r)) throw new HttpError(400, "bad_request", "ref: a branch name or a 40-character sha");
     sha = await refHead(r);
 
     if (!sha) {
@@ -514,15 +524,14 @@ export async function handleHistoryBatch(
   batch: MessageBatch<HistoryMessage>,
   env: Env,
   ctx: ExecutionContext,
-  deps: { objects: (ctx: { exports?: unknown } | ExecutionContext) => ObjectsClient; mergesFor: (monorepoId: string, repo: string) => MergesFor },
+  deps: { objects: () => ObjectsClient; mergesFor: (monorepoId: string, repo: string) => MergesFor },
 ): Promise<void> {
   for (const msg of batch.messages) {
     const m = msg.body;
 
     try {
-      const obj = deps.objects(ctx);
-      const rec = { name: m.repo, artifacts_name: m.artifacts } as RepoRecord;
-      const w = new Walker(obj, rec, JOB_BUDGET);
+      const obj = deps.objects();
+      const w = new Walker(obj, { name: m.repo, artifacts_name: m.artifacts }, JOB_BUDGET);
       const commit = await w.commit(m.commit);
 
       if (commit) await lastCommits(env, w, obj, commit, m.path, deps.mergesFor(m.monorepo, m.repo), true);

@@ -51,6 +51,18 @@ export interface HookJob {
 
 export type HookResult = AttemptResult & { ms: number };
 
+/** Due rows handed out in one step, and the lease they carry. */
+interface Taken {
+  jobs: HookJob[];
+  lease: string;
+}
+
+/** The test switch (HOOKS_TEST) as it is, and the lease in force. */
+export interface HooksTestState {
+  crash: boolean;
+  lease_ms: number;
+}
+
 export class HooksOut {
   constructor(
     private ctx: DurableObjectState,
@@ -75,8 +87,8 @@ export class HooksOut {
     }
   }
 
-  private rows<T>(q: string, ...args: unknown[]): T[] {
-    return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
+  private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
+    return this.sql.exec<T>(q, ...args).toArray();
   }
 
   private lease(): number {
@@ -115,7 +127,7 @@ export class HooksOut {
   }
 
   /** Lease up to `limit` due rows and build their jobs (rows whose hook or repo is gone are closed). */
-  private take(limit: number): { jobs: HookJob[]; lease: string } {
+  private take(limit: number): Taken {
     const m = this.info();
     const lease = now();
 
@@ -145,6 +157,7 @@ export class HooksOut {
       this.sql.exec("UPDATE deliveries SET sent_at = ? WHERE id = ?", lease, d.id);
 
       if (!mains.has(d.repo)) mains.set(d.repo, this.mainOf(d.repo));
+      // SAFETY: queueDeliveries is the only writer of deliveries.payload, always JSON.stringify of a StoredPayload.
       const payload = JSON.parse(d.payload) as StoredPayload;
       payload.monorepo_id ??= m.id; // rows from before namespaces
       jobs.push({
@@ -197,7 +210,7 @@ export class HooksOut {
 
   /** One try's result: delivered, retrying (its next time on the alarm), or dead after the last. */
   private record(j: HookJob, r: HookResult, lease: string): void {
-    if (!this.rows("SELECT id FROM deliveries WHERE id = ?", j.delivery_id).length) return; // trimmed, or the monorepo is gone
+    if (!this.rows<{ id: string }>("SELECT id FROM deliveries WHERE id = ?", j.delivery_id).length) return; // trimmed, or the monorepo is gone
     const at = now();
     this.sql.exec(
       "INSERT INTO delivery_attempts (delivery_id, n, at, response_code, error, ms) VALUES (?, ?, ?, ?, ?, ?)",
@@ -239,7 +252,7 @@ export class HooksOut {
   private crashNext = false;
 
   /** Make the object die right after the next delivery's call answers, before it is recorded. */
-  test(set: { crash?: boolean } = {}): { crash: boolean; lease_ms: number } {
+  test(set: { crash?: boolean } = {}): HooksTestState {
     if (this.env.HOOKS_TEST === "1" && set.crash !== undefined) this.crashNext = set.crash;
 
     return { crash: this.crashNext, lease_ms: this.lease() };

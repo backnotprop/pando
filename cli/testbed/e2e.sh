@@ -40,8 +40,10 @@ echo "  $total files"
 step "pando login, pando init (plain repo), pando clone"
 if [ "$SERVER" = "file:///srv/pando" ]; then
   echo "testbed" | pando login --bootstrap --server "$SERVER" --login tester --name "Test Person" --email person@example.com >/dev/null
+elif [ -z "${PANDO_TOKEN:-}" ]; then
+  fail "against $SERVER the test needs PANDO_TOKEN (a credential from pando credential create)"
 else
-  pando login --server "$SERVER" --name "Test Person" --email person@example.com </dev/null >/dev/null 2>&1 || true
+  ok "against $SERVER with the credential in PANDO_TOKEN"
 fi
 name="acme-$(date +%s)"
 pando init --yes --name "$name" --server "$SERVER" | sed 's/^/  /'

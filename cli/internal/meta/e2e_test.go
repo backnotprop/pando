@@ -1550,3 +1550,63 @@ func TestE2EApplyFromMainAndReferences(t *testing.T) {
 		t.Errorf("references: %v", got)
 	}
 }
+
+// Many machines, each its own person, save inside one quiet window.
+// META_COMMIT_SHAPE=window: one commit, the last saver its author, the
+// others Co-authored-by. Default ("author"): one commit per person.
+func TestE2ECommitWindow(t *testing.T) {
+	env := artifactsEnv(t, "e2e-window-")
+	server, mono := env.server, env.mono
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	shape := os.Getenv("PANDO_META_TEST_SHAPE")
+	if shape == "" {
+		shape = "author"
+	}
+	const n = 10
+	var ms []*machine
+	for i := 0; i < n; i++ {
+		ms = append(ms, env.machine(t, fmt.Sprintf("m%02d", i)))
+	}
+	time.Sleep(time.Second)
+	start := time.Now()
+	for i, m := range ms {
+		m.write(fmt.Sprintf("notes/from-%02d.md", i), fmt.Sprintf("saved by machine %d\n", i))
+	}
+	c := env.client()
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		h, err := c.Changes(context.Background(), 0, 100)
+		done := 0
+		if err == nil {
+			for _, v := range h.Versions {
+				if v.Commit != "" {
+					done++
+				}
+			}
+		}
+		if done == n {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d saves committed after 3 minutes", done, n)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	took := time.Since(start)
+	var l []gitCommit
+	json.Unmarshal(metaRepo(t, server, mono, "log", nil), &l)
+	t.Logf("RESULT shape=%s: %d saves by %d people, all committed %s after the saves, in %d commits", shape, n, n, took.Round(100*time.Millisecond), len(l))
+	t.Logf("newest commit (author %s):\n%s", l[0].Author.Name, l[0].Message)
+	switch shape {
+	case "window":
+		if len(l) != 1 || !strings.HasPrefix(l[0].Message, "Save 10 files") || strings.Count(l[0].Message, "Co-authored-by: ") != n-1 ||
+			strings.Count(l[0].Message, "Pando-Machine: ") != n {
+			t.Errorf("window: %d commits, newest %q", len(l), l[0].Message)
+		}
+	default:
+		if len(l) != n || strings.Contains(l[0].Message, "Co-authored-by") {
+			t.Errorf("author: %d commits, newest %q", len(l), l[0].Message)
+		}
+	}
+}

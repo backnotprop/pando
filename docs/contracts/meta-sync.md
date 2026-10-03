@@ -312,9 +312,19 @@ pando resolve decisions/HISTORY.md                # unfreeze after a conflict
 
 When a path has had no change for 10 seconds, the object commits it to the
 meta layer's `main` (the Artifacts repo `<monorepo>--meta`) through
-gitwrite's `commitChanges` (see `gitwrite.md`). Paths that become due within
-2 seconds of each other and share an author, machine and agent go in one
-commit.
+gitwrite's `commitChanges` (see `gitwrite.md`), one commit at a time
+through the repo's write gate. Which paths share a commit is one Worker
+setting, `META_COMMIT_SHAPE`:
+
+- `author` (the default today): paths due within 2 seconds of each other
+  that share an author, machine and agent go in one commit.
+- `window` (ARCHITECTURE C7; waiting for the owner's answer to round 2,
+  question 8): everything due goes in one commit, whoever saved it. The
+  last saver is its author; every other person is a `Co-authored-by:` line,
+  and each agent and machine gets its own `Pando-Agent:` and
+  `Pando-Machine:` line. Measured on Artifacts, ten people saving inside one
+  window: one commit, everything committed 11 s after the saves, against ten
+  commits and 25 s with `author`.
 
 - A commit holds at most 1,000 files and about 24 MiB, so a big first
   upload becomes several commits.
@@ -322,7 +332,7 @@ commit.
   `Rename <from> to <path>`, `Restore <path> to version <n>`; several paths:
   `Save 3 files`, the first 50 listed in the body), then the who-made-it trailers from
   `formats.md` section 6 (`Pando-Agent` when set, `Pando-Machine`; a save
-  has no worktree) and `Pando-Version: <n>`.
+  has no worktree), `Co-authored-by` with `window`, and `Pando-Version: <n>`.
 - Author: whoever made the latest change, at the time they made it. The
   committer is the same person (gitwrite's default).
 - The object keeps the last commit it wrote as the parent. On `ref_moved` it

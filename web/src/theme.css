@@ -221,7 +221,8 @@ html[data-theme$="-light"] {
 .arrived {
   animation: arrive 0.24s var(--ease-pando);
 }
-.arrived .fox-cool {
+.arrived .fox-cool,
+.fox-arrive {
   animation: cool 6s linear;
 }
 @media (prefers-reduced-motion: reduce) {

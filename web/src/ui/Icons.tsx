@@ -87,3 +87,14 @@ export const CommitIcon = (p: Props) => (
     </g>
   </svg>
 );
+
+export const BranchIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.4">
+      <circle cx="4.5" cy="3.5" r="1.6" />
+      <circle cx="4.5" cy="12.5" r="1.6" />
+      <circle cx="11.5" cy="4.5" r="1.6" />
+      <path d="M4.5 5.1v5.8M11.5 6.1c0 3.1-2.5 3.7-6.1 4.7" />
+    </g>
+  </svg>
+);

@@ -3,8 +3,11 @@
 // started with the test overrides (the split at 2 members instead of 100, a
 // 0.5 s summary tick, and the test route):
 //
-//   npx wrangler dev --port 8811 --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1
-//   PANDO_URL=http://localhost:8811 node test/feed.mjs
+//   npx wrangler dev --port 8811 --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1 > /tmp/feed-dev.log 2>&1
+//   PANDO_URL=http://localhost:8811 PANDO_DEV_LOG=/tmp/feed-dev.log node test/feed.mjs
+//
+// With PANDO_DEV_LOG (the dev server's output), the run fails on any workerd
+// "internal error" or undisposed RPC result logged while it ran.
 //
 // Credentials stay in memory and are never printed. Git never reaches the
 // macOS keychain. It deletes every monorepo it made.
@@ -98,6 +101,9 @@ const joinedAll = (login, names) => waitFor(async () => {
   const d = await debugFeed(login);
   return names.every((n) => d?.index?.some((r) => r.name === n && !r.pending)) ? d : null;
 });
+const DEV_LOG = process.env.PANDO_DEV_LOG ?? null;
+const logLines = () => (DEV_LOG ? readFileSync(DEV_LOG, "utf8").split("\n") : []);
+const logStart = logLines().length;
 const keyDesc = (a, b) => (a.at !== b.at ? (a.at < b.at ? 1 : -1) : a.monorepo !== b.monorepo ? (a.monorepo < b.monorepo ? 1 : -1) : b.seq - a.seq);
 
 const id = Date.now().toString(36);
@@ -383,6 +389,31 @@ try {
   const realBefore = beforeTrim.filter((k) => !k.startsWith(`${O}/1000`));
   check("past the window: the same lines, read from the monorepos' logs (from_logs)", tr.dropped > 0 && p.from_logs === true && realBefore.every((k) => afterTrim.includes(k)), `dropped ${tr.dropped}; ${realBefore.length} lines; missing ${realBefore.filter((k) => !afterTrim.includes(k)).length}`);
 
+  // ── Deleting a monorepo with followers and a feed attached leaves nothing behind ──
+  for (let round = 1; round <= 3; round++) {
+    const D = `fd${round}-${id}`;
+    let rd = await call("POST", "/v1/monorepos", A, { name: D, kind: "repo" });
+    if (rd.status === 201) made.push(D);
+    await call("PUT", `/v1/monorepos/${D}/members/${login.bo}`, A, { role: "member" });
+    await waitFor(async () => (await debugFeed(login.ana)).index.some((i) => i.name === D && !i.pending), 15_000);
+    const fa = openSocket(`/v1/monorepos/${D}/events?topics=main`, A);
+    const fb = openSocket(`/v1/monorepos/${D}/events?topics=main`, B);
+    await waitFor(() => fa.open && fb.open, 10_000);
+    fa.send({ type: "hello", machine: "ma", worktrees: ["d1", "d2"] });
+    fb.send({ type: "hello", machine: "mb", worktrees: ["d3"] });
+    for (let k = 0; k < 3; k++) await call("PUT", `/v1/monorepos/${D}/worktrees/wd${k}_${id}`, A, { repo: ".", branch: `d${k}`, path: `worktrees/d${k}`, machine: "ma", kind: "sparse" });
+    await waitFor(() => live.frames.some((f) => f.event?.monorepo === D), 10_000);
+    rd = await call("DELETE", `/v1/monorepos/${D}?confirm=${D}`, A);
+    made.splice(made.indexOf(D), 1);
+    const closed = await waitFor(() => fa.closed === 4404 && fb.closed === 4404, 10_000);
+    const left = await waitFor(async () => {
+      const [a, b] = [await debugFeed(login.ana), await debugFeed(login.bo)];
+      return !a.index.some((i) => i.name === D) && !a.pointers[D] && !b.index.some((i) => i.name === D) && !b.pointers[D];
+    }, 15_000);
+    check(`delete with followers and feeds attached (${round} of 3): sockets closed 4404, both feeds left`, rd.status === 204 && !!closed && !!left, `${rd.status} ${fa.closed}/${fb.closed}`);
+  }
+  check("the person's socket got a left frame for a deleted monorepo", live.frames.some((f) => f.type === "left" && f.monorepo === `fd1-${id}`));
+
   // ── The home's list ──
   r = await call("GET", "/v1/monorepos?summary=1", A);
   const ms = r.json?.monorepos ?? [];
@@ -409,6 +440,12 @@ try {
     }, 30_000);
     check("deleting the monorepos empties ana's feed (leave messages)", !!d);
   }
+  if (DEV_LOG) {
+    // Alarms and queue batches of deleted monorepos run after the deletes: give them a summary tick (10 s on a plain server).
+    await sleep(12_000);
+    const bad = logLines().slice(logStart).filter((l) => /internal error; reference|not disposed properly/.test(l));
+    check("the dev server logged no internal errors and no undisposed RPC results during the run", bad.length === 0, `${bad.length}: ${bad.slice(0, 2).join(" | ").replace(/\x1b\[[0-9;]*m/g, "").slice(0, 200)}`);
+  } else console.log("SKIP  the dev server log check (set PANDO_DEV_LOG to the dev server's output)");
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

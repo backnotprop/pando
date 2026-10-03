@@ -72,7 +72,6 @@ export interface WindowPage {
 
 export class FeedObject extends DurableObject<Env> {
   private sql: SqlStorage;
-  private alarmChecked = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -280,19 +279,24 @@ export class FeedObject extends DurableObject<Env> {
 
   // ── The window ───────────────────────────────────────────────────────────
 
+  /**
+   * The hourly trim alarm, set when there are lines and none is pending. Its
+   * time is kept here (no getAlarm left running in the background).
+   */
   private ensureAlarm(): void {
-    if (this.alarmChecked) return;
-    this.alarmChecked = true;
-    this.ctx.waitUntil(
-      this.ctx.storage.getAlarm().then((a) => (a === null ? this.ctx.storage.setAlarm(Date.now() + TRIM_EVERY_MS) : undefined)),
+    if (Number(this.get("trim_at") ?? 0) > Date.now()) return;
+    const t = Date.now() + TRIM_EVERY_MS;
+    this.set("trim_at", String(t));
+    this.ctx.storage.setAlarm(t).catch((err) =>
+      console.error("feed: setting the trim alarm failed:", err instanceof Error ? (err.stack ?? err.message) : String(err)),
     );
   }
 
   async alarm(): Promise<void> {
+    this.set("trim_at", "0");
     this.trim();
     // A feed with no lines needs no trimming until lines arrive (ensureAlarm sets it again).
-    if (this.row("SELECT 1 AS x FROM pointers LIMIT 1")) await this.ctx.storage.setAlarm(Date.now() + TRIM_EVERY_MS);
-    else this.alarmChecked = false;
+    if (this.row("SELECT 1 AS x FROM pointers LIMIT 1")) this.ensureAlarm();
   }
 
   /** Keep WINDOW_DAYS of pointers, at most WINDOW_MAX; `floor` remembers the newest `at` dropped. `days`: tests only. */

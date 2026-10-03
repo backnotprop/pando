@@ -344,6 +344,9 @@ try {
   }
 
   // ── Presence: the follower socket's hello ──
+  const mw = openSocket(`/v1/monorepos/${login.ana}/${S}/events?topics=kind:machine.updated`, A);
+  sockets.push(mw);
+  await waitFor(() => mw.open, 10_000);
   const f1 = openSocket(`/v1/monorepos/${login.ana}/${S}/events?topics=main`, A);
   const f2 = openSocket(`/v1/monorepos/${login.ana}/${S}/events?topics=main`, B);
   sockets.push(f1, f2);
@@ -361,8 +364,25 @@ try {
   check("presence: 2 machines and 3 worktrees with open follower sockets", !!(await presence([2, 3])));
   f1.send({ type: "hello", machine: "m1", worktrees: ["w1", "w2", "w4"] });
   check("presence: a hello update (a worktree added) counts", !!(await presence([2, 4])));
+  // ── The Machines tab: one row per (login, credential) ──
+  const machines = async () => (await call("GET", `/v1/monorepos/${login.ana}/${S}/machines`, A)).json?.machines ?? [];
+  const mrows = await machines();
+  const anaRow = mrows.find((x) => x.login === login.ana);
+  const boRow = mrows.find((x) => x.login === login.bo);
+  check("machines: a row per machine, named by its credential, connected with its worktrees", anaRow?.name === "ana-mbp" && anaRow.connected && JSON.stringify(anaRow.worktrees.map((w) => w.id)) === JSON.stringify(["w1", "w2", "w4"]) && boRow?.name === "bo-mbp" && boRow.connected && boRow.worktrees[0]?.id === "w3" && !!anaRow.credential_id && anaRow.credential_id !== boRow.credential_id, JSON.stringify(mrows.map((x) => [x.login.slice(0, 3), x.name, x.connected, x.worktrees.map((w) => w.id).join("+")])));
+  check("machines: latest activity first; a machine that only connected has none", mrows[0]?.login === login.ana && ["push", "branch.opened", "merged", "status"].includes(anaRow?.last_activity?.kind) && anaRow.last_activity.repo_path === "." && boRow?.last_activity === null, JSON.stringify(anaRow?.last_activity)?.slice(0, 160));
+  if (["push", "branch.opened"].includes(anaRow?.last_activity?.kind)) check("machines: a push's row carries its commit count once the facts job ran", typeof anaRow.last_activity.summary?.commits === "number", JSON.stringify(anaRow.last_activity.summary));
+  check("machine.updated: a new row and a connect are published", !!(await waitFor(() => mw.frames.some((f) => f.kind === "machine.updated" && f.row?.login === login.bo && f.row.connected), 5000)) && mw.frames.some((f) => f.kind === "machine.updated" && f.row?.login === login.ana && f.collection === "machines"));
+  const anaPublished = mw.frames.filter((f) => f.row?.login === login.ana).length;
+  await call("PUT", `/v1/monorepos/${login.ana}/${S}/worktrees/wm_${id}`, A, { repo: ".", branch: "feat/m", path: "worktrees/feat-m", machine: "ana-mbp", kind: "sparse" });
+  const moved = await waitFor(async () => (await machines()).find((x) => x.login === login.ana && x.last_activity?.kind === "worktree.reported"), 5000);
+  await sleep(500);
+  check("machines: activity moves the row at once, and is not republished within a minute", !!moved && mw.frames.filter((f) => f.row?.login === login.ana).length === anaPublished, `${anaPublished} -> ${mw.frames.filter((f) => f.row?.login === login.ana).length}`);
+  const page = (await call("GET", `/v1/monorepos/${login.ana}/${S}/events?limit=50`, A)).json?.events ?? [];
+  check("events never carry the credential behind them (via)", page.length > 0 && page.every((x) => !("via" in x)));
   f2.ws.close();
   check("presence: a closed socket stops counting", !!(await presence([1, 3])));
+  check("machines: its machine's last socket closing disconnects it, and is published", !!(await waitFor(() => mw.frames.some((f) => f.kind === "machine.updated" && f.row?.login === login.bo && !f.row.connected), 5000)) && (await machines()).find((x) => x.login === login.bo)?.connected === false);
   check("the person's socket gets summary frames", live.frames.some((f) => f.type === "summary" && f.monorepo_id === ID[S]));
 
   // ── Needs you, from stored facts ──

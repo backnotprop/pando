@@ -767,6 +767,11 @@ paths:
         - presence: `machine.connected`, `machine.disconnected`. Row
           `{connections: [...]}`, the whole list of who is connected now (as in
           meta/status), plus `connection`, the one that changed.
+        - machines: `machine.updated` (upsert, a Machine row; key
+          `<login>/<credential_id>`). Sent at once for a new machine, a
+          connect, a disconnect or a change of its worktrees; for activity
+          alone at most once a minute per machine (every activity event
+          already names its `actor` and `machine`).
 
         Topics (`?topics=`, comma-separated, at most 10): `all` (default),
         `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
@@ -784,7 +789,8 @@ paths:
         monorepo (not read-only mains), at most 1,000, each 1 to 64 of
         `A-Z a-z 0-9 _ -`. `machine` is optional (default: the credential's
         name). Each hello replaces the last one of that socket; presence ends
-        when the socket closes. Answer: `{"type": "hello_ok", "machine",
+        when the socket closes. The hello also marks the socket's credential
+        connected in listMachines, with these worktrees. Answer: `{"type": "hello_ok", "machine",
         "worktrees", "machines_active", "worktrees_active"}`, or an `error`
         frame.
 
@@ -1615,6 +1621,39 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Delivery" }
+  /v1/monorepos/{owner}/{monorepo}/machines:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listMachines
+      summary: The Machines tab, one row per machine (a credential), latest activity first
+      description: |
+        A machine is a credential: the row's key is (login, credential_id),
+        and it is shown by the credential's name, so two people's `laptop`s
+        stay apart. Kept by the monorepo in the same step as each change:
+        - every activity event made through the credential sets
+          `last_activity` (the line's kind, repo, branch and summary, as in
+          FeedEvent; a push's commit count and title arrive a moment later);
+        - a follower's hello on the event socket sets it `connected`, with its
+          worktrees; its last such socket closing sets it disconnected.
+        Machines with no activity yet (only connected) come after the others.
+        Browser sessions (kind `browser`) appear only once they act, never as
+        connected; show them as the web. Live: `machine.updated` on the event
+        stream.
+      tags: [worktrees]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [machines]
+                properties:
+                  machines:
+                    type: array
+                    items: { $ref: "#/components/schemas/Machine" }
   /v1/monorepos/{owner}/{monorepo}/worktrees:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -2245,6 +2284,38 @@ components:
               response_code: { type: [integer, "null"] }
               error: { type: [string, "null"] }
               ms: { type: integer }
+    Machine:
+      type: object
+      required: [login, credential_id, name, kind, connected, connected_at, last_activity, worktrees, updated_at]
+      properties:
+        login: { type: string, description: The person. }
+        credential_id: { type: string, description: "With login, the machine's key." }
+        name: { type: string, description: "The credential's name: the machine as people see it." }
+        kind: { type: [string, "null"], enum: [machine, sandbox, bootstrap, browser, null] }
+        connected: { type: boolean, description: "An event socket of this credential said hello and is open." }
+        connected_at: { type: [string, "null"], format: date-time }
+        last_activity:
+          type: [object, "null"]
+          description: Its latest activity line in this monorepo.
+          properties:
+            seq: { type: integer }
+            at: { type: string, format: date-time }
+            kind: { type: string }
+            repo: { type: [string, "null"] }
+            repo_path: { type: [string, "null"] }
+            branch: { type: [string, "null"] }
+            summary: { type: [object, "null"], description: As FeedEvent.summary. }
+        worktrees:
+          type: array
+          description: "The worktrees its last hello named; repo, branch and path from the worktree registry (null when not reported there)."
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              repo: { type: [string, "null"] }
+              branch: { type: [string, "null"] }
+              path: { type: [string, "null"] }
+        updated_at: { type: string, format: date-time }
     Worktree:
       type: object
       required: [id, repo, branch, path, machine, kind, reported_by, created_at, last_seen_at]

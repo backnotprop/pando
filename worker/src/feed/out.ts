@@ -165,8 +165,8 @@ export class FeedOut {
 
   // ── Activity: marking, and copying to feeds ──────────────────────────────
 
-  /** Called by publish() after each event is written. Never throws. */
-  onPublish(seq: number, at: string, e: StreamEvent): void {
+  /** Called by publish() after each event is written; returns its feed line, if it is activity. Never throws. */
+  onPublish(seq: number, at: string, e: StreamEvent): StoredPointer | null {
     try {
       const p = this.pointerOf(e, false);
       if (p) {
@@ -176,12 +176,14 @@ export class FeedOut {
         this.set("last_activity_at", at);
         if (!wait) this.emit({ monorepo_id: this.monorepo() ?? "", monorepo: this.label(), seq, at, ...p });
         this.scheduleSummary();
+        return p;
       } else if (e.collection === "branches" || e.collection === "statuses" || e.collection === "default_heads") {
         this.scheduleSummary(); // needs-you may have changed (facts stored, main moved)
       }
     } catch (err) {
       console.error("feed: marking an event failed:", err instanceof Error ? err.message : String(err));
     }
+    return null;
   }
 
   /** The branch-facts job's summary for a push (commit count, head title): the event goes out now. */
@@ -497,6 +499,20 @@ export class FeedOut {
     } catch {
       // no attachment
     }
+  }
+
+  /** The ids of open sockets that said hello (for the Machines tab). */
+  liveHelloSids(): Set<string> {
+    const open = new Set<string>();
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        const sid = (ws.deserializeAttachment() as { sid?: string } | null)?.sid;
+        if (sid && ws.readyState === WebSocket.OPEN) open.add(sid);
+      } catch {
+        // no attachment
+      }
+    }
+    return new Set(this.rows<{ sid: string }>("SELECT sid FROM feed_presence").map((r) => r.sid).filter((s) => open.has(s)));
   }
 
   /** Machines and worktrees with an open follower socket (rows of sockets gone without a close are dropped). */

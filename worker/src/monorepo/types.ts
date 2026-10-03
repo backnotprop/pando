@@ -10,6 +10,8 @@ export interface Identity {
   email: string | null;
   credential_id: string;
   credential_name: string;
+  /** machine, sandbox, bootstrap or browser (the Machines tab shows browsers as the web). */
+  credential_kind?: string;
   role: MemberRole;
   /** The agent acting, from the X-Pando-Agent header; null for a person. */
   agent?: string | null;

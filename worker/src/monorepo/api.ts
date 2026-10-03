@@ -357,6 +357,8 @@ api.get("/v1/monorepos/:o/:m/events", async (c) => {
     const headers = new Headers(c.req.raw.headers);
     headers.set("x-pando-login", c.get("identity").login);
     headers.set("x-pando-machine", c.get("identity").credential_name);
+    headers.set("x-pando-credential", c.get("identity").credential_id);
+    headers.set("x-pando-credential-kind", c.get("identity").credential_kind ?? "");
     return stub.fetch(new Request(c.req.raw, { headers }));
   }
   const sinceQ = c.req.query("since");
@@ -854,6 +856,12 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
 });
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
+
+// ── Machines: one row per machine (credential), latest activity first ──────
+
+api.get("/v1/monorepos/:o/:m/machines", async (c) => {
+  return c.json({ machines: await c.get("stub").machineRows() });
+});
 
 api.get("/v1/monorepos/:o/:m/worktrees", async (c) => {
   return c.json({ worktrees: await c.get("stub").listWorktrees({ machine: c.req.query("machine"), repo: c.req.query("repo") }) });

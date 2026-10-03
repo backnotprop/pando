@@ -34,7 +34,7 @@ export function ChangeBar({ who, title, id, at, history }: { who: string; title:
       <span className="flex-none text-[13px] text-bark">{who}</span>
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-bark-dim phone:order-3 phone:basis-full">{title}</span>
       <span className="ml-auto flex flex-none items-center gap-4">
-        <span className="font-mono text-[12.5px] leading-[normal] text-ash phone:hidden">{id}</span>
+        <span className="font-mono text-[12.5px] leading-[15px] text-ash phone:hidden">{id}</span>
         <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{ago(at, clock)}</span>
         <Link {...history} className={lnk}>
           History
@@ -82,7 +82,7 @@ export function FileList({ bar, rows }: { bar: ReactNode; rows: readonly Row[] }
 export function Readme({ name, text }: { name: string; text: string }) {
   return (
     <section className="mt-6 overflow-hidden rounded-[10px] border border-rootline">
-      <h3 className="flex items-center gap-2 border-b border-rule-faint px-4 py-[11px] font-mono text-[13px] leading-[normal] text-bark-dim">
+      <h3 className="flex items-center gap-2 border-b border-rule-faint px-4 py-[11px] font-mono text-[13px] leading-[16px] text-bark-dim">
         <FileIcon className="inline-block size-4 text-ash" />
         {name}
       </h3>

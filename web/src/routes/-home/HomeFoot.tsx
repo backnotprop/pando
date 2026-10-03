@@ -12,10 +12,10 @@ const quiet = "flex h-[30px] items-center gap-2.5 text-[13px] text-bark-dim hove
 
 export function HomeFoot() {
   return (
-    <div className="mt-auto pt-12 phone:order-1 phone:pt-0">
+    <div className="mt-auto pt-12 phone:order-1 phone:pt-2">
       <div className="flex flex-col items-start gap-2 pb-4">
         <span className="flex items-center gap-2.5">
-          <span className="inline-flex h-5 items-center rounded-full border border-rootline px-2 text-[11.5px] leading-[normal] text-bark-dim">What's new</span>
+          <span className="inline-flex h-5 items-center rounded-full border border-rootline px-2 text-[11.5px] leading-[14px] text-bark-dim">What's new</span>
           <span className="font-mono text-[12.5px] text-ash">{WHATS_NEW.date}</span>
         </span>
         <a href={WHATS_NEW.href} className="text-[13.5px] leading-[19px] font-semibold text-bark hover:underline hover:decoration-ash hover:underline-offset-3">

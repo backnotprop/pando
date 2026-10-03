@@ -28,7 +28,7 @@ function SignIn() {
       <h1 className="mt-5 text-[26px] leading-8 tracking-[-.018em]">Pando</h1>
       <a
         href={`/v1/login/browser?return_to=${encodeURIComponent(local(return_to))}`}
-        className="mt-7 inline-flex h-8 items-center justify-center rounded-[7px] bg-bark px-3.5 text-[13.5px] leading-[normal] font-semibold whitespace-nowrap text-soil hover:bg-bark-hi"
+        className="mt-7 inline-flex h-8 items-center justify-center rounded-[7px] bg-bark px-3.5 text-[13.5px] leading-[16px] font-semibold whitespace-nowrap text-soil hover:bg-bark-hi"
       >
         Sign in
       </a>

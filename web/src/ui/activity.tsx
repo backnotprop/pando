@@ -9,7 +9,7 @@ import { Avatar } from "./Avatar";
 import buildkiteMark from "./buildkite-mark.svg";
 import { type AppLink, blobLink, branchLink } from "./paths";
 import { since, useNow } from "./time";
-import { useEndOfList } from "./useEndOfList";
+import { Older } from "./Older";
 
 interface Sentence {
   /** Who leads the line: a person's avatar, a CI service's mark, or an empty slot. */
@@ -100,7 +100,7 @@ export const CheckMark = ({ height = 10 }: { height?: number }) => (
 /** The sentence. `mini` (the side column) leads with the mark and drops "in" and "from". */
 export function Sentence({ s, mini = false }: { s: Sentence; mini?: boolean }) {
   const obj = s.object;
-  const objClass = "fox-cool font-mono text-[13px] leading-[normal] text-bark";
+  const objClass = "fox-cool font-mono text-[13px] leading-[16px] text-bark";
 
   return (
     <span className={`flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap phone:flex-wrap phone:whitespace-normal ${mini ? "text-[13px]" : ""}`}>
@@ -154,7 +154,7 @@ function Line({ e, withMonorepo, clock }: { e: FeedEvent; withMonorepo: boolean;
       >
         <span className="fox-cool font-mono text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
         {withMonorepo ? (
-          <span className="flex items-center gap-2 overflow-hidden font-mono text-[12.5px] leading-[normal] text-ellipsis whitespace-nowrap text-ash phone:hidden">
+          <span className="flex items-center gap-2 overflow-hidden font-mono text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash phone:hidden">
             <span>
               {owner}/<span className="text-bark-dim">{name}</span>
             </span>
@@ -202,19 +202,27 @@ function useMakeRoom(top: string | null) {
   return list;
 }
 
-export function ActivityList({ events, withMonorepo, more }: { events: readonly FeedEvent[]; withMonorepo: boolean; more: (() => void) | null }) {
+/** Older pages load one at a time, from the "Older" link at the end (design review: no infinite scroll). */
+export interface OlderPages {
+  more: boolean;
+  loading: boolean;
+  load: () => void;
+}
+
+export function ActivityList({ events, withMonorepo, older }: { events: readonly FeedEvent[]; withMonorepo: boolean; older: OlderPages }) {
   const clock = useNow();
   const first = events[0];
   const list = useMakeRoom(first ? lineKey(first) : null);
-  const end = useEndOfList<HTMLLIElement>(more);
 
   return (
-    <ul ref={list} aria-label="Activity" data-testid="activity">
-      {events.map((e) => (
-        <Line key={lineKey(e)} e={e} withMonorepo={withMonorepo} clock={clock} />
-      ))}
-      <li ref={end} aria-hidden="true" />
-    </ul>
+    <>
+      <ul ref={list} aria-label="Activity" data-testid="activity">
+        {events.map((e) => (
+          <Line key={lineKey(e)} e={e} withMonorepo={withMonorepo} clock={clock} />
+        ))}
+      </ul>
+      <Older {...older} none="No older activity." />
+    </>
   );
 }
 

@@ -50,7 +50,7 @@ function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
           >
             <Avatar name={m.name} org size={28} />
             <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
-              <span className="font-mono text-[14px] leading-[normal] text-bark">
+              <span className="font-mono text-[14px] leading-[17px] text-bark">
                 <span className="text-ash">{m.owner}/</span>
                 {m.name}
               </span>
@@ -108,7 +108,7 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
   const needs = (useQuery(needsQuery(inMonorepo)).data ?? []).filter((n) => ownedHere(n.monorepo));
   const activity = useInfiniteQuery(activityQuery(inMonorepo));
   const events = (activity.data?.pages ?? []).flatMap((p) => p.events).filter((e) => ownedHere(e.monorepo));
-  const more = activity.hasNextPage && !activity.isFetchingNextPage ? () => void activity.fetchNextPage() : null;
+  const older = { more: activity.hasNextPage, loading: activity.isFetchingNextPage, load: () => void activity.fetchNextPage() };
 
   return (
     <Page crumbs={owner ? [{ label: owner }] : []}>
@@ -134,7 +134,7 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
             <h2 className="text-[14px] leading-5 font-semibold">Activity</h2>
             <Filter lines={mine} current={inMonorepo} />
           </div>
-          {events.length ? <ActivityList events={events} withMonorepo={!inMonorepo} more={more} /> : <Empty>Nothing yet.</Empty>}
+          {events.length ? <ActivityList events={events} withMonorepo={!inMonorepo} older={older} /> : <Empty>Nothing yet.</Empty>}
         </section>
       </div>
     </Page>

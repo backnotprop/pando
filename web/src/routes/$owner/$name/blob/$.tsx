@@ -33,7 +33,7 @@ export const Route = createFileRoute("/$owner/$name/blob/$")({
 });
 
 const tool =
-  "inline-flex h-7 cursor-pointer items-center rounded-md border border-rootline bg-soil px-2.5 text-[12.5px] leading-[normal] whitespace-nowrap text-bark-dim hover:border-rule-hi hover:text-bark";
+  "inline-flex h-7 cursor-pointer items-center rounded-md border border-rootline bg-soil px-2.5 text-[12.5px] leading-[15px] whitespace-nowrap text-bark-dim hover:border-rule-hi hover:text-bark";
 
 function Lines({ text }: { text: string }) {
   return (
@@ -67,7 +67,7 @@ function FilePage() {
   return (
     <div className="max-w-[1000px]">
       <div className="mb-3.5 flex items-center gap-4 phone:flex-wrap">
-        <span className="font-mono text-[13px] leading-[normal] text-ash">
+        <span className="font-mono text-[13px] leading-[16px] text-ash">
           <Link {...monoLink(full)} className="text-bark-dim hover:text-bark">
             {monorepo.name}
           </Link>
@@ -95,7 +95,7 @@ function FilePage() {
         <ChangeBar who={saverOf(entry)} title={what} id={`on ${entry.machine}`} at={entry.at} history={historyLink(full, path)} />
         {/* On a phone: the name on its own line, the four tools on one row below (design review, 2026-10-03). */}
         <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pb-2.5">
-          <span className="mr-auto overflow-hidden font-mono text-[12.5px] leading-[normal] text-ellipsis whitespace-nowrap text-ash phone:basis-full">{name}</span>
+          <span className="mr-auto overflow-hidden font-mono text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash phone:basis-full">{name}</span>
           <span className="flex flex-wrap gap-1.5 phone:flex-nowrap">
             <a href={raw} className={tool}>
               Raw

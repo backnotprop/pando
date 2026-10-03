@@ -19,9 +19,8 @@ info:
     - Git goes through the git door at the repo's `clone_url`,
       `https://<host>/<monorepo>/<name>.git` (smart HTTP; see the `git`
       tag). Pushes to the default branch are refused, except the first push
-      that creates it. An agent cannot push to a branch another identity
-      created.
-    - Every other call is JSON with `Authorization: Bearer <pando token>`.
+      that creates it. Every other push goes through.
+    - Every other call is JSON with `Authorization: Bearer <credential>`.
 
     Artifacts repos, in the namespace `pando-dev`: a project repo is
     `<monorepo>--<name>` (`acme--projects-web`), a plain repo is
@@ -35,16 +34,25 @@ info:
     that is the meta layer's main, table `[repos."<repo path>"]`; in a plain
     repo, the repo's own main, table `[repos."."]`.
 
-    Tokens belong to one monorepo and have a role: `person` or `agent`.
-    People do everything. Agents read, push their own branches, comment on
-    reviews, post commit statuses and report worktrees. Only a person
-    approves, and only a person merges (a person's Merge is the approval).
+    Identity works like GitHub's. A person has a user account and belongs to
+    monorepos as `owner` or `member`. A machine signs in once
+    (`pando login`) and holds a credential for that user; git and every agent
+    on the machine act as that user, the way `gh` and git credentials do. A
+    cloud sandbox gets a credential its user makes for it. Credentials are
+    listed and revocable. Commits are authored as the user; Pando's commit
+    trailers name the agent.
 
-    The first token: the owner sets the Worker secret `PANDO_BOOTSTRAP`, then
-    calls `POST /v1/monorepos` with it as the bearer. That returns the
-    monorepo and a person token for it. The bootstrap secret also works on
-    `POST /v1/monorepos/{monorepo}/tokens`, for recovery. It works nowhere
-    else.
+    Any member may push, review, post statuses, report worktrees and merge
+    (agents included, through the user's credential). Reviews are comments
+    and approvals, not a gate. The merge gate is the checks, and `?force=1`
+    merges past them. Owners also manage members and hooks.
+
+    Signing in: the method (GitHub sign-in or an email link) is not decided.
+    Until it is, the Worker secret `PANDO_BOOTSTRAP` makes users:
+    `POST /v1/users` with it as the bearer returns the user and a first
+    credential. That user then makes more credentials
+    (`POST /v1/user/credentials`) and monorepos (`POST /v1/monorepos`).
+    The bootstrap secret works on `POST /v1/users` only.
 
     Branch names in paths: encode `/` as `%2F` (`agent-3%2Foauth`). Raw
     slashes are accepted too.
@@ -59,7 +67,7 @@ servers:
       subdomain:
         default: example
 security:
-  - pandoToken: []
+  - credential: []
 tags:
   - name: git
     description: |
@@ -72,34 +80,34 @@ tags:
       POST /{monorepo}/{repo}.git/git-receive-pack
       ```
 
-      Credentials: `Authorization: Bearer <pando token>` (for example
-      `git -c http.extraHeader="Authorization: Bearer $PANDO_TOKEN" ...`),
-      or HTTP Basic with the token as the password (any username). Without
+      Credentials: HTTP Basic with the user's credential as the password
+      (any username; this is what `pando credential`, the git credential
+      helper, supplies), or `Authorization: Bearer <credential>`. Without
       credentials the door answers 401 with `WWW-Authenticate: Basic`, so a
-      git credential helper works.
+      credential helper is asked.
 
       Clone and fetch also accept the 30-minute read token from a hook
-      delivery (`read_token`), so CI clones from `clone_url` with no Pando
-      token.
+      delivery (`read_token`), so CI clones from `clone_url` with no
+      credential of its own.
 
-      Push rules (receive-pack). The door reads the command list before the
-      pack and refuses the whole push, with git's usual
-      `! [remote rejected] <ref> (<reason>)` lines, when any command:
-      - updates or deletes the repo's default branch (`refs/heads/main`).
-        Creating it when it does not exist yet is allowed: that is the first
-        push of `pando init`;
-      - is made by an agent to a branch another identity created
-        (`branch <b> belongs to <name>`). People may push to any branch
-        except the default one.
+      Only members of the monorepo get through.
+
+      Push rule (receive-pack). The door reads the command list before the
+      pack. If any command updates or deletes the repo's default branch
+      (`refs/heads/main`), it refuses the whole push with git's usual
+      `! [remote rejected] main (main is protected; ...)` line. Creating main
+      when it does not exist yet is allowed: that is the first push of
+      `pando init`. Main moves only by a merge.
 
       The door records each pushed branch's head and, on its first push, its
-      creator. Then it delivers the `branch.opened` and `push` hooks.
+      author (the user). Then it delivers the `branch.opened` and `push`
+      hooks.
 paths:
-  /v1/monorepos:
+  /v1/users:
     post:
-      operationId: createMonorepo
-      summary: Create a monorepo and its first person token (bootstrap secret only)
-      tags: [monorepos]
+      operationId: createUser
+      summary: Make a user and a first credential (bootstrap secret only, until sign-in exists)
+      tags: [users]
       security:
         - bootstrap: []
       requestBody:
@@ -108,7 +116,111 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, person]
+              required: [login]
+              properties:
+                login: { $ref: "#/components/schemas/Login" }
+                name: { type: string, description: A display name. }
+                email: { type: string, description: Used on merge commits. }
+                credential_name: { type: string, description: "A name for the first credential, for example the machine name. Default `bootstrap`." }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, credential]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  credential: { $ref: "#/components/schemas/NewCredential" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503":
+          description: "`bootstrap_not_configured`: the PANDO_BOOTSTRAP secret is not set."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/user:
+    get:
+      operationId: me
+      summary: The user behind the credential, and the credential itself
+      tags: [users]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/User"
+                  - type: object
+                    required: [credential]
+                    properties:
+                      credential: { $ref: "#/components/schemas/Credential" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/user/credentials:
+    post:
+      operationId: createCredential
+      summary: Make a credential for this user (another machine, a cloud sandbox)
+      description: The new credential acts as the same user. Its secret is shown once.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, description: "The machine or sandbox, for example `ramos-mbp` or `sandbox-agent-3`." }
+                kind: { type: string, enum: [machine, sandbox], default: machine }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewCredential" }
+    get:
+      operationId: listCredentials
+      summary: This user's credentials (no secrets)
+      tags: [users]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items: { $ref: "#/components/schemas/Credential" }
+  /v1/user/credentials/{credential_id}:
+    parameters:
+      - name: credential_id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: revokeCredential
+      summary: Revoke one of this user's credentials
+      tags: [users]
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos:
+    post:
+      operationId: createMonorepo
+      summary: Create a monorepo; the caller becomes its owner
+      tags: [monorepos]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
               properties:
                 name: { $ref: "#/components/schemas/Name" }
                 kind:
@@ -120,12 +232,6 @@ paths:
                     (`<name>--meta`, empty); add code repos with createRepo.
                     `repo`: a plain git repo; Pando makes its one repo (path `.`,
                     name = the monorepo's name) and returns it in `repos`.
-                person:
-                  type: string
-                  description: Name of the person who gets the first token.
-                email:
-                  type: string
-                  description: The person's email, used on merge commits.
       responses:
         "201":
           description: Created
@@ -133,84 +239,19 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [monorepo, token, repos]
+                required: [monorepo, repos]
                 properties:
                   monorepo: { $ref: "#/components/schemas/Monorepo" }
-                  token: { $ref: "#/components/schemas/NewToken" }
                   repos:
                     type: array
                     description: The plain repo for kind `repo`; empty for kind `monorepo`.
                     items: { $ref: "#/components/schemas/Repo" }
         "401": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
-        "503":
-          description: "`bootstrap_not_configured`: the PANDO_BOOTSTRAP secret is not set."
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}:
-    parameters:
-      - $ref: "#/components/parameters/monorepo"
     get:
-      operationId: getMonorepo
-      summary: Get a monorepo
+      operationId: listMonorepos
+      summary: The monorepos this user belongs to
       tags: [monorepos]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Monorepo" }
-        "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/me:
-    parameters:
-      - $ref: "#/components/parameters/monorepo"
-    get:
-      operationId: whoAmI
-      summary: The identity behind the token
-      tags: [tokens]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Identity" }
-        "401": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/tokens:
-    parameters:
-      - $ref: "#/components/parameters/monorepo"
-    post:
-      operationId: createToken
-      summary: Make a token for a person or an agent (people, or the bootstrap secret)
-      tags: [tokens]
-      security:
-        - pandoToken: []
-        - bootstrap: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, role]
-              properties:
-                name:
-                  type: string
-                  description: Who the token is, for example `ramos` or `agent-3`. Branch ownership is by this name.
-                role: { $ref: "#/components/schemas/Role" }
-                email:
-                  type: string
-      responses:
-        "201":
-          description: Created. `token` is shown once.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/NewToken" }
-        "403": { $ref: "#/components/responses/Error" }
-    get:
-      operationId: listTokens
-      summary: List tokens (no secrets; people only)
-      tags: [tokens]
       responses:
         "200":
           description: OK
@@ -218,31 +259,87 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [tokens]
+                required: [monorepos]
                 properties:
-                  tokens:
+                  monorepos:
                     type: array
-                    items: { $ref: "#/components/schemas/Token" }
-  /v1/monorepos/{monorepo}/tokens/{token_id}:
+                    items: { $ref: "#/components/schemas/Monorepo" }
+  /v1/monorepos/{monorepo}:
     parameters:
       - $ref: "#/components/parameters/monorepo"
-      - name: token_id
+    get:
+      operationId: getMonorepo
+      summary: Get a monorepo (members)
+      tags: [monorepos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Monorepo" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/members:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listMembers
+      summary: The monorepo's members
+      tags: [monorepos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+  /v1/monorepos/{monorepo}/members/{login}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - name: login
         in: path
         required: true
-        schema: { type: string }
-    delete:
-      operationId: revokeToken
-      summary: Revoke a token (people only)
-      tags: [tokens]
+        schema: { $ref: "#/components/schemas/Login" }
+    put:
+      operationId: putMember
+      summary: Add a user to the monorepo, or change their role (owners)
+      tags: [monorepos]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/MemberRole" }
       responses:
-        "204": { description: Revoked }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: removeMember
+      summary: Remove a user from the monorepo (owners; the last owner stays)
+      tags: [monorepos]
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{monorepo}/repos:
     parameters:
       - $ref: "#/components/parameters/monorepo"
     post:
       operationId: createRepo
-      summary: Create a repo in a monorepo (people only)
+      summary: Create a repo in a monorepo
       description: |
         Makes the Artifacts repo and records it. It starts empty; the first
         push to `main` through the door (`pando init`) creates main. Refused
@@ -336,8 +433,8 @@ paths:
       summary: Create a branch on the server, off main by default
       description: |
         Points a new branch at `from` (default: main's head) with no new
-        commit. The caller becomes the branch's author, so an agent owns the
-        branch it creates. 409 `branch_exists` if it exists.
+        commit. The caller becomes the branch's author. 409 `branch_exists` if
+        it exists.
       tags: [branches]
       requestBody:
         required: true
@@ -376,7 +473,7 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateBranch
-      summary: Set the branch's title and description (its creator, or a person)
+      summary: Set the branch's title and description
       description: The merge commit's message is the title and description.
       tags: [branches]
       requestBody:
@@ -458,7 +555,7 @@ paths:
       - $ref: "#/components/parameters/branch"
     post:
       operationId: createReview
-      summary: Review a branch (agents comment; only a person approves)
+      summary: Review a branch (a comment or an approval; not a gate)
       tags: [reviews]
       requestBody:
         required: true
@@ -484,11 +581,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Review" }
-        "403":
-          description: "`approval_requires_person`: an agent sent `approve`."
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
     get:
       operationId: listReviews
       summary: The branch's reviews, oldest first
@@ -512,10 +604,11 @@ paths:
       - $ref: "#/components/parameters/branch"
     post:
       operationId: mergeBranch
-      summary: Land the branch on the default branch with a merge commit (people only)
+      summary: Land the branch on the default branch with a merge commit (any member)
       description: |
-        A person's Merge is the approval. Merges in one monorepo run one at a
-        time. The gate: every required check (the repo's `required_checks`;
+        Any member may merge, agents included (like `gh pr merge`). Reviews
+        are not a gate. Merges in one repo run one at a time. The merge commit
+        is authored as the user. The gate: every required check (the repo's `required_checks`;
         with none set, every reported context) is `success` on the branch
         head. `force=1` merges past red or missing checks, and the merge is
         recorded as forced.
@@ -542,11 +635,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MergeResult" }
-        "403":
-          description: "`merge_requires_person`"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
         "409":
           description: "`conflict` (with `paths`: files changed differently on both sides; merge the default branch into the branch, push, and merge again), `head_moved`, or `ref_moved` (retry)."
           content:
@@ -642,7 +730,7 @@ paths:
       - $ref: "#/components/parameters/repo"
     post:
       operationId: createHook
-      summary: Register a hook (people only)
+      summary: Register a hook (owners)
       description: |
         `web`: a signed JSON POST to `url` (see `webhooks` below).
         `buildkite`: Pando calls Buildkite's create-build API,
@@ -713,7 +801,7 @@ paths:
         schema: { type: string }
     delete:
       operationId: deleteHook
-      summary: Remove a hook (people only)
+      summary: Remove a hook (owners)
       tags: [hooks]
       responses:
         "204": { description: Removed }
@@ -751,7 +839,7 @@ paths:
         schema: { type: string }
     post:
       operationId: redeliver
-      summary: Send a delivery again, as a new delivery with a fresh read token (people only)
+      summary: Send a delivery again, as a new delivery with a fresh read token (owners)
       tags: [hooks]
       responses:
         "202":
@@ -797,7 +885,7 @@ paths:
     put:
       operationId: putWorktree
       summary: Report a worktree (creates it, or replaces the one with this id)
-      description: Each call also refreshes `last_seen_at`. Only the token that first reported an id, or a person, may replace it.
+      description: Each call also refreshes `last_seen_at`.
       tags: [worktrees]
       requestBody:
         required: true
@@ -811,7 +899,7 @@ paths:
                 branch: { type: string }
                 path: { type: string, description: "The worktree path from the root (formats.md, section 1)." }
                 machine: { type: string }
-                agent: { type: [string, "null"], description: "The agent working in it, if any." }
+                agent: { type: [string, "null"], description: "The agent working in it, if any (PANDO_AGENT)." }
                 kind: { type: string, enum: [fuse, sparse, fskit] }
       responses:
         "200":
@@ -833,7 +921,7 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: removeWorktree
-      summary: Remove a worktree from the registry (whoever reported it, or a person)
+      summary: Remove a worktree from the registry
       tags: [worktrees]
       responses:
         "204": { description: Removed }
@@ -857,10 +945,10 @@ webhooks:
         "200": { description: Any 2xx counts as delivered. }
 components:
   securitySchemes:
-    pandoToken:
+    credential:
       type: http
       scheme: bearer
-      description: A Pando token (`pando_...`).
+      description: "A user's credential (`pando_` and 40 hex characters). Git sends it as the Basic password."
     bootstrap:
       type: http
       scheme: bearer
@@ -892,11 +980,15 @@ components:
   schemas:
     Name:
       type: string
-      pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name: letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. `v1` and `healthz` are reserved."
-    Role:
+      pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
+      description: "A monorepo name: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. `v1` and `healthz` are reserved."
+    Login:
       type: string
-      enum: [person, agent]
+      pattern: "^[a-z0-9](?:[a-z0-9]|-(?!-)){0,38}$"
+      description: A user's login, GitHub's rules in lower case.
+    MemberRole:
+      type: string
+      enum: [owner, member]
     Error:
       type: object
       required: [error]
@@ -917,36 +1009,42 @@ components:
       properties:
         name: { type: string }
         kind: { type: string, enum: [monorepo, repo] }
+        role: { $ref: "#/components/schemas/MemberRole" }
         created_at: { type: string, format: date-time }
-    Identity:
+    User:
       type: object
-      required: [monorepo, name, role, token_id]
+      required: [login, created_at]
       properties:
-        monorepo: { type: string }
-        name: { type: string }
-        role: { $ref: "#/components/schemas/Role" }
-        email: { type: string }
-        token_id: { type: string }
-    Token:
+        login: { type: string }
+        name: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+    Credential:
       type: object
-      required: [id, name, role, created_at]
+      required: [id, name, kind, created_at]
       properties:
         id: { type: string }
         name: { type: string }
-        role: { $ref: "#/components/schemas/Role" }
-        email: { type: string }
+        kind: { type: string, enum: [machine, sandbox, bootstrap] }
         created_at: { type: string, format: date-time }
-        created_by: { type: string }
         last_used_at: { type: [string, "null"], format: date-time }
-    NewToken:
+    NewCredential:
       allOf:
-        - $ref: "#/components/schemas/Token"
+        - $ref: "#/components/schemas/Credential"
         - type: object
-          required: [token]
+          required: [secret]
           properties:
-            token:
+            secret:
               type: string
-              description: The secret, `pando_` and 40 hex characters. Shown once; Pando keeps only its SHA-256.
+              description: "`pando_` and 40 hex characters. Shown once; Pando keeps only its SHA-256."
+    Member:
+      type: object
+      required: [login, role, added_at]
+      properties:
+        login: { type: string }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        added_at: { type: string, format: date-time }
+        added_by: { type: [string, "null"] }
     Repo:
       type: object
       required: [monorepo, name, path, default_branch, clone_url, created_at]
@@ -976,11 +1074,7 @@ components:
           description: The merge base with the default branch; null when there is none.
         author:
           type: [string, "null"]
-          description: The name that created the branch with its first push through the door.
-        author_role:
-          oneOf:
-            - $ref: "#/components/schemas/Role"
-            - type: "null"
+          description: The user whose first push (or createBranch) made the branch.
         title: { type: [string, "null"] }
         description: { type: [string, "null"] }
         ahead:
@@ -1100,7 +1194,7 @@ components:
         body: { type: string }
     Review:
       type: object
-      required: [id, branch, head, verdict, author, author_role, created_at]
+      required: [id, branch, head, verdict, author, created_at]
       properties:
         id: { type: string }
         branch: { type: string }
@@ -1111,7 +1205,6 @@ components:
           type: array
           items: { $ref: "#/components/schemas/ReviewComment" }
         author: { type: string }
-        author_role: { $ref: "#/components/schemas/Role" }
         created_at: { type: string, format: date-time }
     MergeResult:
       type: object
@@ -1174,7 +1267,7 @@ components:
         machine: { type: string }
         agent: { type: [string, "null"] }
         kind: { type: string, enum: [fuse, sparse, fskit] }
-        reported_by: { type: string, description: The token name that reported it. }
+        reported_by: { type: string, description: The user whose credential reported it. }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
     HookPayload:
@@ -1193,8 +1286,8 @@ components:
         base: { type: [string, "null"], description: The merge base with the default branch. }
         title: { type: [string, "null"] }
         description: { type: [string, "null"] }
-        author: { type: [string, "null"], description: The branch's creator. }
-        pusher: { type: string, description: "Who pushed; for `merged`, who merged." }
+        author: { type: [string, "null"], description: The branch's author (a user). }
+        pusher: { type: string, description: "The user who pushed; for `merged`, who merged." }
         merge_commit: { type: string, description: Only for `merged`. }
         diff_url: { type: string }
         clone_url: { type: string, description: The git door URL. Clone it with `read_token`. }
@@ -1204,4 +1297,4 @@ components:
         read_token_expires_at: { type: string, format: date-time }
         status_url:
           type: string
-          description: "`POST` a commit status here for `head` (needs a Pando token)."
+          description: "`POST` a commit status here for `head` (needs a member's credential)."

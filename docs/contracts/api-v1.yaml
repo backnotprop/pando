@@ -61,6 +61,18 @@ info:
     token. A user's login comes from their email (`ana@x.com` is `ana`, or
     `ana-2` if taken). Invites by email wait until that email first signs in.
 
+    In a browser: `GET /v1/login/browser?return_to=<path>` sends the person to
+    AuthKit's page; WorkOS sends them back to `/v1/login/callback`, which sets
+    the session cookie `__Host-pando_session` (HttpOnly, Secure,
+    SameSite=Lax, host-only) and returns them to `return_to` (a path on this
+    host, else `/`). The session is a credential of kind `browser` for the
+    same Pando user, so it sees the same monorepos. It works on `/v1` only:
+    never as a Bearer token and never at the git door. With the cookie, a
+    write (any method but GET and HEAD) or a WebSocket upgrade must carry
+    `Origin` equal to Pando's own origin, else 403 `bad_origin`. A session
+    ends after 30 days without use, on sign-out (`POST /v1/logout`, which also
+    ends the WorkOS session), or when revoked.
+
     Self-hosted, one person: the Worker secret `PANDO_BOOTSTRAP` makes users
     with `POST /v1/users` (it works there only). Either way, a user then makes
     more credentials (`POST /v1/user/credentials`) and monorepos
@@ -84,6 +96,7 @@ servers:
         default: example
 security:
   - credential: []
+  - session: []
 tags:
   - name: git
     description: |
@@ -245,6 +258,59 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/login/browser:
+    get:
+      operationId: loginBrowser
+      summary: Sign in a browser (redirects to AuthKit)
+      tags: [users]
+      security: []
+      parameters:
+        - name: return_to
+          in: query
+          description: A path on this host to come back to. Anything else becomes `/`.
+          schema: { type: string, default: / }
+      responses:
+        "302": { description: "To AuthKit's sign-in page, with a 10-minute `__Host-pando_login` cookie holding state and the PKCE verifier." }
+  /v1/login/callback:
+    get:
+      operationId: loginCallback
+      summary: Where AuthKit sends the browser back (sets the session cookie)
+      tags: [users]
+      security: []
+      responses:
+        "302": { description: "To `return_to`, with `__Host-pando_session` set." }
+        "400":
+          description: "`bad_state` (no matching sign-in, or older than 10 minutes) or `sign_in_failed`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/logout:
+    get:
+      operationId: logoutPage
+      summary: A one-button page that posts to /v1/logout
+      tags: [users]
+      security: []
+      responses:
+        "200": { description: HTML }
+    post:
+      operationId: logout
+      summary: Sign out this browser (and end its WorkOS session)
+      description: Revokes the session in the cookie, clears the cookie, and sends the browser to WorkOS's logout URL, which returns to `/`. Needs `Origin` equal to Pando's own.
+      tags: [users]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: "With `Accept: application/json`."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed_out: { type: boolean }
+                  logout_url: { type: string, description: Open this to end the WorkOS session too. }
+        "303": { description: To WorkOS's logout URL (a form post). }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/user:
     get:
       operationId: me
@@ -398,6 +464,45 @@ paths:
         "204": { description: Deleted }
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/heads:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: heads
+      summary: Every code repo's main head (for followers; no Artifacts read)
+      description: |
+        Main as Pando last moved it: by the first push through the door, or by
+        a merge. Answered from the monorepo object's records. A repo made
+        before Pando kept heads is read once from Artifacts and kept. `head` is
+        null for an empty repo. The meta layer's repo is not listed.
+
+        A follower (`pando worktree follow`) calls this on connect, then opens
+        `GET /v1/monorepos/{m}/events?topics=main&since=<seq>` (WebSocket) to
+        hear each move, and calls it again every few minutes as a safety net.
+      tags: [repos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heads, seq]
+                properties:
+                  heads:
+                    type: array
+                    items:
+                      type: object
+                      required: [repo, path, default_branch, head, updated_at]
+                      properties:
+                        repo: { type: string, description: The repo's name in URLs. }
+                        path: { type: string }
+                        default_branch: { type: string }
+                        head: { type: [string, "null"] }
+                        updated_at: { type: [string, "null"], format: date-time }
+                  seq:
+                    type: [integer, "null"]
+                    description: The event stream's newest seq when this was read; resume the socket from it. Null when the stream is off.
   /v1/monorepos/{monorepo}/events:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -439,9 +544,17 @@ paths:
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
         latest `limit` with no `since`. With `Upgrade: websocket`: events after
-        `?since=` (at most 500, else one `resync` frame), then
-        `{"type": "caught_up", "head"}`, then live `{"type": "event", ...}`
-        frames. The text `ping` gets `pong`. Set `EVENT_STREAM` false in
+        `?since=` (at most 500, else one `{"type": "resync", "seq",
+        "oldest_seq"}` frame: refetch, then resume from `seq`), then
+        `{"type": "caught_up", "seq"}`, then live `{"type": "event", "seq", ...}`
+        frames. The text `ping` gets `pong`. Close code 4404: the monorepo was
+        deleted.
+
+        Numbers and shas: `seq`, `oldest_seq` are stream sequence numbers. In
+        an event, `head` and `before` (push and default_head events) are commit
+        shas. caught_up, resync and the JSON page also carry `head` and
+        `oldest` with the same numbers as `seq` and `oldest_seq`, for one
+        deploy only (2026-10-03); read `seq`. Set `EVENT_STREAM` false in
         worker/src/monorepo/stream.ts and it answers 501 `event_stream_on_hold`.
       tags: [monorepos]
       parameters:
@@ -461,13 +574,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [events, head, oldest, resync]
+                required: [events, seq, oldest_seq, resync]
                 properties:
                   events:
                     type: array
                     items: { $ref: "#/components/schemas/Event" }
-                  head: { type: integer }
-                  oldest: { type: integer }
+                  seq: { type: integer, description: "The newest event's seq (0 when none)." }
+                  oldest_seq: { type: integer, description: The oldest kept. }
+                  head: { type: integer, deprecated: true, description: "Old name of seq, for one deploy." }
+                  oldest: { type: integer, deprecated: true, description: "Old name of oldest_seq, for one deploy." }
                   resync: { type: boolean, description: "True when `since` is not in the stream; refetch everything." }
         "101": { description: The WebSocket. }
         "501":
@@ -671,7 +786,16 @@ paths:
     get:
       operationId: listBranches
       summary: List branches with head, base, author, ahead and behind, mergeable and checks
-      description: The default branch is not in the list; its name and head are at the top.
+      description: |
+        Answered at once from stored facts. `ahead`, `behind`, `base` and
+        `mergeable` are computed on change, by a queue: when a branch is
+        pushed, and in a sweep when main moves (the 100 open branches pushed
+        most recently in the last 7 days). Until a row's facts are for the
+        current main and head it is `stale: true`, with `mergeable: "pending"`
+        and `last_mergeable`; a `branch.updated` event brings the fresh row. A
+        list computes at most 25 rows itself, those stale for over 30 s (a
+        branch no sweep reaches). The default branch is not in the list; its
+        name and head are at the top.
       tags: [branches]
       parameters:
         - name: state
@@ -680,6 +804,13 @@ paths:
             type: string
             enum: [open, merged, all]
             default: open
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: cursor
+          in: query
+          description: "`next_cursor` from the previous page."
+          schema: { type: string }
       responses:
         "200":
           description: OK
@@ -687,7 +818,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [default_branch, default_head, branches]
+                required: [default_branch, default_head, branches, next_cursor]
                 properties:
                   default_branch: { type: string }
                   default_head:
@@ -696,6 +827,7 @@ paths:
                   branches:
                     type: array
                     items: { $ref: "#/components/schemas/Branch" }
+                  next_cursor: { type: [string, "null"], description: "Pass as `cursor` for the next page; null on the last." }
     post:
       operationId: createBranch
       summary: Create a branch on the server, off main by default
@@ -735,7 +867,7 @@ paths:
       - $ref: "#/components/parameters/branch"
     get:
       operationId: getBranch
-      summary: One branch, as in the list
+      summary: One branch, as in the list (computes its facts first when stale)
       tags: [branches]
       responses:
         "200":
@@ -1279,6 +1411,11 @@ components:
       type: http
       scheme: bearer
       description: "A user's credential (`pando_` and 40 hex characters). Git sends it as the Basic password."
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-pando_session
+      description: A browser session (kind browser), set by /v1/login/callback. /v1 only; writes need Pando's own Origin.
     bootstrap:
       type: http
       scheme: bearer
@@ -1355,9 +1492,10 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [machine, sandbox, bootstrap] }
+        kind: { type: string, enum: [machine, sandbox, bootstrap, browser] }
         created_at: { type: string, format: date-time }
         last_used_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time, description: "Browser sessions only: the end unless used before then (each use pushes it to 30 days)." }
     NewCredential:
       allOf:
         - $ref: "#/components/schemas/Credential"
@@ -1469,8 +1607,11 @@ components:
           description: Commits on the default branch that are not on the branch.
         mergeable:
           type: string
-          enum: [clean, conflicts, up_to_date, unknown]
-          description: From the merge engine's dry run. `up_to_date` means the branch adds nothing.
+          enum: [clean, conflicts, up_to_date, unknown, pending]
+          description: "From the merge engine's dry run. `up_to_date`: the branch adds nothing. `pending`: not yet computed for the current main and head (see `last_mergeable`)."
+        stale: { type: boolean, description: "True while ahead, behind, base and mergeable are not yet for the current main and head." }
+        last_mergeable: { type: [string, "null"], description: "When stale: the last known mergeable answer." }
+        facts_at: { type: [string, "null"], format: date-time, description: When the facts were computed. }
         checks: { $ref: "#/components/schemas/Checks" }
         state:
           type: string

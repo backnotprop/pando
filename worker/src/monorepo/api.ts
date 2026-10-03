@@ -8,6 +8,8 @@ import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
+import type { BranchList } from "./views";
+import { computeFacts, INLINE_MAX, SWEEP_PARALLEL } from "./facts";
 import { EVENT_STREAM, parseTopics } from "./stream";
 import {
   artifactsRepoName,
@@ -23,7 +25,7 @@ import {
 import type { MonorepoObject } from "./object";
 import { hashToken, monorepoStub, newToken } from "./session";
 import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoEvent, RepoRecord, StatusRecord } from "./types";
-import { accounts, authenticate, forgetCachedAuth, identityOf, requireSecret } from "../accounts/auth";
+import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
 
 type Stub = DurableObjectStub<MonorepoObject>;
@@ -124,8 +126,8 @@ async function createArtifactsRepo(env: Env, name: string, description: string):
 
 type UserVars = { auth: Auth };
 const userAuthed = async (c: Context<{ Bindings: Env; Variables: Vars & UserVars }>, next: () => Promise<void>) => {
-  const auth = await authenticate(c.env, requireSecret(c.req.raw), null);
-  if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
+  const auth = await authenticateRequest(c.env, c.req.raw, null);
+  if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
   c.set("auth", auth);
   await next();
 };
@@ -210,8 +212,8 @@ api.route("/", users);
 const authed = async (c: C, next: () => Promise<void>) => {
   const m = c.req.param("m")!;
   if (!validMonorepoName(m)) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-  const auth = await authenticate(c.env, requireSecret(c.req.raw), m);
-  if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
+  const auth = await authenticateRequest(c.env, c.req.raw, m);
+  if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
   if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m}`);
   if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${m}`);
   c.set("m", m);
@@ -259,6 +261,29 @@ api.delete("/v1/monorepos/:m", async (c) => {
   await accounts(c.env).releaseMonorepo(m);
   forgetCachedAuth();
   return c.body(null, 204);
+});
+
+// ── Heads: every repo's main, for followers ───────────────────────────────
+
+api.get("/v1/monorepos/:m/heads", async (c) => {
+  const stub = c.get("stub");
+  const heads = await stub.heads();
+  // A repo made before Pando kept heads: read it once from Artifacts and keep it.
+  const unknown = heads.filter((h) => h.head === null);
+  if (unknown.length) {
+    await views.pool(unknown, 4, async (h) => {
+      const r = await stub.getRepo(h.repo);
+      if (!r) return;
+      const sha = branchesOf(await listRefs(c.env, r).catch(() => new Map<string, string>())).get(r.default_branch) ?? null;
+      if (sha) {
+        h.head = sha;
+        await stub.rememberHead(h.repo, sha);
+      }
+    });
+  }
+  // `seq`: open the event socket with ?since=<seq>&topics=main to miss nothing after this answer.
+  const seq = EVENT_STREAM ? await stub.eventHead() : null;
+  return c.json({ heads, seq });
 });
 
 // ── The event stream ──────────────────────────────────────────────────────
@@ -365,24 +390,56 @@ api.get("/v1/monorepos/:m/repos/:r", async (c) => {
 
 // ── Branches ──────────────────────────────────────────────────────────────
 
-/** The branch rows for one repo, read through this request's monorepo object. */
-function branchViews(c: C, r: RepoRecord, names: string[] | null, state: string) {
+/**
+ * The branch rows for one repo: stored facts from the monorepo object, at
+ * once. Rows stale past the grace period are computed here, at most `inline`
+ * of them (facts.ts), and read again.
+ */
+async function branchViews(
+  c: C,
+  r: RepoRecord,
+  names: string[] | null,
+  state: string,
+  o: { limit?: number; cursor?: string | null; inline?: number; graceMs?: number } = {},
+): Promise<BranchList> {
   const stub = c.get("stub");
-  return views.branchViews(
-    c.env,
-    c.get("info"),
-    { records: (repo) => stub.branchRecords(repo), statuses: (repo, sha) => stub.statuses(repo, sha) },
-    r,
-    names,
-    state as "open" | "merged" | "all",
-  );
+  let main = await stub.currentMain(r.name);
+  if (main === null) {
+    // A repo made before Pando kept heads: read main once and keep it.
+    main = branchesOf(await listRefs(c.env, r).catch(() => new Map<string, string>())).get(r.default_branch) ?? null;
+    if (main) await stub.rememberHead(r.name, main);
+  }
+  const required = await requiredChecks(c.env, c.get("info"), r);
+  const ask = { names: names ?? undefined, state: state as "open" | "merged" | "all", limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
+  let list = (await stub.branchRows(r.name, ask)) as BranchList;
+  const due = list.due.slice(0, o.inline ?? INLINE_MAX);
+  if (due.length && main) {
+    const heads = new Map(list.branches.map((b) => [b.name, b.head]));
+    const m = main;
+    await withRepo(c.env, r.artifacts_name, async (repo) => {
+      const read = commitReader(repo);
+      await views.pool(due, SWEEP_PARALLEL, async (name) => {
+        try {
+          const f = await computeFacts(c.env, r, m, heads.get(name)!, read);
+          await stub.writeFacts(r.name, name, f, required);
+        } catch (err) {
+          if (!(err instanceof views.MainMoved)) throw err; // main moved: the row stays pending
+        }
+      });
+    });
+    list = (await stub.branchRows(r.name, ask)) as BranchList;
+  }
+  return list;
 }
 
 api.get("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   const r = await repoOf(c);
   const state = c.req.query("state") ?? "open";
   if (!["open", "merged", "all"].includes(state)) bad("state is open, merged or all");
-  return c.json(await branchViews(c, r, null, state));
+  const limit = Number(c.req.query("limit") ?? "100");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) bad("limit is 1 to 500");
+  const { due: _due, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
+  return c.json(list);
 });
 
 api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
@@ -408,7 +465,7 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   const stub = c.get("stub");
   const events = await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
   c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
-  const view = (await branchViews(c, r, [b.name], "all")).branches[0];
+  const view = (await branchViews(c, r, [b.name], "all", { inline: 1, graceMs: 0 })).branches[0];
   return c.json(view, 201);
 });
 
@@ -440,7 +497,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
   const r = await repoOf(c);
   const method = c.req.method;
   if (rest === "" && method === "GET") {
-    const v = (await branchViews(c, r, [branch], "all")).branches[0];
+    const v = (await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0];
     if (!v) throw new HttpError(404, "not_found", `no branch ${branch}`);
     return c.json(v);
   }
@@ -453,7 +510,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
     unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head, c.get("identity")));
-    return c.json((await branchViews(c, r, [branch], "all")).branches[0]);
+    return c.json((await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0]);
   }
   if (rest === "" && method === "DELETE") return deleteBranch(c, r, branch);
   if (rest === "diff" && method === "GET") return diff(c, r, branch);

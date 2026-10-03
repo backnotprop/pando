@@ -74,7 +74,8 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   }
 
   const auth = await authenticate(env, secret, monorepo);
-  if (!auth) return unauthorized();
+  // A browser session never works at the git door (it only travels as the /v1 cookie).
+  if (!auth || auth.credential.kind === "browser") return unauthorized();
   if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${monorepo}`);
   if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${monorepo}`);
   const identity = { ...identityOf(auth), agent: agentHeader(req) };

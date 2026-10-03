@@ -23,7 +23,7 @@ import {
 import type { MonorepoObject } from "./object";
 import { hashToken, monorepoStub, newToken } from "./session";
 import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoEvent, RepoRecord, StatusRecord } from "./types";
-import { accounts, authenticate, forgetCachedAuth, identityOf, requireSecret } from "../accounts/auth";
+import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
 
 type Stub = DurableObjectStub<MonorepoObject>;
@@ -124,8 +124,8 @@ async function createArtifactsRepo(env: Env, name: string, description: string):
 
 type UserVars = { auth: Auth };
 const userAuthed = async (c: Context<{ Bindings: Env; Variables: Vars & UserVars }>, next: () => Promise<void>) => {
-  const auth = await authenticate(c.env, requireSecret(c.req.raw), null);
-  if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
+  const auth = await authenticateRequest(c.env, c.req.raw, null);
+  if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
   c.set("auth", auth);
   await next();
 };
@@ -210,8 +210,8 @@ api.route("/", users);
 const authed = async (c: C, next: () => Promise<void>) => {
   const m = c.req.param("m")!;
   if (!validMonorepoName(m)) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-  const auth = await authenticate(c.env, requireSecret(c.req.raw), m);
-  if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
+  const auth = await authenticateRequest(c.env, c.req.raw, m);
+  if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
   if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m}`);
   if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${m}`);
   c.set("m", m);

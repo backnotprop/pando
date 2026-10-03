@@ -9,7 +9,7 @@
 import contract from "../../docs/contracts/api-v1.yaml";
 import type { Env } from "./env";
 import { errorJson, HttpError, toErrorResponse } from "./http";
-import { authenticate, requireSecret } from "./accounts/auth";
+import { authenticateRequest } from "./accounts/auth";
 import { metaRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath } from "./monorepo/door";
@@ -27,7 +27,7 @@ async function meta(request: Request, env: Env): Promise<Response> {
   try {
     const m = metaRoute(request);
     if (!m) return errorJson(404, "not_found", "no such meta layer route");
-    const auth = await authenticate(env, requireSecret(request), m);
+    const auth = await authenticateRequest(env, request, m);
     if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
     if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m}`);
     if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${m}`);
@@ -48,7 +48,7 @@ export default {
     if (url.pathname === "/healthz") return new Response("ok\n");
     if (url.pathname === "/v1/openapi.yaml") return new Response(contract, { headers: { "content-type": "application/yaml; charset=utf-8" } });
     if (isDoorPath(url.pathname)) return handleDoor(request, env, ctx);
-    if (url.pathname === "/v1/users" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
+    if (url.pathname === "/v1/users" || url.pathname === "/v1/logout" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
     if (META_RE.test(url.pathname)) return meta(request, env);
     return api.fetch(request, env, ctx);
   },

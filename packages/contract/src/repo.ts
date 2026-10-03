@@ -31,6 +31,26 @@ export const RepoList = Schema.Struct({ repos: Schema.Array(Repo) });
 
 export interface RepoList extends Schema.Schema.Type<typeof RepoList> {}
 
+/** A code repo's main as Pando last moved it (a merge, or the first push), from its own records. */
+export const RepoHead = Schema.Struct({
+  /** The repo's name in URLs. */
+  repo: RepoName,
+  path: Schema.String,
+  default_branch: Schema.String,
+  /** Main's head commit; null for an empty repo. */
+  head: Schema.NullOr(Schema.String),
+  /** That commit's title (its first line), when Pando recorded it as main moved; null when unknown. */
+  head_title: Schema.NullOr(Schema.String),
+  updated_at: Schema.NullOr(Timestamp),
+});
+
+export interface RepoHead extends Schema.Schema.Type<typeof RepoHead> {}
+
+/** GET .../heads: every code repo's main, and the event stream's seq to resume from (null when the stream is off). */
+export const HeadList = Schema.Struct({ heads: Schema.Array(RepoHead), seq: Schema.NullOr(Count) });
+
+export interface HeadList extends Schema.Schema.Type<typeof HeadList> {}
+
 export const Member = Schema.Struct({
   login: Login,
   name: Schema.NullOr(Schema.String),

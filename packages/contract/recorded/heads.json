@@ -1,0 +1,18 @@
+{
+  "schema": "HeadList",
+  "route": "GET .../heads (after the merges: main's title)",
+  "status": 200,
+  "body": {
+    "heads": [
+      {
+        "repo": "projects-web",
+        "path": "projects/web",
+        "default_branch": "main",
+        "head": "13d5a375d8f4698fb606eca2649fd12f5a215166",
+        "head_title": "Merge branch 'feat/ready'",
+        "updated_at": "2026-10-03T23:04:13.334Z"
+      }
+    ],
+    "seq": 32
+  }
+}

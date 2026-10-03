@@ -10,7 +10,7 @@ import { MonorepoEntry, MonorepoList, MonorepoSummaryList } from "./monorepo.ts"
 import { EventsPage } from "./feed.ts";
 import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { NeedsPage } from "./needs.ts";
-import { MachineList, MemberList, Repo, RepoList } from "./repo.ts";
+import { HeadList, MachineList, MemberList, Repo, RepoList } from "./repo.ts";
 import { Me, SignedOut } from "./user.ts";
 
 const query = (params: URLSearchParams): string => {
@@ -113,6 +113,9 @@ export const getMonorepo = (owner: Login, name: MonorepoName) => ({ path: monore
 
 /** GET .../repos: every code repo. */
 export const listRepos = (owner: Login, name: MonorepoName) => ({ path: `${monorepoBase(owner, name)}/repos`, response: RepoList });
+
+/** GET .../heads: every code repo's main, with its head commit's title when known (no Artifacts read). */
+export const listHeads = (owner: Login, name: MonorepoName) => ({ path: `${monorepoBase(owner, name)}/heads`, response: HeadList });
 
 /** GET .../repos/{repo}: one repo, with its required_checks. */
 export const getRepo = (owner: Login, name: MonorepoName, repo: RepoName) => ({ path: repoBase(owner, name, repo), response: Repo });

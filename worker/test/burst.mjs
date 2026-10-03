@@ -1,10 +1,11 @@
 // Parallel pushes through the door: busy refusals and throughput.
 //
-//   PANDO_URL=https://pando-dev.<subdomain>.workers.dev USE_HOME_CRED=1 ROUNDS=10 P=10 node test/burst.mjs
+//   PANDO_URL=https://pando-dev.<subdomain>.workers.dev USE_HOME_CRED=1 ROUNDS=10 P=10 MIX=20 node test/burst.mjs
 //
 // ROUNDS rounds of P real git pushes at once, each of its own new branch from
-// its own clone, into one repo. Counts Artifacts' "busy" refusals and other
-// failures, and the pushes a second through the repo. Git never reaches the
+// its own clone, into one repo. With MIX, each round also fires MIX API branch
+// creates at the same moment (the Worker's own coalesced ref writes). Counts
+// Artifacts' "busy" refusals and other failures, and the pushes a second. Git never reaches the
 // keychain; credentials are never printed; the monorepo is deleted at the end.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +15,7 @@ import { join } from "node:path";
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const ROUNDS = Number(process.env.ROUNDS ?? 10);
 const P = Number(process.env.P ?? 10);
+const MIX = Number(process.env.MIX ?? 0);
 const call = async (method, path, secret, body) => {
   const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, json: await res.json().catch(() => null) };
@@ -42,6 +44,7 @@ let made = false;
 let busy = 0;
 let other = 0;
 let total = 0;
+let mixBad = 0;
 const rates = [];
 try {
   const r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
@@ -64,19 +67,23 @@ try {
       dirs.push(d);
     }
     const t = Date.now();
+    const creates = Array.from({ length: MIX }, (_, i) => call("POST", `/v1/monorepos/${M}/repos/${M}/branches`, S, { name: `r${k}/c${i}` }));
     const res = await Promise.all(dirs.map((d, i) => push(d, url, `r${k}/a${i}`)));
     const secs = (Date.now() - t) / 1000;
+    const made = await Promise.all(creates);
+    const bad = made.filter((x) => x.status !== 201);
+    mixBad += bad.length;
     const b = res.filter((x) => !x.ok && x.busy).length;
     const o = res.filter((x) => !x.ok && !x.busy);
     busy += b;
     other += o.length;
     total += P;
     rates.push(P / secs);
-    console.log(`round ${k + 1}: ${P - b - o.length}/${P} ok, ${b} busy, ${o.length} other, ${secs.toFixed(2)} s (${(P / secs).toFixed(1)} pushes/s)${o.length ? "  " + o[0].err : ""}`);
+    console.log(`round ${k + 1}: ${P - b - o.length}/${P} ok, ${b} busy, ${o.length} other, ${secs.toFixed(2)} s (${(P / secs).toFixed(1)} pushes/s)${MIX ? `, creates ${MIX - bad.length}/${MIX} ok${bad.length ? " " + bad[0].status + " " + bad[0].json?.error?.code : ""}` : ""}${o.length ? "  " + o[0].err : ""}`);
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
   const avg = rates.reduce((a, b) => a + b, 0) / rates.length;
-  console.log(`TOTAL ${total} pushes: ${busy} busy, ${other} other failures; ${avg.toFixed(1)} pushes a second on average (rounds of ${P} at once)`);
+  console.log(`TOTAL ${total} pushes: ${busy} busy, ${other} other failures; ${avg.toFixed(1)} pushes a second on average (rounds of ${P} at once)${MIX ? `; ${ROUNDS * MIX} creates alongside, ${mixBad} failed` : ""}`);
 } finally {
   if (made) await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`, S);
   rmSync(work, { recursive: true, force: true });

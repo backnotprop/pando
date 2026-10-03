@@ -1181,8 +1181,9 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.gate.renew(key, lease);
   }
 
-  releaseWrite(key: string, lease: string): boolean {
-    return this.gate.release(key, lease);
+  /** hold: false lets the next writer in at once (door pushes); else after the release delay. */
+  releaseWrite(key: string, lease: string, hold = true): boolean {
+    return hold ? this.gate.release(key, lease) : this.gate.release(key, lease, 0);
   }
 
   gateStats(key: string): { held: number; waiting: number } {

@@ -314,6 +314,16 @@ describe("the write gate's release delay", () => {
     await next;
     expect(got - t0).toBeGreaterThanOrEqual(110);
   });
+  it("a release with no hold lets the next writer in at once", async () => {
+    const { WriteGate } = await import("../src/monorepo/gate");
+    const g = new WriteGate(1, 10_000, 5_000, 500);
+    const l1 = await g.acquire("r");
+    const next = g.acquire("r");
+    const t0 = Date.now();
+    expect(g.release("r", l1, 0)).toBe(true);
+    await next;
+    expect(Date.now() - t0).toBeLessThan(100);
+  });
   it("reads GATE_RELEASE_MS, else the default", async () => {
     const { releaseDelay, RELEASE_DELAY_MS } = await import("../src/monorepo/gate");
     expect(releaseDelay({})).toBe(RELEASE_DELAY_MS);

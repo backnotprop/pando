@@ -15,10 +15,11 @@ export const LEASE_MS = 60_000;
 /** The longest a writer waits in the queue. */
 export const WAIT_MS = 120_000;
 /**
- * A released slot is held this much longer before the next writer gets it:
+ * After the Worker's own writes (coalesced ref writes, merges, meta commits),
+ * a released slot is held this much longer before the next writer gets it:
  * Artifacts frees its own slot a moment after it answers, and a writer let in
- * at once was sometimes refused "busy" (about 1 in 40 parallel pushes).
- * GATE_RELEASE_MS overrides it.
+ * at once was sometimes refused "busy" (about 1 in 40 parallel door pushes).
+ * Door pushes release at once. GATE_RELEASE_MS overrides it.
  */
 export const RELEASE_DELAY_MS = 200;
 
@@ -96,17 +97,17 @@ export class WriteGate {
   }
 
   /**
-   * End a lease and let the next writer in, after the release delay (the slot
-   * stays taken until then). False if it already ended.
+   * End a lease and let the next writer in after holdMs (the slot stays taken
+   * until then; the gate's release delay unless given). False if it already ended.
    */
-  release(key: string, lease: string): boolean {
+  release(key: string, lease: string, holdMs = this.releaseDelayMs): boolean {
     const g = this.gates.get(key);
     const t = g?.held.get(lease);
     if (!g || !t || this.releasing.has(lease)) return false;
     clearTimeout(t);
-    if (this.releaseDelayMs > 0) {
+    if (holdMs > 0) {
       this.releasing.add(lease);
-      g.held.set(lease, setTimeout(() => this.free(key, lease), this.releaseDelayMs));
+      g.held.set(lease, setTimeout(() => this.free(key, lease), holdMs));
       return true;
     }
     this.free(key, lease);

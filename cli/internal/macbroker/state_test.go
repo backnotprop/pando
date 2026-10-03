@@ -37,8 +37,8 @@ func TestStateFrom(t *testing.T) {
 		{"turned off", line("-"), enabledList(ExtensionID), false, "is off"},
 		{"list unreadable, plus", line("+"), nil, true, ""},
 		{"list unreadable, no choice", line(" "), nil, false, "is off"},
-		{"not registered", "", enabledList(ExtensionID), false, "Pando.app is not installed"},
-		{"another plugin", "+    ai.plannotator.pando.extension.other(1)\t/x/Other.app/Contents/Extensions/O.appex\n", enabledList(ExtensionID), false, "not installed"},
+		{"not registered", "", enabledList(ExtensionID), false, "pluginkit -a /Applications/Pando.app"},
+		{"another plugin", "+    ai.plannotator.pando.extension.other(1)\t/x/Other.app/Contents/Extensions/O.appex\n", enabledList(ExtensionID), false, "does not list"},
 	}
 	for _, tc := range cases {
 		st := stateFrom(tc.pluginkit, tc.list, none)

@@ -12,7 +12,9 @@ import (
 	"time"
 )
 
-// SettingsPath is where a person turns the extension on.
+// SettingsPath is where a person turns the extension on. On macOS 26.3 the
+// switch only works with the list shown By Category, from the info button
+// next to File System Extensions.
 const SettingsPath = "System Settings > General > Login Items & Extensions > File System Extensions"
 
 // State says whether this Mac can mount worktrees through Pando's FSKit
@@ -55,9 +57,9 @@ func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 func stateFrom(pluginkit string, list []byte, exists func(string) bool) State {
 	flag, app, found := parsePluginkit(pluginkit, exists)
 	if !found {
-		return State{Why: "Pando.app is not installed: put it in Applications and open it once"}
+		return State{Why: "macOS does not list the Pando extension: put Pando.app in Applications and open it once (after replacing the app, run pluginkit -a /Applications/Pando.app/Contents/Extensions/PandoExtension.appex), then turn on Pando in " + SettingsPath}
 	}
-	off := State{App: app, Why: "the Pando file system extension is off: turn on Pando in " + SettingsPath}
+	off := State{App: app, Why: "the Pando file system extension is off: turn on Pando in " + SettingsPath + " (show the list By Category, click the info button; replacing Pando.app turns it off again)"}
 	if flag == '-' || flag == '!' {
 		return off
 	}

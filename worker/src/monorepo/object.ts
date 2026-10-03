@@ -1086,6 +1086,11 @@ export class MonorepoObject extends DurableObject<Env> {
     this.factsOut.add(m as Omit<FactsMessage, "monorepo">);
   }
 
+  /** Tests only (HOOKS_TEST=1): die after the next delivery's call answers, before recording it. */
+  testHooksOutbox(set: { crash?: boolean } = {}) {
+    return this.hooksOut.test(set);
+  }
+
   /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */
   testFactsOutbox(set: { fail?: number } = {}) {
     return this.factsOut.test(set);

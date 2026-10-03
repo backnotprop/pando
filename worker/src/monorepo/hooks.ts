@@ -225,3 +225,14 @@ export function wants(hook: HookRow, e: RepoEvent): boolean {
   if (hook.type === "buildkite" && e.head === ZERO) return false;
   return true;
 }
+
+/** Tests only (HOOKS_TEST=1, the bootstrap secret): POST /v1/_hooks/test {monorepo, crash}. */
+export async function hooksTestRoute(request: Request, env: Env): Promise<Response> {
+  if (env.HOOKS_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+  const { credential } = await import("../http");
+  const { isBootstrap } = await import("./session");
+  if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
+  const b = request.method === "POST" ? ((await request.json().catch(() => ({}))) as { monorepo?: string; crash?: boolean }) : {};
+  if (!b.monorepo) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+  return Response.json(await env.MONOREPO.getByName(b.monorepo).testHooksOutbox(b.crash === undefined ? {} : { crash: b.crash }));
+}

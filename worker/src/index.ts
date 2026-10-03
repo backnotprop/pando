@@ -21,6 +21,7 @@ import { objectsClient } from "./objects";
 import { monorepoStub } from "./monorepo/session";
 import { signin } from "./accounts/signin";
 import { factsTestRoute } from "./monorepo/facts";
+import { hooksTestRoute } from "./monorepo/hooks";
 import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
 import type { FeedMessage } from "./feed/shape";
@@ -97,6 +98,7 @@ export default {
     if (META_RE.test(url.pathname)) return meta(request, env);
     if (isFeedPath(url.pathname)) return handleFeed(request, env);
     if (url.pathname === "/v1/_facts/test") return factsTestRoute(request, env);
+    if (url.pathname === "/v1/_hooks/test") return hooksTestRoute(request, env);
     if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
     return api.fetch(request, env, ctx);
   },

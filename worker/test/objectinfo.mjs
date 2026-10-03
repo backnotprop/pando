@@ -53,6 +53,9 @@ try {
   writeFileSync(join(src, "empty.txt"), "");
   writeFileSync(join(src, "a/b/deep.txt"), "x".repeat(12345));
   writeFileSync(join(src, "big.bin"), Buffer.alloc(2 << 20, 7));
+  // 302 more small files, for requests over the 100-variable SQL limit.
+  mkdirSync(join(src, "many"));
+  for (let i = 0; i < 302; i++) writeFileSync(join(src, "many", `f${i}.txt`), `file ${i}\n`.repeat(i + 1));
   git(["init", "-q"], src);
   git(["add", "-A"], src);
   git(["commit", "-qm", "files"], src);
@@ -63,7 +66,7 @@ try {
   check("git ls-remote (v2) sees object-info advertised", ls.ok && /git< object-info/.test(ls.err), ls.ok ? "" : ls.err.slice(-200));
 
   // 2. The door's reply equals git upload-pack's own reply.
-  const blobs = git(["ls-tree", "-r", "HEAD"], src).out.toString().trim().split("\n").map((l) => l.split(/\s+/)[2]);
+  const blobs = git(["ls-tree", "-r", "HEAD", "--", "README.md", "empty.txt", "a", "big.bin"], src).out.toString().trim().split("\n").map((l) => l.split(/\s+/)[2]);
   const ghost = "0123456789abcdef0123456789abcdef01234567";
   const request = Buffer.concat([
     pkt("command=object-info\n"), pkt("agent=git/2.50.1\n"), pkt("object-format=sha1\n"), Buffer.from("0001"),
@@ -90,6 +93,20 @@ try {
   check("a second ask is answered from the size index", again.bytes.equals(ref), `cold ${cold} ms, warm ${Date.now() - t1} ms`);
   const gz = await post(gzipSync(request), { "content-encoding": "gzip" });
   check("a gzipped request gets the same reply", gz.bytes.equals(ref));
+
+  // 2b. More oids than one SQL statement can bind (302), cold and warm.
+  const many = git(["ls-tree", "-r", "HEAD", "many"], src).out.toString().trim().split("\n").map((l) => l.split(/\s+/)[2]);
+  const bigRequest = Buffer.concat([
+    pkt("command=object-info\n"), pkt("object-format=sha1\n"), Buffer.from("0001"),
+    pkt("size\n"), ...many.map((o) => pkt(`oid ${o}\n`)), Buffer.from("0000"),
+  ]);
+  const bigRef = spawnSync("git", ["-c", "transfer.advertiseObjectInfo=true", "upload-pack", "--stateless-rpc", src], {
+    input: bigRequest, env: { ...process.env, GIT_PROTOCOL: "version=2", GIT_CONFIG_NOSYSTEM: "1", HOME: work },
+  }).stdout;
+  const bigCold = await post(bigRequest);
+  check(`${many.length} oids in one request (cold) match git's reply`, many.length === 302 && bigCold.status === 200 && bigCold.bytes.equals(bigRef), `${bigCold.status} ${bigCold.bytes.length} bytes`);
+  const bigWarm = await post(bigRequest);
+  check(`${many.length} oids again (warm, from the size index) match`, bigWarm.status === 200 && bigWarm.bytes.equals(bigRef), `${bigWarm.status}`);
 
   // 3. Everything else still goes to Artifacts: a blobless clone and its lazy fetches.
   const clone = join(work, "clone");

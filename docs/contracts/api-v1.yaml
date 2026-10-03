@@ -144,9 +144,10 @@ tags:
       first ask and kept forever. Every other v2 command goes to Artifacts
       unchanged.
 
-      Clone and fetch also accept the 30-minute read token from a hook
-      delivery (`read_token`), so CI clones from `clone_url` with no
-      credential of its own.
+      Clone and fetch also accept the read token from a hook delivery
+      (`read_token` for a web hook, 30 minutes; `PANDO_READ_TOKEN` for a
+      Buildkite build, at least 24 hours so Buildkite's Retry can still
+      clone), so CI clones from `clone_url` with no credential of its own.
 
       Only members of the monorepo get through.
 
@@ -174,6 +175,51 @@ tags:
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.
+  - name: ci
+    description: |
+      CI on one model for every service (RESEARCH-2026-10-03 section 6):
+      a **service** (`buildkite` today), a **connection** (one account of it:
+      a Buildkite organization), its **pipelines** (each builds one repo),
+      **builds**, **jobs**, and each job's **check**. Pando runs no CI.
+
+      - **Stored by Pando, pushed by the service.** A connection gets a
+        webhook URL; the service's webhooks keep builds and jobs (state,
+        times, links) in the monorepo's records, written in one step with
+        their events on the monorepo's stream (`ci.build`, `ci.job`) before
+        the webhook is answered. Viewers cost the service nothing.
+      - **A check is a job named by its step key**: a job keyed `ci` writes
+        the status `ci` (`app` `buildkite`, `creator` `app:buildkite`), so
+        `required_checks = ["ci"]` in `.pando/pando.toml` gates merges on it.
+        Commands and triggered builds report; waits and blocks do not. Only
+        the newest job with that key, in the newest build of that pipeline
+        for that commit, reports (a retry or a rebuild takes over). States:
+        passed is success; failed is failure (soft failed: success);
+        canceled, not run after a failure (`broken`) or not taken by an
+        agent (`expired`) are error; a skipped step is success.
+      - **Fetched from the service when opened**: a job's log (its last
+        1 MiB), a build's annotations and artifacts (first 100 of each), a
+        pipeline's configuration (read at most every 5 minutes). Cached once
+        settled (finished over 30 s ago), else for 10 s.
+      - **Actions**, any member: Rebuild (a new build of the same commit
+        with fresh tokens; the service's own rebuild would reuse the old
+        build's env), Cancel and Retry (passed through).
+      - **Mapping a build to a repo**: Pando's own builds carry
+        `meta_data.pando_delivery`, `pando_monorepo` and `pando_repo`; a
+        build started in the service maps through the buildkite hook that
+        names its pipeline. Other builds (another monorepo's, another
+        organization's, an unmapped pipeline's) are answered 200 and ignored.
+      - **Who pushed** comes from Pando's own records: the delivery that
+        started the build, else the push or merge that made the commit.
+      - **The service's rate limit**: Buildkite allows 200 REST calls a
+        minute per organization and 50 per user token. A connection makes at
+        most 40 a minute (10 are left for starting builds); past that, or
+        after Buildkite answers 429, calls answer 503 `ci_rate_limited` with
+        `retry_after_ms`.
+
+      Errors from the service: `ci_unauthorized` (502: the token lacks a
+      scope), `ci_refused` (409: Buildkite refused the action),
+      `ci_service` (502), `ci_rate_limited` (503), `ci_token_missing` (503:
+      the Worker secret BUILDKITE_API_TOKEN is not set).
 paths:
   /v1/users:
     post:
@@ -760,6 +806,11 @@ paths:
           default_head}`. When main moves, every open branch's ahead, behind
           and mergeable change: refetch the branch list.
         - statuses: `status` (Status row).
+        - ci_builds: `ci.build` (CiBuild row, upsert), on the build's repo.
+        - ci_jobs: `ci.job` (CiJob row, upsert; key `<build>/<job>`), on the
+          build's repo.
+        - ci_connections: `ci.connection` (CiConnection row; delete on
+          disconnect, row `{id}`).
         - reviews: `review` (Review row).
         - worktrees: `worktree.reported` (upsert), `worktree.removed` (delete).
         - meta_files: `meta.saved` (a meta history entry, no bytes; not sent
@@ -1422,7 +1473,21 @@ paths:
     post:
       operationId: createStatus
       summary: Report a commit status (GitHub's body)
+      description: |
+        With a member's credential, the status shows that member as
+        `creator` and has `app` null, whatever the body says.
+
+        With a status token (`PANDO_STATUS_TOKEN` in a Buildkite build's
+        env, `status_token` in a web hook's payload), Pando stamps `app` from
+        the hook that delivered it (`buildkite`, a web hook's own `app`, or
+        null) and `creator` `app:<slug>` (`hook:<hook id>` when null). A
+        status token posts statuses for its one commit in its one repo, for
+        24 hours, on this route only: no other route and no git.
       tags: [statuses]
+      security:
+        - credential: []
+        - session: []
+        - statusToken: []
       requestBody:
         required: true
         content:
@@ -1441,6 +1506,16 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Status" }
+        "401":
+          description: "`unauthorized`: not a credential, or a status token that is not valid. `status_token_expired`: older than 24 hours. `status_tokens_off`: the Worker secret PANDO_STATUS_SECRET is not set."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: "`status_token_scope`: the token is for another commit, repo or monorepo. `status_token_route` (on any other route): a status token works here only."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/commits/{ref}/status:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -1476,9 +1551,14 @@ paths:
         with the Worker secret `BUILDKITE_API_TOKEN`, for `push` events (by
         default) on branches that are not deleted. The build gets `commit`,
         `branch`, `message`, and `env`: `PANDO_CLONE_URL`, `PANDO_READ_TOKEN`
-        (30 minutes, read only, this repo), `PANDO_STATUS_URL`,
-        `PANDO_MONOREPO`, `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`,
-        `PANDO_DELIVERY`.
+        (read only, this repo, at least 24 hours: Buildkite's Retry reruns a
+        job with this env), `PANDO_STATUS_URL`, `PANDO_STATUS_TOKEN` (posts
+        checks on this commit for 24 hours, stamped `buildkite`; see
+        createStatus; `pando status <state>` uses it), `PANDO_MONOREPO`,
+        `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`, `PANDO_DELIVERY`,
+        `PANDO_SEQ`. Its `meta_data` has `pando_delivery`, `pando_monorepo`
+        (the id) and `pando_repo`, which Pando's Buildkite webhook uses to map
+        the build back (the `ci` tag).
       tags: [hooks]
       requestBody:
         required: true
@@ -1507,6 +1587,10 @@ paths:
                   properties:
                     organization: { type: string }
                     pipeline: { type: string }
+                app:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{0,38}$"
+                  description: "For `web`: the CI service behind it (`github-actions`, `circleci`, ...), stamped as `app` on statuses posted with its deliveries' status tokens. Not `buildkite` (that is the `buildkite` type's)."
       responses:
         "201":
           description: Created
@@ -1735,6 +1819,441 @@ paths:
       responses:
         "204": { description: Removed }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: getCi
+      summary: The CI tab's top - services, connections, pipelines, required checks
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [services, connections, pipelines, required_checks]
+                properties:
+                  services:
+                    type: array
+                    description: The services Pando can connect.
+                    items:
+                      type: object
+                      properties:
+                        service: { type: string }
+                        name: { type: string }
+                  connections:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiConnection" }
+                  pipelines:
+                    type: array
+                    description: Each connection's pipelines - those its builds named, and those a buildkite hook names.
+                    items: { $ref: "#/components/schemas/CiPipeline" }
+                  required_checks:
+                    type: array
+                    description: Every repo's required checks, read from `.pando/pando.toml` (a repo with no pipeline is here too).
+                    items:
+                      type: object
+                      properties:
+                        repo: { type: string }
+                        path: { type: string }
+                        checks:
+                          type: array
+                          items: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/connections:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: createCiConnection
+      summary: Connect a CI service (owners)
+      description: |
+        Answers the webhook URL to paste into the service, and its token
+        (`webhook_token`), shown this once. For Buildkite: Organization
+        Settings, Notification Services, Add, Webhook; the URL; the token,
+        sent as `X-Buildkite-Token` or (better) signed as
+        `X-Buildkite-Signature`; events `build.*` and `job.*`; the pipelines
+        to send. One connection per organization per monorepo. REST calls
+        use the Worker secret `BUILDKITE_API_TOKEN` at launch (the connection
+        says `token: worker_secret`); per-connection tokens come with C21.
+      tags: [ci]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service, organization]
+              properties:
+                service: { type: string, enum: [buildkite] }
+                organization: { type: string, description: "The organization's slug, as in buildkite.com/<slug>." }
+                webhook_token:
+                  type: string
+                  minLength: 16
+                  maxLength: 200
+                  description: The service's own webhook token, if it made one; else Pando makes one.
+      responses:
+        "201":
+          description: Connected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection, webhook_token]
+                properties:
+                  connection: { $ref: "#/components/schemas/CiConnection" }
+                  webhook_token: { type: string, description: Shown once. }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409":
+          description: "`ci_connection_exists`: this organization is connected already."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/connections/{connection}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciConnection"
+    delete:
+      operationId: deleteCiConnection
+      summary: Disconnect a CI service (owners)
+      description: Its pipelines, builds, jobs and cached details go; its checks stay (they are commit statuses). Its webhook URL then answers 404.
+      tags: [ci]
+      responses:
+        "204": { description: Disconnected }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listCiBuilds
+      summary: Stored builds, newest first
+      tags: [ci]
+      parameters:
+        - { name: repo, in: query, schema: { type: string } }
+        - { name: branch, in: query, schema: { type: string } }
+        - { name: sha, in: query, schema: { type: string }, description: A full sha. }
+        - { name: pipeline, in: query, schema: { type: string } }
+        - { name: connection, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { $ref: "#/components/schemas/CiState" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "`next_cursor` from the previous page." }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [builds, next_cursor]
+                properties:
+                  builds:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiBuild" }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    get:
+      operationId: getCiBuild
+      summary: A build and its jobs
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CiBuild"
+                  - type: object
+                    required: [jobs]
+                    properties:
+                      jobs:
+                        type: array
+                        description: First scheduled first. Wait steps are left out.
+                        items: { $ref: "#/components/schemas/CiJob" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/jobs/{job}/log:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+      - $ref: "#/components/parameters/ciJob"
+    get:
+      operationId: getCiJobLog
+      summary: A job's log, from the service (its last 1 MiB)
+      description: Raw, with the service's escape codes (ANSI colours, Buildkite's timestamps). `Cache-Control` is immutable once `complete`.
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job, content, bytes, total_bytes, truncated, complete, fetched_at, cached]
+                properties:
+                  job: { type: string }
+                  content: { type: string }
+                  bytes: { type: integer, description: The bytes in `content`. }
+                  total_bytes: { type: integer, description: The whole log's size. }
+                  truncated: { type: boolean, description: True when `content` is the log's last 1 MiB only. }
+                  complete: { type: boolean, description: The job finished over 30 s ago; this never changes again. }
+                  fetched_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+        "404": { $ref: "#/components/responses/Error" }
+        "413":
+          description: "`log_too_large`: the log is over 64 MiB; open it in the service (`web_url`)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/annotations:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    get:
+      operationId: listCiAnnotations
+      summary: A build's annotations, from the service (first 100)
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [annotations, truncated, complete, fetched_at, cached]
+                properties:
+                  annotations:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiAnnotation" }
+                  truncated: { type: boolean, description: The build has more than 100. }
+                  complete: { type: boolean }
+                  fetched_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/artifacts:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    get:
+      operationId: listCiArtifacts
+      summary: A build's artifacts, from the service (first 100)
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artifacts, truncated, complete, fetched_at, cached]
+                properties:
+                  artifacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiArtifact" }
+                  truncated: { type: boolean }
+                  complete: { type: boolean }
+                  fetched_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/artifacts/{artifact}/download:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+      - name: artifact
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: downloadCiArtifact
+      summary: Download an artifact of this build
+      description: A 302 to the service's own download URL, which Buildkite keeps good for about 60 seconds. Only an artifact of this build.
+      tags: [ci]
+      responses:
+        "302": { description: "`Location` is the download." }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/rebuild:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    post:
+      operationId: rebuildCiBuild
+      summary: Build the same commit again, with fresh tokens
+      description: |
+        A new build in the same pipeline, for the same commit and branch,
+        with the env a hook delivery gives (a fresh `PANDO_READ_TOKEN` and
+        `PANDO_STATUS_TOKEN`) and `meta_data.pando_rebuild_of`. Recorded at
+        once. Needs `write_builds` on the token.
+      tags: [ci]
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build: { $ref: "#/components/schemas/CiBuild" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    post:
+      operationId: cancelCiBuild
+      summary: Cancel a running build (passed through)
+      description: "409 `ci_finished` when it has finished. Needs `write_builds`."
+      tags: [ci]
+      responses:
+        "202":
+          description: Canceling
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build: { $ref: "#/components/schemas/CiBuild" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/jobs/{job}/retry:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+      - $ref: "#/components/parameters/ciJob"
+    post:
+      operationId: retryCiJob
+      summary: Retry a job (passed through)
+      description: |
+        The service reruns the job with the build's original env, so it can
+        clone for as long as the build's read token lives: at least 24 hours
+        after Pando started the build. The new job is recorded at once and
+        its check goes back to pending. Needs `write_builds`.
+      tags: [ci]
+      responses:
+        "202":
+          description: Retrying
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    oneOf:
+                      - $ref: "#/components/schemas/CiJob"
+                      - type: "null"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/pipelines/{pipeline}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - name: pipeline
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getCiPipeline
+      summary: A pipeline - its configuration (pipeline.yml) and its builds
+      description: |
+        The configuration is the service's (Buildkite's pipeline YAML, as set
+        in Buildkite), read at most every 5 minutes. A pipeline that uploads
+        its steps from the repo shows the upload step here; the repo's own
+        file is on the Code tab. When the read fails, the last copy is
+        shown with `configuration_error`.
+      tags: [ci]
+      parameters:
+        - { name: connection, in: query, schema: { type: string }, description: Needed only when two connections have a pipeline of this name. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pipeline, builds, next_cursor]
+                properties:
+                  pipeline:
+                    allOf:
+                      - $ref: "#/components/schemas/CiPipeline"
+                      - type: object
+                        properties:
+                          configuration: { type: [string, "null"] }
+                          configuration_fetched_at: { type: [string, "null"], format: date-time }
+                          configuration_error:
+                            type: [object, "null"]
+                            properties:
+                              code: { type: string }
+                              message: { type: string }
+                  builds:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiBuild" }
+                  next_cursor: { type: [string, "null"] }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/integrations/buildkite/{connection}:
+    parameters:
+      - $ref: "#/components/parameters/ciConnection"
+    post:
+      operationId: buildkiteWebhook
+      summary: Buildkite's webhooks (the URL a connection shows)
+      description: |
+        Buildkite's own request: `X-Buildkite-Event`, and either
+        `X-Buildkite-Signature: timestamp=<unix s>,signature=<hex>` (HMAC-SHA256
+        of `<timestamp>.<raw body>` keyed by the connection's webhook token;
+        refused when over 5 minutes off) or `X-Buildkite-Token`. Events used:
+        `build.*` and `job.*` (and `ping`). Bodies up to 5 MiB. The build,
+        its job and its check are written with their events before the
+        answer. Events are applied in the order Buildkite signed them (in
+        whole seconds; with a plain token, the order they arrive); a job's
+        state never moves back, and a job event's copy of a build never moves
+        a finished build back.
+      tags: [ci]
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: "`recorded`, or `ignored` with a reason (another monorepo's, another organization's, or a pipeline that builds no repo here)."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: { type: string, enum: [recorded, ignored] }
+                  reason: { type: string }
+                  build: { type: string, description: The Pando build id. }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
 webhooks:
   hookDelivery:
     post:
@@ -1774,6 +2293,10 @@ components:
       type: http
       scheme: bearer
       description: The Worker secret PANDO_BOOTSTRAP.
+    statusToken:
+      type: http
+      scheme: bearer
+      description: "A status token, `pst1.<payload>.<signature>`: one per hook delivery, signed with the Worker secret PANDO_STATUS_SECRET, good for createStatus on one commit in one repo for 24 hours."
   parameters:
     owner:
       name: owner
@@ -1798,6 +2321,24 @@ components:
       in: path
       required: true
       description: The branch name, `/` encoded as `%2F`.
+      schema: { type: string }
+    ciConnection:
+      name: connection
+      in: path
+      required: true
+      description: "A CI connection's id: `<monorepo id>--cic_<12 hex>`."
+      schema: { type: string }
+    ciBuild:
+      name: build
+      in: path
+      required: true
+      description: "Pando's build id (`cib_<16 hex>`)."
+      schema: { type: string }
+    ciJob:
+      name: job
+      in: path
+      required: true
+      description: The service's job id.
       schema: { type: string }
   responses:
     Error:
@@ -1937,7 +2478,8 @@ components:
             - review: `verdict`, `comments` (a count), `head`.
             - status: `context`, `state`, `description`, `target_url`, `sha`,
               `duration_s` (from the run's first `pending` to this state; null
-              without one).
+              without one), `app` (the CI service that reported it, null when
+              a member posted it; `actor` is then that member, else null).
             - worktree.reported, worktree.removed: `path`, `worktree` (its id).
             - meta.saved: `path`, `version`, `deleted`.
     FeedSummary:
@@ -2108,6 +2650,120 @@ components:
         forced: { type: [boolean, "null"], description: "True when the merge went past red or missing checks with force=1." }
         created_at: { type: [string, "null"], format: date-time }
         updated_at: { type: [string, "null"], format: date-time }
+    CiState:
+      type: string
+      enum: [queued, running, blocked, passed, failed, canceled, skipped]
+      description: "One vocabulary for every service. Buildkite's scheduled and waiting are queued, failing and canceling are running, not_run and broken are skipped; `service_state` keeps the service's own word."
+    CiConnection:
+      type: object
+      required: [id, service, organization, web_url, webhook_url, token, created_at, created_by, last_event, last_refused]
+      properties:
+        id: { type: string }
+        service: { type: string, enum: [buildkite] }
+        organization: { type: string }
+        web_url: { type: string, description: The organization on the service. }
+        webhook_url: { type: string, description: The URL to paste into the service's webhook settings. }
+        token: { type: string, enum: [worker_secret, stored], description: "Where its REST token comes from: the Worker secret BUILDKITE_API_TOKEN at launch." }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        last_event:
+          type: [object, "null"]
+          description: The last webhook that passed its check.
+          properties:
+            at: { type: string, format: date-time }
+            event: { type: [string, "null"] }
+            result: { type: [string, "null"], description: "`recorded`, or `ignored: <reason>`." }
+        last_refused:
+          type: [object, "null"]
+          description: The last webhook refused (a wrong token or signature), recorded at most every 10 s.
+          properties:
+            at: { type: string, format: date-time }
+            reason: { type: [string, "null"] }
+    CiPipeline:
+      type: object
+      required: [connection, service, slug, name, repo, web_url, last_build]
+      properties:
+        connection: { type: string }
+        service: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        repo: { type: [string, "null"], description: The repo it builds. }
+        repo_path: { type: [string, "null"] }
+        web_url: { type: string }
+        default_branch: { type: [string, "null"] }
+        hook_id: { type: [string, "null"], description: "The buildkite hook that starts its builds on push, if any." }
+        required_checks:
+          type: array
+          description: Its repo's required checks (from `.pando/pando.toml`).
+          items: { type: string }
+        last_build:
+          oneOf:
+            - $ref: "#/components/schemas/CiBuild"
+            - type: "null"
+    CiBuild:
+      type: object
+      required: [id, service, connection, pipeline, number, repo, sha, state, service_state, created_at]
+      properties:
+        id: { type: string, description: "Pando's id (`cib_...`)." }
+        service: { type: string }
+        connection: { type: string }
+        pipeline: { type: string }
+        number: { type: integer }
+        repo: { type: string }
+        repo_path: { type: [string, "null"] }
+        sha: { type: [string, "null"], description: Null when the service built no fixed commit. }
+        branch: { type: [string, "null"] }
+        message: { type: [string, "null"] }
+        state: { $ref: "#/components/schemas/CiState" }
+        service_state: { type: string }
+        web_url: { type: [string, "null"] }
+        pushed_by: { type: [string, "null"], description: "Who pushed the commit (a login), from Pando's own records; never the service's creator." }
+        created_at: { type: [string, "null"], format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        duration_s: { type: [integer, "null"] }
+        rebuilt_from: { type: [string, "null"], description: The service's id of the build this one rebuilt. }
+    CiJob:
+      type: object
+      required: [id, build, type, state, service_state, check]
+      properties:
+        id: { type: string, description: The service's job id. }
+        build: { type: string }
+        name: { type: [string, "null"] }
+        step_key: { type: [string, "null"] }
+        type: { type: string, description: "`script`, `trigger` or `manual`." }
+        state: { $ref: "#/components/schemas/CiState" }
+        service_state: { type: string }
+        exit_status: { type: [integer, "null"] }
+        soft_failed: { type: boolean }
+        retried: { type: boolean, description: A newer job replaced it (Retry). }
+        web_url: { type: [string, "null"] }
+        created_at: { type: [string, "null"], format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        duration_s: { type: [integer, "null"] }
+        check: { type: [string, "null"], description: "The check (status context) it reports, its step key; null for jobs that report none." }
+    CiAnnotation:
+      type: object
+      properties:
+        id: { type: [string, "null"] }
+        context: { type: [string, "null"] }
+        style: { type: [string, "null"], description: "success, info, warning or error." }
+        body_html: { type: string, description: "HTML a pipeline wrote: sanitise it before showing it." }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    CiArtifact:
+      type: object
+      properties:
+        id: { type: string }
+        job: { type: [string, "null"], description: The job that uploaded it. }
+        path: { type: [string, "null"] }
+        filename: { type: [string, "null"] }
+        dirname: { type: [string, "null"] }
+        mime_type: { type: [string, "null"] }
+        size: { type: [integer, "null"] }
+        sha1sum: { type: [string, "null"] }
+        state: { type: [string, "null"] }
     StatusState:
       type: string
       enum: [pending, success, failure, error]
@@ -2120,7 +2776,12 @@ components:
         state: { $ref: "#/components/schemas/StatusState" }
         target_url: { type: [string, "null"] }
         description: { type: [string, "null"] }
-        creator: { type: string }
+        creator:
+          type: string
+          description: "The member who posted it (a login); `app:<slug>` for a status posted with a status token or by a CI integration; `hook:<hook id>` for a status token from a web hook with no app."
+        app:
+          type: [string, "null"]
+          description: "The CI service that reported it (`buildkite`, `github-actions`, ...), stamped by Pando from a status token or a CI integration, never from the body or `target_url`. Null when a member posted it with their own credential. The web shows the service's mark for a slug it knows."
         created_at: { type: string, format: date-time }
     Checks:
       type: object
@@ -2252,6 +2913,9 @@ components:
           properties:
             organization: { type: string }
             pipeline: { type: string }
+        app:
+          type: [string, "null"]
+          description: "The app its status tokens stamp: `buildkite` for a buildkite hook, a web hook's own `app`, or null."
         active: { type: boolean }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
@@ -2359,4 +3023,8 @@ components:
         read_token_expires_at: { type: string, format: date-time }
         status_url:
           type: string
-          description: "`POST` a commit status here for `head` (needs a member's credential)."
+          description: "`POST` a commit status here for `head`, with `status_token` or a member's credential."
+        status_token:
+          type: string
+          description: "Posts statuses for `head` in this repo for 24 hours, stamped with the hook's `app` (see createStatus). Absent when the Worker secret PANDO_STATUS_SECRET is not set or the branch was deleted."
+        status_token_expires_at: { type: string, format: date-time }

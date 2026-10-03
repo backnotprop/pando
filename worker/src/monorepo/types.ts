@@ -118,7 +118,10 @@ export interface StatusRecord {
   state: "pending" | "success" | "failure" | "error";
   target_url: string | null;
   description: string | null;
+  /** A user's login, or `app:<slug>` / `hook:<hook id>` for a status posted with a status token or by a CI integration. */
   creator: string;
+  /** The CI service that reported it (`buildkite`), stamped by Pando; null when a member posted it. */
+  app: string | null;
   created_at: string;
 }
 

@@ -133,6 +133,19 @@ type Status struct {
 	State       string `json:"state"`
 	TargetURL   string `json:"target_url"`
 	Description string `json:"description"`
+	// Creator is a user's login, or app:<slug> for a status posted with a
+	// status token. App is the CI service Pando stamped ("" when a member
+	// posted it).
+	Creator string `json:"creator"`
+	App     string `json:"app"`
+}
+
+// StatusIn is the body of a new commit status.
+type StatusIn struct {
+	State       string `json:"state"`
+	Context     string `json:"context,omitempty"`
+	TargetURL   string `json:"target_url,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Checks struct {

@@ -5,6 +5,7 @@
 //   /<owner>/<monorepo>/<repo>.git, /<owner>/<repo>.git   the git door (server-git)
 //   /v1/users, /v1/login/...       sign-in (accounts/signin.ts)
 //   /v1/monorepos/{o}/{m}/meta/... the meta layer (live; wired at M3)
+//   /v1/integrations/buildkite/... CI services' webhooks (ci/routes.ts)
 //   /v1/...                        the API (server-git)
 import contract from "../../docs/contracts/api-v1.yaml";
 import type { Env } from "./env";
@@ -20,6 +21,7 @@ import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./
 import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
 import type { FeedMessage } from "./feed/shape";
+import { handleIntegration, isIntegrationPath } from "./ci/routes";
 
 export { MonorepoObject } from "./monorepo/object";
 export { AccountsObject } from "./accounts/object";
@@ -78,6 +80,7 @@ export default {
     if (url.pathname === "/v1/users" || url.pathname === "/v1/logout" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
     if (META_RE.test(url.pathname)) return meta(request, env);
     if (isFeedPath(url.pathname)) return handleFeed(request, env);
+    if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
     return api.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env, unknown>;

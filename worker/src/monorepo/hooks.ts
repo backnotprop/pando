@@ -3,7 +3,9 @@
 //
 // The monorepo object writes each delivery row in the same step as the change
 // and sends its id to the queue. This consumer reads the row, adds a read
-// token for the one repo (30 minutes, cached per repo for 25), POSTs, and
+// token for the one repo (web: 30 minutes, cached per repo for 25; Buildkite:
+// 25 hours, cached for 1, so Retry in Buildkite can still clone a day later)
+// and a status token for the one commit (ci/statustoken.ts), POSTs, and
 // reports the attempt to the object. A failure is retried by the queue after
 // 10 s, 60 s, 5 min and 30 min; then the message goes to pando-hooks-dlq,
 // whose consumer marks the delivery dead. Deliveries are at least once and
@@ -14,6 +16,8 @@ import type { Env } from "../env";
 import { redact } from "../http";
 import { note, timed, timedStub } from "../timing";
 import { deliveryReadToken, withRepo } from "./artifacts";
+import { CI_READ_REUSE_MS, CI_READ_TTL_S, pandoBuildEnv } from "../ci/buildkite";
+import { mintStatusToken, type StatusClaims } from "../ci/statustoken";
 import { commitReader, compareWith } from "./graph";
 import { ZERO } from "./names";
 import type { RepoEvent } from "./types";
@@ -37,13 +41,23 @@ function retryDelays(env: Env): number[] {
   return v && v.length && v.every((n) => Number.isInteger(n) && n >= 0 && n <= 43_200) ? v : RETRY_DELAYS_S;
 }
 
-async function readToken(env: Env, artifactsName: string): Promise<{ token: string; expiresAt: string }> {
-  const hit = readTokens.get(artifactsName);
-  if (hit && Date.now() - hit.at < READ_TOKEN_REUSE_MS) return hit;
-  const t = await deliveryReadToken(env, artifactsName);
+/** A read token for one repo: `ci` (Buildkite) lives CI_READ_TTL_S, `web` 30 minutes. Reused per isolate. */
+export async function readToken(env: Env, artifactsName: string, kind: "web" | "ci" = "web"): Promise<{ token: string; expiresAt: string }> {
+  const key = `${kind}\n${artifactsName}`;
+  const hit = readTokens.get(key);
+  if (hit && Date.now() - hit.at < (kind === "ci" ? CI_READ_REUSE_MS : READ_TOKEN_REUSE_MS)) return hit;
+  const t = await deliveryReadToken(env, artifactsName, kind === "ci" ? CI_READ_TTL_S : 1800);
   if (readTokens.size > 5000) readTokens.clear();
-  readTokens.set(artifactsName, { ...t, at: Date.now() });
+  readTokens.set(key, { ...t, at: Date.now() });
   return t;
+}
+
+/** The delivery's status token, or null when PANDO_STATUS_SECRET is not set or there is no commit. */
+async function statusToken(env: Env, hook: HookRow, p: StoredPayload): Promise<{ token: string; expires_at: string } | null> {
+  if (!env.PANDO_STATUS_SECRET || !p.monorepo_id || !/^[0-9a-f]{40}$/.test(p.head)) return null;
+  const app = hook.type === "buildkite" ? "buildkite" : ((JSON.parse(hook.config ?? "{}") as { app?: string }).app ?? null);
+  const claims: Omit<StatusClaims, "x"> = { m: p.monorepo_id, r: p.repo, s: p.head, a: app, h: hook.id };
+  return mintStatusToken(env.PANDO_STATUS_SECRET, claims);
 }
 
 /** The pando-hooks consumer: deliveries 6 at a time. */
@@ -69,6 +83,7 @@ async function deliverOne(env: Env, msg: Message<DeliveryMessage>, delays: numbe
       return;
     }
     const p = d.payload;
+    p.monorepo_id ??= msg.body.monorepo; // rows from before namespaces
     if (p.base === null && p.head !== ZERO && p.event !== "merged") {
       // The merge base with main, computed here (the object makes no Artifacts reads).
       try {
@@ -80,7 +95,7 @@ async function deliverOne(env: Env, msg: Message<DeliveryMessage>, delays: numbe
     }
     note({ repo: p.repo, event: p.event, hook_type: d.hook.type, seq: p.seq ?? null });
     const t0 = Date.now();
-    const r = await attempt(env, d.hook, msg.body.delivery_id, p, () => readToken(env, d.artifacts_name));
+    const r = await attempt(env, d.hook, msg.body.delivery_id, p, (kind) => readToken(env, d.artifacts_name, kind));
     note({ receiver_ms: Date.now() - t0, receiver_code: r.code, delivered: r.ok });
     const n = msg.attempts; // 1 on the first try
     const retryIn = r.ok ? null : (delays[n - 1] ?? null);
@@ -125,13 +140,15 @@ export interface StoredPayload extends RepoEvent {
 }
 
 export function hookView(h: HookRow) {
-  const config = h.config ? JSON.parse(h.config) : null;
+  const config = h.config ? (JSON.parse(h.config) as { organization?: string; pipeline?: string; app?: string }) : null;
   return {
     id: h.id,
     type: h.type,
     url: h.url,
     events: JSON.parse(h.events) as string[],
     buildkite: h.type === "buildkite" ? { organization: config?.organization, pipeline: config?.pipeline } : null,
+    // The CI service its status tokens stamp: buildkite, a web hook's own app, or null.
+    app: h.type === "buildkite" ? "buildkite" : (config?.app ?? null),
     active: h.active === 1,
     created_at: h.created_at,
     created_by: h.created_by,
@@ -161,9 +178,10 @@ export interface AttemptResult {
 }
 
 /** One delivery attempt. Never throws; never logs the token. */
-export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: StoredPayload, token: () => Promise<{ token: string; expiresAt: string }>): Promise<AttemptResult> {
+export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: StoredPayload, token: (kind: "web" | "ci") => Promise<{ token: string; expiresAt: string }>): Promise<AttemptResult> {
   try {
-    const read = await token();
+    const read = await token(hook.type === "buildkite" ? "ci" : "web");
+    const status = await statusToken(env, hook, p);
     const u = urls(p);
     if (hook.type === "web") {
       const { origin: _origin, plain: _plain, ...rest } = p;
@@ -173,6 +191,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
         ...u,
         read_token: read.token,
         read_token_expires_at: read.expiresAt,
+        ...(status ? { status_token: status.token, status_token_expires_at: status.expires_at } : {}),
       });
       const signature = await hmacHex(hook.secret ?? "", body);
       const res = await fetch(hook.url!, {
@@ -201,18 +220,12 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
       branch: p.branch,
       message: p.title ?? `${p.event} ${p.branch}`,
       author: { name: p.pusher },
-      env: {
-        PANDO_CLONE_URL: u.clone_url,
-        PANDO_READ_TOKEN: read.token,
-        PANDO_STATUS_URL: u.status_url,
-        PANDO_MONOREPO: p.monorepo,
-        PANDO_REPO: p.repo,
-        PANDO_BRANCH: p.branch,
-        PANDO_HEAD: p.head,
-        PANDO_DELIVERY: deliveryId,
-        PANDO_SEQ: String(p.seq ?? ""),
-      },
-      meta_data: { pando_delivery: deliveryId },
+      env: pandoBuildEnv({
+        clone_url: u.clone_url, read_token: read.token, status_url: u.status_url, status_token: status?.token ?? null,
+        monorepo: p.monorepo, repo: p.repo, branch: p.branch, head: p.head, delivery: deliveryId, seq: p.seq ?? null,
+      }),
+      // How Pando's Buildkite webhook (ci/) maps the build back: this monorepo, this repo, this delivery.
+      meta_data: { pando_delivery: deliveryId, pando_monorepo: p.monorepo_id ?? "", pando_repo: p.repo },
     });
     const res = await fetch(url, {
       method: "POST",

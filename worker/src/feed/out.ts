@@ -425,7 +425,8 @@ export class FeedOut {
         branch = this.row<{ name: string }>(
           "SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1", repo, row.sha,
         )?.name ?? null;
-        summary = { context: row.context, state: row.state, description: row.description ?? null, target_url: row.target_url ?? null, sha: row.sha, duration_s: duration };
+        // app: the CI service that reported it (null: a member posted it, and `actor` is that member).
+        summary = { context: row.context, state: row.state, description: row.description ?? null, target_url: row.target_url ?? null, sha: row.sha, duration_s: duration, app: row.app ?? null };
         break;
       }
       case "worktree.reported":
@@ -563,7 +564,7 @@ export class FeedOut {
     if (!branches.length) return [];
     const statuses = new Map<string, StatusRecord[]>();
     for (const s of this.rows<StatusRecord & { repo: string }>(
-      `SELECT s.repo, s.sha, s.context, s.state, s.target_url, s.description, s.creator, s.created_at FROM statuses s
+      `SELECT s.repo, s.sha, s.context, s.state, s.target_url, s.description, s.creator, s.app, s.created_at FROM statuses s
        WHERE EXISTS (SELECT 1 FROM branches b WHERE b.repo = s.repo AND b.head = s.sha AND b.deleted_at IS NULL
                      AND (b.merged_head IS NULL OR b.merged_head != b.head))
        ORDER BY s.id`,

@@ -363,3 +363,20 @@ func (h *HTTP) DeleteWorktree(ctx context.Context, m, id string) error {
 	}
 	return err
 }
+
+// PostStatusTo posts a commit status to a full statuses URL, the
+// PANDO_STATUS_URL a CI build gets, with a status token (PANDO_STATUS_TOKEN)
+// or a credential. The token goes in the Authorization header only.
+func PostStatusTo(ctx context.Context, statusURL, token string, s StatusIn) (*Status, error) {
+	u, err := url.Parse(statusURL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || !strings.Contains(u.Path, "/statuses/") {
+		return nil, fmt.Errorf("PANDO_STATUS_URL is not a Pando statuses URL (https://<host>/v1/monorepos/<owner>/<name>/repos/<repo>/statuses/<sha>)")
+	}
+	h := NewHTTP(u.Scheme+"://"+u.Host, token)
+	h.Client.Timeout = 30 * time.Second
+	var out Status
+	if _, _, err := h.do(ctx, request{method: "POST", path: u.EscapedPath(), body: s}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

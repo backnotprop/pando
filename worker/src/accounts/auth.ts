@@ -81,6 +81,7 @@ export function identityOf(a: Auth): Identity {
     email: a.user.email,
     credential_id: a.credential.id,
     credential_name: a.credential.name,
+    credential_kind: a.credential.kind,
     role: a.role ?? "member",
   };
 }

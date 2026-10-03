@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -74,5 +76,31 @@ func TestCredentialFileMode(t *testing.T) {
 	}
 	if _, err := h.Token("https://pando.example.com"); err != ErrNoToken {
 		t.Fatalf("after logout: %v", err)
+	}
+}
+
+// Five agents adding worktrees at once each saved their own copy of the list
+// and the last one won (seen on the Mac, 2026-10-03). Under the lock every
+// entry stays.
+func TestUpdateWorktreesKeepsConcurrentAdds(t *testing.T) {
+	r := &Root{Dir: t.TempDir()}
+	const n = 20
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := r.UpdateWorktrees(func(ws []Worktree) ([]Worktree, error) {
+				return append(ws, Worktree{Path: fmt.Sprintf("worktrees/a-%02d", i)}), nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	ws, err := r.LoadWorktrees()
+	if err != nil || len(ws) != n {
+		t.Fatalf("%d worktrees kept of %d (err %v)", len(ws), n, err)
 	}
 }

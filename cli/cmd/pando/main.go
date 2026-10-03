@@ -82,7 +82,7 @@ var commands = []app.Command{
 	{Name: "auth", Usage: "auth status                                               who this machine is signed in as", Run: app.Auth},
 	{Name: "init", Usage: "init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder", Run: app.Init},
 	{Name: "clone", Usage: "clone <name> [folder] [--text-only]                       set up a Pando repo or monorepo on this machine", Run: app.Clone},
-	{Name: "worktree", Usage: "worktree add <repo> <branch> | list | remove <path> | follow   one branch, one folder, one agent", Run: app.Worktree},
+	{Name: "worktree", Usage: "worktree add <repo> <branch> | list | remove <path> | follow | mount   one branch, one folder, one agent", Run: app.Worktree},
 	{Name: "branch", Usage: "branch list [--repo <path>] [--all]                       branches with ahead, behind and checks", Run: app.Branch},
 	{Name: "diff", Usage: "diff [<branch>] [--json | --patch] [paths...]             the branch diff against main", Run: app.Diff},
 	{Name: "review", Usage: "review [<branch>] [-m <comment>]                          review in Plannotator, or comment", Run: app.Review},

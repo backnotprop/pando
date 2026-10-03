@@ -17,6 +17,7 @@ import (
 
 	"pando/internal/config"
 	"pando/internal/server"
+	"pando/internal/worktree"
 )
 
 // Env is what every command gets.
@@ -28,7 +29,13 @@ type Env struct {
 	Cwd    string
 	Home   *config.Home
 
-	in *bufio.Reader
+	in    *bufio.Reader
+	noted bool
+
+	// Agent is the agent this command acts for, sent as X-Pando-Agent: a
+	// command's --agent, else PANDO_AGENT, else the agent recorded for the
+	// worktree the command runs in (see agentFor).
+	Agent string
 }
 
 // NewEnv builds an Env for the current process.
@@ -126,13 +133,58 @@ func (e *Env) readSecret(prompt string) (string, error) {
 	return e.readLine()
 }
 
-// open returns the server for a root, with this machine's credential.
+// open returns the server for a root, with this machine's credential and
+// the agent this command acts for.
 func (e *Env) open(root *config.Root) (server.Server, error) {
 	tok, err := e.Home.Token(root.Server)
 	if err != nil && !strings.HasPrefix(root.Server, "file://") {
 		return nil, err
 	}
-	return server.Open(root.Server, tok)
+	s, err := server.Open(root.Server, tok)
+	if h, ok := s.(*server.HTTP); ok && err == nil {
+		h.Agent = worktree.CleanAgent(e.agentFor(root))
+	}
+	return s, err
+}
+
+// agentFor is the agent this command acts for: Env.Agent (a command's
+// --agent), else PANDO_AGENT, else the agent recorded for the worktree the
+// current folder is in. It is the name the Pando-Agent trailer carries.
+func (e *Env) agentFor(root *config.Root) string {
+	if e.Agent != "" {
+		return e.Agent
+	}
+	if a := os.Getenv("PANDO_AGENT"); a != "" {
+		return a
+	}
+	if root == nil {
+		return ""
+	}
+	rel, err := root.Rel(e.Cwd)
+	if err != nil {
+		return ""
+	}
+	ws, _ := root.LoadWorktrees()
+	for _, w := range ws {
+		if rel == w.Path || strings.HasPrefix(rel, w.Path+"/") {
+			return w.Agent
+		}
+	}
+	return ""
+}
+
+// pickNew picks the driver for a new worktree or reference, and says once
+// per command why a Mac is not using the Pando mount, when it is not.
+func (e *Env) pickNew(kind string) (worktree.Driver, error) {
+	drv, err := worktree.Pick(kind, e.Home.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" && !e.noted {
+		e.noted = true
+		e.warnf("%s", n.Note())
+	}
+	return drv, nil
 }
 
 // root finds the Pando root above the current folder.

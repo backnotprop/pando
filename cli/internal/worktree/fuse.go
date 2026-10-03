@@ -2,11 +2,14 @@ package worktree
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +19,12 @@ import (
 	"time"
 
 	"pando/internal/gitx"
+	"pando/internal/macbroker"
 )
 
-// Fuse drives the ArtifactFS fork (projects/artifact-fs) on Linux. Each repo
+// Fuse drives the ArtifactFS fork (projects/artifact-fs): through FUSE on
+// Linux, and on a Mac (FSKit set) through Pando.app's FSKit extension, which
+// the fork's darwin build mounts with /sbin/mount -F -t pando. Each repo
 // folder gets its own ArtifactFS state root and daemon, so worktree names
 // only need to be unique within a repo and every mount lands exactly at
 // <repo>/worktrees/<name>. Each worktree has its own blobless git folder,
@@ -28,11 +34,18 @@ import (
 // the fork): writes fail with EROFS, no root needed. They move only through
 // their git folder (Refresh), never through the mount.
 type Fuse struct {
-	Bin  string // the artifact-fs binary
-	Home string // ~/.pando
+	Bin   string // the artifact-fs binary
+	Home  string // ~/.pando
+	FSKit bool   // a Mac: the volume is Pando.app's FSKit extension
+	App   string // FSKit: the installed Pando.app ("" finds it through pluginkit)
 }
 
-func (f *Fuse) Kind() string { return "fuse" }
+func (f *Fuse) Kind() string {
+	if f.FSKit {
+		return "fskit"
+	}
+	return "fuse"
+}
 
 // stateDir is ~/.pando/afs/<repo folder>-<hash>: ARTIFACT_FS_ROOT for one repo.
 func (f *Fuse) stateDir(s Spec) string {
@@ -85,6 +98,17 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 			return err
 		}
 	}
+	if f.FSKit {
+		// The extension reaches the daemon through Pando.app's broker,
+		// which launchd starts on demand once its LaunchAgent is loaded.
+		app := f.App
+		if app == "" {
+			app = macbroker.AppPath(ctx)
+		}
+		if err := macbroker.Ensure(ctx, app, false, io.Discard); err != nil {
+			return fmt.Errorf("Pando.app's broker: %w", err)
+		}
+	}
 	// A worktree removed earlier under the same name may have left a
 	// registry entry or state behind.
 	_, _ = f.run(ctx, s, "remove-repo", "--name", f.name(s))
@@ -106,7 +130,7 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	}
 	gd := f.gitDir(s)
 	if s.Reference {
-		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", "fuse"}} {
+		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", f.Kind()}} {
 			if _, err := (gitx.Cmd{Env: []string{"GIT_DIR=" + gd}}).Run(ctx, "config", kv[0], kv[1]); err != nil {
 				return err
 			}
@@ -118,12 +142,20 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 		if err := InstallHook(ctx, gd, s.Identity); err != nil {
 			return err
 		}
+		if err := WriteAgentHeader(ctx, gd, s.CloneURL, s.Identity.Agent); err != nil {
+			return err
+		}
+	}
+	logPath := filepath.Join(state, "daemon.log")
+	var logStart int64
+	if st, err := os.Stat(logPath); err == nil {
+		logStart = st.Size()
 	}
 	if err := f.ensureDaemon(s); err != nil {
 		return err
 	}
-	if err := waitMount(mp, true, 90*time.Second); err != nil {
-		return fmt.Errorf("%w (daemon log: %s)", err, filepath.Join(state, "daemon.log"))
+	if err := waitAdded(mp, logPath, logStart, f.name(s), 90*time.Second); err != nil {
+		return fmt.Errorf("%w (daemon log: %s)", err, logPath)
 	}
 	if s.Commit != "" {
 		// Pin through the git folder, never by a checkout through the
@@ -134,6 +166,77 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 		}
 	}
 	return nil
+}
+
+// Up mounts an existing worktree again when its daemon stopped (a reboot, a
+// killed process). The repo's daemon mounts every worktree registered with
+// it, so one call brings back the repo's other worktrees too.
+func (f *Fuse) Up(ctx context.Context, s Spec) (bool, error) {
+	mp := f.mountPath(s)
+	// A FUSE mount outlives its daemon (stale, "transport endpoint is not
+	// connected"), and so does an FSKit volume (EIO), so a mount alone is
+	// not proof.
+	if f.daemonAlive(s) && mountWorks(mp) {
+		return false, nil
+	}
+	ClearStale(ctx, mp)
+	if f.FSKit {
+		if err := macbroker.Ensure(ctx, macbroker.AppPath(ctx), false, io.Discard); err != nil {
+			return false, fmt.Errorf("Pando.app's broker: %w", err)
+		}
+	}
+	logPath := filepath.Join(f.stateDir(s), "daemon.log")
+	var logStart int64
+	if st, err := os.Stat(logPath); err == nil {
+		logStart = st.Size()
+	}
+	if err := f.ensureDaemon(s); err != nil {
+		return false, err
+	}
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		if mountWorks(mp) {
+			return true, nil
+		}
+		if why := mountFailure(logPath, logStart, f.name(s)); why != "" {
+			return false, fmt.Errorf("%s did not mount: %s (daemon log: %s)", mp, why, logPath)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return false, fmt.Errorf("the mount did not come back at %s (daemon log: %s)", mp, logPath)
+}
+
+// mountWorks reports whether p is mounted and answers: listing it works.
+// (Listings are never cached, unlike attributes.)
+func mountWorks(p string) bool {
+	if !isMounted(p) {
+		return false
+	}
+	d, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer d.Close()
+	_, err = d.Readdirnames(1)
+	return err == nil || errors.Is(err, io.EOF)
+}
+
+// ClearStale unmounts p when it is mounted but nobody serves it, so a daemon
+// started again can mount there.
+func ClearStale(ctx context.Context, p string) {
+	if isMounted(p) && !mountWorks(p) {
+		forceUnmount(ctx, p)
+	}
+}
+
+// daemonAlive reports whether the repo's daemon is running.
+func (f *Fuse) daemonAlive(s Spec) bool {
+	b, err := os.ReadFile(filepath.Join(f.stateDir(s), "daemon.pid"))
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	return err == nil && alive(pid)
 }
 
 // Refresh moves a read-only main to the server's main, or a reference to
@@ -209,11 +312,7 @@ func (f *Fuse) Remove(ctx context.Context, s Spec) error {
 	}
 	// The daemon notices the removal within a few seconds and unmounts.
 	if err := waitMount(mp, false, 20*time.Second); err != nil {
-		for _, c := range [][]string{{"fusermount3", "-u", mp}, {"fusermount", "-u", mp}, {"umount", mp}} {
-			if exec.CommandContext(ctx, c[0], c[1:]...).Run() == nil {
-				break
-			}
-		}
+		forceUnmount(ctx, mp)
 		if isMounted(mp) {
 			return fmt.Errorf("%s is still mounted", mp)
 		}
@@ -243,6 +342,17 @@ func (f *Fuse) cleanState(s Spec) {
 // ensureDaemon starts the repo's artifact-fs daemon unless it is running.
 func (f *Fuse) ensureDaemon(s Spec) error {
 	state := f.stateDir(s)
+	// Several worktree adds at once (agents) must start one daemon, not one
+	// each: two daemons on one state root fight over the same mounts.
+	lk, err := os.OpenFile(filepath.Join(state, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lk.Close()
+	if err := syscall.Flock(int(lk.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lk.Fd()), syscall.LOCK_UN)
 	pidFile := filepath.Join(state, "daemon.pid")
 	if b, err := os.ReadFile(pidFile); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && alive(pid) {
@@ -267,48 +377,51 @@ func (f *Fuse) ensureDaemon(s Spec) error {
 	return cmd.Process.Release()
 }
 
-func alive(pid int) bool {
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
-		return false
+// waitAdded waits for a new worktree's mount. When the daemon logs that
+// mounting failed (it retries with a back-off), it stops waiting and returns
+// the daemon's reason, which says what to do (the Mac's FSKit messages do).
+func waitAdded(mp, logPath string, logStart int64, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if isMounted(mp) {
+			return nil
+		}
+		if why := mountFailure(logPath, logStart, name); why != "" {
+			return fmt.Errorf("%s did not mount: %s", mp, why)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	return err != nil || strings.Contains(string(b), "artifact-fs")
+	return fmt.Errorf("the mount did not appear at %s", mp)
 }
 
-// isMounted reads /proc/self/mountinfo (Linux).
-func isMounted(p string) bool {
-	fh, err := os.Open("/proc/self/mountinfo")
+// mountFailure is the error of the first "mount failed" line the daemon
+// logged for repo name after offset start, or "".
+func mountFailure(logPath string, start int64, name string) string {
+	fh, err := os.Open(logPath)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer fh.Close()
+	if _, err := fh.Seek(start, io.SeekStart); err != nil {
+		return ""
+	}
 	sc := bufio.NewScanner(fh)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) > 4 && unescapeMount(fields[4]) == p {
-			return true
+		line := sc.Bytes()
+		if !bytes.Contains(line, []byte("mount failed")) {
+			continue
+		}
+		var rec struct {
+			Msg   string `json:"msg"`
+			Repo  string `json:"repo"`
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(line, &rec) == nil && rec.Repo == name && rec.Error != "" {
+			return gitx.RedactURL(rec.Error)
 		}
 	}
-	return false
-}
-
-func unescapeMount(s string) string {
-	if !strings.Contains(s, `\`) {
-		return s
-	}
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+3 < len(s) {
-			if n, err := strconv.ParseUint(s[i+1:i+4], 8, 8); err == nil {
-				b.WriteByte(byte(n))
-				i += 3
-				continue
-			}
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
+	return ""
 }
 
 func waitMount(p string, want bool, timeout time.Duration) error {

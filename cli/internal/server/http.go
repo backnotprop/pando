@@ -18,6 +18,9 @@ type HTTP struct {
 	Base   string
 	token  string
 	Client *http.Client
+	// Agent, when set, goes out as X-Pando-Agent on every call: the agent
+	// acting through this credential (the Pando-Agent trailer's name).
+	Agent string
 }
 
 // NewHTTP makes an API client. The credential goes in the Authorization
@@ -66,6 +69,9 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	req.Header.Set("User-Agent", "pando-cli/0.1")
+	if h.Agent != "" {
+		req.Header.Set("X-Pando-Agent", h.Agent)
+	}
 	resp, err := h.Client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s %s: %w", r.method, h.Base+r.path, unwrapURLError(err))
@@ -253,10 +259,25 @@ func (h *HTTP) GetBranch(ctx context.Context, m, repo, b string) (*Branch, error
 	return out, err
 }
 
+// CreateBranch makes branch b off main. Making it is idempotent (an existing
+// branch is not an error), so a server error is tried again, twice: with
+// five agents adding worktrees at once, pando-dev answered 2 of 5 with
+// "Artifacts could not unpack" (HTTP 502), 2026-10-03.
 func (h *HTTP) CreateBranch(ctx context.Context, m, repo, b string) (bool, error) {
-	_, _, err := h.do(ctx, request{method: "POST", path: repoPath(m, repo) + "/branches", body: map[string]string{"name": b}}, nil)
-	if Code(err) == "branch_exists" || (StatusOf(err) == http.StatusConflict && Code(err) == "") {
-		return false, nil
+	var err error
+	for attempt := 1; ; attempt++ {
+		_, _, err = h.do(ctx, request{method: "POST", path: repoPath(m, repo) + "/branches", body: map[string]string{"name": b}}, nil)
+		if Code(err) == "branch_exists" || (StatusOf(err) == http.StatusConflict && Code(err) == "") {
+			return false, nil
+		}
+		if err == nil || StatusOf(err) < 500 || attempt == 3 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return false, err
+		case <-time.After(time.Duration(attempt) * 700 * time.Millisecond):
+		}
 	}
 	return err == nil, err
 }

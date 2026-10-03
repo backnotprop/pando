@@ -86,6 +86,9 @@ final class WireClient: @unchecked Sendable {
     /// a concurrent queue. A non-zero errno in the reply arrives as a failure.
     func call(_ op: WireOp, payload: Data? = nil, timeout: TimeInterval,
               completion: @escaping Completion) {
+        // Debug level: kept only while someone streams with --debug. Shows
+        // which thread FSKit delivered the operation on (diligence 8.2, test 1).
+        log.debug("call \(op.name, privacy: .public) on thread \(pthread_mach_thread_np(pthread_self()))")
         let request: Request? = lock.withLock {
             if closed { return nil }
             let r = Request(id: nextID, op: op, payload: payload, timeout: timeout, completion: completion)

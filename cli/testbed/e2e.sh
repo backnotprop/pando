@@ -114,6 +114,9 @@ case "$url" in
       [ "$v" = "HTTP/1.1" ] && [ "$b" = "104857600" ] && ok "$(basename "$w"): http.version HTTP/1.1, http.postBuffer 104857600 for the Pando host" || fail "$(basename "$w"): version=$v postBuffer=$b"
     done
     [ -z "$(git -C "$wt" config --get-urlmatch http.version https://github.com/x/y.git)" ] && ok "other hosts keep git's defaults" || fail "settings leaked to other hosts"
+    [ "$(git -C "$wt" config --get-urlmatch http.extraheader "$url")" = "X-Pando-Agent: agent-7" ] && ok "feat-x pushes carry X-Pando-Agent: agent-7, to the Pando host only" || fail "agent header: $(git -C "$wt" config --get-urlmatch http.extraheader "$url")"
+    [ -z "$(git -C "$wt" config --get-urlmatch http.extraheader https://github.com/x/y.git)" ] || fail "agent header leaked to another host"
+    [ -z "$(git -C /work/acme/worktrees/main config --get-urlmatch http.extraheader "$url")" ] && ok "main, made with no agent, sends none" || fail "main has an agent header"
     ;;
   *) echo "  note the HTTP settings apply to http(s) servers; this run uses $url" ;;
 esac
@@ -138,6 +141,14 @@ grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main s
 [ -z "$(git -C worktrees/main status --porcelain)" ] && ok "git status in worktrees/main is clean after the merge" || fail "main status: $(git -C worktrees/main status --porcelain | head -3)"
 hm=$(hydrated main)
 [ "$hm" -lt 20 ] && ok "git status in worktrees/main downloaded $hm of $total files (index-stat)" || fail "worktrees/main hydrated $hm blobs after git status"
+
+step "the daemon stops (as at a reboot); pando worktree mount brings the mounts back"
+pkill -9 -f "artifact-fs daemon" || true
+sleep 1
+pando worktree mount | sed 's/^/  /'
+grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main reads again after pando worktree mount" || fail "worktrees/main did not come back"
+[ -z "$(git -C "$wt" status --porcelain)" ] && ok "git status in feat-x works again" || fail "feat-x after mount: $(git -C "$wt" status --porcelain 2>&1 | head -3)"
+out=$(pando worktree mount) && echo "$out" | grep -qx "Every worktree here is mounted." && ok "a second pando worktree mount has nothing to do" || fail "second mount: $out"
 
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
@@ -190,13 +201,20 @@ pando init --yes --name acme --server file:///home/dev/srv >/dev/null && pando c
 echo "uid=$(id -u) main=$(findmnt -no OPTIONS worktrees/main | cut -d, -f1)"
 (echo y > worktrees/main/a.txt) 2>/dev/null && echo "main=writable" || echo "main=refused"
 pando worktree add . feat >/dev/null && echo "feat=$(findmnt -no OPTIONS worktrees/feat | cut -d, -f1)"
-cd worktrees/feat && echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
+cd worktrees/feat
+# A file created 0444 and written through its open descriptor, as git writes
+# its packs: a daemon that is not root must still write its backing file.
+(umask 0222 && printf "ro-data\n" > ro.txt) && echo "ro0444=$(stat -c %a ro.txt):$(cat ro.txt)" && rm -f ro.txt
+git clone -q --no-local "file://$HOME/src" clone-in && git -C clone-in fsck --no-progress && echo "clone-in=ok" && rm -rf clone-in
+echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
 echo "main-content=$(tr "\n" " " < worktrees/main/a.txt)"
 pando worktree remove worktrees/feat >/dev/null && echo "removed=yes"
-' 2>&1)
+' 2>&1) || true
 echo "$out" | grep -q "uid=1000 main=ro" && ok "uid 1000: worktrees/main mounts ro with no root" || fail "non-root: $out"
 echo "$out" | grep -q "main=refused" && ok "uid 1000: writing into main is refused" || fail "non-root: $out"
 echo "$out" | grep -q "feat=rw" && ok "uid 1000: a branch worktree mounts rw" || fail "non-root: $out"
+echo "$out" | grep -q "ro0444=444:ro-data" && ok "uid 1000: a file created 0444 is written through its open descriptor" || fail "non-root: $out"
+echo "$out" | grep -q "clone-in=ok" && ok "uid 1000: git clone into a worktree (packs written 0444), fsck clean" || fail "non-root: $out"
 echo "$out" | grep -q "main-content=hi two" && ok "uid 1000: main follows the merge" || fail "non-root: $out"
 echo "$out" | grep -q "removed=yes" && ok "uid 1000: worktree remove unmounts" || fail "non-root: $out"
 

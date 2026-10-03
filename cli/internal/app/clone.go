@@ -19,7 +19,7 @@ import (
 func Clone(e *Env, args []string) error {
 	fs := flags("clone")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
-	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse, for worktrees/main and references")
+	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse, for worktrees/main and references (default: the mount when this machine has one)")
 	textOnly := fs.Bool("text-only", false, "keep the meta layer's large files and binaries as pointers until pando fetch (agent sandboxes)")
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -120,7 +120,7 @@ func mountReference(e *Env, root *config.Root, p refs.Pointer, kind string) erro
 	if _, err := os.Lstat(filepath.Join(dst, ".git")); err == nil {
 		return nil // the real repo, or already mounted
 	}
-	drv, err := worktree.Pick(kind, e.Home.Dir)
+	drv, err := e.pickNew(kind)
 	if err != nil {
 		return err
 	}

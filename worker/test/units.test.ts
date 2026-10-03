@@ -9,6 +9,7 @@ import { compareWith, type CommitInfo } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
 import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection, refusal } from "../src/monorepo/pktline";
 import type { StatusRecord } from "../src/monorepo/types";
+import { hasCode, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../src/parse";
 
 const dec = new TextDecoder();
 
@@ -509,5 +510,20 @@ describe("raw ETags", () => {
     expect(matchesEtag("*", oid)).toBe(true);
     expect(matchesEtag(`"${"b".repeat(40)}"`, oid)).toBe(false);
     expect(matchesEtag(null, oid)).toBe(false);
+  });
+});
+
+describe("parse guards (worker/src/parse.ts)", () => {
+  it("tells the JSON kinds apart", () => {
+    expect([isText("a"), isText(""), isText(1), isText(null), isText(undefined)]).toEqual([true, true, false, false, false]);
+    expect([isWholeNumber(0), isWholeNumber(7), isWholeNumber(-1), isWholeNumber(1.5), isWholeNumber("3"), isWholeNumber(2 ** 53)]).toEqual([true, true, false, false, false, false]);
+    expect([isRecord({}), isRecord({ a: 1 }), isRecord([]), isRecord(null), isRecord("x"), isRecord(undefined)]).toEqual([true, true, false, false, false, false]);
+    expect([isTextList([]), isTextList(["a", "b"]), isTextList(["a", 1]), isTextList("a")]).toEqual([true, true, false, false]);
+  });
+
+  it("reads a thrown value's code, and JSON text", () => {
+    expect([hasCode({ code: "NOT_FOUND" }), hasCode(Object.assign(new Error("x"), { code: "E" })), hasCode({ code: 404 }), hasCode(new Error("x")), hasCode(null)]).toEqual([true, true, false, false, false]);
+    expect(parseJson('{"a":[1,"b"]}')).toEqual({ a: [1, "b"] });
+    expect(parseJson("not json")).toBe(null);
   });
 });

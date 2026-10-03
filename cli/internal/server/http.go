@@ -380,3 +380,82 @@ func PostStatusTo(ctx context.Context, statusURL, token string, s StatusIn) (*St
 	}
 	return &out, nil
 }
+
+// ── CI (the ci tag in api-v1.yaml): a Pando server only, not file:// ──
+
+// CIEvent is a connection's last webhook: its time, the event, and what Pando did with it.
+type CIEvent struct {
+	At     string `json:"at"`
+	Event  string `json:"event"`
+	Result string `json:"result"`
+	Reason string `json:"reason"`
+}
+
+// CIConnection is one CI service account (a Buildkite organization). It
+// holds no secret: the webhook token is shown only when connecting.
+type CIConnection struct {
+	ID           string   `json:"id"`
+	Service      string   `json:"service"`
+	Organization string   `json:"organization"`
+	WebURL       string   `json:"web_url"`
+	WebhookURL   string   `json:"webhook_url"`
+	Token        string   `json:"token"`
+	CreatedAt    string   `json:"created_at"`
+	CreatedBy    string   `json:"created_by"`
+	LastEvent    *CIEvent `json:"last_event"`
+	LastRefused  *CIEvent `json:"last_refused"`
+}
+
+type CIBuild struct {
+	ID         string `json:"id"`
+	Pipeline   string `json:"pipeline"`
+	Number     int    `json:"number"`
+	State      string `json:"state"`
+	SHA        string `json:"sha"`
+	Branch     string `json:"branch"`
+	CreatedAt  string `json:"created_at"`
+	FinishedAt string `json:"finished_at"`
+}
+
+type CIPipeline struct {
+	Connection     string   `json:"connection"`
+	Slug           string   `json:"slug"`
+	Repo           string   `json:"repo"`
+	RepoPath       string   `json:"repo_path"`
+	RequiredChecks []string `json:"required_checks"`
+	LastBuild      *CIBuild `json:"last_build"`
+}
+
+type CIOverview struct {
+	Connections []CIConnection `json:"connections"`
+	Pipelines   []CIPipeline   `json:"pipelines"`
+}
+
+// CIConnected is the answer to connecting: WebhookToken is shown this once.
+type CIConnected struct {
+	Connection   CIConnection `json:"connection"`
+	WebhookToken string       `json:"webhook_token"`
+}
+
+func (h *HTTP) CIOverview(ctx context.Context, m string) (*CIOverview, error) {
+	out := &CIOverview{}
+	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/ci"}, out)
+	return out, err
+}
+
+// CIConnect connects a Buildkite organization. webhookToken is Buildkite's
+// own token when the person pastes it; empty, and Pando makes one.
+func (h *HTTP) CIConnect(ctx context.Context, m, org, webhookToken string) (*CIConnected, error) {
+	body := map[string]string{"service": "buildkite", "organization": org}
+	if webhookToken != "" {
+		body["webhook_token"] = webhookToken
+	}
+	out := &CIConnected{}
+	_, _, err := h.do(ctx, request{method: "POST", path: monoPath(m) + "/ci/connections", body: body}, out)
+	return out, err
+}
+
+func (h *HTTP) CIDisconnect(ctx context.Context, m, id string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m) + "/ci/connections/" + esc(id)}, nil)
+	return err
+}

@@ -1,56 +1,118 @@
-// PandoItem.swift — an FSItem backed by an oak inode number.
+// PandoItem.swift: an FSItem backed by a daemon inode number, and the mapping
+// from the wire's attribute record to FSKit's attributes.
 //
-// NOTE ON FSKit API SURFACE
-// -------------------------
-// FSKit's Swift API changed across macOS 15.x betas. The conformances here are
-// reconciled against the macOS 26.1 SDK (FSKit.framework/Headers/FSVolume.h),
-// which is what this target builds with. One deliberate divergence from Apple's
-// PassthroughFS sample: that sample (an older beta) declares `renameItem` under
-// `FSVolume.RenameOperations`, but in 26.1 `renameItem` belongs to
-// `FSVolume.Operations` and `RenameOperations` only carries `setVolumeName` —
-// so PandoVolume keeps `renameItem` in its `FSVolume.Operations` conformance.
-// The oak-specific logic — mapping each operation to a `DaemonClient` call and
-// translating the reply — is what matters here and is stable regardless.
+// Rules from the wire contract (section 4.1) and the diligence (6.7):
+// - The daemon numbers the root 2, FSKit's `.rootDirectory`, and every other
+//   item 3 or more; the numbers are used as FSKit item ids unchanged. FSKit
+//   reserves 0 (invalid), 1 (parent of root) and 2 (root).
+// - linkCount is 1 for everything (no hard links), uid and gid are this
+//   process's, atime equals mtime, birthTime equals ctime, and allocSize is
+//   the size rounded up to 4096.
+// - Times convert with integer arithmetic, never through a Double.
+//
+// Derived from Oak's OakFSItem.swift (Apache 2.0, see ../NOTICE).
 
 import FSKit
 import Foundation
 
-final class PandoItem: FSItem {
+final class PandoItem: FSItem, @unchecked Sendable {
+    /// The daemon's inode number.
     let ino: UInt64
-    var name: FSFileName
+    private let lock = NSLock()
+    private var _kind: WireKind
+    private var _name: FSFileName
 
-    init(ino: UInt64, name: FSFileName) {
+    init(ino: UInt64, kind: WireKind, name: FSFileName) {
         self.ino = ino
-        self.name = name
+        self._kind = kind
+        self._name = name
         super.init()
+    }
+
+    /// Remembered from lookup, create and getattr, so a remove needs no
+    /// getattr to choose between unlink and rmdir.
+    var kind: WireKind {
+        get { lock.withLock { _kind } }
+        set { lock.withLock { _kind = newValue } }
+    }
+
+    var name: FSFileName {
+        get { lock.withLock { _name } }
+        set { lock.withLock { _name = newValue } }
     }
 }
 
 extension WireKind {
-    /// Map the wire file-type tag to an FSKit item type.
     var fsItemType: FSItem.ItemType {
         switch self {
-        case .dir: return .directory
-        case .file: return .file
-        case .symlink: return .symlink
+        case .dir: .directory
+        case .file: .file
+        case .symlink: .symlink
         }
     }
 }
 
-extension AttrWire {
-    /// Populate an `FSItem.Attributes` from a daemon stat reply.
-    func apply(to attrs: FSItem.Attributes) {
-        let kind = WireKind(rawValue: kind) ?? .file
+/// Converts nanoseconds since 1970 to a timespec without rounding through a
+/// floating point value.
+func timespecFromNanoseconds(_ ns: Int64) -> timespec {
+    var sec = ns / 1_000_000_000
+    var nsec = ns % 1_000_000_000
+    if nsec < 0 { // floor for times before 1970
+        sec -= 1
+        nsec += 1_000_000_000
+    }
+    return timespec(tv_sec: Int(sec), tv_nsec: Int(nsec))
+}
+
+func nanoseconds(_ ts: timespec) -> Int64 {
+    Int64(ts.tv_sec) * 1_000_000_000 + Int64(ts.tv_nsec)
+}
+
+/// The daemon's numbers are FSKit item ids unchanged (the root is 2).
+func fsID(_ ino: UInt64) -> FSItem.Identifier {
+    FSItem.Identifier(rawValue: ino) ?? .invalid
+}
+
+/// Builds FSKit attributes from wire records (contract, 4.1).
+enum ItemAttributes {
+    /// Fills FSKit attributes from a wire attribute record. `parent` is the
+    /// containing directory's number when the caller knows it.
+    static func from(_ a: WireAttr, parent: UInt64? = nil) -> FSItem.Attributes {
+        let attrs = FSItem.Attributes()
+        let kind = a.wireKind
         attrs.type = kind.fsItemType
-        attrs.mode = UInt32(perm)
-        attrs.size = size
-        attrs.allocSize = size
-        attrs.fileID = FSItem.Identifier(rawValue: ino) ?? .invalid
-        attrs.linkCount = (kind == .dir) ? 2 : 1
-        let secs = Double(mtime_ns) / 1_000_000_000.0
-        let ts = timespec(tv_sec: Int(secs), tv_nsec: Int(mtime_ns % 1_000_000_000))
-        attrs.modifyTime = ts
-        attrs.changeTime = ts
-        attrs.accessTime = ts
+        attrs.mode = a.mode & 0o7777
+        attrs.linkCount = 1
+        attrs.uid = getuid()
+        attrs.gid = getgid()
+        attrs.flags = 0
+        attrs.size = a.size
+        attrs.allocSize = (a.size + 4095) & ~UInt64(4095)
+        attrs.fileID = fsID(a.ino)
+        if a.ino == kRootIno {
+            attrs.parentID = .parentOfRoot
+        } else if let parent {
+            attrs.parentID = fsID(parent)
+        }
+        let mtime = timespecFromNanoseconds(a.mtime_ns)
+        let ctime = timespecFromNanoseconds(a.ctime_ns)
+        attrs.modifyTime = mtime
+        attrs.accessTime = mtime
+        attrs.changeTime = ctime
+        attrs.birthTime = ctime
+        return attrs
+    }
+
+    /// Attributes for a listing entry the daemon sent without a record.
+    /// Only reached if the daemon breaks the `with_attrs` rule.
+    static func minimal(ino: UInt64, kind: WireKind) -> FSItem.Attributes {
+        let attrs = FSItem.Attributes()
+        attrs.type = kind.fsItemType
+        attrs.mode = kind == .dir ? 0o755 : 0o644
+        attrs.linkCount = 1
+        attrs.uid = getuid()
+        attrs.gid = getgid()
+        attrs.fileID = fsID(ino)
+        return attrs
     }
 }

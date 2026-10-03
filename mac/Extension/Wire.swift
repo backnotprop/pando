@@ -1,151 +1,240 @@
-// Wire.swift — Swift mirror of the daemon's request/reply protocol.
+// Wire.swift: Pando's FSKit wire, version 3, as the extension speaks it.
 //
-// Keep these shapes in lockstep with the Rust side:
-//   cli/src/commands/mount/fskit/protocol.rs
+// The contract is owned by the fskit lane, in the ArtifactFS fork:
+// docs/pando-fskit-wire-v3.md (matched against commit 7bd0156). Section
+// numbers below ("contract, 4.4") refer to it.
 //
-// Encoding is JSON, framed with a big-endian UInt32 byte length (see
-// DaemonClient.swift and ipc.rs). serde's default enum representation is
-// "externally tagged": a unit variant serializes as the bare string
-// ("Ok"), and a variant with data as {"Variant": <payload>}. The Codable
-// conformances below match that exactly.
+// Frame, identical on both hops (extension to broker over XPC, broker to
+// daemon over the unix socket):
+//
+//     u32 BE  frame_len   bytes after this field
+//     u32 BE  header_len
+//     [header_len]        UTF-8 JSON object
+//     [rest]              raw payload: file bytes for `read` replies and
+//                         `write` requests, empty otherwise
+//
+// Request header: {"id": u64, "op": "<name>", ...fields}
+// Reply header:   {"id": u64, "errno": i32 (0 = ok), ...result}
+//
+// No FSKit here, so the harness in ../Tests can run it outside the extension.
+//
+// Derived from Oak's Wire.swift (Apache 2.0, see ../NOTICE); version 3 is a
+// new format.
 
 import Foundation
 
-/// Version of the daemon wire protocol this extension speaks. Must match
-/// `PROTOCOL_VERSION` in cli/src/commands/mount/fskit/protocol.rs. The extension
-/// announces it via `Op.hello` at mount time (see `DaemonClient.handshake`) and
-/// refuses to mount if the daemon reports a different one — an `Oak Mount` app
-/// and `oak` CLI from different releases would otherwise trade misinterpreted
-/// frames. Bump in lockstep with the Rust `PROTOCOL_VERSION`.
-///
-/// History: v1 → v2 added `Op.readlink` (symlink target resolution).
-let kWireVersion: UInt32 = 2
+/// The wire version this extension speaks. `hello` must report the same.
+let kWireVersion: UInt32 = 3
 
-enum WireKind: UInt8 {
+/// The root directory's number on the wire: FSKit's `.rootDirectory`. Every
+/// other item is 3 or more; ".." of the root is 1, `.parentOfRoot`.
+let kRootIno: UInt64 = 2
+
+/// readdir's errno for a cookie that no longer matches the listing (a wire
+/// code, NFS's NFSERR_BAD_COOKIE; contract, 4.4).
+let kErrBadCookie: Int32 = 10003
+
+enum WireKind: UInt8, Sendable {
     case dir = 0
     case file = 1
     case symlink = 2
 }
 
-/// One VFS operation forwarded to the daemon. Mirrors Rust `enum Op`.
-enum Op: Encodable {
-    case hello(protocolVersion: UInt32)
+/// One file operation, as a request header. Field names are the JSON keys.
+enum WireOp: Sendable {
+    case hello(build: String)
     case lookup(parent: UInt64, name: String)
     case getattr(ino: UInt64)
-    case readdir(ino: UInt64)
+    case readdir(ino: UInt64, cookie: UInt64, verifier: UInt64, maxEntries: UInt32, withAttrs: Bool)
     case read(ino: UInt64, offset: Int64, size: UInt32)
+    /// The bytes travel as the frame's payload.
+    case write(ino: UInt64, offset: Int64)
     case readlink(ino: UInt64)
-    case write(ino: UInt64, offset: Int64, data: Data)
-    case create(parent: UInt64, name: String, exec: Bool)
-    case mkdir(parent: UInt64, name: String)
+    case create(parent: UInt64, name: String, mode: UInt32)
+    case mkdir(parent: UInt64, name: String, mode: UInt32)
+    case symlink(parent: UInt64, name: String, target: String)
     case unlink(parent: UInt64, name: String)
     case rmdir(parent: UInt64, name: String)
     case rename(parent: UInt64, name: String, newparent: UInt64, newname: String)
-    case truncate(ino: UInt64, size: UInt64)
+    /// Only the fields present are changed. uid and gid are never sent.
+    case setattr(ino: UInt64, size: UInt64?, mode: UInt32?, mtimeNs: Int64?, atimeNs: Int64?)
+    /// Items FSKit reclaimed, batched. The daemon frees removed items and
+    /// only notes the rest; numbers stay with their paths (contract, 4.3).
+    case forget(inos: [UInt64])
+
+    var name: String {
+        switch self {
+        case .hello: "hello"
+        case .lookup: "lookup"
+        case .getattr: "getattr"
+        case .readdir: "readdir"
+        case .read: "read"
+        case .write: "write"
+        case .readlink: "readlink"
+        case .create: "create"
+        case .mkdir: "mkdir"
+        case .symlink: "symlink"
+        case .unlink: "unlink"
+        case .rmdir: "rmdir"
+        case .rename: "rename"
+        case .setattr: "setattr"
+        case .forget: "forget"
+        }
+    }
+}
+
+/// The request header: `id`, `op`, then the op's own fields.
+private struct RequestHeader: Encodable {
+    let id: UInt64
+    let op: WireOp
+
+    private enum Key: String, CodingKey {
+        case id, op, version, build, parent, name, ino, cookie, verifier
+        case max_entries, with_attrs, offset, size, mode, target
+        case newparent, newname, mtime_ns, atime_ns, inos
+    }
 
     func encode(to encoder: Encoder) throws {
-        // serde externally-tagged: { "Variant": { fields… } }
-        var c = encoder.container(keyedBy: GenericKey.self)
-        switch self {
-        case let .hello(protocolVersion):
-            try c.encode(HelloP(protocol_version: protocolVersion), forKey: .init("Hello"))
-        case let .lookup(parent, name):
-            try c.encode(LookupP(parent: parent, name: name), forKey: .init("Lookup"))
-        case let .getattr(ino):
-            try c.encode(InoP(ino: ino), forKey: .init("Getattr"))
-        case let .readdir(ino):
-            try c.encode(InoP(ino: ino), forKey: .init("Readdir"))
+        var c = encoder.container(keyedBy: Key.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(op.name, forKey: .op)
+        switch op {
+        case let .hello(build):
+            try c.encode(kWireVersion, forKey: .version)
+            try c.encode(build, forKey: .build)
+        case let .lookup(parent, name), let .unlink(parent, name), let .rmdir(parent, name):
+            try c.encode(parent, forKey: .parent)
+            try c.encode(name, forKey: .name)
+        case let .getattr(ino), let .readlink(ino):
+            try c.encode(ino, forKey: .ino)
+        case let .readdir(ino, cookie, verifier, maxEntries, withAttrs):
+            try c.encode(ino, forKey: .ino)
+            try c.encode(cookie, forKey: .cookie)
+            try c.encode(verifier, forKey: .verifier)
+            try c.encode(maxEntries, forKey: .max_entries)
+            try c.encode(withAttrs, forKey: .with_attrs)
         case let .read(ino, offset, size):
-            try c.encode(ReadP(ino: ino, offset: offset, size: size), forKey: .init("Read"))
-        case let .readlink(ino):
-            try c.encode(InoP(ino: ino), forKey: .init("Readlink"))
-        case let .write(ino, offset, data):
-            // serde expects Vec<u8> as a JSON array of numbers.
-            try c.encode(WriteP(ino: ino, offset: offset, data: [UInt8](data)), forKey: .init("Write"))
-        case let .create(parent, name, exec):
-            try c.encode(CreateP(parent: parent, name: name, exec: exec), forKey: .init("Create"))
-        case let .mkdir(parent, name):
-            try c.encode(NameP(parent: parent, name: name), forKey: .init("Mkdir"))
-        case let .unlink(parent, name):
-            try c.encode(NameP(parent: parent, name: name), forKey: .init("Unlink"))
-        case let .rmdir(parent, name):
-            try c.encode(NameP(parent: parent, name: name), forKey: .init("Rmdir"))
+            try c.encode(ino, forKey: .ino)
+            try c.encode(offset, forKey: .offset)
+            try c.encode(size, forKey: .size)
+        case let .write(ino, offset):
+            try c.encode(ino, forKey: .ino)
+            try c.encode(offset, forKey: .offset)
+        case let .create(parent, name, mode), let .mkdir(parent, name, mode):
+            try c.encode(parent, forKey: .parent)
+            try c.encode(name, forKey: .name)
+            try c.encode(mode, forKey: .mode)
+        case let .symlink(parent, name, target):
+            try c.encode(parent, forKey: .parent)
+            try c.encode(name, forKey: .name)
+            try c.encode(target, forKey: .target)
         case let .rename(parent, name, newparent, newname):
-            try c.encode(RenameP(parent: parent, name: name, newparent: newparent, newname: newname),
-                         forKey: .init("Rename"))
-        case let .truncate(ino, size):
-            try c.encode(TruncateP(ino: ino, size: size), forKey: .init("Truncate"))
+            try c.encode(parent, forKey: .parent)
+            try c.encode(name, forKey: .name)
+            try c.encode(newparent, forKey: .newparent)
+            try c.encode(newname, forKey: .newname)
+        case let .setattr(ino, size, mode, mtimeNs, atimeNs):
+            try c.encode(ino, forKey: .ino)
+            try c.encodeIfPresent(size, forKey: .size)
+            try c.encodeIfPresent(mode, forKey: .mode)
+            try c.encodeIfPresent(mtimeNs, forKey: .mtime_ns)
+            try c.encodeIfPresent(atimeNs, forKey: .atime_ns)
+        case let .forget(inos):
+            try c.encode(inos, forKey: .inos)
         }
     }
-
-    private struct HelloP: Encodable { let protocol_version: UInt32 }
-    private struct LookupP: Encodable { let parent: UInt64; let name: String }
-    private struct InoP: Encodable { let ino: UInt64 }
-    private struct ReadP: Encodable { let ino: UInt64; let offset: Int64; let size: UInt32 }
-    private struct WriteP: Encodable { let ino: UInt64; let offset: Int64; let data: [UInt8] }
-    private struct CreateP: Encodable { let parent: UInt64; let name: String; let exec: Bool }
-    private struct NameP: Encodable { let parent: UInt64; let name: String }
-    private struct RenameP: Encodable { let parent: UInt64; let name: String; let newparent: UInt64; let newname: String }
-    private struct TruncateP: Encodable { let ino: UInt64; let size: UInt64 }
 }
 
-struct AttrWire: Decodable {
+/// The attribute record: `{ino, kind, mode, size, mtime_ns, ctime_ns}`.
+struct WireAttr: Decodable, Sendable {
     let ino: UInt64
+    let kind: UInt8
+    /// Permission bits, 0o7777.
+    let mode: UInt32
     let size: UInt64
-    let kind: UInt8
-    let perm: UInt16
-    let mtime_ns: UInt128
+    let mtime_ns: Int64
+    let ctime_ns: Int64
+
+    var wireKind: WireKind { WireKind(rawValue: kind) ?? .file }
 }
 
-struct DirEntryWire: Decodable {
+/// One `readdir` entry. `attr` is present when the request had `with_attrs`
+/// (then "." and ".." never appear); `next_cookie` is its position + 1.
+struct WireDirEntry: Decodable, Sendable {
+    let name: String
     let ino: UInt64
     let kind: UInt8
-    let name: String
+    let next_cookie: UInt64
+    let attr: WireAttr?
+
+    var wireKind: WireKind { WireKind(rawValue: kind) ?? .file }
 }
 
-/// Payload of `Reply::Hello { protocol_version }`.
-private struct HelloReply: Decodable { let protocol_version: UInt32 }
+/// A reply header. `id` and `errno` are always present; the rest depends on
+/// the op, so every other field is optional.
+struct WireReply: Decodable, Sendable {
+    let id: UInt64
+    let errno: Int32
+    /// Set by the broker on the frames it makes itself (no daemon, bad mount
+    /// id); unknown fields are ignored, so the daemon is unaffected.
+    let message: String?
+    // hello
+    let version: UInt32?
+    let build: String?
+    let max_read: UInt32?
+    let max_write: UInt32?
+    // lookup, getattr, create, mkdir, symlink, setattr
+    let attr: WireAttr?
+    // readdir
+    let entries: [WireDirEntry]?
+    let verifier: UInt64?
+    let eof: Bool?
+    // readlink
+    let target: String?
+    // write: bytes written and the file's size after the write
+    let written: UInt32?
+    let size: UInt64?
+    // setattr: which of "size", "mode", "mtime", "atime" were applied
+    let consumed: [String]?
+}
 
-/// The daemon's reply. Mirrors Rust `enum Reply`.
-enum Reply: Decodable {
-    case hello(protocolVersion: UInt32)
-    case attr(AttrWire)
-    case entries([DirEntryWire])
-    case data(Data)
-    case written(UInt32)
-    case ok
-    case errno(Int32)
+/// A decoded reply: the header and the raw payload.
+struct WireResponse: Sendable {
+    let reply: WireReply
+    let payload: Data
+}
 
-    init(from decoder: Decoder) throws {
-        // serde externally-tagged: "Ok" (bare string) or { "Variant": payload }.
-        if let s = try? decoder.singleValueContainer().decode(String.self), s == "Ok" {
-            self = .ok
-            return
-        }
-        let c = try decoder.container(keyedBy: GenericKey.self)
-        if let k = c.allKeys.first {
-            switch k.stringValue {
-            case "Hello": self = .hello(protocolVersion: try c.decode(HelloReply.self, forKey: k).protocol_version)
-            case "Attr": self = .attr(try c.decode(AttrWire.self, forKey: k))
-            case "Entries": self = .entries(try c.decode([DirEntryWire].self, forKey: k))
-            case "Data": self = .data(Data(try c.decode([UInt8].self, forKey: k)))
-            case "Written": self = .written(try c.decode(UInt32.self, forKey: k))
-            case "Errno": self = .errno(try c.decode(Int32.self, forKey: k))
-            default:
-                throw DecodingError.dataCorruptedError(
-                    forKey: k, in: c, debugDescription: "unknown Reply variant \(k.stringValue)")
-            }
-            return
-        }
-        throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "empty Reply"))
+enum WireFrameError: Error {
+    case malformed(String)
+}
+
+/// Encodes one request frame.
+func encodeFrame(id: UInt64, op: WireOp, payload: Data?) throws -> Data {
+    let header = try JSONEncoder().encode(RequestHeader(id: id, op: op))
+    let payloadCount = payload?.count ?? 0
+    let frameLen = 4 + header.count + payloadCount
+    guard frameLen <= Int(UInt32.max) else { throw WireFrameError.malformed("frame too large") }
+    var frame = Data(capacity: 4 + frameLen)
+    withUnsafeBytes(of: UInt32(frameLen).bigEndian) { frame.append(contentsOf: $0) }
+    withUnsafeBytes(of: UInt32(header.count).bigEndian) { frame.append(contentsOf: $0) }
+    frame.append(header)
+    if let payload { frame.append(payload) }
+    return frame
+}
+
+/// Decodes one reply frame (with its 4-byte length prefix).
+func decodeFrame(_ frame: Data) throws -> WireResponse {
+    guard frame.count >= 8 else { throw WireFrameError.malformed("short frame") }
+    let frameLen = frame.withUnsafeBytes { Int(UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self))) }
+    let headerLen = frame.withUnsafeBytes {
+        Int(UInt32(bigEndian: $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self)))
     }
-}
-
-/// A dynamic CodingKey so we can use the serde variant name as the key.
-struct GenericKey: CodingKey {
-    var stringValue: String
-    var intValue: Int? { nil }
-    init(_ s: String) { self.stringValue = s }
-    init?(stringValue: String) { self.stringValue = stringValue }
-    init?(intValue: Int) { return nil }
+    guard frameLen == frame.count - 4, 8 + headerLen <= frame.count else {
+        throw WireFrameError.malformed("lengths do not match the frame")
+    }
+    let start = frame.startIndex
+    let header = frame.subdata(in: (start + 8)..<(start + 8 + headerLen))
+    let reply = try JSONDecoder().decode(WireReply.self, from: header)
+    let payload = frame.subdata(in: (start + 8 + headerLen)..<frame.endIndex)
+    return WireResponse(reply: reply, payload: payload)
 }

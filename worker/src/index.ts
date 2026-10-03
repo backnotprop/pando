@@ -7,6 +7,7 @@
 //   /v1/monorepos/{o}/{m}/meta/... the meta layer (live; wired at M3)
 //   /v1/integrations/buildkite/... CI services' webhooks (ci/routes.ts)
 //   /v1/...                        the API (server-git)
+//   any other GET                  the web app (web/, wrangler.jsonc assets)
 import contract from "../../docs/contracts/api-v1.yaml";
 import type { Env } from "./env";
 import { errorJson, HttpError, toErrorResponse } from "./http";
@@ -87,6 +88,32 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
   }
 }
 
+// ── The web app (web/, served from wrangler.jsonc `assets`) ──────────────────
+
+/** Headers on the app's pages (APPROACH.md, "Where it lives"). */
+const APP_CSP =
+  "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:";
+
+/** A page of the app: any GET or HEAD outside /v1 that no route above took. */
+function isAppPath(request: Request, url: URL): boolean {
+  return (request.method === "GET" || request.method === "HEAD") && !url.pathname.startsWith("/v1/");
+}
+
+/** The app's file for this path, or index.html (the app's router takes the path), with its headers on HTML. */
+async function app(request: Request, env: Env): Promise<Response> {
+  const res = await env.ASSETS.fetch(request);
+
+  if (!(res.headers.get("content-type") ?? "").startsWith("text/html")) return res;
+
+  const page = new Response(res.body, res);
+
+  page.headers.set("content-security-policy", APP_CSP);
+  page.headers.set("x-content-type-options", "nosniff");
+  page.headers.set("referrer-policy", "same-origin");
+
+  return page;
+}
+
 export default {
   /** The queues: last commits (monorepo/files.ts) and the feed. */
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -136,6 +163,8 @@ export default {
     if (url.pathname === "/v1/_hooks/test") return hooksTestRoute(request, env);
 
     if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
+
+    if (isAppPath(request, url)) return app(request, env);
 
     return api.fetch(request, env, ctx);
   },

@@ -1,0 +1,18 @@
+{
+  "schema": "MemberList",
+  "route": "GET .../members",
+  "status": 200,
+  "body": {
+    "members": [
+      {
+        "login": "rec-musyuiou",
+        "name": "Ana Lima",
+        "picture_url": null,
+        "role": "owner",
+        "added_at": "2026-10-03T22:31:03.995Z",
+        "added_by": null,
+        "last_active_at": "2026-10-03T22:31:03.990Z"
+      }
+    ]
+  }
+}

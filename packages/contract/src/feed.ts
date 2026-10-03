@@ -4,6 +4,7 @@
 // (worker/src/feed/out.ts pointerOf, feed/push.ts).
 import * as Schema from "effect/Schema";
 
+import { StatusState } from "./checks.ts";
 import { Count, FullName, MonorepoId, RepoName, Sha, Timestamp } from "./ids.ts";
 import { FeedSummary } from "./monorepo.ts";
 import { NeedChange } from "./needs.ts";
@@ -44,8 +45,6 @@ export const ReviewSummary = Schema.Struct({
 });
 
 export interface ReviewSummary extends Schema.Schema.Type<typeof ReviewSummary> {}
-
-export const StatusState = Schema.Literals(["pending", "success", "failure", "error"]);
 
 /** Only when a check's state changes. */
 export const StatusSummary = Schema.Struct({
@@ -90,24 +89,32 @@ const lineFields = {
   repo: Schema.NullOr(RepoName),
   repo_path: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
-  /** The person (a login); a meta.saved line from before versions kept the login has the author's name. */
+  /** The person (a login); for meta.saved, the author's name. */
   actor: Schema.NullOr(Schema.String),
   /** The credential's name: the machine or sandbox. */
   machine: Schema.NullOr(Schema.String),
 };
 
+/**
+ * A union of activity lines on `kind`, each with its own summary, over the
+ * given fields: the feed's lines (FeedEvent) and a machine's last activity
+ * (Machine.last_activity) share it. Pipe it through Schema.toTaggedUnion("kind").
+ */
+export const byActivityKind = <const Fields extends Schema.Struct.Fields>(fields: Fields) =>
+  Schema.Union([
+    Schema.Struct({ ...fields, kind: Schema.tag("push"), summary: Schema.NullOr(PushSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("branch.opened"), summary: Schema.NullOr(PushSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("branch.deleted"), summary: Schema.NullOr(BranchDeletedSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("merged"), summary: Schema.NullOr(MergedSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("review"), summary: Schema.NullOr(ReviewSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("status"), summary: Schema.NullOr(StatusSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("worktree.reported"), summary: Schema.NullOr(WorktreeSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("worktree.removed"), summary: Schema.NullOr(WorktreeSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("meta.saved"), summary: Schema.NullOr(MetaSavedSummary) }),
+  ]);
+
 /** One line of the activity log. No agent field (owner ruling: people, machines and worktrees only). */
-export const FeedEvent = Schema.Union([
-  Schema.Struct({ ...lineFields, kind: Schema.tag("push"), summary: Schema.NullOr(PushSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("branch.opened"), summary: Schema.NullOr(PushSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("branch.deleted"), summary: Schema.NullOr(BranchDeletedSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("merged"), summary: Schema.NullOr(MergedSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("review"), summary: Schema.NullOr(ReviewSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("status"), summary: Schema.NullOr(StatusSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("worktree.reported"), summary: Schema.NullOr(WorktreeSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("worktree.removed"), summary: Schema.NullOr(WorktreeSummary) }),
-  Schema.Struct({ ...lineFields, kind: Schema.tag("meta.saved"), summary: Schema.NullOr(MetaSavedSummary) }),
-]).pipe(Schema.toTaggedUnion("kind"));
+export const FeedEvent = byActivityKind(lineFields).pipe(Schema.toTaggedUnion("kind"));
 
 export type FeedEvent = typeof FeedEvent.Type;
 

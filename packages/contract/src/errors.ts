@@ -3,12 +3,15 @@
 // a non-2xx response into one of the tagged errors below with failureOf.
 import * as Schema from "effect/Schema";
 
-/** The wire body of every error response. Extra fields (such as `checks` on a refused merge) are kept by the server and ignored here. */
+import { Checks } from "./checks.ts";
+
+/** The wire body of every error response. A refused merge carries `checks` (412 checks_not_green) or `paths` (409 conflicts). */
 export const ErrorBody = Schema.Struct({
   error: Schema.Struct({
     code: Schema.String,
     message: Schema.String,
     paths: Schema.optionalKey(Schema.Array(Schema.String)),
+    checks: Schema.optionalKey(Checks),
   }),
 });
 

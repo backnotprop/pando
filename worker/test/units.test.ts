@@ -5,7 +5,7 @@ import { cacheable } from "../src/accounts/auth";
 import type { Auth } from "../src/accounts/object";
 import { combine } from "../src/monorepo/checks";
 import { pandoTrailers } from "../src/monorepo/views";
-import { compareWith, type CommitInfo } from "../src/monorepo/graph";
+import { compareWith, type CommitInfo, type CommitReader } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
 import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection, refusal } from "../src/monorepo/pktline";
 import type { StatusRecord } from "../src/monorepo/types";
@@ -108,18 +108,27 @@ describe("merge base, ahead and behind", () => {
   //          b1    y1 - y2
   //                       \
   //                        z1 (a branch stacked on y)
-  const g: Record<string, CommitInfo> = {
-    root: { parents: [], time: 1, tree: "t" },
-    m1: { parents: ["root"], time: 2, tree: "t" },
-    b1: { parents: ["m1"], time: 3, tree: "t" },
-    m2: { parents: ["m1"], time: 4, tree: "t" },
-    y1: { parents: ["m2"], time: 5, tree: "t" },
-    y2: { parents: ["y1"], time: 6, tree: "t" },
-    m3: { parents: ["m2", "y2"], time: 7, tree: "t" },
-    z1: { parents: ["y2"], time: 8, tree: "t" },
+  /** A reader over a fixed graph; a commit the graph lacks is a broken test, so it throws. */
+  const readerOf = (graph: Map<string, CommitInfo>): CommitReader => async (sha) => {
+    const c = graph.get(sha);
+
+    if (!c) throw new Error(`no commit ${sha} in the test graph`);
+
+    return c;
   };
 
-  const read = async (s: string) => g[s];
+  const read = readerOf(
+    new Map([
+      ["root", { parents: [], time: 1, tree: "t" }],
+      ["m1", { parents: ["root"], time: 2, tree: "t" }],
+      ["b1", { parents: ["m1"], time: 3, tree: "t" }],
+      ["m2", { parents: ["m1"], time: 4, tree: "t" }],
+      ["y1", { parents: ["m2"], time: 5, tree: "t" }],
+      ["y2", { parents: ["y1"], time: 6, tree: "t" }],
+      ["m3", { parents: ["m2", "y2"], time: 7, tree: "t" }],
+      ["z1", { parents: ["y2"], time: 8, tree: "t" }],
+    ]),
+  );
 
   it("a branch off an older main", async () => {
     expect(await compareWith(read, "m3", "b1")).toEqual({ mergeBase: "m1", ahead: 1, behind: 4, aheadCommits: ["b1"] });
@@ -130,14 +139,16 @@ describe("merge base, ahead and behind", () => {
   });
 
   it("lists a branch's own commits newest first even within one second", async () => {
-    const same: Record<string, CommitInfo> = {
-      r: { parents: [], time: 1, tree: "t" },
-      c1: { parents: ["r"], time: 5, tree: "t" },
-      c2: { parents: ["c1"], time: 5, tree: "t" },
-      c3: { parents: ["c2"], time: 5, tree: "t" },
-    };
+    const same = readerOf(
+      new Map([
+        ["r", { parents: [], time: 1, tree: "t" }],
+        ["c1", { parents: ["r"], time: 5, tree: "t" }],
+        ["c2", { parents: ["c1"], time: 5, tree: "t" }],
+        ["c3", { parents: ["c2"], time: 5, tree: "t" }],
+      ]),
+    );
 
-    const out = await compareWith(async (x) => same[x], "r", "c3");
+    const out = await compareWith(same, "r", "c3");
     expect(out.aheadCommits).toEqual(["c3", "c2", "c1"]);
   });
 
@@ -254,7 +265,7 @@ describe("the write gate", () => {
     const g = new WriteGate(1, 50, 200);
     await g.acquire("r"); // never released: the lease ends after 50 ms
     const next = await g.acquire("r");
-    expect(typeof next).toBe("string");
+    expect(next).toEqual(expect.any(String));
     const slow = new WriteGate(1, 10_000, 50);
     await slow.acquire("r");
     await expect(slow.acquire("r")).rejects.toBeInstanceOf(GateBusy);
@@ -350,9 +361,9 @@ describe("the write gate's release delay", () => {
 describe("RPC results are released on arrival", () => {
   it("calls the result's disposer once and drops it, keeping the data", async () => {
     const { released } = await import("../src/timing");
-    const D = (Symbol as unknown as { dispose: symbol }).dispose;
+    const D = Symbol.dispose;
     let calls = 0;
-    const r: Record<string | symbol, unknown> = { token: "t", n: 2 };
+    const r = { token: "t", n: 2 };
     Object.defineProperty(r, D, { value: () => calls++, enumerable: false, configurable: true });
     const out = released(r);
     expect(calls).toBe(1);

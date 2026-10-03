@@ -1,0 +1,19 @@
+{
+  "schema": "RepoList",
+  "route": "GET .../repos",
+  "status": 200,
+  "body": {
+    "repos": [
+      {
+        "monorepo": "rec-musyuiou/rec-musyuiou",
+        "name": "projects-web",
+        "path": "projects/web",
+        "description": null,
+        "default_branch": "main",
+        "clone_url": "http://localhost:8843/rec-musyuiou/rec-musyuiou/projects-web.git",
+        "created_at": "2026-10-03T22:31:08.229Z",
+        "created_by": "rec-musyuiou"
+      }
+    ]
+  }
+}

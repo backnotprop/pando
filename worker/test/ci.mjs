@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -45,23 +46,10 @@ const check = (name, ok, detail = "") => {
   console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`));
 };
 
-const call = async (method, path, secret, body, headers = {}) => {
-  const res = await fetch(URL_ + path, {
-    method,
-    redirect: "manual",
-    headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers },
-    body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
-  });
+const call = (method, path, secret, body, headers = {}) => request(URL_, method, path, { secret, body, headers, redirect: "manual" });
 
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, text, headers: res.headers };
-};
+/** A body sent exactly as given (a signed webhook body keeps its bytes). */
+const callRaw = (method, path, raw, headers = {}) => request(URL_, method, path, { raw, headers, redirect: "manual" });
 
 const waitFor = async (pred, ms = 30_000) => {
   const end = Date.now() + ms;
@@ -113,7 +101,7 @@ const bkApi = (req, raw, res) => {
   }
 
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds\/(\d+)\/cancel$/.exec(u.pathname)) && req.method === "PUT") {
-    return json(200, { ...bkBuild(m[1], Number(m[2]), { state: "canceling", ...(bkStub.builds?.[m[2]] ?? {}) }), pipeline: bkPipeline(m[1]) });
+    return json(200, { ...bkBuild(m[1], Number(m[2]), { state: "canceling", ...bkStub.builds?.[m[2]] }), pipeline: bkPipeline(m[1]) });
   }
 
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds\/(\d+)\/jobs\/([^/]+)\/retry$/.exec(u.pathname)) && req.method === "PUT") {
@@ -263,7 +251,7 @@ try {
   const build = await waitFor(() => got.buildkite.find((b) => b?.commit === head));
   const benv = build?.env ?? {};
   const token = benv.PANDO_STATUS_TOKEN;
-  check("the Buildkite build gets PANDO_STATUS_TOKEN beside PANDO_READ_TOKEN", /^pst1\./.test(token ?? "") && /^art_v\d+_/.test(benv.PANDO_READ_TOKEN ?? ""));
+  check("the Buildkite build gets PANDO_STATUS_TOKEN beside PANDO_READ_TOKEN", (token ?? "").startsWith("pst1.") && /^art_v\d+_/.test(benv.PANDO_READ_TOKEN ?? ""));
   const c = token ? claimsOf(token) : {};
   check("its claims: this monorepo's id, this repo, this commit, app buildkite, the hook, 24 hours", c.m === MID && c.r === M && c.s === head && c.a === "buildkite" && c.h === bk?.id && Math.abs(c.x - (Date.now() / 1000 + 86400)) < 120);
   const readExp = Number(/\?expires=(\d+)/.exec(benv.PANDO_READ_TOKEN ?? "")?.[1]);
@@ -271,7 +259,7 @@ try {
   check("meta_data maps the build back: pando_delivery, pando_monorepo, pando_repo", build?.meta_data?.pando_delivery && build.meta_data.pando_monorepo === MID && build.meta_data.pando_repo === M);
   const ghaGot = await waitFor(() => got.web.find((w) => w.route === "/gha" && w.body?.head === head));
   const plainGot = await waitFor(() => got.web.find((w) => w.route === "/plain" && w.body?.head === head));
-  check("a web hook's payload carries status_token", /^pst1\./.test(ghaGot?.body?.status_token ?? "") && !!ghaGot.body.status_token_expires_at);
+  check("a web hook's payload carries status_token", (ghaGot?.body?.status_token ?? "").startsWith("pst1.") && !!ghaGot.body.status_token_expires_at);
   const webRead = Number(/\?expires=(\d+)/.exec(ghaGot?.body?.read_token ?? "")?.[1]);
   check("a web hook's read token still lives 30 minutes", webRead * 1000 - Date.now() <= 31 * 60_000);
 
@@ -359,7 +347,7 @@ try {
   r = await call("POST", `${ciBase}/connections`, S, { service: "buildkite", organization: "O", api_url: `http://127.0.0.1:${port}` });
   const conn = r.json?.connection;
   const WH = r.json?.webhook_token;
-  check("an owner connects Buildkite: the webhook URL, and its token shown once", r.status === 201 && conn?.organization === "o" && conn.webhook_url === `${URL_}/v1/integrations/buildkite/${conn.id}` && typeof WH === "string" && WH.length >= 32 && conn.token === "worker_secret");
+  check("an owner connects Buildkite: the webhook URL, and its token shown once", r.status === 201 && conn?.organization === "o" && conn.webhook_url === `${URL_}/v1/integrations/buildkite/${conn.id}` && /^[0-9a-f]{32,}$/.test(WH ?? "") && conn.token === "worker_secret");
   r = await call("POST", `${ciBase}/connections`, S, { service: "buildkite", organization: "o" });
   check("the same organization twice: 409", r.status === 409);
   r = await call("GET", ciBase, B);
@@ -377,10 +365,10 @@ try {
     if (o.token) headers["x-buildkite-token"] = o.token === true ? WH : o.token;
     else headers["x-buildkite-signature"] = `timestamp=${ts},signature=${createHmac("sha256", o.key ?? WH).update(`${ts}.${body}`).digest("hex")}`;
 
-    return call("POST", hookUrl, null, body, headers);
+    return callRaw("POST", hookUrl, body, headers);
   };
 
-  r = await call("POST", hookUrl, null, "{}", { "x-buildkite-event": "ping" });
+  r = await callRaw("POST", hookUrl, "{}", { "x-buildkite-event": "ping" });
   check("a webhook with no token or signature: 401", r.status === 401);
   r = await send("ping", {}, { token: "wrong-token-wrong-token" });
   check("the wrong token: 401", r.status === 401);
@@ -388,7 +376,7 @@ try {
   check("a signature with another key: 401", r.status === 401);
   r = await send("ping", {}, { skew: -600 });
   check("a signature over 5 minutes old (a replay): 401", r.status === 401);
-  r = await call("POST", "/v1/integrations/buildkite/m_0000000000000000--cic_000000000000", null, "{}", { "x-buildkite-event": "ping", "x-buildkite-token": WH });
+  r = await callRaw("POST", "/v1/integrations/buildkite/m_0000000000000000--cic_000000000000", "{}", { "x-buildkite-event": "ping", "x-buildkite-token": WH });
   check("an unknown monorepo or connection: 404", r.status === 404);
   r = await send("ping", {}, { token: true });
   check("ping with X-Buildkite-Token: recorded", r.status === 200 && r.json?.result === "recorded");
@@ -409,7 +397,7 @@ try {
   const JOB1 = (jid, key, state, o = {}) => ({ ...B1(o.buildState ?? "running", { started_at: iso(1000) }), job: bkJob(jid, key, { state, created_at: iso(500), ...o }) });
   r = await send("build.scheduled", B1("scheduled"));
   const build1 = r.json?.build;
-  check("build.scheduled for a build Pando started: recorded", r.status === 200 && r.json?.result === "recorded" && /^cib_/.test(build1 ?? ""), JSON.stringify(r.json));
+  check("build.scheduled for a build Pando started: recorded", r.status === 200 && r.json?.result === "recorded" && (build1 ?? "").startsWith("cib_"), JSON.stringify(r.json));
   r = await call("GET", `${ciBase}/builds`, B);
   const row1 = r.json?.builds?.find((b) => b.id === build1);
   check("the build: repo, commit, branch, number, queued, who pushed (from Pando's delivery)",
@@ -565,7 +553,7 @@ try {
     const body = JSON.stringify({ event: "ping" });
     const ts = Math.floor(Date.now() / 1000);
 
-    return call("POST", cliHook, null, body, { "x-buildkite-event": "ping", "x-buildkite-signature": `timestamp=${ts},signature=${createHmac("sha256", key).update(`${ts}.${body}`).digest("hex")}` });
+    return callRaw("POST", cliHook, body, { "x-buildkite-event": "ping", "x-buildkite-signature": `timestamp=${ts},signature=${createHmac("sha256", key).update(`${ts}.${body}`).digest("hex")}` });
   };
 
   r = await signed("not-the-token");

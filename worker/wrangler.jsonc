@@ -96,5 +96,15 @@
     { "tag": "v3", "new_sqlite_classes": ["FeedObject"] }
   ],
   // The contract, served at /v1/openapi.yaml.
-  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }]
+  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }],
+  // The web app (projects/pando/web, built with `npm run build` there), on the
+  // same origin. The Worker runs first for every path but the app's hashed
+  // assets and fonts; app paths fall through to ASSETS (index.ts), and any
+  // path without a file gets index.html (the app's own router takes it).
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/*", "!/assets/*", "!/fonts/*"]
+  }
 }

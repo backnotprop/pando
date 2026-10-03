@@ -7,7 +7,7 @@
 #   worker/test/live/run-e2e.sh -run Race       # extra go test flags
 #   worker/test/live/run-e2e.sh --artifacts     # also commits, on real Artifacts
 #                                               # (pando-spike, your wrangler login)
-#   META_COMMIT_SHAPE=window worker/test/live/run-e2e.sh --artifacts -run Window
+#   META_COMMIT_GROUPING=window worker/test/live/run-e2e.sh --artifacts -run Window
 #                                               # one commit per quiet window
 #
 # Against a deployed Worker instead:
@@ -28,9 +28,9 @@ log="$state/wrangler.log"
 
 cd "$worker"
 vars=()
-if [[ -n "${META_COMMIT_SHAPE:-}" ]]; then
-  vars=(--var "META_COMMIT_SHAPE:$META_COMMIT_SHAPE")
-  export PANDO_META_TEST_SHAPE="$META_COMMIT_SHAPE"
+if [[ -n "${META_COMMIT_GROUPING:-}" ]]; then
+  vars=(--var "META_COMMIT_GROUPING:$META_COMMIT_GROUPING")
+  export PANDO_META_TEST_SHAPE="$META_COMMIT_GROUPING" # the Go tests' own name for it
 fi
 npx wrangler dev -c "$config" "${vars[@]}" --port "$port" --inspector-port $((port + 500)) \
   --ip 127.0.0.1 --persist-to "$state/do" >"$log" 2>&1 &

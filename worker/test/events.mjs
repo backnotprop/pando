@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -45,22 +46,7 @@ const checkS = (name, ok, detail = "") => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const call = async (method, path, secret, body, headers = {}) => {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { authorization: `Bearer ${secret}`, ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, text };
-};
+const call = (method, path, secret, body, headers = {}) => request(URL_, method, path, { secret, body, headers });
 
 const work = mkdtempSync(join(tmpdir(), "pando-events-"));
 
@@ -157,9 +143,9 @@ try {
   const mainOnly = openEvents(M, A, null, "main");
   sockets.push(mainOnly);
   const caught = STREAM ? await waitFor(() => ev.frames.find((f) => f.type === "caught_up")) : null;
-  checkS("the owner opens the event socket and is caught up (caught_up carries seq, a number)", !!caught && typeof caught.seq === "number", JSON.stringify(caught));
+  checkS("the owner opens the event socket and is caught up (caught_up carries seq, a number)", !!caught && Number.isInteger(caught.seq), JSON.stringify(caught));
 
-  if (STREAM) ev.ws.readyState === 1 && ev.ws.send("ping");
+  if (STREAM && ev.ws.readyState === 1) ev.ws.send("ping");
   checkS("ping gets pong", STREAM && !!(await waitFor(() => ev.frames.find((f) => f.type === "pong"), 5000)));
 
   r = await call("GET", `/v1/monorepos/${O}/${M}/heads`, A);
@@ -294,17 +280,21 @@ try {
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/tree`, A);
   check("meta/tree lists the file in one call", r.json?.files?.some((f) => f.path === "notes/today.md" && f.size === bytes.length && f.version >= 1), `${r.status} ${(r.json?.files ?? []).map((f) => f.path).join(",")}`);
   // login beside the display name: on the event, the history and the tree
-  checkS("meta.saved carries the saver's login beside the name", e?.row?.login === `ana-${id}` && /^Ana Lima/.test(e?.row?.author ?? ""), `${e?.row?.login} / ${e?.row?.author}`);
+  checkS("meta.saved carries the saver's login beside the name", e?.row?.login === `ana-${id}` && (e?.row?.author ?? "").startsWith("Ana Lima"), `${e?.row?.login} / ${e?.row?.author}`);
   {
     // The home's line for that save names the person by login, as every other line does.
     const until = Date.now() + 10_000;
     let line = null;
+
     while (!line && Date.now() < until) {
       line = (await call("GET", `/v1/events?in=${O}/${M}&limit=50`, A)).json?.events?.find((x) => x.kind === "meta.saved" && x.summary?.path === "notes/today.md") ?? null;
+
       if (!line) await sleep(200);
     }
+
     checkS("the home's meta.saved line has the saver's login as actor", line?.actor === `ana-${id}`, `${line?.actor}`);
   }
+
   const v1 = (await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s1"), 10_000))?.version;
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/history?path=notes/today.md`, A);
   check("meta history entries carry login", r.json?.versions?.[0]?.login === `ana-${id}`, JSON.stringify(r.json?.versions?.[0]?.login));
@@ -315,7 +305,7 @@ try {
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/tree?dir=`, A);
   const fNotes = r.json?.folders?.find((f) => f.name === "notes");
   const fPlans = r.json?.folders?.find((f) => f.name === "plans");
-  check("meta/tree?dir= gives each folder its last change (who, what, when, version)", fNotes?.files === 1 && fNotes?.last?.version === v1 && fNotes?.last?.path === "notes/today.md" && fNotes?.last?.login === `ana-${id}` && typeof fNotes?.last?.at === "number" && fPlans?.last?.version === v2 && fPlans?.last?.path === "plans/q4/plan.md", JSON.stringify(r.json?.folders));
+  check("meta/tree?dir= gives each folder its last change (who, what, when, version)", fNotes?.files === 1 && fNotes?.last?.version === v1 && fNotes?.last?.path === "notes/today.md" && fNotes?.last?.login === `ana-${id}` && Number.isInteger(fNotes?.last?.at) && fPlans?.last?.version === v2 && fPlans?.last?.path === "plans/q4/plan.md", JSON.stringify(r.json?.folders));
 
   // the root raw route: a monorepo's own file, now and at a version
   const rawGet = async (path, secret, headers = {}) => {
@@ -411,7 +401,7 @@ try {
   const future = openEvents(M, A, all[all.length - 1].seq + 1000);
   sockets.push(future);
   const rs = await waitFor(() => future.frames.find((f) => f.type === "resync"));
-  checkS("a ?since= ahead of the stream gets resync, with the stream's seq", rs?.seq === all[all.length - 1].seq && typeof rs?.oldest_seq === "number");
+  checkS("a ?since= ahead of the stream gets resync, with the stream's seq", rs?.seq === all[all.length - 1].seq && Number.isInteger(rs?.oldest_seq));
 
   for (const s of [ev, again, future, mainOnly]) s.ws.close();
   }

@@ -24,7 +24,9 @@ import http from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -45,22 +47,7 @@ const check = (name, ok, detail = "") => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const call = async (method, path, secret, body, headers = {}) => {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, text };
-};
+const call = (method, path, secret, body, headers = {}) => request(URL_, method, path, { secret, body, headers });
 
 async function waitFor(pred, ms = 30_000, every = 200) {
   const end = Date.now() + ms;
@@ -103,7 +90,8 @@ function openSocket(path, secret) {
   };
 
   ws.onclose = (e) => (s.closed = e.code);
-  s.send = (o) => ws.send(typeof o === "string" ? o : JSON.stringify(o));
+  s.send = (o) => ws.send(JSON.stringify(o));
+  s.ping = () => ws.send("ping");
 
   return s;
 }
@@ -195,8 +183,8 @@ try {
   await waitFor(() => live.open, 10_000);
   live.send({ type: "hello", since: 0 });
   const caught = await waitFor(() => live.frames.find((f) => f.type === "caught_up"), 10_000);
-  check("the live socket answers hello with caught_up and the landed number", typeof caught?.landed === "number", JSON.stringify(caught));
-  live.send("ping");
+  check("the live socket answers hello with caught_up and the landed number", Number.isInteger(caught?.landed), JSON.stringify(caught));
+  live.ping();
   check("ping gets pong", !!(await waitFor(() => live.frames.find((f) => f.type === "pong"), 5000)));
 
   // Cookie sockets: the Origin rule applies (403 bad_origin before the cookie is even read).
@@ -415,7 +403,7 @@ try {
 
     const ns = (lines1 ?? []).map((f) => f.n);
     check("feed topic: caught_up names the last line number, then every line arrives once, numbered in order",
-      typeof cu1?.feed_n === "number" && lines1?.length === 5 && ns.every((n, i) => i === 0 || n === ns[i - 1] + 1) && ns[0] === cu1.feed_n + 1, `${cu1?.feed_n} then ${ns.join(",")}`);
+      Number.isInteger(cu1?.feed_n) && lines1?.length === 5 && ns.every((n, i) => i === 0 || n === ns[i - 1] + 1) && ns[0] === cu1.feed_n + 1, `${cu1?.feed_n} then ${ns.join(",")}`);
     const lastN = Math.max(...s1.frames.filter((x) => x.type === "feed").map((f) => f.n));
     s1.ws.close();
     await waitFor(() => s1.closed !== null, 5000);
@@ -465,7 +453,7 @@ try {
   check("machines: a row per machine, named by its credential, connected with its worktrees", anaRow?.name === "ana-mbp" && anaRow.connected && JSON.stringify(anaRow.worktrees.map((w) => w.id)) === JSON.stringify(["w1", "w2", "w4"]) && boRow?.name === "bo-mbp" && boRow.connected && boRow.worktrees[0]?.id === "w3" && !!anaRow.credential_id && anaRow.credential_id !== boRow.credential_id, JSON.stringify(mrows.map((x) => [x.login.slice(0, 3), x.name, x.connected, x.worktrees.map((w) => w.id).join("+")])));
   check("machines: latest activity first; a machine that only connected has none", mrows[0]?.login === login.ana && ["push", "branch.opened", "merged", "status"].includes(anaRow?.last_activity?.kind) && anaRow.last_activity.repo_path === "." && boRow?.last_activity === null, JSON.stringify(anaRow?.last_activity)?.slice(0, 160));
 
-  if (["push", "branch.opened"].includes(anaRow?.last_activity?.kind)) check("machines: a push's row carries its commit count once the facts job ran", typeof anaRow.last_activity.summary?.commits === "number", JSON.stringify(anaRow.last_activity.summary));
+  if (["push", "branch.opened"].includes(anaRow?.last_activity?.kind)) check("machines: a push's row carries its commit count once the facts job ran", Number.isInteger(anaRow.last_activity.summary?.commits), JSON.stringify(anaRow.last_activity.summary));
   check("machine.updated: a new row and a connect are published", !!(await waitFor(() => mw.frames.some((f) => f.kind === "machine.updated" && f.row?.login === login.bo && f.row.connected), 5000)) && mw.frames.some((f) => f.kind === "machine.updated" && f.row?.login === login.ana && f.collection === "machines"));
   const anaPublished = mw.frames.filter((f) => f.row?.login === login.ana).length;
   await call("PUT", `/v1/monorepos/${login.ana}/${S}/worktrees/wm_${id}`, A, { repo: ".", branch: "feat/m", path: "worktrees/feat-m", machine: "ana-mbp", kind: "sparse" });
@@ -509,7 +497,7 @@ try {
   check("the person's socket gets a needs frame for feat/x", !!(await waitFor(() => live.frames.find((f) => f.type === "needs" && f.monorepo_id === ID[S] && f.changed?.some((c) => c.branch === "feat/x" && c.state === "failing")), 10_000)));
   p = await pageAll(A, `&in=${login.ana}/${S}`);
   const st = p.events.filter((x) => x.kind === "status");
-  check("status lines: only changes of state (pending once, then failure with a duration)", st.length === 2 && st[0].summary.state === "failure" && typeof st[0].summary.duration_s === "number" && st[0].branch === "feat/x", st.map((x) => `${x.summary.state}:${x.summary.duration_s}`).join(" "));
+  check("status lines: only changes of state (pending once, then failure with a duration)", st.length === 2 && st[0].summary.state === "failure" && Number.isInteger(st[0].summary.duration_s) && st[0].branch === "feat/x", st.map((x) => `${x.summary.state}:${x.summary.duration_s}`).join(" "));
   // A conflict: c1 lands on main, c2 changed the same line differently.
   git(["checkout", "-q", "main"], src);
   git(["checkout", "-qb", "c1"], src);
@@ -656,7 +644,7 @@ try {
   if (DEV_LOG) {
     // Alarms and drains of deleted monorepos run after the deletes: give them a summary tick (10 s on a plain server).
     await sleep(12_000);
-    const lines = logLines().slice(logStart).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+    const lines = logLines().slice(logStart).map((l) => stripVTControlCharacters(l));
     // Fails the run: an undisposed RPC result; a 500 (the Worker logs "internal error: <message>"); Pando's own
     // error lines ("feed: ...") and uncaught exceptions; SQLITE_BUSY or SQLITE_READONLY (another dev server sharing
     // this one's state). Not: this test's own crash and failed drains.
@@ -670,7 +658,7 @@ try {
 
     for (const l of lines) {
       if (/feed test: (the object dies|a failed drain)/.test(l)) ours++;
-      else if (/^✘ \[ERROR\] Error: internal error; reference = /.test(l)) internal++;
+      else if (l.startsWith("✘ [ERROR] Error: internal error; reference = ")) internal++;
       else if (/not disposed properly|SQLITE_(BUSY|READONLY)|✘ \[ERROR\] (Uncaught|internal error: |feed: )/.test(l)) bad.push(l);
     }
 

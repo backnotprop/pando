@@ -9,6 +9,7 @@ package meta
 // Each test uses its own monorepo name, so its own object.
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -623,4 +625,132 @@ func (p *proxy) restore() {
 	p.mu.Lock()
 	p.down = false
 	p.mu.Unlock()
+}
+
+// ---- commits after quiet, on real Artifacts (run-e2e.sh --artifacts) ----
+
+func artifactsServer(t *testing.T) string {
+	server := testServer(t)
+	if os.Getenv("PANDO_META_TEST_ARTIFACTS") == "" {
+		t.Skip("needs the test Worker with Artifacts: worker/test/live/run-e2e.sh --artifacts")
+	}
+	return server
+}
+
+func metaRepo(t *testing.T, server, mono, action string, extra map[string]string) []byte {
+	t.Helper()
+	body := map[string]string{"monorepo": mono, "action": action}
+	for k, v := range extra {
+		body[k] = v
+	}
+	b, _ := json.Marshal(body)
+	resp, err := http.Post(server+"/test/meta-repo", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("%s: %d %s", action, resp.StatusCode, out)
+	}
+	return out
+}
+
+type gitCommit struct {
+	Hash    string `json:"hash"`
+	Message string `json:"message"`
+	Author  struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"author"`
+}
+
+func TestE2ECommitsAfterQuiet(t *testing.T) {
+	server := artifactsServer(t)
+	b := make([]byte, 4)
+	rand.Read(b)
+	mono := "e2e-commit-" + hex.EncodeToString(b)
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	c := client(server, mono)
+	ctx := context.Background()
+
+	logOf := func() []gitCommit {
+		var l []gitCommit
+		json.Unmarshal(metaRepo(t, server, mono, "log", nil), &l)
+		return l
+	}
+	readGit := func(p string) string {
+		var r struct{ Content *string }
+		json.Unmarshal(metaRepo(t, server, mono, "read", map[string]string{"path": p}), &r)
+		if r.Content == nil {
+			return "<missing>"
+		}
+		return *r.Content
+	}
+	committed := func(p string, n int) func() bool {
+		return func() bool {
+			h, err := c.History(ctx, p, 1)
+			return err == nil && len(h.Versions) == 1 && h.Versions[0].Commit != "" && len(logOf()) == n
+		}
+	}
+	waitLong := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(45 * time.Second)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s", what)
+	}
+
+	a := newMachine(t, "ana", server, mono)
+	a.write("a.md", "a1\n")
+	a.write("notes/b.md", "b1\n")
+	start := time.Now()
+	waitLong("the first commit", committed("notes/b.md", 1))
+	t.Logf("two saves became one commit after %s", time.Since(start).Round(time.Second))
+	l := logOf()
+	if !strings.HasPrefix(l[0].Message, "Save 2 files\n") || !strings.Contains(l[0].Message, "Pando-Machine: ana") ||
+		l[0].Author.Name != "Ana" || l[0].Author.Email != "ana@example.com" {
+		t.Errorf("first commit: %+v", l[0])
+	}
+	t.Logf("commit %s:\n%s", l[0].Hash[:10], l[0].Message)
+	if got := readGit("notes/b.md"); got != "b1\n" {
+		t.Errorf("notes/b.md in git: %q", got)
+	}
+
+	// main moves under the object (a reviewed merge); the next commit must
+	// land on top of it, not overwrite it.
+	metaRepo(t, server, mono, "move-main", map[string]string{"path": "elsewhere.md", "content": "moved\n"})
+	a.write("a.md", "a2\n")
+	waitLong("the commit after main moved", committed("a.md", 3))
+	l = logOf()
+	if !strings.HasPrefix(l[0].Message, "Save a.md\n") || !strings.Contains(l[0].Message, "Pando-Version: 3") {
+		t.Errorf("second save commit: %q", l[0].Message)
+	}
+	if readGit("a.md") != "a2\n" || readGit("elsewhere.md") != "moved\n" {
+		t.Errorf("git has a.md %q, elsewhere.md %q", readGit("a.md"), readGit("elsewhere.md"))
+	}
+
+	// A restore is a commit too.
+	r, err := c.Restore(ctx, "a.md", 1, "Ana <ana@example.com>", "ana", "agent-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitContent(t, a, "a.md", "a1\n")
+	waitLong("the restore commit", committed("a.md", 4))
+	l = logOf()
+	if !strings.HasPrefix(l[0].Message, fmt.Sprintf("Restore a.md to version %d\n", r.RestoredFrom)) || !strings.Contains(l[0].Message, "Pando-Agent: agent-7") {
+		t.Errorf("restore commit: %q", l[0].Message)
+	}
+	if readGit("a.md") != "a1\n" {
+		t.Errorf("a.md in git after restore: %q", readGit("a.md"))
+	}
+	st, _ := c.Status(ctx)
+	if st["uncommitted"].(float64) != 0 || st["commit_error"] != nil {
+		t.Errorf("status: %v", st)
+	}
 }

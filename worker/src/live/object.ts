@@ -10,6 +10,7 @@ import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./co
 export type MetaEnv = CommitEnv;
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+const GROUP_MS = 2_000; // paths due within this of each other share a commit
 const RETRY_MIN_MS = 30_000;
 const RETRY_MAX_MS = 600_000;
 const PAGE_BYTES = 4 * 1024 * 1024; // catch-up page size
@@ -165,14 +166,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
-    // Set by the Worker from the checked token (route.ts); absent until auth is wired.
+    // Set by the Worker from the checked credential (route.ts): the user.
     const author = request.headers.get("x-pando-author");
-    const agent = request.headers.get("x-pando-agent");
     const att: Attachment = {
       id: crypto.randomUUID(),
       author: author ?? "",
       machine: "",
-      agent: agent || null,
+      agent: null,
       fixed: author !== null,
       hello: false,
       live: false,
@@ -264,9 +264,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!target) return fail(404, "not_found", `${path} has no version at or before ${body?.version}`);
 
     // From here to the broadcast nothing awaits, so no other change interleaves.
-    const fixed = request.headers.get("x-pando-author");
-    const author = fixed ?? (str(body?.author) || "unknown");
-    const agent = fixed !== null ? request.headers.get("x-pando-agent") || null : str(body?.agent) || null;
+    const author = request.headers.get("x-pando-author") ?? (str(body?.author) || "unknown");
+    const agent = str(body?.agent) || null;
     const machine = str(body?.machine) || "unknown";
     const cur = this.current(path);
     const same = target.deleted ? !cur || cur.deleted : !!cur && !cur.deleted && cur.sha === target.sha;
@@ -299,7 +298,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       uncommitted,
       sockets: this.ctx.getWebSockets().length,
       last_commit: this.kv("parent"),
-      commit_error: gitWriter(this.env) ? this.kv("commit_error") : "gitwrite is not wired yet",
+      commit_error: gitWriter(this.env) ? this.kv("commit_error") : "no Artifacts binding: versions are kept, not committed",
     };
   }
 
@@ -368,11 +367,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   private hello(ws: WebSocket, att: Attachment, msg: any): void {
-    if (!att.fixed) {
-      att.author = str(msg.author) || "unknown";
-      att.agent = str(msg.agent) || null;
-    }
+    if (!att.fixed) att.author = str(msg.author) || "unknown";
     att.machine = str(msg.machine) || "unknown";
+    att.agent = str(msg.agent) || null; // agents act as their user; the trailers name them
     att.hello = true;
     const head = this.head();
     let since = int(msg.since);
@@ -662,7 +659,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const writer = gitWriter(this.env);
     if (!writer) return;
     const due = this.sql
-      .exec<any>("SELECT path, version FROM pending WHERE due <= ? ORDER BY version", Date.now())
+      .exec<any>("SELECT path, version FROM pending WHERE due <= ? ORDER BY version", Date.now() + GROUP_MS)
       .toArray() as { path: string; version: number }[];
 
     // Paths due together with the same author, machine and agent share a commit.

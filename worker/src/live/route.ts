@@ -6,18 +6,18 @@
 //   POST /v1/monorepos/{monorepo}/meta/restore
 //   GET  /v1/monorepos/{monorepo}/meta/status
 //
-// The Worker checks the token first, then passes who it is as `identity`.
-// Until then the object takes the author from the client's hello.
+// The Worker checks the credential first, then passes the user as `identity`.
+// Without one the object takes the author from the client's hello.
 import type { MetaLayerObject } from "./object";
 
 export interface LiveEnv {
   META: DurableObjectNamespace<MetaLayerObject>;
 }
 
+// The user behind the credential (api-v1.yaml: agents act as their user).
 export interface MetaIdentity {
   name: string;
   email?: string;
-  role: "person" | "agent";
 }
 
 const ROUTE = /^\/v1\/monorepos\/([^/]+)\/meta\/(socket|history|file|restore|status)$/;
@@ -37,12 +37,11 @@ export async function routeMeta(request: Request, env: LiveEnv, identity?: MetaI
   const monorepo = metaRoute(request);
   if (!monorepo) return null;
   const headers = new Headers(request.headers);
-  for (const h of ["x-pando-author", "x-pando-agent", "x-pando-monorepo", "x-pando-meta-repo"]) headers.delete(h);
+  for (const h of ["x-pando-author", "x-pando-monorepo", "x-pando-meta-repo"]) headers.delete(h);
   headers.set("x-pando-monorepo", monorepo);
   headers.set("x-pando-meta-repo", `${monorepo}--meta`); // api-v1.yaml: the meta layer's Artifacts repo
   if (identity) {
     headers.set("x-pando-author", identity.email ? `${identity.name} <${identity.email}>` : identity.name);
-    if (identity.role === "agent") headers.set("x-pando-agent", identity.name);
   }
   const stub = env.META.get(env.META.idFromName(monorepo));
   return stub.fetch(new Request(request, { headers }));

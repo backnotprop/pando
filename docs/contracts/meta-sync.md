@@ -239,8 +239,10 @@ pando resolve decisions/HISTORY.md                # unfreeze after a conflict
 ## Commits after quiet
 
 When a path has had no change for 10 seconds, the object commits it to the
-meta layer's `main` through gitwrite's `commitChanges` (see `gitwrite.md`).
-Paths that become due together and share an author go in one commit.
+meta layer's `main` (the Artifacts repo `<monorepo>--meta`) through
+gitwrite's `commitChanges` (see `gitwrite.md`). Paths that become due within
+2 seconds of each other and share an author, machine and agent go in one
+commit.
 
 - Message: `Save decisions/HISTORY.md` (also `Delete <path>`,
   `Rename <from> to <path>`, `Restore <path> to version <n>`; several paths:

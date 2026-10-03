@@ -11,17 +11,18 @@ import { withRepo } from "../monorepo/artifacts";
 import { commitReader, compareWith } from "../monorepo/graph";
 import { ZERO } from "../monorepo/names";
 import type { RepoRecord } from "../monorepo/types";
+import type { PushNumbers } from "./shape";
 
 /** A new branch with no main to compare against counts at most this many commits (`commits_more` past it). */
 const LOG_MAX = 250;
 
-type Stub = {
+interface Stub {
   currentMain(repo: string): Promise<string | null>;
-  feedPush(seq: number, summary: Record<string, unknown>): Promise<boolean>;
-};
+  feedPush(seq: number, summary: PushNumbers): Promise<boolean>;
+}
 
 export async function sendPushSummary(env: Env, stub: Stub, r: RepoRecord, push: { seq: number; before: string }, head: string, isMain: boolean): Promise<void> {
-  const summary: Record<string, unknown> = { commits: null, head_title: null };
+  const summary: PushNumbers = { commits: null, head_title: null };
 
   try {
     await withRepo(env, r.artifacts_name, async (repo) => {

@@ -830,7 +830,8 @@ paths:
       description: |
         Points a new branch at `from` (default: main's head) with no new
         commit. The caller becomes the branch's author. 409 `branch_exists` if
-        it exists.
+        it exists. The answer has `stale: true` until the branch's facts are
+        computed (a `branch.updated` event follows).
       tags: [branches]
       requestBody:
         required: true
@@ -863,8 +864,14 @@ paths:
       - $ref: "#/components/parameters/branch"
     get:
       operationId: getBranch
-      summary: One branch, as in the list (computes its facts first when stale)
+      summary: One branch, as in the list
+      description: Answers from stored facts at once, like the list. It computes them first only when they have been stale for over 30 s, or with `?fresh=1`.
       tags: [branches]
+      parameters:
+        - name: fresh
+          in: query
+          description: "`1`: compute ahead, behind and mergeable now if stale (about 1 s)."
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: OK
@@ -1081,7 +1088,12 @@ paths:
                   description: The merge commit message. Default "<title>\n\n<description>\n\nMerge branch '<branch>'", or "Merge branch '<branch>'" with no title.
                 expected_head:
                   type: string
-                  description: Refuse with 409 `head_moved` unless the branch head is this sha.
+                  description: |
+                    Refuse with 409 `head_moved` unless the branch head is this
+                    sha. When it is the head Pando recorded for the branch (every
+                    push is recorded before git is told it landed), the merge
+                    uses the recorded heads and reads no refs, which is faster;
+                    exactly this commit is merged.
       responses:
         "200":
           description: Merged, or already in the default branch.

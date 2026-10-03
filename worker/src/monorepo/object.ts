@@ -12,7 +12,7 @@ import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, LEASE_MS, retryBusy, WriteGate } from "./gate";
-import { finishTiming, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
+import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
 import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
@@ -504,11 +504,19 @@ export class MonorepoObject extends DurableObject<Env> {
     );
   }
 
-  /** The merge gate reads the required checks fresh (and keeps them for the lists). */
+  /**
+   * The merge gate's required checks: the kept list, read from pando.toml
+   * when there is none. The kept list is dropped whenever main moves in the
+   * repo holding pando.toml by a merge or its first push, and .pando/** never
+   * changes any other way (the live layer refuses saves there), so it is
+   * never stale.
+   */
   private async checksFor(r: RepoRecord, sha: string): Promise<Checks> {
-    const m = this.info()!;
-    const required = await requiredChecks(this.env, m, r);
-    this.setRequiredChecks(r.name, required);
+    let required = this.storedRequired(r.name);
+    if (!required) {
+      required = await requiredChecks(this.env, this.info()!, r);
+      this.setRequiredChecks(r.name, required);
+    }
     return combine(sha, required, this.statuses(r.name, sha));
   }
 
@@ -523,13 +531,33 @@ export class MonorepoObject extends DurableObject<Env> {
     );
   }
 
-  private async mergeNow(a: MergeArgs): Promise<MergeResult> {
-    const r = (await this.getRepo(a.repo)) ?? fail(404, "not_found", `no repo ${a.repo}`);
+  /**
+   * The branch head and main to merge. When the caller names the head it
+   * expects and that is the head the door recorded (every push is recorded
+   * before git is told it landed), the recorded heads are used and Artifacts
+   * is not read. Otherwise, or when asked to, the refs are read from
+   * Artifacts and a head that is not the expected one is refused.
+   */
+  private async mergeHeads(r: RepoRecord, a: MergeArgs, readRefs: boolean): Promise<{ head: string; base: string; read: boolean }> {
+    if (a.branch === r.default_branch) fail(400, "bad_request", `cannot merge ${r.default_branch} into itself`);
+    const stored = this.branchRecord(a.repo, a.branch)?.head ?? null;
+    const storedMain = this.currentMain(a.repo);
+    // The meta layer's main also moves by the live layer's commits, which this object does not record.
+    const isMeta = r.artifacts_name === metaArtifactsName(this.info()!.name);
+    if (!readRefs && !isMeta && a.expected_head && stored === a.expected_head && storedMain) {
+      return { head: stored, base: storedMain, read: false };
+    }
     const refs = branchesOf(await listRefs(this.env, r, "local"));
     const head = refs.get(a.branch) ?? fail(404, "not_found", `no branch ${a.branch}`);
     const base = refs.get(r.default_branch) ?? fail(409, "no_main", `${r.default_branch} does not exist yet`);
-    if (a.branch === r.default_branch) fail(400, "bad_request", `cannot merge ${r.default_branch} into itself`);
     if (a.expected_head && a.expected_head !== head) fail(409, "head_moved", `the branch is at ${head}, not ${a.expected_head}`);
+    return { head, base, read: true };
+  }
+
+  private async mergeNow(a: MergeArgs): Promise<MergeResult> {
+    const r = (await this.getRepo(a.repo)) ?? fail(404, "not_found", `no repo ${a.repo}`);
+    let { head, base, read } = await this.mergeHeads(r, a, false);
+    note({ heads_from: read ? "artifacts" : "records" });
     const checks = await this.checksFor(r, head);
     if (checks.state !== "success" && !a.force) {
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });
@@ -540,15 +568,15 @@ export class MonorepoObject extends DurableObject<Env> {
     const email = a.identity.email ?? `${a.identity.login}@users.pando.invalid`;
     let out;
     const engine = gitwrite;
-    try {
+    const attemptMerge = (h: string, baseSha: string) =>
       // One of the repo's two write slots, held for the merge's push; Artifacts' "busy" is retried.
-      out = await this.gatedTimed(r.artifacts_name, () =>
+      this.gatedTimed(r.artifacts_name, () =>
         retryBusy(
           () =>
             engine.mergeCommit(
               { artifacts: timedArtifacts(this.env.ARTIFACTS), name: r.artifacts_name },
               {
-                base: r.default_branch, head, baseSha: base, message,
+                base: r.default_branch, head: h, baseSha, message,
                 author: { name: a.identity.name ?? a.identity.login, email },
                 committer: { name: "Pando", email: "pando@pando.invalid" },
               },
@@ -556,7 +584,16 @@ export class MonorepoObject extends DurableObject<Env> {
           (e) => isBusy(e instanceof Error ? e.message : String(e)),
         ),
       );
+    try {
+      out = await attemptMerge(head, base);
+      if (out.status === "ref_moved" && !read) {
+        // The recorded main was behind Artifacts: read the refs (which also re-checks the head) and try once more.
+        ({ head, base, read } = await this.mergeHeads(r, a, true));
+        note({ heads_from: "artifacts after ref_moved" });
+        out = await attemptMerge(head, base);
+      }
     } catch (err) {
+      if (err instanceof HttpError) throw err;
       if (err instanceof GateBusy) fail(503, "repo_busy", err.message);
       const code = gitWriteCode(err);
       const msg = redact(err instanceof Error ? err.message : String(err));

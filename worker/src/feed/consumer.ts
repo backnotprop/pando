@@ -64,6 +64,8 @@ export async function handleFeedBatch(batch: MessageBatch<FeedMessage>, env: Env
  * 100 outbox rows. Answers per message whether every feed took it; the object
  * deletes those rows and retries the rest.
  */
+// RPC methods only: no fetch(). Workers Caching is on for this Worker
+// (wrangler.jsonc); RPC calls are never cached, a fetch() here could be.
 export class FeedDrain extends WorkerEntrypoint<Env> {
   async deliver(msgs: FeedMessage[]): Promise<{ ok: boolean[]; error: string | null }> {
     const fields = { route: "feed.drain", monorepo: msgs[0]?.monorepo ?? null, messages: msgs.length, ...ageFields(msgs, Date.now()) };

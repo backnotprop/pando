@@ -794,7 +794,7 @@ function walkerOf(c: C, r: RepoRecord): { w: files.Walker; obj: ReturnType<typeo
 
 function refOf(c: C, r: RepoRecord, w: files.Walker) {
   const stub = c.get("stub");
-  return files.resolveCommit(c.env, w, (ref) => stub.refHead(r.name, ref), c.req.query("ref"));
+  return files.resolveCommit(c.env, w, (ref) => stub.refHead(r.name, ref), c.req.query("ref"), (sha) => stub.rememberHead(r.name, sha));
 }
 
 api.get("/v1/monorepos/:o/:m/repos/:r/tree", async (c) => {

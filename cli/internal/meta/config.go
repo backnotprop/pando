@@ -28,6 +28,7 @@ type Config struct {
 	MaxHold     time.Duration   // a file still changing is sent after this (default 5 min)
 	Backoff     []time.Duration // reconnect waits (default 5, 10, 30, 60 s)
 	PingEvery   time.Duration   // default 30 s
+	FullScan    time.Duration   // with file-change notifications: the safety-net scan (default 30 s)
 	MaxInFlight int             // default 64
 
 	Log *log.Logger
@@ -45,6 +46,9 @@ func (c *Config) defaults() {
 	}
 	if c.PingEvery == 0 {
 		c.PingEvery = 30 * time.Second
+	}
+	if c.FullScan == 0 {
+		c.FullScan = fullScanEvery
 	}
 	if c.MaxInFlight == 0 {
 		c.MaxInFlight = 64

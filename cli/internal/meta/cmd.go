@@ -68,7 +68,7 @@ func Init(ctx context.Context, root string) error {
 	if err := c.initAction(ctx, "start"); err != nil {
 		return fmt.Errorf("starting the first upload: %w", err)
 	}
-	e.rules.first = true
+	e.rules.setFirst(true)
 	e.untilSynced = true
 	if err := e.Run(ctx); err != nil {
 		return err

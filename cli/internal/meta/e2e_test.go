@@ -242,8 +242,10 @@ func (m *machine) config() Config {
 	}
 }
 
-func (m *machine) start() {
-	e, err := New(m.config())
+func (m *machine) start() { m.startWith(m.config()) }
+
+func (m *machine) startWith(cfg Config) {
+	e, err := New(cfg)
 	if err != nil {
 		m.t.Fatal(err)
 	}
@@ -396,6 +398,8 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 		"data/cache.sqlite",
 	}
 	atRoot := []string{".env", ".pando/pando.toml", ".pando/local/mine.json", "projects/web/README.md"}
+	// A nested repo's .git comes first, as git clone makes it.
+	a.write("research/infra/lib/.git/HEAD", "ref: refs/heads/main\n")
 	for _, p := range local {
 		a.write(p, "stays\n")
 	}
@@ -403,7 +407,6 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 		a.writeRoot(p, "stays\n")
 	}
 	pointer := ".pando/references/" + env.p("research/infra/lib.toml")
-	a.write("research/infra/lib/.git/HEAD", "ref: refs/heads/main\n")
 	a.write("big.txt", strings.Repeat("a", MaxBytes+1))
 	a.write("image.dat", "\x89PNG\x00\x01")
 	a.writeRoot(pointer, "url = \"https://example.com/lib.git\"\n")

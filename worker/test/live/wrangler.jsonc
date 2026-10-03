@@ -1,0 +1,12 @@
+// Local test Worker for the live lane: `wrangler dev -c test/live/wrangler.jsonc`.
+// Never deployed; the real Worker is ../../wrangler.jsonc (pando-dev).
+{
+  "name": "pando-live-test",
+  "main": "entry.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "META", "class_name": "MetaLayerObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MetaLayerObject"] }]
+}

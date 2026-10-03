@@ -1,0 +1,33 @@
+{
+  "name": "pando-web",
+  "private": true,
+  "type": "module",
+  "description": "Pando's web app: a Vite SPA served by the Worker on the same origin (worker/wrangler.jsonc, assets).",
+  "scripts": {
+    "dev": "node scripts/fonts.mjs && vite",
+    "build": "node scripts/fonts.mjs && vite build",
+    "typecheck": "tsc --noEmit",
+    "e2e": "npm run build && playwright test --project=e2e",
+    "shots": "npm run build && playwright test --project=shots"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.8.0",
+    "@pando/contract": "*",
+    "@tanstack/react-query": "5.104.1",
+    "@tanstack/react-router": "1.170.41",
+    "effect": "4.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/router-plugin": "1.168.42",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.2"
+  }
+}

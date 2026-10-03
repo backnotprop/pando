@@ -1,0 +1,6 @@
+# Apple's SF fonts are copied in at build (scripts/fonts.mjs) and never committed.
+public/fonts/
+test-results/
+playwright-report/
+e2e/.state/
+e2e/shots/

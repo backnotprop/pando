@@ -143,6 +143,7 @@ try {
   check("bootstrap makes user bo", r.status === 201 && !!B);
   r = await call("GET", "/v1/user", A);
   check("GET /v1/user names ana and her credential", r.json?.login === `ana-${id}` && r.json?.credential?.name === "ana-mbp");
+  check("a user made by the bootstrap path has picture_url null", r.json && "picture_url" in r.json && r.json.picture_url === null);
 
   // ── A plain repo ──
   r = await call("POST", "/v1/monorepos", A, { name: M, kind: "repo" });
@@ -181,6 +182,16 @@ try {
   check("bo cannot add himself", r.status === 403, `${r.status}`);
   r = await call("PUT", `/v1/monorepos/${M}/members/bo-${id}`, A, { role: "member" });
   check("ana (owner) adds bo as a member", r.status === 200 && r.json?.role === "member", `${r.status}`);
+  r = await call("GET", `/v1/monorepos/${M}/members`, A);
+  {
+    const ana = r.json?.members?.find((m) => m.login === `ana-${id}`);
+    const bo = r.json?.members?.find((m) => m.login === `bo-${id}`);
+    check(
+      "members carry name, picture_url and last_active_at",
+      ana?.name === "Ana" && ana?.picture_url === null && Date.parse(ana?.last_active_at) > Date.now() - 5 * 60_000 && bo && bo.name === null && "last_active_at" in bo && "picture_url" in bo,
+      JSON.stringify({ ana: ana && { name: ana.name, last_active_at: ana.last_active_at }, bo: bo && { name: bo.name, last_active_at: bo.last_active_at } }),
+    );
+  }
   g = git(["clone", "-q", cloneUrl, boDir], work, B);
   check("bo clones through the door (Basic, credential helper)", g.ok, g.ok ? "" : g.out.slice(-300));
 

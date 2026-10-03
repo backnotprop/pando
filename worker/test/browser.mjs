@@ -27,6 +27,7 @@ const b64url = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").
 
 // ── the stand-in WorkOS ──
 const codes = new Map();
+const devices = new Map();
 const seen = { exchanges: [], logouts: [] };
 let nextUser = null;
 let sidN = 0;
@@ -45,6 +46,19 @@ const stub = createServer((req, res) => {
       back.searchParams.set("code", code);
       back.searchParams.set("state", q.get("state"));
       return res.writeHead(302, { location: back.toString() }).end();
+    }
+    if (req.method === "POST" && u.pathname === "/user_management/authorize/device") {
+      // The device flow: the person is taken as having confirmed at once.
+      const device_code = `dev_${devices.size + 1}_${Date.now()}`;
+      devices.set(device_code, nextUser);
+      return res.writeHead(200, { "content-type": "application/json" }).end(
+        JSON.stringify({ device_code, user_code: "ABCD-EFGH", verification_uri: "https://example.invalid/device", verification_uri_complete: "https://example.invalid/device?code=ABCD-EFGH", expires_in: 300, interval: 1 }),
+      );
+    }
+    if (req.method === "POST" && u.pathname === "/user_management/authenticate" && new URLSearchParams(body).get("grant_type") === "urn:ietf:params:oauth:grant-type:device_code") {
+      const user = devices.get(new URLSearchParams(body).get("device_code"));
+      if (!user) return res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "invalid_grant" }));
+      return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ user, access_token: "x.e30.sig", refresh_token: "r" }));
     }
     if (req.method === "POST" && u.pathname === "/user_management/authenticate") {
       const f = new URLSearchParams(body);
@@ -107,7 +121,9 @@ try {
   const boot = await (await api("POST", "/v1/users", { bearer: BOOT, body: { login: `ana-${id}`, name: "Ana", email: `ana-${id}@pando.invalid` } })).json();
   const A = boot.credential?.secret;
   check("a user made earlier by the bootstrap path", !!A);
-  const ana = { id: `user_ana_${id}`, email: `ana-${id}@pando.invalid`, email_verified: true, first_name: "Ana", last_name: "Lima" };
+  const P1 = `https://workoscdn.example/images/ana-${id}-1`;
+  const P2 = `https://workoscdn.example/images/ana-${id}-2`;
+  const ana = { id: `user_ana_${id}`, email: `ana-${id}@pando.invalid`, email_verified: true, first_name: "Ana", last_name: "Lima", profile_picture_url: P1 };
 
   const s1 = await signIn(ana, "/v1/user");
   check("GET /v1/login/browser redirects to AuthKit with PKCE and state", s1.start.status === 302 && /\/user_management\/authorize\?/.test(s1.start.headers.get("location") ?? "") && /code_challenge=/.test(s1.start.headers.get("location")));
@@ -122,6 +138,7 @@ try {
   let r = await api("GET", "/v1/user", { session });
   let me = await r.json();
   check("the browser is the same Pando user as before (linked by verified email)", r.status === 200 && me.login === `ana-${id}`, `${r.status} ${me.login}`);
+  check("the signed-in user carries their WorkOS picture", me.picture_url === P1, String(me.picture_url));
   check("its credential is a browser session with an end date", me.credential?.kind === "browser" && /Safari on macOS/.test(me.credential?.name) && Date.parse(me.credential?.expires_at) > Date.now() + 29 * 86400e3);
   r = await api("GET", "/v1/user/credentials", { session });
   check("it is listed beside the machine credentials", (await r.json()).credentials?.some((c) => c.kind === "browser"));
@@ -170,15 +187,38 @@ try {
   // ── bad starts and return_to ──
   r = await fetch(`${URL_}/v1/login/callback?code=x&state=y`, { redirect: "manual" });
   check("a callback with no matching login cookie is refused", r.status === 400 && (await r.json()).error?.code === "bad_state");
-  const s2 = await signIn(ana, "//evil.example/steal");
+  const s2 = await signIn({ ...ana, profile_picture_url: P2 }, "//evil.example/steal");
   check("return_to on another host becomes /", s2.location === "/", s2.location);
-  const s3 = await signIn(ana, "https://evil.example/");
+  me = await (await api("GET", "/v1/user", { session: s2.session })).json();
+  check("the picture is refreshed on the next sign-in", me.picture_url === P2, String(me.picture_url));
+  r = await api("GET", `/v1/monorepos/br-${id}/members`, { session: s2.session });
+  const am = (await r.json()).members?.find((m) => m.login === `ana-${id}`);
+  check(
+    "a member carries name, picture and last_active_at (from their credentials' last use)",
+    r.status === 200 && am?.name === "Ana Lima" && am?.picture_url === P2 && Date.parse(am?.last_active_at) > Date.now() - 5 * 60_000,
+    JSON.stringify({ name: am?.name, picture: am?.picture_url === P2, last_active_at: am?.last_active_at }),
+  );
+  const s3 = await signIn({ ...ana, profile_picture_url: "javascript:alert(1)" }, "https://evil.example/");
   check("return_to with a scheme becomes /", s3.location === "/", s3.location);
+  me = await (await api("GET", "/v1/user", { session: s3.session })).json();
+  check("a picture that is not an https URL is kept as null", "picture_url" in me && me.picture_url === null, String(me.picture_url));
 
   // ── a new person ──
   const s4 = await signIn({ id: `user_new_${id}`, email: `zed.${id}@pando.invalid`, email_verified: true, first_name: "Zed", last_name: null }, "/");
   me = await (await api("GET", "/v1/user", { session: s4.session })).json();
   check("a first-time person gets a user named from their email", me.login === `zed-${id}` && me.name === "Zed", me.login);
+  check("a person with no picture has picture_url null (the web draws one)", "picture_url" in me && me.picture_url === null);
+
+  // ── the device flow (pando login) stores the picture too ──
+  const P3 = `https://workoscdn.example/images/zed-${id}`;
+  nextUser = { id: `user_new_${id}`, email: `zed.${id}@pando.invalid`, email_verified: true, first_name: "Zed", last_name: null, profile_picture_url: P3 };
+  const dev = await (await api("POST", "/v1/login/device")).json();
+  r = await api("POST", "/v1/login/token", { body: { device_code: dev.device_code, credential_name: `zed-laptop-${id}` } });
+  const tok = await r.json();
+  check("pando login's device flow signs in the same person and returns their picture", r.status === 200 && tok.user?.login === `zed-${id}` && tok.user?.picture_url === P3, `${r.status} ${tok.user?.login}`);
+  me = await (await api("GET", "/v1/user", { bearer: tok.credential?.secret })).json();
+  check("and GET /v1/user shows it", me.picture_url === P3 && me.credential?.kind === "machine");
+  if (tok.credential?.id) await api("DELETE", `/v1/user/credentials/${tok.credential.id}`, { bearer: tok.credential.secret });
 
   // ── sign out ──
   r = await api("POST", "/v1/logout", { session, origin: "https://other.plannotator.workers.dev", accept: "application/json" });

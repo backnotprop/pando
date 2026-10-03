@@ -183,7 +183,7 @@ describe("names", () => {
 });
 
 describe("the auth cache keeps successes only", () => {
-  const user = { login: "ana", name: null, email: null, created_at: "" };
+  const user = { login: "ana", name: null, email: null, picture_url: null, created_at: "" };
   const credential = { id: "c", name: "m", kind: "machine" as const, created_at: "", last_used_at: null };
   const mono = { name: "acme", kind: "monorepo" as const, created_at: "" };
   const auth = (over: Partial<Auth>): Auth => ({ user, credential, role: "member", monorepo: mono, ...over });
@@ -350,6 +350,20 @@ describe("RPC results are released on arrival", () => {
     expect(released(null)).toBe(null);
     expect(released(true)).toBe(true);
     expect(released({ plain: 1 })).toEqual({ plain: 1 });
+  });
+});
+
+describe("a person's picture", () => {
+  it("keeps https URLs only, at most 2,048 characters", async () => {
+    const { pictureUrl } = await import("../src/accounts/signin");
+    expect(pictureUrl("https://workoscdn.com/images/v1/123abc")).toBe("https://workoscdn.com/images/v1/123abc");
+    expect(pictureUrl("http://example.com/a.png")).toBe(null);
+    expect(pictureUrl("javascript:alert(1)")).toBe(null);
+    expect(pictureUrl("data:image/png;base64,AAAA")).toBe(null);
+    expect(pictureUrl("not a url")).toBe(null);
+    expect(pictureUrl(`https://x.example/${"a".repeat(2100)}`)).toBe(null);
+    expect(pictureUrl(null)).toBe(null);
+    expect(pictureUrl(undefined)).toBe(null);
   });
 });
 

@@ -22,7 +22,7 @@ import { credential, HttpError, toErrorResponse } from "../http";
 import { hashToken, isBootstrap, newToken } from "../monorepo/session";
 import type { Outcome } from "../monorepo/types";
 import { accounts, forgetCachedAuth, readCookie, sameOrigin, SESSION_COOKIE } from "./auth";
-import type { Credential, CredentialKind, User } from "./object";
+import type { Credential, CredentialKind, SignedIn, User } from "./object";
 
 export const signin = new Hono<{ Bindings: Env }>();
 signin.onError((err) => toErrorResponse(err));
@@ -74,6 +74,31 @@ async function workos(env: Env, path: string, form: Record<string, string>): Pro
   return { ok: res.ok, status: res.status, data };
 }
 
+/** Who WorkOS says signed in (its User object): id, email, display name, picture. */
+function signedInFrom(data: Record<string, unknown>): SignedIn {
+  const u = data.user as
+    | { id?: string; email?: string; email_verified?: boolean; first_name?: string | null; last_name?: string | null; profile_picture_url?: string | null }
+    | undefined;
+  if (!u?.id || !u.email) throw new HttpError(502, "workos", "WorkOS returned no user");
+  return {
+    workos_id: u.id,
+    email: u.email,
+    email_verified: u.email_verified === true,
+    name: [u.first_name, u.last_name].filter(Boolean).join(" ") || null,
+    picture_url: pictureUrl(u.profile_picture_url),
+  };
+}
+
+/** A picture the web may put in an <img>: an https URL of at most 2,048 characters, else null. Never fetched here. */
+export function pictureUrl(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 2048) return null;
+  try {
+    return new URL(v).protocol === "https:" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Step 1: a code for the person to confirm in the browser, and a device code for the CLI to poll with. */
 signin.post("/v1/login/device", async (c) => {
   const r = await workos(c.env, "/authorize/device", { client_id: workosClient(c.env) });
@@ -113,12 +138,10 @@ signin.post("/v1/login/token", async (c) => {
     const message = String(r.data.error_description ?? "the sign-in did not complete");
     throw new HttpError(400, PENDING.has(code) ? code : "sign_in_failed", message);
   }
-  const u = r.data.user as { id?: string; email?: string; email_verified?: boolean; first_name?: string | null; last_name?: string | null } | undefined;
-  if (!u?.id || !u.email) throw new HttpError(502, "workos", "WorkOS returned no user");
-  const display = [u.first_name, u.last_name].filter(Boolean).join(" ") || null;
+  const who = signedInFrom(r.data);
   const secret = newToken();
   const out = (await accounts(c.env).signIn(
-    { workos_id: u.id, email: u.email, email_verified: u.email_verified === true, name: display },
+    who,
     { hash: await hashToken(secret), name, kind },
   )) as { user: User; credential: Credential; joined: string[] };
   return c.json({ user: out.user, credential: { ...out.credential, secret }, joined: out.joined });
@@ -219,12 +242,10 @@ signin.get("/v1/login/callback", async (c) => {
   if (!r.ok) {
     throw new HttpError(400, "sign_in_failed", `WorkOS refused the code (${r.status}): ${String(r.data.error_description ?? r.data.message ?? r.data.error ?? "")}`.trim());
   }
-  const u = r.data.user as { id?: string; email?: string; email_verified?: boolean; first_name?: string | null; last_name?: string | null } | undefined;
-  if (!u?.id || !u.email) throw new HttpError(502, "workos", "WorkOS returned no user");
-  const display = [u.first_name, u.last_name].filter(Boolean).join(" ") || null;
+  const who = signedInFrom(r.data);
   const secret = newToken();
   await accounts(c.env).signIn(
-    { workos_id: u.id, email: u.email, email_verified: u.email_verified === true, name: display },
+    who,
     { hash: await hashToken(secret), name: browserName(c.req.header("user-agent") ?? null), kind: "browser", workos_sid: sessionIdOf(r.data.access_token) },
   );
   const headers = new Headers({ location: safeReturnTo(saved.return_to), "cache-control": "no-store" });

@@ -75,7 +75,7 @@ var metaUsage = []string{
 }
 
 var commands = []app.Command{
-	{Name: "login", Usage: "login [--server <url>] [--name <name>] [--email <email>]   sign this machine in", Run: app.Login},
+	{Name: "login", Usage: "login [--server <url>] [--bootstrap | --with-credential]   sign this machine in (in the browser)", Run: app.Login},
 	{Name: "logout", Usage: "logout [--server <url>]                                   sign this machine out", Run: app.Logout},
 	{Name: "auth", Usage: "auth status                                               who this machine is signed in as", Run: app.Auth},
 	{Name: "init", Usage: "init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder", Run: app.Init},
@@ -87,6 +87,7 @@ var commands = []app.Command{
 	{Name: "merge", Usage: "merge [<branch>] [--force]                                land a branch on main with a merge commit", Run: app.Merge},
 	{Name: "reference", Usage: "reference update <path> | sync                            move a reference to its newest commit", Run: app.Reference},
 	{Name: "status", Usage: "status                                                    this folder, its worktrees and references", Run: app.Status},
+	{Name: "members", Usage: "members list | invite <email> [--owner] | remove <who>      who belongs to a monorepo", Run: app.Members},
 	{Name: "mac", Usage: "mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)", Run: app.Mac},
 	{Name: "credential", Usage: "credential create --name <sandbox> | list | revoke <id>   credentials that act as you", Run: app.Credential},
 }

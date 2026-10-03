@@ -131,6 +131,42 @@ func (h *HTTP) CreateUser(ctx context.Context, bootstrap, login, name, email, cr
 	return out, err
 }
 
+func (h *HTTP) ListMembers(ctx context.Context, m string) ([]Member, error) {
+	var out struct {
+		Members []Member `json:"members"`
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/members"}, &out)
+	return out.Members, err
+}
+
+func (h *HTTP) RemoveMember(ctx context.Context, m, login string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m) + "/members/" + esc(login)}, nil)
+	return err
+}
+
+func (h *HTTP) Invite(ctx context.Context, m, email, role string) (*InviteResult, error) {
+	body := map[string]string{"email": email}
+	if role != "" {
+		body["role"] = role
+	}
+	out := &InviteResult{}
+	_, _, err := h.do(ctx, request{method: "POST", path: monoPath(m) + "/invites", body: body}, out)
+	return out, err
+}
+
+func (h *HTTP) ListInvites(ctx context.Context, m string) ([]Invite, error) {
+	var out struct {
+		Invites []Invite `json:"invites"`
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/invites"}, &out)
+	return out.Invites, err
+}
+
+func (h *HTTP) RevokeInvite(ctx context.Context, m, email string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m) + "/invites/" + esc(email)}, nil)
+	return err
+}
+
 func (h *HTTP) Me(ctx context.Context) (*Me, error) {
 	out := &Me{}
 	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/user"}, out)

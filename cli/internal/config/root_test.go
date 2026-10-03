@@ -76,19 +76,3 @@ func TestCredentialFileMode(t *testing.T) {
 		t.Fatalf("after logout: %v", err)
 	}
 }
-
-func TestWorkOSClientID(t *testing.T) {
-	t.Setenv("PANDO_WORKOS_CLIENT_ID", "")
-	h := &Home{}
-	if h.WorkOSClientID() != DefaultWorkOSClientID {
-		t.Fatal("default")
-	}
-	h.WorkOS = "client_self_hosted"
-	if h.WorkOSClientID() != "client_self_hosted" {
-		t.Fatal("config")
-	}
-	t.Setenv("PANDO_WORKOS_CLIENT_ID", "client_env")
-	if h.WorkOSClientID() != "client_env" {
-		t.Fatal("env")
-	}
-}

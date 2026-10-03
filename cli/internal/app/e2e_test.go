@@ -61,7 +61,7 @@ func (h *harness) pando(dir, stdin string, args ...string) (string, error) {
 	e.Cwd = dir
 	cmds := map[string]func(*Env, []string) error{
 		"login": Login, "init": Init, "clone": Clone, "worktree": Worktree, "branch": Branch,
-		"diff": Diff, "review": Review, "merge": Merge, "status": Status, "reference": Reference,
+		"diff": Diff, "review": Review, "merge": Merge, "status": Status, "reference": Reference, "members": Members,
 	}
 	err = cmds[args[0]](e, args[1:])
 	return out.String(), err
@@ -227,6 +227,18 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	}
 	if os.WriteFile(filepath.Join(otherMain, "y"), []byte("y"), 0o644) == nil {
 		t.Fatal("main is writable after following")
+	}
+
+	out = h.ok(clone, "members", "invite", "ana@example.com")
+	if !strings.Contains(out, "Invited ana@example.com to ws as a member") {
+		t.Fatalf("invite:\n%s", out)
+	}
+	if out = h.ok(clone, "members", "list"); !strings.Contains(out, "ana@example.com") || !strings.Contains(out, "owner") {
+		t.Fatalf("members list:\n%s", out)
+	}
+	h.ok(clone, "members", "remove", "ws", "ana@example.com")
+	if out = h.ok(clone, "members", "list", "ws"); strings.Contains(out, "ana@example.com") {
+		t.Fatalf("the invite is still there:\n%s", out)
 	}
 
 	out = h.ok(clone, "status")

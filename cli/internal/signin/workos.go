@@ -1,8 +1,8 @@
-// Package signin is how a person signs a machine in: WorkOS CLI Auth, the
-// OAuth device flow (https://workos.com/docs/reference/authkit/cli-auth).
-// The CLI is a public client: it holds a client ID, never an API key. The
-// WorkOS result goes to the Pando Worker, which issues the machine
-// credential. Tokens are never printed or logged.
+// Package signin signs a machine in: WorkOS AuthKit's CLI Auth, the OAuth
+// device flow, run through the Pando Worker (api-v1.yaml, loginStart and
+// loginPoll). The Worker holds the WorkOS client; the CLI only shows a code,
+// polls, and receives the Pando user and a new machine credential. The
+// credential's secret is never printed or logged.
 package signin
 
 import (
@@ -13,15 +13,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
 
-// DefaultAPI is WorkOS's API. PANDO_WORKOS_API overrides it (tests).
-const DefaultAPI = "https://api.workos.com"
-
-// Device is the answer to the device authorization request.
+// Device is the answer to POST /v1/login/device.
 type Device struct {
 	DeviceCode              string `json:"device_code"`
 	UserCode                string `json:"user_code"`
@@ -31,38 +27,38 @@ type Device struct {
 	Interval                int    `json:"interval"`
 }
 
-// User is the WorkOS user in the result.
+// User is the Pando user.
 type User struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
+	Login string `json:"login"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
-// Result is what a finished sign-in returns. AccessToken and RefreshToken
-// are secrets.
+// Credential is the new machine credential; Secret is shown once.
+type Credential struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Secret string `json:"secret"`
+}
+
+// Result is the answer to a successful POST /v1/login/token.
 type Result struct {
-	User                 User   `json:"user"`
-	OrganizationID       string `json:"organization_id"`
-	AccessToken          string `json:"access_token"`
-	RefreshToken         string `json:"refresh_token"`
-	AuthenticationMethod string `json:"authentication_method"`
+	User       User       `json:"user"`
+	Credential Credential `json:"credential"`
+	Joined     []string   `json:"joined"`
 }
 
-// Client runs the device flow.
+// Client runs the flow against one Pando server.
 type Client struct {
-	API      string // WorkOS API base
-	ClientID string
-	HTTP     *http.Client
-	Sleep    func(context.Context, time.Duration) error // for tests
+	Server string
+	HTTP   *http.Client
+	Sleep  func(context.Context, time.Duration) error // for tests
 }
 
-// New makes a client for a WorkOS client ID.
-func New(api, clientID string) *Client {
-	if api == "" {
-		api = DefaultAPI
-	}
-	return &Client{API: strings.TrimRight(api, "/"), ClientID: clientID, HTTP: &http.Client{Timeout: 30 * time.Second}, Sleep: sleep}
+// New makes a client for a Pando server URL.
+func New(server string) *Client {
+	return &Client{Server: strings.TrimRight(server, "/"), HTTP: &http.Client{Timeout: 30 * time.Second}, Sleep: sleep}
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -76,29 +72,63 @@ func sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// Start asks WorkOS for a device code and the URL the person opens.
-func (c *Client) Start(ctx context.Context) (*Device, error) {
-	body, _ := json.Marshal(map[string]string{"client_id": c.ClientID})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.API+"/user_management/authorize/device", bytes.NewReader(body))
+// ErrNotConfigured means the server has no sign-in (no WorkOS client): use
+// pando login --bootstrap on a self-hosted server.
+var ErrNotConfigured = errors.New("this server has no sign-in set up; on a self-hosted server use pando login --bootstrap")
+
+// ErrDenied means the person turned the request down.
+var ErrDenied = errors.New("the sign-in was turned down")
+
+// ErrExpired means the code ran out before the person confirmed it.
+var ErrExpired = errors.New("the sign-in code expired; run pando login again")
+
+func (c *Client) post(ctx context.Context, path string, body any) (int, []byte, error) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", c.Server+path, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "pando-cli/0.1")
 	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, data, err
+}
+
+func errorCode(data []byte) (code, message string) {
+	var e struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(data, &e)
+	return e.Error.Code, e.Error.Message
+}
+
+// Start asks the server for a code to confirm in the browser.
+func (c *Client) Start(ctx context.Context) (*Device, error) {
+	status, data, err := c.post(ctx, "/v1/login/device", map[string]string{})
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("WorkOS device authorization: HTTP %d %s", resp.StatusCode, oauthError(data))
+	if status/100 != 2 {
+		code, msg := errorCode(data)
+		if code == "sign_in_not_configured" {
+			return nil, ErrNotConfigured
+		}
+		return nil, fmt.Errorf("starting sign-in: HTTP %d %s %s", status, code, msg)
 	}
 	d := &Device{}
 	if err := json.Unmarshal(data, d); err != nil {
 		return nil, err
 	}
 	if d.DeviceCode == "" || d.UserCode == "" {
-		return nil, errors.New("WorkOS device authorization: no device code in the answer")
+		return nil, errors.New("starting sign-in: the server sent no code")
 	}
 	if d.Interval <= 0 {
 		d.Interval = 5
@@ -109,17 +139,12 @@ func (c *Client) Start(ctx context.Context) (*Device, error) {
 	return d, nil
 }
 
-// ErrDenied means the person turned the request down.
-var ErrDenied = errors.New("the sign-in was turned down")
-
-// ErrExpired means the code ran out before the person finished.
-var ErrExpired = errors.New("the sign-in code expired; run pando login again")
-
-// Wait polls until the person finishes in the browser, turns it down, or
-// the code expires.
-func (c *Client) Wait(ctx context.Context, d *Device) (*Result, error) {
+// Wait polls until the person confirms, turns it down, or the code expires.
+// credentialName names the new credential (the machine name).
+func (c *Client) Wait(ctx context.Context, d *Device, credentialName, kind string) (*Result, error) {
 	interval := time.Duration(d.Interval) * time.Second
 	deadline := time.Now().Add(time.Duration(d.ExpiresIn) * time.Second)
+	body := map[string]string{"device_code": d.DeviceCode, "credential_name": credentialName, "kind": kind}
 	for {
 		if err := c.Sleep(ctx, interval); err != nil {
 			return nil, err
@@ -127,68 +152,34 @@ func (c *Client) Wait(ctx context.Context, d *Device) (*Result, error) {
 		if time.Now().After(deadline) {
 			return nil, ErrExpired
 		}
-		form := url.Values{
-			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-			"device_code": {d.DeviceCode},
-			"client_id":   {c.ClientID},
-		}
-		req, err := http.NewRequestWithContext(ctx, "POST", c.API+"/user_management/authenticate", strings.NewReader(form.Encode()))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		resp, err := c.HTTP.Do(req)
+		status, data, err := c.post(ctx, "/v1/login/token", body)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			continue // a network blip; try again at the next interval
 		}
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if resp.StatusCode/100 == 2 {
+		if status/100 == 2 {
 			r := &Result{}
 			if err := json.Unmarshal(data, r); err != nil {
 				return nil, err
 			}
-			if r.AccessToken == "" {
-				return nil, errors.New("WorkOS returned no access token")
+			if r.Credential.Secret == "" {
+				return nil, errors.New("signed in, but the server sent no credential")
 			}
 			return r, nil
 		}
-		var e struct {
-			Error string `json:"error"`
-		}
-		_ = json.Unmarshal(data, &e)
-		switch e.Error {
+		code, msg := errorCode(data)
+		switch code {
 		case "authorization_pending":
 		case "slow_down":
 			interval += 5 * time.Second
 		case "access_denied":
 			return nil, ErrDenied
-		case "expired_token":
+		case "expired_token", "invalid_grant":
 			return nil, ErrExpired
 		default:
-			return nil, fmt.Errorf("WorkOS sign-in: HTTP %d %s", resp.StatusCode, oauthError(data))
+			return nil, fmt.Errorf("sign-in: HTTP %d %s %s", status, code, msg)
 		}
 	}
-}
-
-func oauthError(data []byte) string {
-	var e struct {
-		Error       string `json:"error"`
-		Description string `json:"error_description"`
-		Message     string `json:"message"`
-	}
-	if json.Unmarshal(data, &e) == nil {
-		switch {
-		case e.Error != "" && e.Description != "":
-			return e.Error + ": " + e.Description
-		case e.Error != "":
-			return e.Error
-		case e.Message != "":
-			return e.Message
-		}
-	}
-	return ""
 }

@@ -21,24 +21,7 @@ type Home struct {
 	Dir      string             `toml:"-"`
 	Server   string             `toml:"server"`
 	Machine  string             `toml:"machine,omitempty"`
-	WorkOS   string             `toml:"workos_client_id,omitempty"`
 	Accounts map[string]Account `toml:"accounts,omitempty"`
-}
-
-// DefaultWorkOSClientID is Pando's WorkOS client for sign-in (public; a
-// client ID is not a secret). A self-hosted install sets workos_client_id in
-// ~/.pando/config.toml, or PANDO_WORKOS_CLIENT_ID.
-const DefaultWorkOSClientID = "client_01M3ZW5WYKNDQZE358DYA7VHY5"
-
-// WorkOSClientID is the WorkOS client ID sign-in uses.
-func (h *Home) WorkOSClientID() string {
-	if v := os.Getenv("PANDO_WORKOS_CLIENT_ID"); v != "" {
-		return v
-	}
-	if h.WorkOS != "" {
-		return h.WorkOS
-	}
-	return DefaultWorkOSClientID
 }
 
 // Account is who this machine is signed in as on one server host. The

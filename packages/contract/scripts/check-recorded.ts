@@ -4,10 +4,12 @@
 // Run: npm run check -w @pando/contract
 import { readdirSync, readFileSync } from "node:fs";
 
-import { Option, Result, Schema } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { flow } from "effect/Function";
+import * as Result from "effect/Result";
 
-import { ActivityFrame, ErrorBody, EventsPage, Me, MetaFileHeaders, MetaHistory, MetaTree, MonorepoList, MonorepoSummaryList, NeedsPage } from "../src/index.ts";
+import { ActivityFrame, decodeStrict, ErrorBody, EventsPage, Me, MetaFileHeaders, MetaHistory, MetaTree, MonorepoList, MonorepoSummaryList, NeedsPage } from "../src/index.ts";
 
 const Recording = Schema.Struct({
   schema: Schema.String,
@@ -17,7 +19,7 @@ const Recording = Schema.Struct({
 });
 
 /** A decoder that answers the failure, if any, so every entry has one type. */
-const refuses = <A, I>(schema: Schema.Codec<A, I>) => flow(Schema.decodeUnknownResult(schema, { onExcessProperty: "error" }), Result.getFailure);
+const refuses = <A, I>(schema: Schema.Codec<A, I>) => flow(decodeStrict(schema), Result.getFailure);
 
 const decoders = {
   Me: refuses(Me),

@@ -1,7 +1,7 @@
 // API errors. On the wire every error is `{"error": {"code", "message"}}`
 // (worker/src/http.ts errorJson), sometimes with more fields. A client turns
 // a non-2xx response into one of the tagged errors below with failureOf.
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 /** The wire body of every error response. Extra fields (such as `checks` on a refused merge) are kept by the server and ignored here. */
 export const ErrorBody = Schema.Struct({

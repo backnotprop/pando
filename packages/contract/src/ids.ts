@@ -1,7 +1,7 @@
 // Scalar values shared by every record: branded strings, so a login cannot be
 // passed where a monorepo id is expected. Patterns are the server's own
 // (api-v1.yaml, components/schemas); the rest are only non-empty.
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 /** A person's login, which is also their namespace (api-v1.yaml `Login`). */
 export const Login = Schema.String.check(Schema.isPattern(/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/)).pipe(Schema.brand("Login"));

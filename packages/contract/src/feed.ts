@@ -2,7 +2,7 @@
 // `listActivity`) and the person's WebSocket on the same path. One line per
 // activity, discriminated by `kind`; its `summary` depends on the kind
 // (worker/src/feed/out.ts pointerOf, feed/push.ts).
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 import { Count, FullName, MonorepoId, RepoName, Sha, Timestamp } from "./ids.ts";
 import { FeedSummary } from "./monorepo.ts";

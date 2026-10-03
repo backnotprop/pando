@@ -2,7 +2,7 @@
 // GET /v1/monorepos/{owner}/{monorepo}/meta/tree, .../history and .../file
 // (docs/contracts/meta-sync.md, "History and restore"). Versions count up per
 // monorepo; `at` is milliseconds since 1970, unlike the ISO times elsewhere.
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 import { Count, Sha } from "./ids.ts";
 

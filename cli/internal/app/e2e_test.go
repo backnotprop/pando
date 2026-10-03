@@ -39,6 +39,7 @@ func newHarness(t *testing.T) *harness {
 		})
 	})
 	t.Setenv("PANDO_HOME", filepath.Join(base, "home"))
+	t.Setenv("USER", "pat") // the file:// server's one user, so monorepos are pat/<name>
 	t.Setenv("PANDO_MACHINE", "test-box")
 	t.Setenv("PANDO_WORKTREE_KIND", "sparse")
 	t.Setenv("PANDO_AGENT", "")
@@ -85,6 +86,22 @@ func (h *harness) pando(dir, stdin string, args ...string) (string, error) {
 	err = cmds[args[0]](e, args[1:])
 	return out.String(), err
 }
+
+// pandoErr runs one command with stderr kept apart.
+func (h *harness) pandoErr(dir string, stderr *strings.Builder, args ...string) (string, error) {
+	h.t.Helper()
+	var out bytes.Buffer
+	e, err := NewEnv(context.Background(), strings.NewReader(""), &out, stderr)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	e.Cwd = dir
+	cmds := map[string]func(*Env, []string) error{"status": Status, "worktree": Worktree, "clone": Clone}
+	err = cmds[args[0]](e, args[1:])
+	return out.String(), err
+}
+
+func (h *harness) ctx() context.Context { return context.Background() }
 
 func (h *harness) ok(dir string, args ...string) string {
 	h.t.Helper()
@@ -141,7 +158,7 @@ func TestMonorepoEndToEnd(t *testing.T) {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
 	out := h.ok(ws, "init", "--yes")
-	if !strings.Contains(out, "pushed main") || !strings.Contains(out, "Pando monorepo ws is set up") {
+	if !strings.Contains(out, "pushed main") || !strings.Contains(out, "Pando monorepo pat/ws is set up") {
 		t.Fatalf("init:\n%s", out)
 	}
 
@@ -250,7 +267,7 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	}
 
 	out = h.ok(clone, "members", "invite", "ana@example.com")
-	if !strings.Contains(out, "Invited ana@example.com to ws as a member") {
+	if !strings.Contains(out, "Invited ana@example.com to pat/ws as a member") {
 		t.Fatalf("invite:\n%s", out)
 	}
 	if out = h.ok(clone, "members", "list"); !strings.Contains(out, "ana@example.com") || !strings.Contains(out, "owner") {

@@ -55,7 +55,7 @@ func Branch(e *Env, args []string) error {
 	}
 	out := map[string]*server.BranchList{}
 	for _, r := range repos {
-		bl, err := srv.ListBranches(e.Ctx, root.Name, repoName(root, r), state)
+		bl, err := srv.ListBranches(e.Ctx, root.FullName(), repoName(root, r), state)
 		if err != nil {
 			return fmt.Errorf("%s: %w", r, err)
 		}
@@ -156,7 +156,7 @@ func Diff(e *Env, args []string) error {
 	if *patch {
 		format = server.DiffPatch
 	}
-	body, omitted, err := srv.Diff(e.Ctx, root.Name, repoName(root, repo), branch, format, paths)
+	body, omitted, err := srv.Diff(e.Ctx, root.FullName(), repoName(root, repo), branch, format, paths)
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func Review(e *Env, args []string) error {
 	}
 	name := repoName(root, repo)
 	agent := os.Getenv("PANDO_AGENT")
-	b, err := srv.GetBranch(e.Ctx, root.Name, name, branch)
+	b, err := srv.GetBranch(e.Ctx, root.FullName(), name, branch)
 	if err != nil {
 		return fmt.Errorf("branch %s: %w", branch, err)
 	}
@@ -240,7 +240,7 @@ func Review(e *Env, args []string) error {
 			in.Verdict = "comment"
 		}
 	} else {
-		patch, _, err := srv.Diff(e.Ctx, root.Name, name, branch, server.DiffPatch, nil)
+		patch, _, err := srv.Diff(e.Ctx, root.FullName(), name, branch, server.DiffPatch, nil)
 		if err != nil {
 			return err
 		}
@@ -268,7 +268,7 @@ func Review(e *Env, args []string) error {
 		word := map[string]string{"comment": "Comment", "approve": "Approved", "request_changes": "Changes requested"}[in.Verdict]
 		in.Body = strings.TrimSpace(in.Body + "\n\n" + word + " by agent " + agent + ".")
 	}
-	rv, err := srv.CreateReview(e.Ctx, root.Name, name, branch, in)
+	rv, err := srv.CreateReview(e.Ctx, root.FullName(), name, branch, in)
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func Merge(e *Env, args []string) error {
 	// else pushed). Elsewhere the server's current head is merged, as
 	// gh pr merge does. Either way, no branch read before the merge.
 	expected := e.pushedHead(root, branch)
-	res, err := srv.Merge(e.Ctx, root.Name, name, branch, *force, expected)
+	res, err := srv.Merge(e.Ctx, root.FullName(), name, branch, *force, expected)
 	if err != nil {
 		var ae *server.APIError
 		if errors.As(err, &ae) {

@@ -119,7 +119,7 @@ func decodeError(status int, data []byte) error {
 
 func esc(s string) string { return url.PathEscape(s) }
 
-func monoPath(m string) string { return "/v1/monorepos/" + esc(m) }
+func monoPath(m string) string { return MonorepoPath(m) }
 
 func repoPath(m, repo string) string { return monoPath(m) + "/repos/" + esc(repo) }
 
@@ -209,11 +209,15 @@ func (h *HTTP) CreateMonorepo(ctx context.Context, name, kind string) (*Created,
 	return out, err
 }
 
-func (h *HTTP) ListMonorepos(ctx context.Context) ([]Monorepo, error) {
+func (h *HTTP) ListMonorepos(ctx context.Context, name string) ([]Monorepo, error) {
 	var out struct {
 		Monorepos []Monorepo `json:"monorepos"`
 	}
-	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/monorepos"}, &out)
+	q := url.Values{}
+	if name != "" {
+		q.Set("name", name)
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/monorepos", query: q}, &out)
 	return out.Monorepos, err
 }
 

@@ -53,7 +53,7 @@ func Init(e *Env, args []string) error {
 		return err
 	}
 	if existing != nil && existing.Kind != plan.Kind {
-		return fmt.Errorf("%s is already a Pando %s named %s", dir, existing.Kind, existing.Name)
+		return fmt.Errorf("%s is already a Pando %s named %s", dir, existing.Kind, existing.FullName())
 	}
 
 	printPlan(e, plan)
@@ -145,12 +145,16 @@ func Init(e *Env, args []string) error {
 		return fmt.Errorf("%q cannot be a monorepo name (lower-case letters, digits, '.', '_', '-'; no '--'; at most 39); pass --name", mono)
 	}
 
-	srvc, repos, made, err := ensureMonorepo(e, serverURL, mono, plan.Kind)
+	existingFull := ""
+	if existing != nil && existing.Owner != "" && existing.Name == mono {
+		existingFull = existing.FullName()
+	}
+	srvc, repos, mrec, made, err := ensureMonorepo(e, serverURL, mono, existingFull, plan.Kind)
 	if err != nil {
 		return err
 	}
-
-	root := &config.Root{Dir: plan.Root, Kind: plan.Kind, Name: mono, Server: serverURL}
+	root := &config.Root{Dir: plan.Root, Kind: plan.Kind, Owner: mrec.Owner, Name: mrec.Name, ID: mrec.ID, Server: serverURL}
+	mono = root.FullName() // owner/name from here on
 	if existing != nil {
 		root.Repos = existing.Repos
 	}
@@ -284,41 +288,55 @@ func printPlan(e *Env, p *detect.Plan) {
 // It creates first and looks up only on 409: a lookup before the create
 // would plant a "no such monorepo" answer in the Worker's per-isolate auth
 // cache, which then answers 404 for some seconds after the create.
-func ensureMonorepo(e *Env, serverURL, mono, kind string) (srv server.Server, repos []server.Repo, made bool, err error) {
+func ensureMonorepo(e *Env, serverURL, name, existingFull, kind string) (srv server.Server, repos []server.Repo, m *server.Monorepo, made bool, err error) {
 	tok, terr := e.Home.Token(serverURL)
 	if terr != nil && !strings.HasPrefix(serverURL, "file://") {
-		return nil, nil, false, terr
+		return nil, nil, nil, false, terr
 	}
 	s, err := server.Open(serverURL, tok)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
 	if h, ok := s.(*server.HTTP); ok {
 		h.Agent = worktree.CleanAgent(e.agentFor(nil))
 	}
-	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
-	if err == nil {
-		e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
-		return s, created.Repos, true, nil
+	full := existingFull
+	if full == "" {
+		created, err := s.CreateMonorepo(e.Ctx, name, kind)
+		if err == nil {
+			m := created.Monorepo
+			e.printf("\nMade %s %s on %s; you are its owner.\n", kind, m.Full(), config.Host(serverURL))
+			if ra := created.ReplacedAlias; ra != nil && ra.FullName != "" {
+				e.warnf("%s no longer leads to %s", ra.FullName, ra.PointedTo)
+			}
+			return s, created.Repos, &m, true, nil
+		}
+		if server.StatusOf(err) != 409 {
+			return nil, nil, nil, false, err
+		}
+		// It exists in this person's own namespace (a new monorepo is made
+		// there): continue with it.
+		me, err := s.Me(e.Ctx)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		full = strings.ToLower(me.Login) + "/" + name
 	}
-	if server.StatusOf(err) != 409 {
-		return nil, nil, false, err
-	}
-	m, err := s.GetMonorepo(e.Ctx, mono)
+	got, err := s.GetMonorepo(e.Ctx, full)
 	switch {
 	case server.StatusOf(err) == 403:
-		return nil, nil, false, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", mono, config.Host(serverURL))
+		return nil, nil, nil, false, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", full, config.Host(serverURL))
 	case err != nil:
-		return nil, nil, false, err
-	case m.Kind != kind:
-		return nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
+		return nil, nil, nil, false, err
+	case got.Kind != kind:
+		return nil, nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", full, got.Kind, kind)
 	}
-	repos, err = s.ListRepos(e.Ctx, mono)
+	repos, err = s.ListRepos(e.Ctx, got.Full())
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
-	e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", mono, config.Host(serverURL), dash(m.Role))
-	return s, repos, false, nil
+	e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", got.Full(), config.Host(serverURL), dash(got.Role))
+	return s, repos, got, false, nil
 }
 
 // pushMain pushes a project's main branch through the git door, and adds a

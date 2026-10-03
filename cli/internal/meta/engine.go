@@ -8,13 +8,14 @@ import (
 	"io/fs"
 	"math/rand/v2"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
+
+	"pando/internal/server"
 
 	"github.com/coder/websocket"
 )
@@ -361,7 +362,7 @@ func (e *Engine) logf(format string, args ...any) {
 // ---- the connection ----
 
 func (e *Engine) socketURL() string {
-	u := e.cfg.Server + "/v1/monorepos/" + url.PathEscape(e.cfg.Monorepo) + "/meta/socket"
+	u := e.cfg.Server + server.MonorepoPath(e.cfg.Monorepo) + "/meta/socket"
 	if strings.HasPrefix(u, "https://") {
 		return "wss://" + strings.TrimPrefix(u, "https://")
 	}

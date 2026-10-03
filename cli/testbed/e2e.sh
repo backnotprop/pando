@@ -180,6 +180,24 @@ grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main r
 [ -z "$(git -C "$wt" status --porcelain)" ] && ok "git status in feat-x works again" || fail "feat-x after mount: $(git -C "$wt" status --porcelain 2>&1 | head -3)"
 out=$(pando worktree mount) && echo "$out" | grep -qx "Every worktree here is mounted." && ok "a second pando worktree mount has nothing to do" || fail "second mount: $out"
 
+step "a version 1 folder (before owner/name) upgrades, and its mounts' remotes follow"
+cd /work/acme
+owner=$(sed -n 's/.*"owner": "\([^"]*\)".*/\1/p' .pando/local/root.json)
+newurl=$(git -C worktrees/main remote get-url origin)
+oldurl=$(echo "$newurl" | sed "s#/$owner/#/#")   # the old /<name>/... address, gone with no bridge
+sed -i -e '/"owner":/d' -e '/"id":/d' -e 's/"version": 2/"version": 1/' -e "s#$newurl#$oldurl#g" .pando/local/root.json
+for w in main feat-x; do git -C "worktrees/$w" config remote.origin.url "$oldurl"; done
+[ -n "$owner" ] && [ "$newurl" != "$oldurl" ] && grep -q '"version": 1' .pando/local/root.json && ok "made it version 1, remotes at $oldurl" || fail "setup: owner=$owner new=$newurl old=$oldurl"
+up=$(pando status 2>&1)
+echo "$up" | grep -q "now named $owner/" && ok "pando status upgraded it: $(echo "$up" | grep -o "now named [^ ]*")" || fail "upgrade: $up"
+grep -q '"version": 2' .pando/local/root.json && grep -q "\"owner\": \"$owner\"" .pando/local/root.json && ok "root.json is version 2 with the owner and an id ($(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' .pando/local/root.json))" || fail "root.json: $(cat .pando/local/root.json)"
+for w in main feat-x; do
+  [ "$(git -C "worktrees/$w" remote get-url origin)" = "$newurl" ] && ok "worktrees/$w ($(findmnt -no FSTYPE "worktrees/$w")) points at $newurl again" || fail "$w origin: $(git -C "worktrees/$w" remote get-url origin)"
+done
+git -C worktrees/feat-x fetch -q origin && ok "git fetch through the mount works" || fail "fetch through feat-x failed"
+again=$(pando status 2>&1)
+echo "$again" | grep -q "now named" && fail "a second run upgraded again: $again" || ok "a second run changes nothing"
+
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
 pando worktree remove worktrees/feat-x | sed 's/^/  /'

@@ -133,7 +133,7 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	}
 	entry, ok := root.Repo(repo)
 	if !ok || entry.CloneURL == "" {
-		r, err := srv.GetRepo(e.Ctx, root.Name, repoName(root, repo))
+		r, err := srv.GetRepo(e.Ctx, root.FullName(), repoName(root, repo))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", repo, err)
 		}
@@ -160,7 +160,7 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	readOnly := branch == "main"
 	made := false
 	if !readOnly {
-		made, err = srv.CreateBranch(e.Ctx, root.Name, entry.Name, branch)
+		made, err = srv.CreateBranch(e.Ctx, root.FullName(), entry.Name, branch)
 		if err != nil {
 			return nil, fmt.Errorf("branch %s: %w", branch, err)
 		}
@@ -220,7 +220,7 @@ func report(e *Env, srv server.Server, root *config.Root, w config.Worktree) err
 		a := w.Agent
 		in.Agent = &a
 	}
-	return srv.PutWorktree(e.Ctx, root.Name, w.ID, in)
+	return srv.PutWorktree(e.Ctx, root.FullName(), w.ID, in)
 }
 
 func worktreeList(e *Env, args []string) error {
@@ -237,7 +237,7 @@ func worktreeList(e *Env, args []string) error {
 	srv, err := e.open(root)
 	var all []server.Worktree
 	if err == nil {
-		all, err = srv.ListWorktrees(e.Ctx, root.Name)
+		all, err = srv.ListWorktrees(e.Ctx, root.FullName())
 	}
 	if err != nil {
 		e.warnf("the server's list is not available (%v); showing this machine only", err)
@@ -280,7 +280,7 @@ func worktreeList(e *Env, args []string) error {
 			repos[w.Repo] = true
 		}
 		for r := range repos {
-			if bl, err := srv.ListBranches(e.Ctx, root.Name, repoName(root, r), "all"); err == nil {
+			if bl, err := srv.ListBranches(e.Ctx, root.FullName(), repoName(root, r), "all"); err == nil {
 				for _, b := range bl.Branches {
 					counts[r+"\x00"+b.Name] = ab{count(b, b.Ahead), count(b, b.Behind)}
 				}
@@ -393,7 +393,7 @@ func worktreeRemove(e *Env, args []string) error {
 		return err
 	}
 	if srv, err := e.open(root); err == nil {
-		if err := srv.DeleteWorktree(e.Ctx, root.Name, w.ID); err != nil {
+		if err := srv.DeleteWorktree(e.Ctx, root.FullName(), w.ID); err != nil {
 			e.warnf("removed here, but the server's worktree list still has it: %v", err)
 		}
 	}

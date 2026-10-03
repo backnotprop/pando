@@ -12,12 +12,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
+
+	"pando/internal/server"
 )
 
 // MaxLarge is the largest file the meta layer carries through R2: 100 MB,
@@ -68,7 +69,7 @@ func sha256File(abs string) (string, int64, error) {
 }
 
 func (c *Client) blobURL(oid string) string {
-	return c.Server + "/v1/monorepos/" + url.PathEscape(c.Monorepo) + "/meta/blobs/" + oid
+	return c.Server + server.MonorepoPath(c.Monorepo) + "/meta/blobs/" + oid
 }
 
 func (c *Client) blobRequest(ctx context.Context, method, oid string, body io.Reader, size int64) (*http.Response, error) {

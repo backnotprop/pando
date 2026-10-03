@@ -80,7 +80,7 @@ var commands = []app.Command{
 	{Name: "logout", Usage: "logout [--server <url>]                                   sign this machine out", Run: app.Logout},
 	{Name: "auth", Usage: "auth status                                               who this machine is signed in as", Run: app.Auth},
 	{Name: "init", Usage: "init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder", Run: app.Init},
-	{Name: "clone", Usage: "clone <name> [folder] [--text-only]                       set up a Pando repo or monorepo on this machine", Run: app.Clone},
+	{Name: "clone", Usage: "clone <owner/name | name> [folder] [--text-only]         set up a Pando repo or monorepo on this machine", Run: app.Clone},
 	{Name: "worktree", Usage: "worktree add <repo> <branch> | list | remove <path> | follow | mount   one branch, one folder, one agent", Run: app.Worktree},
 	{Name: "branch", Usage: "branch list [--repo <path>] [--all]                       branches with ahead, behind and checks", Run: app.Branch},
 	{Name: "diff", Usage: "diff [<branch>] [--json | --patch] [paths...]             the branch diff against main", Run: app.Diff},
@@ -88,7 +88,7 @@ var commands = []app.Command{
 	{Name: "merge", Usage: "merge [<branch>] [--force]                                land a branch on main with a merge commit", Run: app.Merge},
 	{Name: "reference", Usage: "reference update <path> | sync                            move a reference to its newest commit", Run: app.Reference},
 	{Name: "status", Usage: "status                                                    this folder, its worktrees and references", Run: app.Status},
-	{Name: "monorepo", Usage: "monorepo list | delete <name> [--yes]                     your monorepos; delete one (owners)", Run: app.Monorepo},
+	{Name: "monorepo", Usage: "monorepo list | delete <owner/name> [--yes]               your monorepos; delete one (owners)", Run: app.Monorepo},
 	{Name: "members", Usage: "members list | invite <email> [--owner] | remove <who>      who belongs to a monorepo", Run: app.Members},
 	{Name: "mac", Usage: "mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)", Run: app.Mac},
 	{Name: "credential", Usage: "credential create --name <sandbox> | list | revoke <id>   credentials that act as you", Run: app.Credential},
@@ -114,6 +114,16 @@ func main() {
 		return
 	}
 	if run, ok := metaCommands[os.Args[1]]; ok {
+		// A version 1 folder gets its owner/name first (the meta layer's
+		// URLs are built from it).
+		dir, _ := os.Getwd()
+		if r := flagValue(os.Args[2:], "root"); r != "" {
+			dir = r
+		}
+		if err := app.UpgradeRootAt(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "pando:", err)
+			os.Exit(1)
+		}
 		os.Exit(run(os.Args[2:]))
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

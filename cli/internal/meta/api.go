@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"pando/internal/server"
 )
 
 // Client calls the meta layer's HTTP routes: history, file, restore, status.
@@ -82,7 +84,7 @@ func (e *APIError) Error() string {
 }
 
 func (c *Client) url(route string, q url.Values) string {
-	u := c.Server + "/v1/monorepos/" + url.PathEscape(c.Monorepo) + "/meta/" + route
+	u := c.Server + server.MonorepoPath(c.Monorepo) + "/meta/" + route
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}

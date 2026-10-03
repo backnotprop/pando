@@ -40,6 +40,7 @@ func newHarness(t *testing.T) *harness {
 	t.Setenv("PANDO_TOKEN", "")
 	t.Setenv("PANDO_SERVER", "")
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1") // no osxkeychain prompts on a Mac
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
 		t.Setenv(k, "Pat Person")
 	}

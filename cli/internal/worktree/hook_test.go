@@ -21,7 +21,7 @@ func gitIn(t *testing.T, dir string, env []string, args ...string) (string, erro
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
-	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null")
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	cmd.Env = append(cmd.Env, env...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err

@@ -464,6 +464,45 @@ paths:
         "204": { description: Deleted }
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/heads:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: heads
+      summary: Every code repo's main head (for followers; no Artifacts read)
+      description: |
+        Main as Pando last moved it: by the first push through the door, or by
+        a merge. Answered from the monorepo object's records. A repo made
+        before Pando kept heads is read once from Artifacts and kept. `head` is
+        null for an empty repo. The meta layer's repo is not listed.
+
+        A follower (`pando worktree follow`) calls this on connect, then opens
+        `GET /v1/monorepos/{m}/events?topics=main&since=<seq>` (WebSocket) to
+        hear each move, and calls it again every few minutes as a safety net.
+      tags: [repos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heads, seq]
+                properties:
+                  heads:
+                    type: array
+                    items:
+                      type: object
+                      required: [repo, path, default_branch, head, updated_at]
+                      properties:
+                        repo: { type: string, description: The repo's name in URLs. }
+                        path: { type: string }
+                        default_branch: { type: string }
+                        head: { type: [string, "null"] }
+                        updated_at: { type: [string, "null"], format: date-time }
+                  seq:
+                    type: [integer, "null"]
+                    description: The event stream's newest seq when this was read; resume the socket from it. Null when the stream is off.
   /v1/monorepos/{monorepo}/events:
     parameters:
       - $ref: "#/components/parameters/monorepo"

@@ -261,6 +261,29 @@ api.delete("/v1/monorepos/:m", async (c) => {
   return c.body(null, 204);
 });
 
+// ── Heads: every repo's main, for followers ───────────────────────────────
+
+api.get("/v1/monorepos/:m/heads", async (c) => {
+  const stub = c.get("stub");
+  const heads = await stub.heads();
+  // A repo made before Pando kept heads: read it once from Artifacts and keep it.
+  const unknown = heads.filter((h) => h.head === null);
+  if (unknown.length) {
+    await views.pool(unknown, 4, async (h) => {
+      const r = await stub.getRepo(h.repo);
+      if (!r) return;
+      const sha = branchesOf(await listRefs(c.env, r).catch(() => new Map<string, string>())).get(r.default_branch) ?? null;
+      if (sha) {
+        h.head = sha;
+        await stub.rememberHead(h.repo, sha);
+      }
+    });
+  }
+  // `seq`: open the event socket with ?since=<seq>&topics=main to miss nothing after this answer.
+  const seq = EVENT_STREAM ? await stub.eventHead() : null;
+  return c.json({ heads, seq });
+});
+
 // ── The event stream ──────────────────────────────────────────────────────
 
 api.get("/v1/monorepos/:m/events", async (c) => {

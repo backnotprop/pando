@@ -123,6 +123,8 @@ try {
   if (STREAM) ev.ws.readyState === 1 && ev.ws.send("ping");
   checkS("ping gets pong", STREAM && !!(await waitFor(() => ev.frames.find((f) => f.type === "pong"), 5000)));
 
+  r = await call("GET", `/v1/monorepos/${M}/heads`, A);
+  check("GET heads: an empty repo's main is null", r.status === 200 && r.json?.heads?.length === 1 && r.json.heads[0].repo === repo && r.json.heads[0].head === null, JSON.stringify(r.json));
   // ── push main, then a branch ──
   const src = join(work, "src");
   mkdirSync(src);
@@ -132,6 +134,8 @@ try {
   git(["commit", "-qm", "first"], src);
   check("push main through the door", git(["push", "-q", url, "main"], src, A).ok);
   const mainHead = git(["rev-parse", "HEAD"], src).out.trim();
+  r = await call("GET", `/v1/monorepos/${M}/heads`, A);
+  check("GET heads: main after its first push, with no Artifacts read", r.json?.heads?.[0]?.head === mainHead && r.json.heads[0].path === "projects/web" && !!r.json.heads[0].updated_at);
   let e = await find(ev, (x) => x.collection === "default_heads" && x.row?.default_head === mainHead);
   checkS("event: push of main (default_heads upsert)", e?.kind === "push" && e?.key === repo && e?.machine === "ana-mbp" && e?.actor === `ana-${id}`, scrub(JSON.stringify(e)).slice(0, 200));
 
@@ -191,6 +195,12 @@ try {
   check("merge feat/a (as agent-1)", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
   e = await find(ev, (x) => x.kind === "merged");
   checkS("event: merged, with merge facts on the Branch row", e?.row?.state === "merged" && e?.row?.merge_commit === mergeSha && e?.row?.merged_by === `ana-${id}` && e?.row?.merged_machine === "ana-mbp" && e?.row?.merged_agent === "agent-1" && e?.row?.forced === false && !!e?.row?.merged_at, scrub(JSON.stringify(e?.row)).slice(0, 260));
+  r = await call("GET", `/v1/monorepos/${M}/heads`, A);
+  check("GET heads: main is the merge commit after a merge", r.json?.heads?.[0]?.head === mergeSha);
+  if (STREAM) {
+    const latest = await call("GET", `/v1/monorepos/${M}/events?limit=1`, A);
+    checkS("GET heads carries the stream's seq to resume from", r.json?.seq === latest.json?.head, `${r.json?.seq} vs ${latest.json?.head}`);
+  }
   e = await find(ev, (x) => x.kind === "default_head.updated");
   checkS("event: default_head.updated to the merge commit", e?.row?.default_head === mergeSha);
   await new Promise((res) => setTimeout(res, 1500));

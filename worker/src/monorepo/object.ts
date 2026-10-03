@@ -140,6 +140,9 @@ export class MonorepoObject extends DurableObject<Env> {
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
     if (!cols.includes("machine")) this.sql.exec("ALTER TABLE merges ADD COLUMN machine TEXT");
     if (!cols.includes("agent")) this.sql.exec("ALTER TABLE merges ADD COLUMN agent TEXT");
+    const rcols = this.rows<{ name: string }>("PRAGMA table_info(repos)").map((c) => c.name);
+    if (!rcols.includes("default_head")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head TEXT");
+    if (!rcols.includes("default_head_at")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head_at TEXT");
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -258,6 +261,22 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.repoRow(name);
   }
 
+  /** Main's head as Pando last moved or saw it (pushes through the door, merges, and the Worker's reads). */
+  rememberHead(repo: string, sha: string | null): void {
+    this.sql.exec(
+      "UPDATE repos SET default_head = ?, default_head_at = ? WHERE name = ? AND (default_head IS NOT ? )",
+      sha, now(), repo, sha,
+    );
+  }
+
+  /** Every code repo's main, from the object's records (no Artifacts call). */
+  heads(): { repo: string; path: string; default_branch: string; head: string | null; updated_at: string | null }[] {
+    return this.rows<{ repo: string; path: string; default_branch: string; head: string | null; updated_at: string | null }>(
+      `SELECT name AS repo, path, default_branch, default_head AS head, default_head_at AS updated_at FROM repos
+       WHERE NOT (name = 'meta' AND artifacts_name LIKE '%--meta') ORDER BY path`,
+    );
+  }
+
   /** The code repos (the meta layer's repo is not listed). */
   listRepos(): RepoRecord[] {
     return this.rows<RepoRecord>("SELECT * FROM repos WHERE NOT (name = 'meta' AND artifacts_name LIKE '%--meta') ORDER BY path");
@@ -309,6 +328,7 @@ export class MonorepoObject extends DurableObject<Env> {
         author: null, pusher: identity.login, title: null, description: null,
       };
       if (name === main) {
+        this.rememberHead(repo, u.new === ZERO ? null : u.new);
         events.push({ ...base, event: "push", author: identity.login });
         this.publish({
           kind: "push", collection: "default_heads", key: repo, op: "upsert", repo, ...who(identity),
@@ -489,6 +509,7 @@ export class MonorepoObject extends DurableObject<Env> {
       "UPDATE branches SET merge_commit = ?, merged_head = ?, merged_at = ?, merged_by = ? WHERE repo = ? AND name = ?",
       out.sha, head, at, a.identity.login, a.repo, a.branch,
     );
+    this.rememberHead(a.repo, out.sha);
     const merge = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
     this.publishBranch("merged", a.repo, a.branch, a.identity, { merge });
     // main moved: every open branch's ahead, behind and mergeable change; clients refetch the branch list.
@@ -716,6 +737,11 @@ export class MonorepoObject extends DurableObject<Env> {
       : this.rows<{ seq: number; at: string; body: string; tags: string | null }>("SELECT seq, at, body, tags FROM events WHERE seq > ? ORDER BY seq LIMIT ?", since, all ? limit : SCAN_MAX)
           .filter((r) => match(r.tags)).slice(0, limit);
     return rows.map((r) => ({ seq: r.seq, at: r.at, ...JSON.parse(r.body) }));
+  }
+
+  /** The newest event's seq (0 when there is none). */
+  eventHead(): number {
+    return this.eventBounds().head;
   }
 
   private eventBounds(): { head: number; oldest: number } {

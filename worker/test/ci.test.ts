@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildState, jobCheck, jobState, normalizeBuild, normalizeJob, normalizePipeline, orgFromUrl, rateWaitMs, verifyWebhook, type NormJob } from "../src/ci/buildkite";
 import { CiStore, decodeCursor, encodeCursor, READS_PER_MIN } from "../src/ci/store";
 import { mintStatusToken, stampOf, STATUS_TOKEN_TTL_S, verifyStatusToken } from "../src/ci/statustoken";
+import { redact } from "../src/http";
 
 const SECRET = "unit-test-secret";
 const SHA = "a".repeat(40);
@@ -49,6 +50,11 @@ describe("the status token", () => {
   it("stamps app:<slug>, or hook:<id> when the hook has no app", () => {
     expect(stampOf({ a: "buildkite", h: "hk_1" })).toEqual({ app: "buildkite", creator: "app:buildkite" });
     expect(stampOf({ a: null, h: "hk_2" })).toEqual({ app: null, creator: "hook:hk_2" });
+  });
+
+  it("never reaches a log line or an error body", async () => {
+    const { token } = await mintStatusToken(SECRET, claims);
+    expect(redact(`refused ${token} at x`)).toBe("refused <status-token> at x");
   });
 
   it("refuses to mint a bad app slug", async () => {

@@ -84,6 +84,9 @@ export interface Summary {
   needs: { ready: number; conflicts: number; failing: number };
   members: number;
   large: boolean;
+  /** Its projects (code repos; the meta layer's repo not counted), and their open branches (main not counted). */
+  repos: number;
+  open_branches: number;
   /** When the monorepo object computed it. */
   at: string;
 }

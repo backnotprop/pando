@@ -344,6 +344,38 @@ try {
     check("crash after the drain: delivered once to the socket's feed, redelivered without a second copy, outbox empty", r.status === 200 && !!got && !!drained && (await ptrT()) === n0 + 1, `${n0} -> ${await ptrT()}`);
   }
 
+  // ── A monorepo's own `feed` topic: every line, in order, and a reconnect replays what it missed ──
+  {
+    const tsock = (q) => openSocket(`/v1/monorepos/${login.ana}/${T}/events?topics=feed${q}`, A);
+    const s1 = tsock("");
+    sockets.push(s1);
+    const cu1 = await waitFor(() => s1.frames.find((f) => f.type === "caught_up"), 10_000);
+    const wids = Array.from({ length: 8 }, (_, k) => `wf${k}_${id}`);
+    const put = (w) => call("PUT", `/v1/monorepos/${login.ana}/${T}/worktrees/${w}`, A, { repo: ".", branch: w, path: `worktrees/${w}`, machine: "ana-mbp", kind: "sparse" });
+    for (const w of wids.slice(0, 5)) await put(w);
+    const lines1 = await waitFor(() => {
+      const f = s1.frames.filter((x) => x.type === "feed" && wids.includes(x.event?.summary?.worktree));
+      return f.length >= 5 ? f : null;
+    }, 10_000);
+    const ns = (lines1 ?? []).map((f) => f.n);
+    check("feed topic: caught_up names the last line number, then every line arrives once, numbered in order",
+      typeof cu1?.feed_n === "number" && lines1?.length === 5 && ns.every((n, i) => i === 0 || n === ns[i - 1] + 1) && ns[0] === cu1.feed_n + 1, `${cu1?.feed_n} then ${ns.join(",")}`);
+    const lastN = Math.max(...s1.frames.filter((x) => x.type === "feed").map((f) => f.n));
+    s1.ws.close();
+    await waitFor(() => s1.closed !== null, 5000);
+    for (const w of wids.slice(5)) await put(w);
+    const s2 = tsock(`&feed_since=${lastN}`);
+    sockets.push(s2);
+    const cu2 = await waitFor(() => s2.frames.find((f) => f.type === "caught_up"), 10_000);
+    const replayed = s2.frames.filter((x) => x.type === "feed");
+    check("feed topic: a socket that reconnects with feed_since gets exactly the lines it missed, then caught_up",
+      replayed.length === 3 && replayed.map((f) => f.event.summary?.worktree).join() === wids.slice(5).join() && cu2?.feed_n === lastN + 3 && s2.frames.indexOf(cu2) > s2.frames.indexOf(replayed[2]),
+      `${replayed.map((f) => `${f.n}:${f.event.summary?.worktree}`).join(" ")} then ${cu2?.feed_n}`);
+    const s3 = tsock(`&feed_since=${10 ** 9}`);
+    sockets.push(s3);
+    check("feed topic: a feed_since ahead of the monorepo gets feed_resync", !!(await waitFor(() => s3.frames.find((f) => f.type === "feed_resync"), 5000)));
+  }
+
   // ── Presence: the follower socket's hello ──
   const mw = openSocket(`/v1/monorepos/${login.ana}/${S}/events?topics=kind:machine.updated`, A);
   sockets.push(mw);
@@ -504,6 +536,16 @@ try {
   const ms = r.json?.monorepos ?? [];
   const ordered = ms.every((m, i) => i === 0 || (ms[i - 1].last_activity_at ?? "") >= (m.last_activity_at ?? ""));
   check("GET /v1/monorepos?summary=1: every monorepo, most recently active first, with its line", ms.length === 5 && ordered && ms.every((m) => m.role && "machines_active" in m && "needs" in m), ms.map((m) => `${m.name.slice(0, 2)}:${m.last_activity_at?.slice(11, 19)}`).join(" "));
+  {
+    // The line's "N projects, M open branches", from the monorepo's own records: S has feat/x and c2 open (c1 merged), T none.
+    const line = await waitFor(async () => {
+      const list = (await call("GET", "/v1/monorepos?summary=1", A)).json?.monorepos ?? [];
+      const s1 = list.find((m) => m.name === S);
+      const t1 = list.find((m) => m.name === T);
+      return s1?.repos === 1 && s1.open_branches === 2 && t1?.repos === 1 && t1.open_branches === 0 ? { s1, t1 } : null;
+    }, 15_000);
+    check("summary: repos and open_branches per monorepo (S: 1 project, 2 open branches; T: 1, 0)", !!line);
+  }
   r = await call("GET", "/v1/monorepos", A);
   check("GET /v1/monorepos without summary is unchanged", r.json?.monorepos?.length === 5 && !("needs" in r.json.monorepos[0]));
 } catch (err) {

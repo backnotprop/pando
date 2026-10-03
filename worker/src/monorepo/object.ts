@@ -305,6 +305,7 @@ export class MonorepoObject extends DurableObject<Env> {
         "INSERT INTO repos (name, path, artifacts_name, remote, default_branch, description, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         r.name, r.path, r.artifacts_name, r.remote, r.default_branch, r.description, r.created_at, r.created_by,
       );
+      this.feed.scheduleSummary(); // the home's "N projects" changed, with no event to say so
       return r;
     });
   }
@@ -1023,7 +1024,9 @@ export class MonorepoObject extends DurableObject<Env> {
         else for (const e of replay) server.send(JSON.stringify({ type: "event", ...e }));
       }
     }
-    server.send(JSON.stringify({ type: "caught_up", seq: head }));
+    // The `feed` topic: what was sent after feed_since, in the order it went out (C25).
+    if (topics.includes("feed")) this.feed.replay(server, url.searchParams.get("feed_since"));
+    server.send(JSON.stringify({ type: "caught_up", seq: head, ...(topics.includes("feed") ? { feed_n: this.feed.feedHead() } : {}) }));
     return new Response(null, { status: 101, webSocket: client });
   }
 

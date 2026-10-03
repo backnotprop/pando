@@ -841,9 +841,17 @@ paths:
         `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
         `meta` (meta_files and presence), `kind:<kind>`, `feed` (the
         activity lines as the person's feed shows them, as
-        `{"type": "feed", "event": FeedEvent}` frames: the home uses it for a
-        monorepo of more than 100 members). `pando worktree follow` needs
-        only `main:<repo>`.
+        `{"type": "feed", "n", "event": FeedEvent}` frames: the home uses it
+        for a monorepo of more than 100 members, and a monorepo's pages may).
+        `pando worktree follow` needs only `main:<repo>`.
+
+        The `feed` topic's lines are numbered `n` in the order they go out
+        (a push's line goes out when its commit count is known, so `n` is not
+        `seq` order). `caught_up` then carries `feed_n`, the last number
+        sent. A socket that drops reconnects with `feed_since=<the last n it
+        saw>` and first gets every line sent after it (at most 500, else one
+        `{"type": "feed_resync", "feed_n"}`: refetch, then reconnect with that
+        `feed_n`).
 
         Presence (the home's `machines_active` and `worktrees_active`): a
         follower sends, after the socket opens and whenever a worktree is
@@ -881,6 +889,10 @@ paths:
         - name: topics
           in: query
           schema: { type: string, default: all }
+        - name: feed_since
+          in: query
+          description: "With `topics` including `feed`, on a WebSocket: replay the `feed` lines numbered after this."
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: A page of events
@@ -2635,7 +2647,7 @@ components:
     FeedSummary:
       type: object
       description: A monorepo's one line on the home.
-      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, at]
+      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, repos, open_branches, at]
       properties:
         last_activity_at: { type: [string, "null"], format: date-time, description: Its newest activity line. }
         worktrees_active: { type: integer, description: Worktrees named in the hellos of open follower sockets. }
@@ -2649,6 +2661,8 @@ components:
             failing: { type: integer }
         members: { type: integer }
         large: { type: boolean, description: "More than 100 members: its lines are read on demand, not copied to feeds." }
+        repos: { type: integer, description: "Its projects (code repos; the meta layer's own repo is not counted). A plain repo has 1." }
+        open_branches: { type: integer, description: "Open branches across those projects (not merged, not deleted, main not counted)." }
         at: { type: string, format: date-time, description: When the monorepo computed it. }
     MonorepoSummary:
       allOf:
@@ -2667,6 +2681,8 @@ components:
                 failing: { type: integer }
             members: { type: [integer, "null"] }
             large: { type: [boolean, "null"] }
+            repos: { type: [integer, "null"] }
+            open_branches: { type: [integer, "null"] }
     NeedRow:
       type: object
       required: [monorepo, monorepo_id, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]

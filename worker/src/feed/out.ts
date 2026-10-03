@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS feed_presence (sid TEXT PRIMARY KEY, login TEXT, mach
 `;
 
 const OUTBOX_BATCH = 100;
+/** Lines a reconnecting `feed` socket gets before it is told to refetch. */
+const REPLAY_LINES = 500;
 /** A failed drain is tried again after these delays; after the last, the row is dead (kept DEAD_KEEP_MS). */
 const RETRY_MS = [1_000, 5_000, 30_000, 300_000];
 const DEAD_KEEP_MS = 7 * 86_400_000;
@@ -100,6 +102,9 @@ export class FeedOut {
     if (!ecols.includes("feed")) this.sql.exec("ALTER TABLE events ADD COLUMN feed TEXT");
     if (!ecols.includes("feed_wait")) this.sql.exec("ALTER TABLE events ADD COLUMN feed_wait INTEGER");
     this.sql.exec("CREATE INDEX IF NOT EXISTS events_feed ON events (at, seq) WHERE feed IS NOT NULL");
+    // The order lines went out on the `feed` topic (a push goes out after its facts job, not in seq order).
+    if (!ecols.includes("feed_n")) this.sql.exec("ALTER TABLE events ADD COLUMN feed_n INTEGER");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS events_feed_n ON events (feed_n) WHERE feed_n IS NOT NULL");
     const bcols = this.rows<{ name: string }>("PRAGMA table_info(branches)").map((c) => c.name);
     // The credential (machine) that last pushed the branch (C25, item 4).
     if (!bcols.includes("pushed_machine")) this.sql.exec("ALTER TABLE branches ADD COLUMN pushed_machine TEXT");
@@ -199,7 +204,11 @@ export class FeedOut {
 
   /** A feed line: to sockets on this monorepo's `feed` topic now, and to members' feeds through the outbox. */
   private emit(event: FeedEvent): void {
-    const frame = JSON.stringify({ type: "feed", event });
+    // Numbered in the order lines go out, so a socket that reconnects with feed_since=<n> misses none.
+    const n = this.feedHead() + 1;
+    this.set("feed_n", String(n));
+    this.sql.exec("UPDATE events SET feed_n = ? WHERE seq = ?", n, event.seq);
+    const frame = JSON.stringify({ type: "feed", n, event });
     for (const ws of this.ctx.getWebSockets("feed")) {
       try {
         ws.send(frame);
@@ -210,6 +219,30 @@ export class FeedOut {
     // Large monorepos are read on demand (fan-in); members unknown means no feed has joined yet.
     if (this.isLarge() || !this.get("members_at")) return;
     this.queue({ t: "event", event });
+  }
+
+  /** The number of the last line sent on the `feed` topic (0 when none). */
+  feedHead(): number {
+    return Number(this.get("feed_n") ?? 0);
+  }
+
+  /**
+   * A socket on the `feed` topic that asked for `feed_since=<n>`: the lines sent after n, in the order they went
+   * out (at most REPLAY_MAX; more, or an n this monorepo never reached, gets `feed_resync`: refetch the log).
+   */
+  replay(ws: WebSocket, sinceParam: string | null): void {
+    if (sinceParam === null || sinceParam === "") return;
+    const head = this.feedHead();
+    const since = Number(sinceParam);
+    const resync = () => ws.send(JSON.stringify({ type: "feed_resync", feed_n: head }));
+    if (!Number.isSafeInteger(since) || since < 0 || since > head) return resync();
+    const rows = this.rows<{ seq: number; at: string; feed: string; feed_n: number }>(
+      "SELECT seq, at, feed, feed_n FROM events WHERE feed_n > ? ORDER BY feed_n LIMIT ?", since, REPLAY_LINES + 1,
+    );
+    if (rows.length > REPLAY_LINES) return resync();
+    const id = this.monorepo() ?? "";
+    const label = this.label();
+    for (const r of rows) ws.send(JSON.stringify({ type: "feed", n: r.feed_n, event: { monorepo_id: id, monorepo: label, seq: r.seq, at: r.at, ...(JSON.parse(r.feed) as StoredPointer) } }));
   }
 
   /**
@@ -602,7 +635,17 @@ export class FeedOut {
     const p = this.presence();
     const counts = { ready: 0, conflicts: 0, failing: 0 };
     for (const n of needs) counts[n.state]++;
-    return { last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts, members: this.memberCount(), large: this.isLarge(), at: now() };
+    // "2 projects, 5 open branches": counted from the object's own records (no Artifacts call).
+    const code = "NOT (r.name = 'meta' AND r.artifacts_name LIKE '%--meta')";
+    const repos = this.row<{ n: number }>(`SELECT COUNT(*) AS n FROM repos r WHERE ${code}`)!.n;
+    const open = this.row<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM branches b JOIN repos r ON r.name = b.repo
+       WHERE ${code} AND b.deleted_at IS NULL AND b.head IS NOT NULL AND (b.merged_head IS NULL OR b.merged_head != b.head) AND b.name != r.default_branch`,
+    )!.n;
+    return {
+      last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts,
+      members: this.memberCount(), large: this.isLarge(), repos, open_branches: open, at: now(),
+    };
   }
 
   private tickMs(): number {

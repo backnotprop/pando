@@ -154,6 +154,8 @@ export async function monoreposSummary(env: Env, login: string) {
       needs: s?.needs ?? null,
       members: s?.members ?? null,
       large: s?.large ?? null,
+      repos: s?.repos ?? null,
+      open_branches: s?.open_branches ?? null,
     };
   });
   monorepos.sort((a, b) => ((b.last_activity_at ?? "") < (a.last_activity_at ?? "") ? -1 : (b.last_activity_at ?? "") > (a.last_activity_at ?? "") ? 1 : a.full_name < b.full_name ? -1 : 1));

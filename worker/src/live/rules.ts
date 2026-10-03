@@ -6,7 +6,7 @@ export const MAX_BYTES = 1_572_864; // 1.5 MiB: Durable Object rows hold 2 MB
 const BINARY_SNIFF = 8000; // git's test: a NUL in the first 8,000 bytes
 
 export type Refusal = {
-  reason: "protected" | "not_meta" | "local_only" | "too_large" | "binary" | "bad_path" | "bad_sha";
+  reason: "protected" | "not_meta" | "local_only" | "too_large" | "binary" | "bad_path" | "bad_sha" | "missing_blob";
   status: number;
   message: string;
 };
@@ -38,6 +38,15 @@ const LOCAL_SUFFIXES = [
   ".provisionprofile",
   ".swp",
   "~",
+  // databases change under a running program; a copy of one is not a database
+  ".sqlite",
+  ".sqlite3",
+  ".sqlite-wal",
+  ".sqlite-shm",
+  ".sqlite-journal",
+  ".db",
+  ".db-wal",
+  ".db-shm",
 ];
 const LOCAL_PREFIXES = [".env", ".dev.vars", "id_rsa", "id_ed25519", "id_ecdsa", ".#"];
 
@@ -87,11 +96,11 @@ export function checkPath(path: unknown): Refusal | null {
 
 export function checkBytes(bytes: Uint8Array): Refusal | null {
   if (bytes.length > MAX_BYTES) {
-    return { reason: "too_large", status: 413, message: "files over 1.5 MiB are not live yet" };
+    return { reason: "too_large", status: 413, message: "files over 1.5 MiB go to R2: send a pointer" };
   }
   const n = Math.min(bytes.length, BINARY_SNIFF);
   for (let i = 0; i < n; i++) {
-    if (bytes[i] === 0) return { reason: "binary", status: 415, message: "binary files are not live yet" };
+    if (bytes[i] === 0) return { reason: "binary", status: 415, message: "binary files go to R2: send a pointer" };
   }
   return null;
 }

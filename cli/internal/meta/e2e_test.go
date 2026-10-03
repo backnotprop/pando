@@ -243,6 +243,7 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 		".pando/local/mine.json",
 		"research/infra/lib/README.md", // inside a folder with its own .git
 		"projects/web/README.md",
+		"data/cache.sqlite",
 	}
 	for _, p := range local {
 		a.write(p, "stays\n")
@@ -255,8 +256,11 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 
 	waitContent(t, b, "normal.md", "goes\n")
 	waitContent(t, b, ".pando/references/research/infra/lib.toml", "url = \"https://example.com/lib.git\"\n")
+	// Large files and binaries go too, through R2 (M7).
+	waitContent(t, b, "big.txt", strings.Repeat("a", MaxBytes+1))
+	waitContent(t, b, "image.dat", "\x89PNG\x00\x01")
 	time.Sleep(time.Second) // give anything wrong time to arrive
-	for _, p := range append(local, "big.txt", "image.dat", "research/infra/lib/.git/HEAD") {
+	for _, p := range append(local, "research/infra/lib/.git/HEAD") {
 		if _, ok := b.read(p); ok {
 			t.Errorf("%s reached ben", p)
 		}
@@ -265,8 +269,8 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st["files"].(float64) != 2 {
-		t.Errorf("the server holds %v files, want 2", st["files"])
+	if st["files"].(float64) != 4 {
+		t.Errorf("the server holds %v files, want 4", st["files"])
 	}
 }
 
@@ -516,7 +520,7 @@ func TestE2ECloneDownload(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server)), 0o644)
 	t.Setenv("PANDO_MACHINE", "carl")
 	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
-	if err := Clone(context.Background(), carl); err != nil {
+	if err := Clone(context.Background(), carl, CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for p, body := range files {
@@ -928,5 +932,130 @@ func TestE2EInitCommits(t *testing.T) {
 	json.Unmarshal(metaRepo(t, server, mono, "read", map[string]string{"path": ".pando/pando.toml"}), &r)
 	if r.Content == nil || *r.Content != "local_only = []\n" {
 		t.Errorf(".pando/pando.toml in git: %v", r.Content)
+	}
+}
+
+// ---- large files and binaries through R2 (M7) ----
+
+func randomBinary(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	b[0] = 0 // binary by git's test
+	return string(b)
+}
+
+func TestE2ELargeFiles(t *testing.T) {
+	server := testServer(t)
+	mono := newMonorepo(t)
+	ctx := context.Background()
+	a := newMachine(t, "ana", server, mono)
+	b := newMachine(t, "ben", server, mono)
+
+	render := randomBinary(300 << 10)
+	big := strings.Repeat("a long text line\n", 2<<20/17+1) // just over 2 MiB
+	a.write("design/render.png", render)
+	a.write("research/big.txt", big)
+	start := time.Now()
+	waitContent(t, b, "design/render.png", render)
+	waitContent(t, b, "research/big.txt", big)
+	t.Logf("a 300 KB binary and a 2 MiB text reached ben through R2 in %s", time.Since(start).Round(time.Millisecond))
+
+	// git and history hold a Git LFS pointer, not the bytes.
+	ptrText, err := client(server, mono).File(ctx, "design/render.png", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ptr, ok := parsePointer(ptrText)
+	if !ok || ptr.Size != int64(len(render)) {
+		t.Fatalf("design/render.png on the server is not its pointer: %q", ptrText)
+	}
+	t.Logf("pointer:\n%s", ptrText)
+
+	render2 := randomBinary(200 << 10)
+	a.write("design/render.png", render2)
+	waitContent(t, b, "design/render.png", render2)
+
+	// A large file over 100 MB stays here (a sparse file: no disk used).
+	f, _ := os.Create(a.path("video/huge.mov"))
+	f.Truncate(MaxLarge + 1)
+	f.Close()
+
+	// A text-only clone keeps pointers until pando fetch.
+	carl := &machine{t: t, name: "carl", root: t.TempDir(), server: server, mono: mono}
+	carl.write(".pando/local/root.json", fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server))
+	t.Setenv("PANDO_MACHINE", "carl")
+	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
+	if err := Clone(ctx, carl.root, CloneOptions{TextOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := carl.read("design/render.png"); !strings.HasPrefix(got, "version https://git-lfs.github.com/spec/v1\n") {
+		t.Fatalf("text-only clone has %d bytes at design/render.png, want a pointer", len(got))
+	}
+	var out strings.Builder
+	if err := Fetch(ctx, carl.root, []string{"design/render.png"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(strings.TrimSpace(out.String()))
+	if got, _ := carl.read("design/render.png"); got != render2 {
+		t.Fatal("pando fetch did not bring the bytes")
+	}
+	carl.start()
+	render3 := randomBinary(100 << 10)
+	big2 := big + "one more line\n"
+	a.write("design/render.png", render3)
+	a.write("research/big.txt", big2)
+	waitContent(t, carl, "design/render.png", render3) // fetched: follows new versions
+	waitContent(t, b, "research/big.txt", big2)
+	waitFor(t, "carl's big.txt to be the new pointer", func() bool {
+		got, _ := carl.read("research/big.txt")
+		p, ok := parsePointer([]byte(got))
+		return ok && p.Size == int64(len(big2))
+	})
+	if _, ok := b.read("video/huge.mov"); ok {
+		t.Error("a file over 100 MB left ana")
+	}
+}
+
+func TestE2ELargeFileConflict(t *testing.T) {
+	server := testServer(t)
+	mono := newMonorepo(t)
+	a := newMachine(t, "ana", server, mono)
+	b := newMachine(t, "ben", server, mono)
+	v1 := randomBinary(50 << 10)
+	a.write("art/logo.bin", v1)
+	waitContent(t, b, "art/logo.bin", v1)
+
+	b.stop()
+	fromAna := randomBinary(60 << 10)
+	a.write("art/logo.bin", fromAna)
+	waitFor(t, "ana's second version on the server", func() bool {
+		h, err := client(server, mono).History(context.Background(), "art/logo.bin", 10)
+		return err == nil && len(h.Versions) == 2
+	})
+	fromBen := randomBinary(70 << 10)
+	b.write("art/logo.bin", fromBen)
+	b.start()
+
+	waitContent(t, b, "art/logo.bin", fromAna)
+	waitFor(t, "a conflict copy on ben", func() bool { return len(b.conflictCopies("art/logo.bin")) == 1 })
+	kept, _ := os.ReadFile(b.conflictCopies("art/logo.bin")[0])
+	if string(kept) != fromBen {
+		t.Error("the conflict copy does not hold ben's bytes")
+	}
+	if got, _ := a.read("art/logo.bin"); got != fromAna {
+		t.Error("ana's file changed")
+	}
+}
+
+func TestE2EPointerNeedsItsBytes(t *testing.T) {
+	server := testServer(t)
+	mono := newMonorepo(t)
+	send, next := rawSocket(t, server, mono)
+	b := make([]byte, 32)
+	rand.Read(b)
+	ptr := Pointer{Oid: hex.EncodeToString(b), Size: 1234}.text()
+	send(saveMsg{Type: "save", ID: "p", Path: "x.png", SHA: gitSHA(ptr), Bytes: ptr})
+	if m := next(""); m.Type != "refused" || m.Reason != "missing_blob" {
+		t.Errorf("a pointer with no bytes in R2: %+v", m)
 	}
 }

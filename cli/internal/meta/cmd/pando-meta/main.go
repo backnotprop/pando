@@ -15,7 +15,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: pando-meta sync|init|clone|history|restore|resolve|status [args]")
+		fmt.Fprintln(os.Stderr, "usage: pando-meta sync|init|clone|fetch|history|restore|resolve|status [args]")
 		os.Exit(2)
 	}
 	cmds := map[string]func([]string) int{

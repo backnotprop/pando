@@ -4,6 +4,7 @@
 // Owned by the live lane. The wire is docs/contracts/meta-sync.md.
 import { DurableObject } from "cloudflare:workers";
 import { checkBytes, checkPath, MAX_BYTES, type Refusal } from "./rules";
+import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
 
@@ -367,6 +368,15 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
           if (bytes) {
             msg.decoded = bytes;
             msg.computedSha = await gitBlobSha(bytes);
+            // A large file arrives as a pointer: its bytes must be in R2 first.
+            const ptr = parsePointer(bytes);
+            const monorepo = this.kv("monorepo");
+            if (ptr && monorepo) {
+              const head = await this.env.BLOBS?.head(blobKey(monorepo, ptr.oid));
+              msg.blobMissing = !head || head.size !== ptr.size;
+            } else if (ptr) {
+              msg.blobMissing = true;
+            }
           }
         }
         if (this.change(ws, att, msg)) await this.scheduleCommit();
@@ -471,6 +481,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       if (badBytes) return refuse(path, badBytes);
       const sha = msg.computedSha as string;
       if (msg.sha !== sha) return refuse(path, { reason: "bad_sha", status: 400, message: "sha does not match bytes" });
+      if (msg.blobMissing) {
+        return refuse(path, { reason: "missing_blob", status: 400, message: "upload the file's bytes to meta/blobs first" });
+      }
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
       if (!this.baseMatches(cur, base)) return this.stale(ws, id, path, base, cur);

@@ -2,7 +2,8 @@ package meta
 
 // Entry points for the cli lane (cli/cmd/pando/main.go and cli/internal/app):
 //
-//	pando clone, after root.json:  Clone(ctx, root)         the first download of the meta layer
+//	pando clone, after root.json:  Clone(ctx, root, opts)   the first download of the meta layer
+//	pando fetch <path>...:         CmdFetch(args)           a large file's bytes on a --text-only clone
 //	pando init, after root.json:   Init(ctx, root)          the first upload, .pando/ included
 //	the daemon:                    Sync(ctx, root, hooks)   the live sync until ctx ends
 //	pando meta sync [--once]:      CmdSync(args, hooks)
@@ -29,14 +30,23 @@ import (
 	"time"
 )
 
+// CloneOptions are pando clone's choices for the meta layer.
+type CloneOptions struct {
+	// TextOnly keeps large files and binaries as Git LFS pointers until
+	// pando fetch <path> (agent sandboxes). It stays set for the daemon.
+	TextOnly bool
+}
+
 // Clone downloads the meta layer into root, which already holds
-// .pando/local/root.json, and returns. It does not call Hooks.References:
-// the caller sets up references after it.
-func Clone(ctx context.Context, root string) error {
+// .pando/local/root.json, and returns once every file is written (large
+// files included, unless TextOnly). It does not call Hooks.References: the
+// caller sets up references after it.
+func Clone(ctx context.Context, root string, opts CloneOptions) error {
 	e, err := engineFor(root)
 	if err != nil {
 		return err
 	}
+	e.textOnly = opts.TextOnly
 	return e.CatchUp(ctx)
 }
 
@@ -435,11 +445,55 @@ func CmdStatus(args []string) int {
 
 // CmdClone and CmdInit are Clone and Init as commands, for the pando-meta dev
 // binary and for setting up a folder by hand.
-func CmdClone(args []string) int { return cmdRoot("clone", args, Clone) }
-func CmdInit(args []string) int  { return cmdRoot("init", args, Init) }
+func CmdClone(args []string) int {
+	textOnly := false
+	return cmdRoot("clone", args, func(fs *flag.FlagSet) {
+		fs.BoolVar(&textOnly, "text-only", false, "keep large files as pointers until pando fetch")
+	}, func(ctx context.Context, root string) error {
+		return Clone(ctx, root, CloneOptions{TextOnly: textOnly})
+	})
+}
 
-func cmdRoot(name string, args []string, run func(context.Context, string) error) int {
+func CmdInit(args []string) int { return cmdRoot("init", args, nil, Init) }
+
+// CmdFetch downloads the bytes of large files kept as pointers.
+func CmdFetch(args []string) int {
+	fs, rootFlag := setup("fetch", os.Stderr)
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(pos) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: pando fetch <path>...")
+		return 2
+	}
+	root, err := rootFor(*rootFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "pando:", err)
+		return 1
+	}
+	var paths []string
+	for _, a := range pos {
+		p, err := metaPath(root, a)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "pando:", err)
+			return 1
+		}
+		paths = append(paths, p)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := Fetch(ctx, root, paths, os.Stdout); err != nil {
+		return 1
+	}
+	return 0
+}
+
+func cmdRoot(name string, args []string, flags func(*flag.FlagSet), run func(context.Context, string) error) int {
 	fs, rootFlag := setup(name, os.Stderr)
+	if flags != nil {
+		flags(fs)
+	}
 	if _, err := parseArgs(fs, args); err != nil {
 		return 2
 	}

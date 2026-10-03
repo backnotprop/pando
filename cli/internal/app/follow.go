@@ -313,12 +313,35 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 		}
 	}()
 
+	// ended is why the socket ended: the server's 4404 (the monorepo was
+	// deleted) stops the follower.
+	ended := func(err error) (time.Duration, error) {
+		if websocket.CloseStatus(err) == 4404 {
+			return time.Since(started), errStop{"the monorepo " + f.root.FullName() + " was deleted on the server; stopped following"}
+		}
+		return time.Since(started), err
+	}
+	// writeFailed is why a write failed. Once the server has closed the
+	// socket (4404 right after it opened, say) a write fails with no reason
+	// given; the read side has the reason, a moment later.
+	writeFailed := func(err error) (time.Duration, error) {
+		select {
+		case rerr := <-readErr:
+			f.debugf("write error: %v; read error: %v", err, rerr)
+			if websocket.CloseStatus(rerr) != -1 {
+				err = rerr
+			}
+		case <-time.After(2 * time.Second):
+		}
+		return ended(err)
+	}
+
 	// Presence (C25): say which branch worktrees this machine has here, now
 	// and whenever they change. Presence lives with the socket, so every
 	// new socket says it again.
 	ids := branchWorktreeIDs(f.root)
 	if err := f.hello(ctx, conn, ids); err != nil {
-		return time.Since(started), err
+		return writeFailed(err)
 	}
 	wtFile := filepath.Join(config.LocalDir(f.root.Dir), "worktrees.json")
 	wtStamp := fileStamp(wtFile)
@@ -335,10 +358,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 			return time.Since(started), nil
 		case err := <-readErr:
 			f.debugf("read error: %v", err)
-			if websocket.CloseStatus(err) == 4404 {
-				return time.Since(started), errStop{"the monorepo " + f.root.FullName() + " was deleted on the server; stopped following"}
-			}
-			return time.Since(started), err
+			return ended(err)
 		case data := <-frames:
 			heard = time.Now()
 			if string(data) == "pong" {
@@ -366,7 +386,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 			err := conn.Write(wctx, websocket.MessageText, []byte("ping"))
 			c()
 			if err != nil {
-				return time.Since(started), err
+				return writeFailed(err)
 			}
 			if time.Since(lastRead) >= safety {
 				f.catchUp()
@@ -391,7 +411,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 				if now := branchWorktreeIDs(f.root); strings.Join(now, ",") != strings.Join(ids, ",") {
 					ids = now
 					if err := f.hello(ctx, conn, ids); err != nil {
-						return time.Since(started), err
+						return writeFailed(err)
 					}
 				}
 			}

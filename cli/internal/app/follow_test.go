@@ -39,6 +39,7 @@ type fakeStream struct {
 	hellos   []string // hello frames received, in order
 	closes   atomic.Int32
 	live     atomic.Int32 // socket handlers running
+	opened   atomic.Int32 // socket handlers started, ever (counted after live)
 }
 
 func (f *fakeStream) head() string {
@@ -78,6 +79,7 @@ func (f *fakeStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.live.Add(1)
+		f.opened.Add(1)
 		defer f.live.Add(-1)
 		defer c.CloseNow()
 		ctx := r.Context()
@@ -206,6 +208,12 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 	if fs.headsN.Load() != reads || fs.lists.Load() != 0 {
 		t.Fatal("an event should move main with no read")
 	}
+	// HEAD moves inside git pull; the refresh makes main read-only again
+	// just after, in the background. Under load that comes later.
+	waitFor("main to be read-only again", func() bool {
+		st, err := os.Stat(mainDir)
+		return err == nil && st.Mode().Perm()&0o222 == 0
+	})
 	if os.WriteFile(filepath.Join(mainDir, "x"), []byte("x"), 0o644) == nil {
 		t.Fatal("main is writable after following")
 	}
@@ -226,8 +234,10 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 	}
 
 	// The monorepo is deleted (close 4404): the follower stops. Sent once
-	// only the newest socket's handler is left to take it.
-	waitFor("the old sockets' handlers to end", func() bool { return fs.live.Load() == 1 })
+	// only the newest socket's handler is left to take it: the third has
+	// started (opened is read first; it counts after live), and the older
+	// two have ended. An older one still running could take the signal.
+	waitFor("the old sockets' handlers to end", func() bool { return fs.opened.Load() == 3 && fs.live.Load() == 1 })
 	fs.deleted <- struct{}{}
 	select {
 	case <-stopped:
@@ -418,5 +428,37 @@ func TestFollowerBranchOnlyAndMainsOnly(t *testing.T) {
 	defer fs.mu.Unlock()
 	if !strings.Contains(fs.queries[0], "topics=main") || strings.Contains(fs.queries[0], "main%3A") {
 		t.Fatalf("branch-only query %q: want topics=main", fs.queries[0])
+	}
+}
+
+// A server that closes the socket with 4404 as soon as it opens: the
+// follower stops. Its hello may be written before the close arrives or
+// fail after it (then only the read side knows why); both must stop. Tried
+// a number of times, as the order varies.
+func TestFollowerStopsOnAnEarly4404(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("PANDO_TOKEN", "tok")
+	bare := filepath.Join(h.base, "acme.git")
+	h.git(h.base, "init", "-q", "--bare", "-b", "main", bare)
+	fs := &fakeStream{t: t, bare: bare, hasHeads: true, send: make(chan string, 4), hangUp: make(chan struct{}, 1), deleted: make(chan struct{}, 1)}
+	srv := httptest.NewServer(fs)
+	defer srv.Close()
+	root := newFollowRoot(t, h, fs, srv.URL, []config.Worktree{
+		{ID: "wt_a", Repo: ".", Branch: "feat-a", Path: "worktrees/feat-a", Kind: "sparse"},
+	})
+	for try := 1; try <= 20; try++ {
+		fs.deleted <- struct{}{} // taken by the next socket as it opens
+		ctx, cancel := context.WithCancel(context.Background())
+		e, _ := NewEnv(ctx, strings.NewReader(""), io.Discard, io.Discard)
+		e.Cwd = root.Dir
+		stopped := make(chan struct{})
+		go func() { (&follower{e: e, root: root}).run(ctx, time.Hour); close(stopped) }()
+		select {
+		case <-stopped:
+			cancel()
+		case <-time.After(10 * time.Second):
+			cancel()
+			t.Fatalf("try %d: the follower did not stop on a 4404 sent as the socket opened", try)
+		}
 	}
 }

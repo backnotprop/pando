@@ -347,6 +347,8 @@ export class FeedOut {
     // Let the change's own answer go out first: the crash is after the acknowledgement, mid-drain.
     if (when === "before") await new Promise((r) => setTimeout(r, 200));
     this.ctx.abort(`feed test: the object dies ${when} its drain`);
+    // A real crash runs nothing after this point: neither does the old instance here.
+    await new Promise<never>(() => {});
   }
 
   /** Tests only (FEED_TEST=1): the next n drains fail. */

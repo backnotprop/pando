@@ -13,7 +13,7 @@
 // are never printed.
 import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -466,6 +466,58 @@ try {
   check("its connection, pipelines and builds are gone; its checks stay", r.json?.connections?.length === 0 && r.json.pipelines.length === 0 && left.length === 0 && (await statusOf("typecheck"))?.app === "buildkite");
   r = await send("ping", {}, { token: true });
   check("its webhook URL answers 404", r.status === 404);
+
+  // `pando ci`, the cli, as the owner signed in on this machine (PANDO_HOME in the test's folder).
+  const pandoEnv = { ...process.env, PANDO_HOME: join(work, "pando-home-ci"), PANDO_SERVER: "", PANDO_TOKEN: "" };
+  const pando = (args, input) => spawnSync(bin, args, { cwd: work, env: pandoEnv, encoding: "utf8", input });
+  const login = pando(["login", "--server", URL_, "--with-credential"], S + "\n");
+  check("pando login --with-credential (piped)", login.status === 0, scrub(login.stderr).trim().slice(0, 200));
+  const MO = `${O}/${M}`;
+  let cmd = pando(["ci", "connect", "--org", "o", "--monorepo", MO]);
+  check("pando ci connect into a pipe (as an agent would): refused, nothing made", cmd.status !== 0 && /own terminal/.test(cmd.stderr) && (await call("GET", ciBase, S)).json?.connections?.length === 0);
+  const tokFile = join(work, "bk-webhook-token");
+  cmd = pando(["ci", "connect", "--org", "o", "--monorepo", MO, "--out", tokFile]);
+  const cliToken = readFileSync(tokFile, "utf8").trim();
+  const cliConn = (await call("GET", ciBase, S)).json?.connections?.[0];
+  check("pando ci connect --out: connected, the token only in the file (mode 600), the URL and Buildkite's steps printed",
+    cmd.status === 0 && cliToken.length >= 32 && !cmd.stdout.includes(cliToken) && (statSync(tokFile).mode & 0o777) === 0o600 &&
+    cmd.stdout.includes(cliConn?.webhook_url ?? "?") && /Settings > Notification Services/.test(cmd.stdout) && /X-Buildkite-Signature/.test(cmd.stdout), scrub(cmd.stderr).trim());
+  const cliHook = `/v1/integrations/buildkite/${cliConn?.id}`;
+  const signed = (key) => {
+    const body = JSON.stringify({ event: "ping" });
+    const ts = Math.floor(Date.now() / 1000);
+    return call("POST", cliHook, null, body, { "x-buildkite-event": "ping", "x-buildkite-signature": `timestamp=${ts},signature=${createHmac("sha256", key).update(`${ts}.${body}`).digest("hex")}` });
+  };
+  r = await signed("not-the-token");
+  check("a webhook signed with another key: 401", r.status === 401);
+  r = await signed(cliToken);
+  check("a webhook signed with the file's token: recorded", r.status === 200 && r.json?.result === "recorded");
+  cmd = pando(["ci", "status", "--monorepo", MO]);
+  check("pando ci status: the webhook URL, the last event (ping, recorded) and the last refusal, and no token",
+    cmd.status === 0 && cmd.stdout.includes(cliConn?.webhook_url ?? "?") && /last event\s+ping .*recorded/.test(cmd.stdout) &&
+    /last refused\s+.*X-Buildkite-Signature does not match/.test(cmd.stdout) && !cmd.stdout.includes(cliToken), scrub(cmd.stdout + cmd.stderr).trim().split("\n").slice(0, 4).join(" | "));
+  cmd = pando(["ci", "connect", "--org", "o", "--monorepo", MO, "--out", join(work, "again")]);
+  check("connecting twice says how to start over", cmd.status !== 0 && /pando ci disconnect --org o/.test(cmd.stderr));
+  // `pando ci pipeline`: a repo's buildkite hook without hand-crafting the POST. (No pushes while the
+  // hook it adds exists: that hook has no test api_url, so a push would call the real Buildkite.)
+  const bkHooks = async () => ((await call("GET", `${base}/hooks`, S)).json?.hooks ?? []).filter((h) => h.type === "buildkite");
+  cmd = pando(["ci", "pipeline", "add", M, "p2", "--monorepo", MO]);
+  let hooks2 = await bkHooks();
+  check("pando ci pipeline add <repo> <pipeline> (owner): a buildkite hook for the connected organization",
+    cmd.status === 0 && hooks2.some((h) => h.buildkite?.organization === "o" && h.buildkite?.pipeline === "p2") && /each push to a branch now starts a build of o\/p2/.test(cmd.stdout), scrub(cmd.stderr).trim());
+  cmd = pando(["ci", "pipeline", "add", M, "p2", "--monorepo", MO]);
+  check("adding it again adds nothing", cmd.status === 0 && /already starts/.test(cmd.stdout) && (await bkHooks()).length === hooks2.length);
+  cmd = pando(["ci", "pipeline", "list", "--monorepo", MO]);
+  check("pando ci pipeline list: both pipelines this repo starts", cmd.status === 0 && /o\/p\b/.test(cmd.stdout) && /o\/p2/.test(cmd.stdout));
+  const memberEnv = { ...pandoEnv, PANDO_HOME: join(work, "pando-home-member") };
+  spawnSync(bin, ["login", "--server", URL_, "--with-credential"], { cwd: work, env: memberEnv, encoding: "utf8", input: B + "\n" });
+  const asMember = spawnSync(bin, ["ci", "pipeline", "add", M, "p3", "--monorepo", MO], { cwd: work, env: memberEnv, encoding: "utf8" });
+  check("a member (not an owner) is told only an owner can add a pipeline", asMember.status !== 0 && /only an owner of .* can add a pipeline/.test(asMember.stderr) && !(await bkHooks()).some((h) => h.buildkite?.pipeline === "p3"));
+  cmd = pando(["ci", "pipeline", "remove", M, "p2", "--monorepo", MO]);
+  hooks2 = await bkHooks();
+  check("pando ci pipeline remove", cmd.status === 0 && !hooks2.some((h) => h.buildkite?.pipeline === "p2") && hooks2.some((h) => h.buildkite?.pipeline === "p"));
+  cmd = pando(["ci", "disconnect", "--org", "o", "--monorepo", MO]);
+  check("pando ci disconnect", cmd.status === 0 && (await call("GET", ciBase, S)).json?.connections?.length === 0);
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

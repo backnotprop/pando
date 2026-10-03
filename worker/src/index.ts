@@ -17,10 +17,14 @@ import { handleDoor, isDoorPath } from "./monorepo/door";
 import { signin } from "./accounts/signin";
 import { handleFactsBatch, type FactsMessage } from "./monorepo/facts";
 import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./monorepo/hooks";
+import { handleFeedBatch } from "./feed/consumer";
+import { handleFeed, isFeedPath } from "./feed/routes";
+import type { FeedMessage } from "./feed/shape";
 
 export { MonorepoObject } from "./monorepo/object";
 export { AccountsObject } from "./accounts/object";
 export { MetaLayerObject } from "./live/object";
+export { FeedObject } from "./feed/object";
 export type { Env };
 
 const META_RE = /^\/v1\/monorepos\/[^/]+\/meta(\/|$)/;
@@ -58,6 +62,7 @@ export default {
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     if (batch.queue === "pando-hooks") return handleDeliveries(batch as MessageBatch<DeliveryMessage>, env);
     if (batch.queue === "pando-hooks-dlq") return handleDeadDeliveries(batch as MessageBatch<DeliveryMessage>, env);
+    if (batch.queue === "pando-feed") return handleFeedBatch(batch as MessageBatch<FeedMessage>, env);
     return handleFactsBatch(batch as MessageBatch<FactsMessage>, env);
   },
 
@@ -68,6 +73,7 @@ export default {
     if (isDoorPath(url.pathname)) return handleDoor(request, env, ctx);
     if (url.pathname === "/v1/users" || url.pathname === "/v1/logout" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
     if (META_RE.test(url.pathname)) return meta(request, env);
+    if (isFeedPath(url.pathname)) return handleFeed(request, env);
     return api.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env, unknown>;

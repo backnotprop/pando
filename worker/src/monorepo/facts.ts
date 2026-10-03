@@ -19,6 +19,7 @@ import { requiredKept } from "./checks";
 import { commitReader, compareWith, type CommitReader } from "./graph";
 import { MainMoved, mergeableOf, pool } from "./views";
 import type { RepoRecord } from "./types";
+import { sendPushSummary } from "../feed/push";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
 export const SWEEP_DAYS = 7;
@@ -40,9 +41,13 @@ export interface Facts {
   mergeable: string;
 }
 
-export type FactsMessage =
+export type FactsMessage = (
   | { type: "sweep"; monorepo: string; repo: string; main: string }
-  | { type: "branch"; monorepo: string; repo: string; branch: string; head: string };
+  | { type: "branch"; monorepo: string; repo: string; branch: string; head: string }
+) & {
+  /** The push behind this job (C25): its event waits for the commit count and head title computed here. */
+  push?: { seq: number; before: string };
+};
 
 /** One branch's facts against main. Reads Artifacts. */
 export async function computeFacts(env: Env, r: RepoRecord, main: string, head: string, read?: CommitReader): Promise<Facts> {
@@ -97,6 +102,7 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
   const stub = stubOf(env, m.monorepo);
   const [r, info] = await Promise.all([stub.getRepo(m.repo), stub.info()]);
   if (!r || !info) return { computed: 0, abandoned: true };
+  if (m.push) await sendPushSummary(env, stub, r, m.push, m.type === "branch" ? m.head : m.main, m.type === "sweep");
   if (m.type === "branch") {
     const main = await stub.currentMain(m.repo);
     if (!main) return { computed: 0, abandoned: true };

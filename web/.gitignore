@@ -1,4 +1,4 @@
-# Apple's SF fonts are copied in at build (scripts/fonts.mjs) and never committed.
+# Apple's SF fonts: copied in only for local builds (PANDO_SF_FONTS=1, vite.config.ts), never committed.
 public/fonts/
 test-results/
 playwright-report/

@@ -4,11 +4,11 @@
   "type": "module",
   "description": "Pando's web app: a Vite SPA served by the Worker on the same origin (worker/wrangler.jsonc, assets).",
   "scripts": {
-    "dev": "node scripts/fonts.mjs && vite",
-    "build": "node scripts/fonts.mjs && vite build",
+    "dev": "vite",
+    "build": "vite build",
     "typecheck": "tsc --noEmit",
     "e2e": "npm run build && playwright test --project=e2e",
-    "shots": "npm run build && playwright test --project=shots"
+    "shots": "PANDO_SF_FONTS=1 npm run build && playwright test --project=shots"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",

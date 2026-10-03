@@ -42,6 +42,7 @@ export interface Facts {
 }
 
 export type FactsMessage = (
+  // monorepo: the monorepo's id (for one made before namespaces, its old name).
   | { type: "sweep"; monorepo: string; repo: string; main: string }
   | { type: "branch"; monorepo: string; repo: string; branch: string; head: string }
 ) & {
@@ -79,7 +80,7 @@ export async function handleFactsBatch(batch: MessageBatch<FactsMessage>, env: E
   const run = async (msg: Message<FactsMessage>) => {
     try {
       const b = msg.body;
-      await timed("queue", { route: `facts.${b.type}`, monorepo: b.monorepo, repo: b.repo, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () =>
+      await timed("queue", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () =>
         runFacts(env, b).finally(() => {
           // The facts themselves, apart from the push's line (push_summary_ms).
           const t = currentTiming();

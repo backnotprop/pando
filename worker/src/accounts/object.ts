@@ -8,7 +8,7 @@ import type { Env } from "../env";
 import { now } from "../http";
 
 export type {
-  Auth, Credential, CredentialKind, Invite, Member, MemberRole, MonorepoEntry, NewCredentialRow, SignedIn, User,
+  Auth, Credential, CredentialKind, Invite, Member, MemberRole, MonorepoEntry, MonorepoInfo, MonorepoRef, NewCredentialRow, SignedIn, User,
 } from "./store";
 
 // The tables as they were, so an object that never ran still answers.
@@ -27,7 +27,24 @@ CREATE TABLE IF NOT EXISTS invites (
 CREATE TABLE IF NOT EXISTS copied_to_d1 (at TEXT NOT NULL, rows INTEGER NOT NULL);
 `;
 
-const TABLES = ["users", "credentials", "monorepos", "members", "invites"] as const;
+type Row = Record<string, SqlStorageValue>;
+
+/**
+ * The object's tables, as D1 now keeps them (migration 0003): every user is
+ * also a namespace; a monorepo's old name is its id and its creator its owner.
+ */
+const COPY: { from: string; to: string; map: (r: Row) => Row }[] = [
+  { from: "users", to: "users", map: (r) => r },
+  { from: "users", to: "namespaces", map: (r) => ({ name: r.login, kind: "user", created_at: r.created_at }) },
+  { from: "credentials", to: "credentials", map: (r) => r },
+  {
+    from: "monorepos",
+    to: "monorepos",
+    map: (r) => ({ id: r.name, owner: r.created_by, name: r.name, kind: r.kind, created_at: r.created_at, created_by: r.created_by }),
+  },
+  { from: "members", to: "members", map: ({ monorepo, ...r }) => ({ monorepo_id: monorepo, ...r }) },
+  { from: "invites", to: "invites", map: ({ monorepo, ...r }) => ({ monorepo_id: monorepo, ...r }) },
+];
 /** Statements per D1 batch while copying. */
 const COPY_BATCH = 50;
 
@@ -50,12 +67,13 @@ export class AccountsObject extends DurableObject<Env> {
       if (this.sql.exec("SELECT at FROM copied_to_d1").toArray().length) return;
       const db = this.env.ACCOUNTS_DB;
       const stmts: D1PreparedStatement[] = [];
-      for (const table of TABLES) {
-        for (const r of this.sql.exec(`SELECT * FROM ${table}`).toArray()) {
+      for (const { from, to, map } of COPY) {
+        for (const raw of this.sql.exec(`SELECT * FROM ${from}`).toArray()) {
+          const r = map(raw as Row);
           const cols = Object.keys(r);
           stmts.push(
             db
-              .prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(", ")}) VALUES (${cols.map((_, i) => `?${i + 1}`).join(", ")})`)
+              .prepare(`INSERT OR IGNORE INTO ${to} (${cols.join(", ")}) VALUES (${cols.map((_, i) => `?${i + 1}`).join(", ")})`)
               .bind(...cols.map((c) => r[c] ?? null)),
           );
         }

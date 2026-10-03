@@ -11,6 +11,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const N = Number(process.env.N ?? 20);
@@ -37,8 +40,9 @@ const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL
 const git = (a, cwd) => spawnSync("git", ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", "-c", "http.version=HTTP/1.1", ...a], { cwd, env, encoding: "utf8", maxBuffer: 1 << 26 });
 
 const M = `facts-${id}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
-const list = (M2) => call("GET", `/v1/monorepos/${M2}/repos/${M2}/branches?state=open&limit=500`, S);
+const list = (M2) => call("GET", `/v1/monorepos/${O}/${M2}/repos/${M2}/branches?state=open&limit=500`, S);
 /** Poll until no open branch is stale; returns [ms, samples]. */
 async function untilFresh(t0, maxMs) {
   const samples = [];
@@ -62,6 +66,7 @@ async function untilFresh(t0, maxMs) {
 try {
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
+  O = r.json?.monorepo?.owner ?? null;
   const url = r.json?.repos?.[0]?.clone_url;
   const src = join(work, "src");
   mkdirSync(src);
@@ -88,7 +93,7 @@ try {
 
   // 3 merges, then the list at once, then until fresh.
   for (let k = 0; k < 3; k++) {
-    r = await call("POST", `/v1/monorepos/${M}/repos/${M}/branches/b${k}/merge?force=1`, S);
+    r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/branches/b${k}/merge?force=1`, S);
     if (r.status !== 200) console.log(`      merge b${k}: ${r.status} ${r.json?.error?.code}`);
   }
   t0 = Date.now();
@@ -103,10 +108,10 @@ try {
   const b = r.json?.branches?.find((x) => x.name === "b5");
   check("a fresh row has ahead 1, behind 6 (3 merge commits and 3 merged commits), mergeable clean", b && b.ahead === 1 && b.behind === 6 && b.mergeable === "clean", JSON.stringify({ ahead: b?.ahead, behind: b?.behind, m: b?.mergeable }));
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`, S);
+    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
     check(`delete ${M}`, r.status === 204, `${r.status}`);
   }
   rmSync(work, { recursive: true, force: true });

@@ -6,7 +6,7 @@ import { timedStub } from "../timing";
 import { credential, HttpError } from "../http";
 import { hashToken } from "../monorepo/session";
 import type { Identity } from "../monorepo/types";
-import { Accounts, confirmed, type Auth } from "./store";
+import { Accounts, confirmed, type Auth, type MonorepoRef } from "./store";
 
 const CACHE_MS = 15_000;
 /** An unknown credential is answered from cache this long (bad tokens stop reaching the database). */
@@ -44,9 +44,9 @@ export function accounts(env: Env): Accounts {
 export const cacheable = confirmed;
 
 /** The caller, or null for an unknown or revoked credential. Successes are cached briefly per isolate. */
-export async function authenticate(env: Env, secret: string, monorepo: string | null): Promise<AuthResult | null> {
+export async function authenticate(env: Env, secret: string, monorepo: MonorepoRef | null): Promise<AuthResult | null> {
   const hash = await hashToken(secret);
-  const key = `${hash}\n${monorepo ?? ""}`;
+  const key = `${hash}\n${monorepo ? `${monorepo.owner}/${monorepo.name}` : ""}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < (hit.auth ? CACHE_MS : UNKNOWN_MS)) return hit.auth;
   const auth = await accounts(env).authenticate(hash, monorepo);
@@ -113,7 +113,7 @@ export function sameOrigin(req: Request): boolean {
  * subdomain are same-site, so SameSite alone does not stop them). A browser
  * session works only as the cookie, and the cookie only for a browser session.
  */
-export async function authenticateRequest(env: Env, req: Request, monorepo: string | null): Promise<AuthResult | null> {
+export async function authenticateRequest(env: Env, req: Request, monorepo: MonorepoRef | null): Promise<AuthResult | null> {
   const bearer = credential(req);
   if (bearer) {
     const auth = await authenticate(env, bearer, monorepo);

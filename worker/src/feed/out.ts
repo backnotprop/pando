@@ -17,7 +17,7 @@ import type { Env } from "../env";
 import { now } from "../http";
 import { combine } from "../monorepo/checks";
 import { ZERO } from "../monorepo/names";
-import type { StatusRecord, StreamEvent } from "../monorepo/types";
+import type { ObjectInfo, StatusRecord, StreamEvent } from "../monorepo/types";
 import {
   FANOUT_MAX, HELLO_WORKTREES_MAX, MEMBERS_INLINE_MAX, nameOf, seqBound, TICK_LARGE_MS, TICK_SMALL_MS,
   type FeedEvent, type FeedMessage, type Key, type NeedChange, type NeedRow, type NeedState, type StoredPointer, type Summary,
@@ -54,8 +54,19 @@ export class FeedOut {
     private ctx: DurableObjectState,
     private env: Env,
     private sql: SqlStorage,
-    private monorepo: () => string | null,
+    private info: () => ObjectInfo | null,
   ) {}
+
+  /** The monorepo's id: the key of its lines and messages. */
+  private monorepo(): string | null {
+    return this.info()?.id ?? null;
+  }
+
+  /** Its owner/name, on every line sent out. */
+  private label(): string {
+    const m = this.info();
+    return m?.label ?? m?.id ?? "";
+  }
 
   private rows<T>(q: string, ...args: unknown[]): T[] {
     return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
@@ -145,7 +156,7 @@ export class FeedOut {
         const wait = e.kind === "push" || e.kind === "branch.opened" ? 1 : 0;
         this.sql.exec("UPDATE events SET feed = ?, feed_wait = ? WHERE seq = ?", JSON.stringify(p), wait, seq);
         this.set("last_activity_at", at);
-        if (!wait) this.emit({ monorepo: this.monorepo() ?? "", seq, at, ...p });
+        if (!wait) this.emit({ monorepo_id: this.monorepo() ?? "", monorepo: this.label(), seq, at, ...p });
         this.scheduleSummary();
       } else if (e.collection === "branches" || e.collection === "statuses" || e.collection === "default_heads") {
         this.scheduleSummary(); // needs-you may have changed (facts stored, main moved)
@@ -162,7 +173,7 @@ export class FeedOut {
     const p = JSON.parse(r.feed) as StoredPointer;
     p.summary = { ...(p.summary ?? {}), ...summary };
     this.sql.exec("UPDATE events SET feed = ?, feed_wait = 0 WHERE seq = ?", JSON.stringify(p), seq);
-    this.emit({ monorepo: this.monorepo() ?? "", seq, at: r.at, ...p });
+    this.emit({ monorepo_id: this.monorepo() ?? "", monorepo: this.label(), seq, at: r.at, ...p });
     return true;
   }
 
@@ -336,7 +347,8 @@ export class FeedOut {
           cursor.at, seqBound(cursor, name), limit,
         )
       : this.rows<{ seq: number; at: string; feed: string }>("SELECT seq, at, feed FROM events WHERE feed IS NOT NULL ORDER BY at DESC, seq DESC LIMIT ?", limit);
-    return rows.map((r) => ({ monorepo: name, seq: r.seq, at: r.at, ...(JSON.parse(r.feed) as StoredPointer) }));
+    const label = this.label();
+    return rows.map((r) => ({ monorepo_id: name, monorepo: label, seq: r.seq, at: r.at, ...(JSON.parse(r.feed) as StoredPointer) }));
   }
 
   // ── Presence: the follower sockets' hello ────────────────────────────────

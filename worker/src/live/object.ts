@@ -1031,7 +1031,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     try {
       await timed(
         "object",
-        { route: "meta.commit", monorepo: this.kv("monorepo"), repo: "meta", files: rows.length },
+        { route: "meta.commit", monorepo_id: this.kv("monorepo"), repo: "meta", files: rows.length },
         () => this.commitRows(writer, rows, this.kv("init_commit") === "1"),
       );
     } catch (e) {

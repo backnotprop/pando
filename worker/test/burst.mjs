@@ -40,6 +40,7 @@ const push = (cwd, url, branch) =>
   });
 
 const M = `burst-${id}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
 let busy = 0;
 let other = 0;
@@ -49,6 +50,7 @@ const rates = [];
 try {
   const r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
+  O = r.json?.monorepo?.owner ?? null;
   const url = r.json?.repos?.[0]?.clone_url;
   const src = join(work, "src");
   mkdirSync(src);
@@ -67,7 +69,7 @@ try {
       dirs.push(d);
     }
     const t = Date.now();
-    const creates = Array.from({ length: MIX }, (_, i) => call("POST", `/v1/monorepos/${M}/repos/${M}/branches`, S, { name: `r${k}/c${i}` }));
+    const creates = Array.from({ length: MIX }, (_, i) => call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/branches`, S, { name: `r${k}/c${i}` }));
     const res = await Promise.all(dirs.map((d, i) => push(d, url, `r${k}/a${i}`)));
     const secs = (Date.now() - t) / 1000;
     const made = await Promise.all(creates);
@@ -85,6 +87,6 @@ try {
   const avg = rates.reduce((a, b) => a + b, 0) / rates.length;
   console.log(`TOTAL ${total} pushes: ${busy} busy, ${other} other failures; ${avg.toFixed(1)} pushes a second on average (rounds of ${P} at once)${MIX ? `; ${ROUNDS * MIX} creates alongside, ${mixBad} failed` : ""}`);
 } finally {
-  if (made) await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`, S);
+  if (made) await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
   rmSync(work, { recursive: true, force: true });
 }

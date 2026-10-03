@@ -13,6 +13,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
@@ -72,14 +75,16 @@ const port = server.address().port;
 const id = Date.now().toString(36);
 const work = mkdtempSync(join(tmpdir(), "pando-hooks-"));
 const M = `hk-${id}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 let S = null;
 let made = false;
 try {
   S = (await call("POST", "/v1/users", BOOT, { login: `hk-${id}` })).json?.credential?.secret;
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
+  O = r.json?.monorepo?.owner ?? null;
   const url = r.json?.repos?.[0]?.clone_url;
-  const base = `/v1/monorepos/${M}/repos/${M}`;
+  const base = `/v1/monorepos/${O}/${M}/repos/${M}`;
   const hook = async (body) => (await call("POST", `${base}/hooks`, S, body)).json?.id;
   const flaky = await hook({ type: "web", url: `http://127.0.0.1:${port}/flaky`, secret: SECRET, events: ["push", "merged"] });
   const dead = await hook({ type: "web", url: `http://127.0.0.1:${port}/dead`, secret: SECRET, events: ["push"] });
@@ -102,7 +107,7 @@ try {
   const t0 = Date.now();
   check("push a branch", git(["push", "-q", url, "feat"], src).status === 0);
   const head = git(["rev-parse", "HEAD"], src).stdout.trim();
-  const events = (await call("GET", `/v1/monorepos/${M}/events?since=0&limit=100`, S)).json?.events ?? [];
+  const events = (await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=100`, S)).json?.events ?? [];
   const pushSeq = events.find((e) => e.collection === "branches" && e.row?.name === "feat")?.seq;
 
   // flaky: 503, 503, 200
@@ -147,10 +152,10 @@ try {
   r = await call("POST", `${base}/hooks/${flaky}/redeliver?since=${merged.body.seq}`, S);
   check("replay from the newest seq queues nothing", r.status === 202 && r.json?.queued === 0);
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`, S);
+    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
     check(`delete ${M}`, r.status === 204);
   }
   server.close();

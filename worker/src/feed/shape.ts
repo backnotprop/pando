@@ -6,7 +6,12 @@
 // research/plans/architecture-2026-10-03/ARCHITECTURE.md: a FeedObject per
 // person; fan-out on write through the pando-feed queue for monorepos of
 // FANOUT_MAX members or fewer; fan-in on read for larger ones; a coalesced
-// summary line per monorepo; the display key (at, monorepo, seq).
+// summary line per monorepo; the display key (at, monorepo_id, seq).
+//
+// Fields (one meaning across the API): `monorepo` is the owner/name label,
+// `monorepo_id` the permanent id. Keys, cursors and stored rows use the id;
+// the label is added when a line is sent or read. Queue messages are internal
+// and their `monorepo` is the id.
 
 /** Monorepos with this many members or fewer copy their events into members' feeds (an owner limit). */
 export const FANOUT_MAX = 100;
@@ -43,8 +48,14 @@ export const ACTIVITY_KINDS = [
   "push", "branch.opened", "branch.deleted", "merged", "review", "status", "worktree.reported", "worktree.removed", "meta.saved",
 ] as const;
 
-/** One line of the activity log. No agent field: the product shows people, machines and worktrees (owner ruling). */
+/**
+ * One line of the activity log. No agent field: the product shows people,
+ * machines and worktrees (owner ruling). `monorepo_id` keys the line (never
+ * moved by a rename); `monorepo` is its owner/name, added when the line is
+ * sent or read.
+ */
 export interface FeedEvent {
+  monorepo_id: string;
   monorepo: string;
   seq: number;
   at: string;
@@ -60,8 +71,8 @@ export interface FeedEvent {
   summary: Record<string, unknown> | null;
 }
 
-/** What a monorepo object stores per activity event: the event without monorepo, seq and at. */
-export type StoredPointer = Omit<FeedEvent, "monorepo" | "seq" | "at">;
+/** What a monorepo object stores per activity event: the event without its monorepo, seq and at. */
+export type StoredPointer = Omit<FeedEvent, "monorepo_id" | "monorepo" | "seq" | "at">;
 
 /** One monorepo's line on the home. */
 export interface Summary {
@@ -87,7 +98,9 @@ export interface NeedChange {
 
 /** A branch that needs someone, from stored facts (no Artifacts call). */
 export interface NeedRow {
+  /** The monorepo's owner/name and id (added by the routes). */
   monorepo?: string;
+  monorepo_id?: string;
   repo: string;
   repo_path: string;
   branch: string;
@@ -100,7 +113,7 @@ export interface NeedRow {
   updated_at: string | null;
 }
 
-/** pando-feed queue messages. */
+/** pando-feed queue messages. `monorepo` is always the monorepo's id. */
 export type FeedMessage =
   | { type: "events"; monorepo: string; members: string[]; events: FeedEvent[] }
   | { type: "summary"; monorepo: string; members: string[] | null; summary: Summary; needs_changed: NeedChange[]; needs_more: boolean }
@@ -111,30 +124,30 @@ export type FeedMessage =
 
 export interface Key {
   at: string;
-  monorepo: string;
+  monorepo_id: string;
   seq: number;
 }
 
 /** Newest first: negative when a comes before b on the page. */
 export function byKeyDesc(a: Key, b: Key): number {
   if (a.at !== b.at) return a.at < b.at ? 1 : -1;
-  if (a.monorepo !== b.monorepo) return a.monorepo < b.monorepo ? 1 : -1;
+  if (a.monorepo_id !== b.monorepo_id) return a.monorepo_id < b.monorepo_id ? 1 : -1;
   return b.seq - a.seq;
 }
 
 /** The cursor: opaque, "older than this event". About 40 bytes. */
 export function encodeCursor(k: Key): string {
-  const raw = `${k.at}|${k.monorepo}|${k.seq}`;
+  const raw = `${k.at}|${k.monorepo_id}|${k.seq}`;
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export function decodeCursor(s: string): Key | null {
   try {
     const raw = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
-    const [at, monorepo, seq] = raw.split("|");
+    const [at, monorepo_id, seq] = raw.split("|");
     const n = Number(seq);
-    if (!at || !monorepo || !Number.isSafeInteger(n) || n < 0 || Number.isNaN(Date.parse(at))) return null;
-    return { at, monorepo, seq: n };
+    if (!at || !monorepo_id || !Number.isSafeInteger(n) || n < 0 || Number.isNaN(Date.parse(at))) return null;
+    return { at, monorepo_id, seq: n };
   } catch {
     return null;
   }
@@ -144,19 +157,19 @@ export function decodeCursor(s: string): Key | null {
  * For one monorepo's log: its events older than the cursor are those with
  * at < cursor.at, or at = cursor.at and seq < the bound returned here.
  */
-export function seqBound(cursor: Key, monorepo: string): number {
-  if (monorepo < cursor.monorepo) return Number.MAX_SAFE_INTEGER;
-  if (monorepo > cursor.monorepo) return 0;
+export function seqBound(cursor: Key, monorepoId: string): number {
+  if (monorepoId < cursor.monorepo_id) return Number.MAX_SAFE_INTEGER;
+  if (monorepoId > cursor.monorepo_id) return 0;
   return cursor.seq;
 }
 
-/** Merge pages from several sources: newest first, each (monorepo, seq) once, at most `limit`. */
+/** Merge pages from several sources: newest first, each (monorepo_id, seq) once, at most `limit`. */
 export function mergePages(lists: FeedEvent[][], limit: number): FeedEvent[] {
   const seen = new Set<string>();
   const all: FeedEvent[] = [];
   for (const l of lists) {
     for (const e of l) {
-      const k = `${e.monorepo}\n${e.seq}`;
+      const k = `${e.monorepo_id}\n${e.seq}`;
       if (seen.has(k)) continue;
       seen.add(k);
       all.push(e);

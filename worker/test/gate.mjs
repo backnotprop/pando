@@ -12,6 +12,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const results = [];
@@ -56,10 +59,12 @@ const tally = (rs, ok) => {
 };
 
 const M = `gate-${id}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
 try {
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
+  O = r.json?.monorepo?.owner ?? null;
   const url = r.json?.repos?.[0]?.clone_url;
   const src = join(work, "src");
   mkdirSync(src);
@@ -68,14 +73,14 @@ try {
   git(["add", "-A"], src);
   git(["commit", "-qm", "first"], src);
   check("push main", git(["push", "-q", url, "main"], src).status === 0);
-  const branches = (q = "") => call("GET", `/v1/monorepos/${M}/repos/${M}/branches?state=all${q}`, S);
+  const branches = (q = "") => call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches?state=all${q}`, S);
 
   // ── parallel branch creates ──
   for (const n of [5, 20, 50]) {
     const t = Date.now();
     const rs = await Promise.all(
       Array.from({ length: n }, (_, i) =>
-        call("POST", `/v1/monorepos/${M}/repos/${M}/branches`, S, { name: `c${n}/b${i}` }).then((x) => ({ ...x, label: `${x.status} ${x.json?.error?.code}` })),
+        call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/branches`, S, { name: `c${n}/b${i}` }).then((x) => ({ ...x, label: `${x.status} ${x.json?.error?.code}` })),
       ),
     );
     const ms = Date.now() - t;
@@ -103,12 +108,12 @@ try {
   for (let i = 0; i < 3; i++) git(["commit", "-q", "--allow-empty", "-m", `more ${i}`], join(work, `a${i + 3}`));
   t = Date.now();
   const mixed = await Promise.all([
-    ...[0, 1, 2].map((i) => call("POST", `/v1/monorepos/${M}/repos/${M}/branches/agent-${i}%2Fwork/merge?force=1`, S).then((x) => ({ ok: x.status === 200, label: `merge ${x.status} ${x.json?.error?.code}` }))),
+    ...[0, 1, 2].map((i) => call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/branches/agent-${i}%2Fwork/merge?force=1`, S).then((x) => ({ ok: x.status === 200, label: `merge ${x.status} ${x.json?.error?.code}` }))),
     ...[3, 4, 5].map((i) => gitAsync(["push", "-q", url, `agent-${i}/work`], join(work, `a${i}`)).then((x) => ({ ok: x.ok, label: `push ${x.err}` }))),
   ]);
   check("3 merges and 3 pushes at once all succeed", mixed.every((x) => x.ok), `${Date.now() - t} ms, ${tally(mixed, (x) => x.ok)}`);
   t = Date.now();
-  const dels = await Promise.all(Array.from({ length: 20 }, (_, i) => call("DELETE", `/v1/monorepos/${M}/repos/${M}/branches/c20%2Fb${i}`, S).then((x) => ({ ...x, label: `${x.status} ${x.json?.error?.code}` }))));
+  const dels = await Promise.all(Array.from({ length: 20 }, (_, i) => call("DELETE", `/v1/monorepos/${O}/${M}/repos/${M}/branches/c20%2Fb${i}`, S).then((x) => ({ ...x, label: `${x.status} ${x.json?.error?.code}` }))));
   const left = ((await branches()).json?.branches ?? []).filter((b) => b.name.startsWith("c20/")).length;
   check("20 parallel branch deletes all succeed", dels.every((x) => x.status === 204) && left === 0, `${Date.now() - t} ms, ${tally(dels, (x) => x.status === 204)}, ${left} left`);
 
@@ -137,10 +142,10 @@ try {
   }
   console.log(`      one small push after another: ${((Date.now() - t) / 5).toFixed(0)} ms each`);
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`, S);
+    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
     check(`delete ${M}`, r.status === 204, `${r.status}`);
   }
   rmSync(work, { recursive: true, force: true });

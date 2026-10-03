@@ -22,6 +22,9 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "https://pando-dev.plannotator.workers.dev").replace(/\/$/, "");
 const file = process.env.PANDO_CREDENTIAL_FILE ?? join(process.env.PANDO_HOME ?? join(homedir(), ".pando"), "credentials", new URL(URL_).host);
@@ -66,11 +69,13 @@ const git = (args, cwd, secret) => {
 };
 
 const M = `edge-${Date.now().toString(36)}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
 let throwaway = null;
 try {
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
+  O = r.json?.monorepo?.owner ?? null;
   check("create a test plain repo", made, `${r.status}`);
   const url = r.json?.repos?.[0]?.clone_url;
   const repo = r.json?.repos?.[0]?.name;
@@ -123,17 +128,17 @@ try {
     check(`push a ${sizes[i]} MiB branch through the door`, p.ok, `${p.ms} ms${p.ok ? "" : ": " + p.out.split("\n").filter(Boolean).slice(-3).join(" | ")}`);
   }
   check("no push failed (no \"Network connection lost\")", failures === 0, `${failures} failed`);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/big%2F3/diff`, S);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/big%2F3/diff`, S);
   check("the diff of the 12 MiB branch reads only the start of the blob", r.status === 200 && r.json?.files?.[0]?.patch_omitted === "binary", `${r.status} ${JSON.stringify(r.json?.files?.map((f) => [f.path, f.patch_omitted]))}`);
   const clone = join(work, "clone");
   const c = git(["clone", "-q", "--branch", "big/3", url, clone], work, S);
   check("clone the 12 MiB branch back through the door", c.ok, `${c.ms} ms`);
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (throwaway?.id) await call("DELETE", `/v1/user/credentials/${throwaway.id}`, S);
   if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`, S);
+    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
     check("delete the test monorepo", r.status === 204, `${r.status}`);
   }
   rmSync(work, { recursive: true, force: true });

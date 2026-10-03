@@ -38,6 +38,7 @@ type Source = "live" | "restore" | "main";
 interface Attachment {
   id: string;
   author: string;
+  login?: string | null; // the user's login, from the Worker (route.ts); null without a credential
   machine: string;
   agent: string | null;
   fixed: boolean; // identity came from the Worker, not from hello
@@ -56,6 +57,7 @@ interface VersionRow {
   deleted: number;
   moved: string | null; // a rename's other path
   author: string;
+  login: string | null; // the saver's login (null: before 2026-10-03, or no credential)
   machine: string;
   agent: string | null;
   at: number;
@@ -81,6 +83,7 @@ interface NewVersion {
   deleted: boolean;
   moved?: string | null;
   author: string;
+  login?: string | null;
   machine: string;
   agent: string | null;
   source: Source;
@@ -157,6 +160,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // from the stored pointers once.
   private migrate(): void {
     const cols = this.sql.exec<any>("PRAGMA table_info(versions)").toArray().map((c) => c.name as string);
+    if (!cols.includes("login")) this.sql.exec("ALTER TABLE versions ADD COLUMN login TEXT");
     if (cols.includes("lfs_oid")) return;
     this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_oid TEXT");
     this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_size INTEGER");
@@ -188,7 +192,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         restored_from INTEGER,
         commit_sha TEXT,
         lfs_oid TEXT,
-        lfs_size INTEGER
+        lfs_size INTEGER,
+        login TEXT
       );
       CREATE INDEX IF NOT EXISTS versions_by_path ON versions(path, version);
       CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, version INTEGER NOT NULL, sha TEXT, deleted INTEGER NOT NULL);
@@ -264,6 +269,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const att: Attachment = {
       id: crypto.randomUUID(),
       author: author ?? "",
+      login: request.headers.get("x-pando-login"),
       machine: "",
       agent: null,
       fixed: author !== null,
@@ -309,6 +315,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       size: r.size,
       deleted: !!r.deleted,
       author: r.author,
+      login: r.login ?? null,
       machine: r.machine,
       agent: r.agent,
       at: r.at,
@@ -374,6 +381,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       size: target.deleted ? null : target.size,
       deleted: !!target.deleted,
       author,
+      login: request.headers.get("x-pando-login"),
       machine,
       agent,
       source: "restore",
@@ -559,7 +567,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       this.send(ws, { type: "refused", id, status: r.status, path, reason: r.reason, message: r.message });
       return false;
     };
-    const who = { author: att.author, machine: att.machine, agent: att.agent };
+    const who = { author: att.author, login: att.login ?? null, machine: att.machine, agent: att.agent };
 
     // During pando init's first upload, .pando/ (but not .pando/local/) may be saved.
     const check = (p: string) => {
@@ -711,8 +719,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const lfs = n.lfs !== undefined ? n.lfs : n.bytes && n.bytes.length < 1024 ? parsePointer(n.bytes) : null;
     const version = this.sql
       .exec<any>(
-        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha, lfs_oid, lfs_size)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
+        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha, lfs_oid, lfs_size, login)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
         n.path,
         n.op,
         n.sha,
@@ -728,6 +736,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         n.commit_sha ?? null,
         lfs?.oid ?? null,
         lfs?.size ?? null,
+        n.login ?? null,
       )
       .one().version as number;
     this.sql.exec(
@@ -887,16 +896,22 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (folder !== null) {
       body.dir = folder;
       if (!after) {
-        body.folders = this.sql
+        // Each subfolder with its file count and `last`: the newest version
+        // anywhere under it, a delete or a rename included. One query: the
+        // files rows hold each path's newest version.
+        const rows = this.sql
           .exec<any>(
-            `SELECT substr(rest, 1, instr(rest, '/') - 1) AS name, COUNT(*) AS files FROM (
-               SELECT substr(path, length(?1) + 1) AS rest FROM files
-               WHERE deleted = 0 AND path >= ?1 AND path < ?2
-             ) WHERE instr(rest, '/') > 0 GROUP BY name ORDER BY name`,
+            `SELECT g.name, g.files, v.* FROM (
+               SELECT substr(rest, 1, instr(rest, '/') - 1) AS name, SUM(deleted = 0) AS files, MAX(version) AS last FROM (
+                 SELECT substr(path, length(?1) + 1) AS rest, deleted, version FROM files
+                 WHERE path >= ?1 AND path < ?2
+               ) WHERE instr(rest, '/') > 0 GROUP BY name HAVING SUM(deleted = 0) > 0
+             ) g JOIN versions v ON v.version = g.last ORDER BY g.name`,
             prefix,
             upper,
           )
-          .toArray();
+          .toArray() as (VersionRow & { name: string; files: number })[];
+        body.folders = rows.map((r) => ({ name: r.name, files: r.files, last: this.historyEntry(r) }));
       }
     }
     return json(body);
@@ -942,6 +957,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       size: r.size,
       deleted: !!r.deleted,
       author: r.author,
+      login: r.login ?? null,
       machine: r.machine,
       agent: r.agent,
       at: r.at,
@@ -956,9 +972,20 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     return msg;
   }
 
+  // ---- one file for the root raw route (Durable Object RPC, monorepo/raw.ts) ----
+
+  // The path as it is now, or at a version (its latest change at or before
+  // it); null when it did not exist then or was deleted. A large file's
+  // version is its pointer: `large` names the R2 blob.
+  readFile(path: string, version: number | null): { version: number; sha: string; bytes: ArrayBuffer; large: { oid: string; size: number } | null } | null {
+    const row = this.versionAt(path, version);
+    if (!row || row.deleted || !row.sha) return null;
+    return { version: row.version, sha: row.sha, bytes: this.blob(row.sha), large: row.lfs_oid ? { oid: row.lfs_oid, size: row.lfs_size ?? 0 } : null };
+  }
+
   // ---- updates from main (Durable Object RPC, called by the monorepo object) ----
 
-  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
+  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
     const shas = await Promise.all(
       input.changes.map((c) => (c.bytes === null ? null : gitBlobSha(c.bytes instanceof Uint8Array ? c.bytes : new Uint8Array(c.bytes)))),
     );
@@ -973,7 +1000,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         if (!cur || cur.deleted) continue;
         version = this.insert({
           path: c.path, op: "delete", sha: null, size: null, deleted: true,
-          author: input.author ?? "main", machine: "server", agent: null, source: "main", commit_sha: input.commit,
+          author: input.author ?? "main", login: input.login ?? null, machine: "server", agent: null, source: "main", commit_sha: input.commit,
         });
       } else {
         const bytes = c.bytes instanceof Uint8Array ? c.bytes : new Uint8Array(c.bytes);
@@ -982,7 +1009,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         if (cur && !cur.deleted && cur.sha === sha) continue;
         version = this.insert({
           path: c.path, op: "save", sha, bytes, size: bytes.length, deleted: false,
-          author: input.author ?? "main", machine: "server", agent: null, source: "main", commit_sha: input.commit,
+          author: input.author ?? "main", login: input.login ?? null, machine: "server", agent: null, source: "main", commit_sha: input.commit,
         });
       }
       versions.push(version);

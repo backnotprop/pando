@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 
 retryResetFetch();
 
@@ -64,6 +64,7 @@ const git = (args, cwd) => {
 const M = `smoke-${Date.now().toString(36)}`;
 let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`)).status);
 try {
   let r = await call("GET", "/v1/user");
   check("the credential works", r.status === 200, `${r.status} as ${r.json?.login}`);
@@ -73,6 +74,7 @@ try {
   r = await call("POST", "/v1/monorepos", { name: M, kind: "repo" });
   made = r.status === 201;
   O = r.json?.monorepo?.owner ?? null;
+  if (made) tw.add(`${O}/${M}`);
   let stale = 0;
   for (let i = 0; i < 8; i++) if ((await call("GET", `/v1/monorepos/${O}/${M}`)).status !== 200) stale++;
   check("right after creating it, no request sees a cached 404", stale === 0, `${stale} of 8 stale`);
@@ -137,10 +139,7 @@ try {
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {
-  if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`);
-    check("delete the test monorepo", r.status === 204, `${r.status}`);
-  }
+  if (made) check("delete the test monorepo", await tw.cleanup());
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

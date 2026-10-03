@@ -11,6 +11,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { throwaways } from "./errors.mjs";
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const ROUNDS = Number(process.env.ROUNDS ?? 10);
@@ -42,6 +43,7 @@ const push = (cwd, url, branch) =>
 const M = `burst-${id}`;
 let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, S)).status);
 let busy = 0;
 let other = 0;
 let total = 0;
@@ -51,6 +53,7 @@ try {
   const r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   made = r.status === 201;
   O = r.json?.monorepo?.owner ?? null;
+  if (made) tw.add(`${O}/${M}`);
   const url = r.json?.repos?.[0]?.clone_url;
   const src = join(work, "src");
   mkdirSync(src);
@@ -87,6 +90,6 @@ try {
   const avg = rates.reduce((a, b) => a + b, 0) / rates.length;
   console.log(`TOTAL ${total} pushes: ${busy} busy, ${other} other failures; ${avg.toFixed(1)} pushes a second on average (rounds of ${P} at once)${MIX ? `; ${ROUNDS * MIX} creates alongside, ${mixBad} failed` : ""}`);
 } finally {
-  if (made) await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
+  if (made) await tw.cleanup();
   rmSync(work, { recursive: true, force: true });
 }

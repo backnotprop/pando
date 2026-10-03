@@ -752,7 +752,7 @@ export class MonorepoObject extends DurableObject<Env> {
       );
     });
     const author = `${who.name ?? who.login} <${who.email ?? `${who.login}@users.pando.invalid`}>`;
-    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, changes });
+    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, login: who.login, changes });
   }
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────
@@ -840,16 +840,6 @@ export class MonorepoObject extends DurableObject<Env> {
       this.sql.exec("DELETE FROM deliveries WHERE id = ?", o.id);
     }
     return id;
-  }
-
-  /** Send the due deliveries now (the pando-hooks consumer, for messages sent before the outbox). */
-  sendDueDeliveries(): Promise<void> {
-    return this.hooksOut.sendDue();
-  }
-
-  /** The pando-hooks-dlq consumer, for messages sent before the outbox: the delivery gave up. */
-  markDead(id: string): void {
-    this.sql.exec("UPDATE deliveries SET status = 'dead', next_attempt_at = NULL WHERE id = ? AND status != 'delivered'", id);
   }
 
   /** Send one delivery again (same row, same seq; new attempts are added). */
@@ -1097,6 +1087,11 @@ export class MonorepoObject extends DurableObject<Env> {
   ): void {
     // The outbox (facts-out.ts), drained at once by RPC.
     this.factsOut.add(m as Omit<FactsMessage, "monorepo">);
+  }
+
+  /** Tests only (HOOKS_TEST=1): die after the next delivery's call answers, before recording it. */
+  testHooksOutbox(set: { crash?: boolean } = {}) {
+    return this.hooksOut.test(set);
   }
 
   /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */

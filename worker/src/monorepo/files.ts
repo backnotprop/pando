@@ -349,7 +349,12 @@ export async function rawResponse(blob: Response, name: string, oid: string, pin
     "cache-control": pinned ? "private, max-age=31536000, immutable" : "private, no-cache",
   });
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-  const reader = blob.body!.getReader();
+  if (!blob.body) {
+    // An empty file.
+    headers.set("content-type", IMAGES[ext] ?? "text/plain; charset=utf-8");
+    return new Response(null, { headers });
+  }
+  const reader = blob.body.getReader();
   const chunks: Uint8Array[] = [];
   let n = 0;
   while (n < 8000) {

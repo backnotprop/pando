@@ -245,13 +245,20 @@ changed since I last looked").
 {"path": "decisions/HISTORY.md", "head": 440,
  "versions": [
    {"version": 432, "path": "decisions/HISTORY.md", "op": "save", "sha": "4b82...", "size": 9, "deleted": false,
-    "author": "Ana <ana@example.com>", "machine": "ana-mbp", "agent": null, "at": 1790000000000, "source": "live",
-    "from": null, "restored_from": null, "commit": "e1f0..."}
+    "author": "Ana <ana@example.com>", "login": "ana", "machine": "ana-mbp", "agent": null, "at": 1790000000000, "source": "live",
+    "from": null, "to": null, "restored_from": null, "commit": "e1f0..."}
  ]}
 ```
 
+A rename is two versions: on its delete side `to` is the new path, on its
+save side `from` is the old path; both are `null` on any other change.
+
 `commit` is the meta layer commit that carries the version, or `null` until
-it is committed. `large` is `{"oid", "size"}` when the version is a large
+it is committed. `login` is the saver's Pando login beside `author`, the
+display name (2026-10-03): set from the checked credential on live saves,
+restores, and changes merged on `main` (the merger); `null` on versions
+from before then. Socket `change` messages and `meta.saved` events carry it
+too. `large` is `{"oid", "size"}` when the version is a large
 file's pointer (then `size` and `sha` are the pointer's), else `null`.
 
 **`GET file?path=<path>&version=<version>`**: the bytes of the path as it
@@ -276,14 +283,17 @@ history entry (above). Deleted paths are left out.
 
 - `prefix=<string>`: paths that start with it (a plain string match).
 - `dir=<folder>`: one folder (`""` is the root): the files directly in it,
-  and on the first page its subfolders with how many files each holds.
+  and on the first page its subfolders with how many files each holds and
+  `last`, the newest change anywhere under each (a history entry: who,
+  what, when, version; it may be a delete or a rename).
 - `limit=`: 1 to 5,000, default 1,000. `after=<path>`: continue after that
   path; pass the previous page's `next`.
 - Not both `prefix` and `dir` (400).
 
 ```json
 {"head": 431, "prefix": "docs/", "dir": "docs", "files": [...],
- "folders": [{"name": "deep", "files": 12}], "next": "docs/two.md"}
+ "folders": [{"name": "deep", "files": 12, "last": {"version": 430, "path": "docs/deep/a.md", "op": "save", "login": "ana", ...}}],
+ "next": "docs/two.md"}
 ```
 
 `next` is `null` on the last page. `dir` and `folders` are there only with
@@ -294,6 +304,13 @@ a folder listing 2 to 30 ms.
 **`GET references`**: the reference pointers under `.pando/references/`
 (formats.md, section 4), parsed:
 `{"head", "references": [{"path", "url", "ref", "commit", "version", "error"}]}`.
+
+**Raw, for the web** (not under `/meta`): `GET` or `HEAD
+/{owner}/{monorepo}/raw/{path}?v=<version>` answers one meta layer file's
+bytes, as it is now or, with `v`, as of that version (its latest change at
+or before it), with the same headers as project raw files (api-v1.yaml,
+"Raw files"). The `ETag` is the content's sha: git's blob sha, or a large
+file's SHA-256 (its bytes come from R2). Members only.
 `path` is the reference's folder (`research/infra/oak`); `error` says why
 a pointer did not parse. `url` never shows a user or password: they are
 removed (a live save of such a pointer is refused, see `credentials`).

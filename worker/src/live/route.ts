@@ -25,6 +25,7 @@ export interface LiveEnv {
 export interface MetaIdentity {
   name: string;
   email?: string;
+  login?: string;
 }
 
 const ROUTE = /^\/v1\/monorepos\/([^/]+)\/([^/]+)\/meta\/(socket|history|file|restore|status|init|tree|references|blobs\/[^/]+)$/;
@@ -49,11 +50,12 @@ export async function routeMeta(request: Request, env: LiveEnv, monorepo: string
   const oid = blobOid(request);
   if (oid !== null) return handleBlob(request, env.BLOBS, monorepo, oid);
   const headers = new Headers(request.headers);
-  for (const h of ["x-pando-author", "x-pando-monorepo", "x-pando-meta-repo"]) headers.delete(h);
+  for (const h of ["x-pando-author", "x-pando-login", "x-pando-monorepo", "x-pando-meta-repo"]) headers.delete(h);
   headers.set("x-pando-monorepo", monorepo);
   headers.set("x-pando-meta-repo", `${monorepo}--meta`); // api-v1.yaml: the meta layer's Artifacts repo
   if (identity) {
     headers.set("x-pando-author", identity.email ? `${identity.name} <${identity.email}>` : identity.name);
+    if (identity.login) headers.set("x-pando-login", identity.login);
   }
   const stub = env.META.get(env.META.idFromName(monorepo));
   return stub.fetch(new Request(request, { headers }));

@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 
 retryResetFetch();
 
@@ -64,6 +64,7 @@ const work = mkdtempSync(join(tmpdir(), "pando-feedload-"));
 const id = Date.now().toString(36);
 const made = [];
 let S;
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, S)).status);
 const out = [];
 const say = (s) => {
   out.push(s);
@@ -82,6 +83,7 @@ try {
     const r = await call("POST", "/v1/monorepos", S, { name: m, kind: "repo" });
     if (r.status === 201) {
       made.push(m);
+      tw.add(`${me}/${m}`);
       clone[m] = r.json.repos[0].clone_url;
     } else console.log(`create ${m}: ${r.status} ${r.json?.error?.code}`);
   });
@@ -262,10 +264,7 @@ try {
   console.log("exception:", describeError(err));
 } finally {
   const t0 = performance.now();
-  await pool(made, 5, async (m) => {
-    const r = await call("DELETE", `/v1/monorepos/${me}/${m}?confirm=${me}/${m}`, S);
-    if (r.status !== 204) console.log(`delete ${m}: ${r.status}`);
-  });
+  await tw.cleanup();
   console.log(`deleted ${made.length} monorepos in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   // Deleting a monorepo clears it from the person's home and log (leave messages).
   if (made.length && S) {

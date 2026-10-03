@@ -3,8 +3,9 @@
 // written in the same step as the change; the object hands due rows at once to
 // the HooksDrain Worker entrypoint (hooks.ts) by RPC, which POSTs and answers
 // each result; the object records it. The alarm is only the retry timer
-// (10 s, 60 s, 5 min, 30 min, then dead). pando-hooks measured p50 1.2 s and
-// up to 4.5 s in the queue alone at one push every 5 s.
+// (10 s, 60 s, 5 min, 30 min, then dead). The pando-hooks queue this replaced
+// took p50 1.2 s and up to 4.5 s on its own; through the outbox a hook
+// reaches its receiver p50 0.15 s after git push returns (C25-LIVE-HOME.md).
 //
 // Each delivery is its own call, so a slow receiver holds only itself. A row
 // handed to a call is leased (`sent_at`), so concurrent drains never send it
@@ -27,6 +28,8 @@ const CALLS_AT_ONCE = 20;
 const ROUND_MAX = 60;
 /** A handed-out row is sent again after this if no answer came (a POST times out after 10 s). */
 export const LEASE_MS = 60_000;
+/** The lease under HOOKS_TEST=1: longer than hooks.mjs's slow receiver (4 s), short enough to wait for. */
+const TEST_LEASE_MS = 6_000;
 
 /** One delivery for the drain: everything it needs, so it never calls back. */
 export interface HookJob {
@@ -72,6 +75,10 @@ export class HooksOut {
     return this.sql.exec<Row>(q, ...args).toArray() as unknown as T[];
   }
 
+  private lease(): number {
+    return this.env.HOOKS_TEST === "1" ? TEST_LEASE_MS : LEASE_MS;
+  }
+
   private delays(): number[] {
     const v = this.env.HOOK_RETRY_DELAYS?.split(",").map((x) => Number(x.trim()));
     return v && v.length && v.every((n) => Number.isInteger(n) && n >= 0 && n <= 43_200) ? v : RETRY_DELAYS_S;
@@ -104,7 +111,7 @@ export class HooksOut {
     const m = this.info();
     const lease = now();
     if (!m) return { jobs: [], lease };
-    const expired = new Date(Date.now() - LEASE_MS).toISOString();
+    const expired = new Date(Date.now() - this.lease()).toISOString();
     const due = this.rows<{ id: string; hook_id: string; repo: string; payload: string; tries: number; created_at: string; next_attempt_at: string | null }>(
       `SELECT id, hook_id, repo, payload, tries, created_at, next_attempt_at FROM deliveries
        WHERE status IN ('queued', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
@@ -130,7 +137,7 @@ export class HooksOut {
         attempt: d.tries + 1, due: Date.parse(d.next_attempt_at ?? d.created_at),
       });
     }
-    if (jobs.length) this.armAt(Date.now() + LEASE_MS + 1_000);
+    if (jobs.length) this.armAt(Date.now() + this.lease() + 1_000);
     return { jobs, lease };
   }
 
@@ -151,6 +158,14 @@ export class HooksOut {
     let results: HookResult[];
     try {
       results = released(await this.ctx.exports.HooksDrain.run(jobs));
+      if (this.crashNext) {
+        // Tests only: the receiver has the delivery; the object dies before recording it.
+        this.crashNext = false;
+        await this.ctx.storage.sync();
+        await new Promise((r) => setTimeout(r, 200)); // the push's own answer goes out first
+        this.ctx.abort("hooks test: the object dies after a delivery was sent, before its answer is recorded");
+        return;
+      }
     } catch (err) {
       const error = `the delivery call failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
       results = jobs.map(() => ({ ok: false, code: null, error, ms: 0 }));
@@ -190,8 +205,18 @@ export class HooksOut {
     const live = "status IN ('queued', 'retrying')";
     const retry = this.rows<{ t: string | null }>(`SELECT MIN(next_attempt_at) AS t FROM deliveries WHERE ${live} AND next_attempt_at > ?`, now())[0]?.t;
     const leased = this.rows<{ t: string | null }>(`SELECT MIN(sent_at) AS t FROM deliveries WHERE ${live} AND sent_at IS NOT NULL`)[0]?.t;
-    const times = [retry ? Date.parse(retry) : Infinity, leased ? Date.parse(leased) + LEASE_MS + 1_000 : Infinity];
+    const times = [retry ? Date.parse(retry) : Infinity, leased ? Date.parse(leased) + this.lease() + 1_000 : Infinity];
     const t = Math.min(...times);
     if (t < Infinity) this.armAt(t);
+  }
+
+  // ── Tests only (HOOKS_TEST=1) ─────────────────────────────────────────────
+
+  private crashNext = false;
+
+  /** Make the object die right after the next delivery's call answers, before it is recorded. */
+  test(set: { crash?: boolean } = {}): { crash: boolean; lease_ms: number } {
+    if (this.env.HOOKS_TEST === "1" && set.crash !== undefined) this.crashNext = set.crash;
+    return { crash: this.crashNext, lease_ms: this.lease() };
   }
 }

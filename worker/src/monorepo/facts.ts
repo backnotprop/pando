@@ -1,15 +1,16 @@
 // Branch facts (ahead, behind, merge base, mergeable), computed on change and
 // stored in the monorepo object, so a branch list answers at once.
 //
-// - When main moves (a merge, main's first push), the object queues one
-//   "sweep" for that repo and that main. The consumer walks the open branches
+// - When main moves (a merge, main's first push), the object's outbox
+//   (facts-out.ts) holds one "sweep" for that repo and that main, drained at
+//   once into FactsDrain by RPC. The sweep walks the open branches
 //   pushed in the last SWEEP_DAYS, newest first, at most SWEEP_MAX, SWEEP_PARALLEL
 //   at a time, and stops when main moves on (the newer main has its own sweep).
-// - When a branch's head moves, the object queues a one-branch job.
+// - When a branch's head moves, the outbox holds a one-branch job.
 // - A branch's facts are skipped when already stored for its (main, head).
 // - Branches no sweep reaches are computed when listed: at most INLINE_MAX per
 //   list call, once they have been stale for STALE_GRACE_MS.
-// The object never calls Artifacts for this; the consumer and the list route do.
+// The object never calls Artifacts for this; FactsDrain and the list route do.
 
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
@@ -25,12 +26,16 @@ import { sendPushSummary } from "../feed/push";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
 export const SWEEP_DAYS = 7;
+
 /** At most this many branches per sweep, most recently pushed first (an owner limit). */
 export const SWEEP_MAX = 100;
+
 /** Dry runs at once within one sweep. */
 export const SWEEP_PARALLEL = 6;
+
 /** A branch list computes at most this many stale branches itself (an owner limit). */
 export const INLINE_MAX = 25;
+
 /** How long a list waits for the queue before computing a stale branch itself. */
 export const STALE_GRACE_MS = 30_000;
 
@@ -58,14 +63,18 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
     let base: string | null = null;
     let ahead: number | null = null;
     let behind: number | null = null;
+
     try {
       ({ mergeBase: base, ahead, behind } = await compareWith(rd, main, head));
     } catch {
       /* too far apart: unknown */
     }
+
     const mergeable = base ? await mergeableOf(env, r, main, head, ahead) : "unknown";
+
     return { main, head, ahead, behind, merge_base: base, mergeable };
   };
+
   return read ? go(read) : withRepo(env, r.artifacts_name, (repo) => go(commitReader(repo)));
 }
 
@@ -74,43 +83,9 @@ function stubOf(env: Env, monorepo: string) {
 }
 
 /**
- * The queue consumer. One-branch jobs in a batch run SWEEP_PARALLEL at a
- * time; sweeps run one after another (each already runs SWEEP_PARALLEL dry
- * runs), so one invocation has at most SWEEP_PARALLEL in flight.
- */
-export async function handleFactsBatch(batch: MessageBatch<FactsMessage>, env: Env): Promise<void> {
-  const run = async (msg: Message<FactsMessage>) => {
-    try {
-      const b = msg.body;
-      await timed("queue", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () =>
-        runFacts(env, b).finally(() => {
-          // The facts themselves, apart from the push's line (push_summary_ms).
-          const t = currentTiming();
-          if (t) t.fields.facts_job_ms = Date.now() - t.start - Number(t.fields.push_summary_ms ?? 0);
-        }),
-      );
-      msg.ack();
-    } catch (err) {
-      if (err instanceof MainMoved) {
-        msg.ack(); // main moved on; its own sweep recomputes this branch
-        return;
-      }
-      if (err instanceof HttpError && err.status === 404) {
-        msg.ack(); // the repo or monorepo is gone
-        return;
-      }
-      console.error(`branch facts (${msg.body.type} ${msg.body.repo}) failed:`, err instanceof Error ? err.message : String(err));
-      msg.retry({ delaySeconds: 5 * msg.attempts });
-    }
-  };
-  await pool(batch.messages.filter((m) => m.body.type === "branch"), SWEEP_PARALLEL, run);
-  for (const m of batch.messages.filter((x) => x.body.type === "sweep")) await run(m);
-}
-
-/**
  * The facts drain (C25-LIVE-HOME.md step 2): the monorepo object's outbox
  * calls this by RPC with its due jobs. One-branch jobs run SWEEP_PARALLEL at
- * a time, sweeps one after another, as the queue consumer did. Answers, per
+ * a time, sweeps one after another. Answers, per
  * job, whether it is done: main having moved on, or the repo being gone,
  * counts as done; anything else is retried by the object.
  */
@@ -118,12 +93,15 @@ export class FactsDrain extends WorkerEntrypoint<Env> {
   async run(jobs: FactsJob[]): Promise<{ ok: boolean[]; error: string | null }> {
     const ok = jobs.map(() => false);
     let error: string | null = null;
+
     const one = async (i: number) => {
       const b = jobs[i];
+
       try {
         await timed("drain", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, facts_age_ms: Math.max(0, Date.now() - b.created) }, () =>
           runFacts(this.env, b).finally(() => {
             const t = currentTiming();
+
             if (t) t.fields.facts_job_ms = Date.now() - t.start - Number(t.fields.push_summary_ms ?? 0);
           }),
         );
@@ -131,15 +109,20 @@ export class FactsDrain extends WorkerEntrypoint<Env> {
       } catch (err) {
         if (err instanceof MainMoved || (err instanceof HttpError && err.status === 404)) {
           ok[i] = true; // main moved on (its own sweep recomputes), or the repo is gone
+
           return;
         }
+
         error ??= err instanceof Error ? err.message : String(err);
         console.error(`branch facts (${b.type} ${b.repo}) failed:`, err instanceof Error ? err.message : String(err));
       }
     };
+
     const idx = jobs.map((_, i) => i);
     await pool(idx.filter((i) => jobs[i].type === "branch"), SWEEP_PARALLEL, one);
+
     for (const i of idx.filter((i) => jobs[i].type === "sweep")) await one(i);
+
     return { ok, error };
   }
 }
@@ -147,21 +130,29 @@ export class FactsDrain extends WorkerEntrypoint<Env> {
 export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: number; abandoned: boolean }> {
   const stub = stubOf(env, m.monorepo);
   const [r, info] = await Promise.all([stub.getRepo(m.repo), stub.info()]);
+
   if (!r || !info) return { computed: 0, abandoned: true };
+
   if (m.push) {
     const t0 = Date.now();
     await sendPushSummary(env, stub, r, m.push, m.type === "branch" ? m.head : m.main, m.type === "sweep");
     note({ push_summary_ms: Date.now() - t0 }); // the push's line leaves for the feed here; the facts themselves follow
   }
+
   if (m.type === "branch") {
     const main = await stub.currentMain(m.repo);
+
     if (!main) return { computed: 0, abandoned: true };
     const required = await requiredKept(env, info, r);
     const f = await computeFacts(env, r, main, m.head);
+
     return { computed: (await stub.writeFacts(m.repo, m.branch, f, required)) ? 1 : 0, abandoned: false };
   }
+
   const cands = await stub.factsCandidates(m.repo, m.main, SWEEP_DAYS, SWEEP_MAX);
+
   if (cands.main !== m.main) return { computed: 0, abandoned: true }; // a newer main has its own sweep
+
   if (!cands.branches.length) return { computed: 0, abandoned: false };
   const required = await requiredKept(env, info, r);
   let computed = 0;
@@ -170,12 +161,16 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
     const read = commitReader(repo);
     await pool(cands.branches, SWEEP_PARALLEL, async (b) => {
       if (abandoned) return;
+
       if ((await stub.currentMain(m.repo)) !== m.main) {
         abandoned = true;
+
         return;
       }
+
       try {
         const f = await computeFacts(env, r, m.main, b.head, read);
+
         if (await stub.writeFacts(m.repo, b.name, f, required)) computed++;
       } catch (err) {
         if (!(err instanceof MainMoved)) throw err;
@@ -183,6 +178,7 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
       }
     });
   });
+
   return { computed, abandoned };
 }
 
@@ -195,10 +191,13 @@ export async function factsTestRoute(request: Request, env: Env): Promise<Respon
   if (env.FACTS_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
   const { credential } = await import("../http");
   const { isBootstrap } = await import("./session");
+
   if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
   const url = new URL(request.url);
   const b = request.method === "POST" ? ((await request.json().catch(() => ({}))) as { monorepo?: string; fail?: number }) : {};
   const id = b.monorepo ?? url.searchParams.get("monorepo");
+
   if (!id) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+
   return Response.json(await stubOf(env, id).testFactsOutbox(b.fail === undefined ? {} : { fail: b.fail }));
 }

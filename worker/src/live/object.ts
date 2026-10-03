@@ -19,25 +19,39 @@ import { addGate, timed } from "../timing";
 export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+
 const TREE_LIMIT = 1000; // GET tree: files per page by default
+
 const TREE_MAX = 5000; // and at most
+
 const EVENTS_FLUSH_MS = 250; // meta events go to the monorepo's stream in one call per this much time
+
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
+
 const GROUP_MS = 2_000; // paths due within this of each other share a commit
+
 const RETRY_MIN_MS = 30_000;
+
 const RETRY_MAX_MS = 600_000;
+
 const PAGE_BYTES = 4 * 1024 * 1024; // catch-up page size
+
 const PAGE_ROWS = 1000;
+
 const INIT_WINDOW_MS = 30 * 60_000; // pando init's first upload, at most this long
+
 const COMMIT_FILES = 1000; // one commit holds at most this many files
+
 const COMMIT_BYTES = 24 * 1024 * 1024; // and about this many bytes (gitwrite packs in memory)
 
 type Op = "save" | "delete" | "rename";
+
 type Source = "live" | "restore" | "main";
 
 interface Attachment {
   id: string;
   author: string;
+  login?: string | null; // the user's login, from the Worker (route.ts); null without a credential
   machine: string;
   agent: string | null;
   fixed: boolean; // identity came from the Worker, not from hello
@@ -56,6 +70,7 @@ interface VersionRow {
   deleted: number;
   moved: string | null; // a rename's other path
   author: string;
+  login: string | null; // the saver's login (null: before 2026-10-03, or no credential)
   machine: string;
   agent: string | null;
   at: number;
@@ -81,6 +96,7 @@ interface NewVersion {
   deleted: boolean;
   moved?: string | null;
   author: string;
+  login?: string | null;
   machine: string;
   agent: string | null;
   source: Source;
@@ -104,9 +120,11 @@ function str(v: unknown): string {
 function withoutCredentials(raw: string): string {
   try {
     const u = new URL(raw);
+
     if (!u.username && !u.password) return raw;
     u.username = "";
     u.password = "";
+
     return u.toString();
   } catch {
     return raw; // git@host:path names a user, never a password
@@ -121,6 +139,7 @@ function name(v: unknown): string {
 
 function int(v: unknown, fallback = 0): number {
   const n = typeof v === "number" ? v : typeof v === "string" && v !== "" ? Number(v) : NaN;
+
   return Number.isSafeInteger(n) && n >= 0 ? n : fallback;
 }
 
@@ -138,7 +157,9 @@ function fail(status: number, code: string, message: string): Response {
 
 function parsePerson(author: string): { name: string; email: string } {
   const m = author.match(/^\s*(.*?)\s*<([^>]*)>\s*$/);
+
   if (m && m[2]) return { name: m[1] || m[2], email: m[2] };
+
   return { name: author || "unknown", email: "unknown@pando.invalid" };
 }
 
@@ -157,14 +178,20 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // from the stored pointers once.
   private migrate(): void {
     const cols = this.sql.exec<any>("PRAGMA table_info(versions)").toArray().map((c) => c.name as string);
+
+    if (!cols.includes("login")) this.sql.exec("ALTER TABLE versions ADD COLUMN login TEXT");
+
     if (cols.includes("lfs_oid")) return;
     this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_oid TEXT");
     this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_size INTEGER");
+
     const small = this.sql
       .exec<any>("SELECT version, sha FROM versions WHERE sha IS NOT NULL AND deleted = 0 AND size < 1024")
       .toArray() as { version: number; sha: string }[];
+
     for (const r of small) {
       const ptr = parsePointer(new Uint8Array(this.blob(r.sha)));
+
       if (ptr) this.sql.exec("UPDATE versions SET lfs_oid = ?, lfs_size = ? WHERE version = ?", ptr.oid, ptr.size, r.version);
     }
   }
@@ -188,7 +215,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         restored_from INTEGER,
         commit_sha TEXT,
         lfs_oid TEXT,
-        lfs_size INTEGER
+        lfs_size INTEGER,
+        login TEXT
       );
       CREATE INDEX IF NOT EXISTS versions_by_path ON versions(path, version);
       CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, version INTEGER NOT NULL, sha TEXT, deleted INTEGER NOT NULL);
@@ -206,6 +234,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // repo are the caller's to delete.
   async destroy(): Promise<{ closed: number }> {
     const sockets = this.ctx.getWebSockets();
+
     for (const ws of sockets) {
       try {
         ws.close(META_DELETED, "this monorepo was deleted");
@@ -213,9 +242,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         // already closed
       }
     }
+
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.createSchema(); // this instance may serve the next request
+
     return { closed: sockets.length };
   }
 
@@ -224,11 +255,14 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const monorepo = request.headers.get("x-pando-monorepo");
+
     if (monorepo && this.kv("monorepo") !== monorepo) this.setKv("monorepo", monorepo);
     const metaRepo = request.headers.get("x-pando-meta-repo");
+
     if (metaRepo && this.kv("meta_repo") !== metaRepo) this.setKv("meta_repo", metaRepo);
 
     const action = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+
     switch (action) {
       case "socket":
         return this.openSocket(request);
@@ -238,6 +272,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return this.file(url);
       case "restore":
         if (request.method !== "POST") return fail(405, "method_not_allowed", "use POST");
+
         return this.restore(request);
       case "status":
         return json(this.status());
@@ -247,8 +282,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return this.references();
       case "init":
         if (request.method !== "POST") return fail(405, "method_not_allowed", "use POST");
+
         return this.init(request);
     }
+
     return fail(404, "not_found", "no such meta layer route");
   }
 
@@ -256,14 +293,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return fail(426, "upgrade_required", "expected a WebSocket upgrade");
     }
+
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
     // Set by the Worker from the checked credential (route.ts): the user.
     const author = request.headers.get("x-pando-author");
+
     const att: Attachment = {
       id: crypto.randomUUID(),
       author: author ?? "",
+      login: request.headers.get("x-pando-login"),
       machine: "",
       agent: null,
       fixed: author !== null,
@@ -271,7 +311,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       live: false,
       connected_at: new Date().toISOString(),
     };
+
     server.serializeAttachment(att);
+
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -279,6 +321,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const path = url.searchParams.get("path");
     const limit = Math.min(Math.max(int(url.searchParams.get("limit"), 50), 1), 1000);
     let rows: VersionRow[];
+
     if (path) {
       const before = int(url.searchParams.get("before"), Number.MAX_SAFE_INTEGER);
       rows = this.sql
@@ -295,6 +338,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         .exec<any>("SELECT * FROM versions WHERE version > ? ORDER BY version ASC LIMIT ?", since, limit)
         .toArray() as VersionRow[];
     }
+
     return json({ path, head: this.head(), versions: rows.map((r) => this.historyEntry(r)) });
   }
 
@@ -309,6 +353,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       size: r.size,
       deleted: !!r.deleted,
       author: r.author,
+      login: r.login ?? null,
       machine: r.machine,
       agent: r.agent,
       at: r.at,
@@ -329,6 +374,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         version ?? Number.MAX_SAFE_INTEGER,
       )
       .toArray() as VersionRow[];
+
     return rows[0] ?? null;
   }
 
@@ -336,7 +382,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const path = url.searchParams.get("path") ?? "";
     const v = url.searchParams.get("version");
     const row = this.versionAt(path, v === null ? null : int(v));
+
     if (!row || row.deleted || !row.sha) return fail(404, "not_found", "no such file at that version");
+
     return new Response(this.blob(row.sha), {
       headers: {
         "content-type": "application/octet-stream",
@@ -348,15 +396,19 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private async restore(request: Request): Promise<Response> {
     let body: any;
+
     try {
       body = await request.json();
     } catch {
       return fail(400, "invalid_input", "send JSON");
     }
+
     const path = str(body?.path);
     const bad = checkPath(path);
+
     if (bad) return fail(bad.status, bad.reason, bad.message);
     const target = this.versionAt(path, int(body?.version));
+
     if (!target) return fail(404, "not_found", `${path} has no version at or before ${body?.version}`);
 
     // From here to the broadcast nothing awaits, so no other change interleaves.
@@ -365,6 +417,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const machine = name(body?.machine) || "unknown";
     const cur = this.current(path);
     const same = target.deleted ? !cur || cur.deleted : !!cur && !cur.deleted && cur.sha === target.sha;
+
     if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 });
 
     const version = this.insert({
@@ -374,14 +427,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       size: target.deleted ? null : target.size,
       deleted: !!target.deleted,
       author,
+      login: request.headers.get("x-pando-login"),
       machine,
       agent,
       source: "restore",
       restored_from: target.version,
       lfs: target.lfs_oid ? { oid: target.lfs_oid, size: target.lfs_size ?? 0 } : null,
     });
+
     this.broadcast(this.changeMessage(this.row(version)));
     await this.scheduleCommit();
+
     return json({ path, version, sha: target.deleted ? null : target.sha, restored_from: target.version });
   }
 
@@ -391,37 +447,46 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // it and commits everything at once.
   private async init(request: Request): Promise<Response> {
     let body: any;
+
     try {
       body = await request.json();
     } catch {
       return fail(400, "invalid_input", "send JSON");
     }
+
     if (body?.action === "start") {
       if (!this.initializing() && this.head() > 0) {
         return fail(409, "not_empty", "this meta layer already has files: use pando clone");
       }
+
       this.setKv("init_started", String(Date.now()));
+
       return json({ initializing: true, head: this.head() });
     }
+
     if (body?.action === "done") {
       if (!this.initializing()) return fail(409, "not_initializing", "no first upload is open");
       this.setKv("init_started", null);
       this.setKv("init_commit", "1");
       this.sql.exec("UPDATE pending SET due = ?", Date.now());
       await this.scheduleCommit();
+
       return json({ initializing: false, head: this.head() });
     }
+
     return fail(400, "invalid_input", 'action is "start" or "done"');
   }
 
   private initializing(): boolean {
     const started = int(this.kv("init_started"), 0);
+
     return started > 0 && Date.now() - started < INIT_WINDOW_MS;
   }
 
   private status() {
     const files = this.sql.exec<any>("SELECT COUNT(*) AS n FROM files WHERE deleted = 0").one().n as number;
     const uncommitted = this.sql.exec<any>("SELECT COUNT(*) AS n FROM pending").one().n as number;
+
     return {
       monorepo: this.kv("monorepo"),
       head: this.head(),
@@ -439,12 +504,15 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
     if (typeof raw !== "string") return this.send(ws, { type: "error", message: "send JSON text frames" });
     let msg: any;
+
     try {
       msg = JSON.parse(raw);
     } catch {
       return this.send(ws, { type: "error", message: "bad JSON" });
     }
+
     const att = ws.deserializeAttachment() as Attachment;
+
     switch (msg?.type) {
       case "hello":
         return this.hello(ws, att, msg);
@@ -452,16 +520,19 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       case "delete":
       case "rename":
         if (!att.hello) return this.send(ws, { type: "error", message: "send hello first" });
+
         // Decode and hash first: the only await. change() then reads, checks the
         // base and writes with no await, so no other change can slip in between.
         if (msg.type === "save" && typeof msg.bytes === "string") {
           const bytes = fromBase64(msg.bytes);
+
           if (bytes) {
             msg.decoded = bytes;
             msg.computedSha = await gitBlobSha(bytes);
             // A large file arrives as a pointer: its bytes must be in R2 first.
             const ptr = parsePointer(bytes);
             const monorepo = this.kv("monorepo");
+
             if (ptr && monorepo) {
               const head = await this.env.BLOBS?.head(blobKey(monorepo, ptr.oid));
               msg.blobMissing = !head || head.size !== ptr.size;
@@ -470,15 +541,20 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
             }
           }
         }
+
         if (this.change(ws, att, msg)) await this.scheduleCommit();
+
         return;
     }
+
     this.send(ws, { type: "error", message: `unknown message type ${JSON.stringify(msg?.type)}` });
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     const att = ws.deserializeAttachment() as Attachment | null;
+
     if (att?.hello) this.emitConnection("machine.disconnected", "delete", att);
+
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
     } catch {
@@ -498,9 +574,12 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private broadcast(msg: unknown, exceptId?: string): void {
     const text = JSON.stringify(msg);
+
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() as Attachment | null;
+
       if (!a?.live || a.id === exceptId) continue;
+
       try {
         ws.send(text);
       } catch {
@@ -516,9 +595,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     att.client = name(msg.client) || null;
     const first = !att.hello;
     att.hello = true;
+
     if (first) this.emitConnection("machine.connected", "upsert", att);
     const head = this.head();
     let since = int(msg.since);
+
     if (since > head) since = 0; // the client saw a different history: send everything
     this.send(ws, { type: "welcome", head, monorepo: this.kv("monorepo"), max_bytes: MAX_BYTES });
 
@@ -526,6 +607,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     // marking the socket live below cannot miss a change.
     // A machine starting from 0 has nothing to delete, so it gets no deletes.
     const skipDeleted = since === 0 ? 1 : 0;
+
     const rows = this.sql
       .exec<any>(
         "SELECT version FROM files WHERE version > ? AND NOT (deleted = 1 AND ? = 1) ORDER BY version LIMIT ?",
@@ -534,19 +616,24 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         PAGE_ROWS,
       )
       .toArray() as { version: number }[];
+
     let bytes = 0;
     let last = since;
+
     for (const r of rows) {
       const change = this.changeMessage(this.row(r.version));
       this.send(ws, change);
       bytes += change.size ?? 0;
       last = r.version;
+
       if (bytes >= PAGE_BYTES) break;
     }
+
     const more =
       this.sql
         .exec<any>("SELECT COUNT(*) AS n FROM files WHERE version > ? AND NOT (deleted = 1 AND ? = 1)", last, skipDeleted)
         .one().n > 0;
+
     att.live = !more;
     ws.serializeAttachment(att);
     this.send(ws, { type: "caught_up", head: more ? last : head, more });
@@ -555,60 +642,81 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // change applies a save, delete or rename. It returns true when a version was added.
   private change(ws: WebSocket, att: Attachment, msg: any): boolean {
     const id = str(msg.id);
+
     const refuse = (path: unknown, r: Refusal) => {
       this.send(ws, { type: "refused", id, status: r.status, path, reason: r.reason, message: r.message });
+
       return false;
     };
-    const who = { author: att.author, machine: att.machine, agent: att.agent };
+
+    const who = { author: att.author, login: att.login ?? null, machine: att.machine, agent: att.agent };
 
     // During pando init's first upload, .pando/ (but not .pando/local/) may be saved.
     const check = (p: string) => {
       const bad = checkPath(p);
+
       return bad?.reason === "protected" && this.initializing() ? null : bad;
     };
 
     if (msg.type === "save") {
       const path = str(msg.path);
       const badPath = check(path);
+
       if (badPath) return refuse(msg.path, badPath);
       const bytes = msg.decoded as Uint8Array | undefined;
+
       if (!bytes) return refuse(path, { reason: "bad_sha", status: 400, message: "bytes missing or not base64" });
       const badBytes = checkBytes(bytes);
+
       if (badBytes) return refuse(path, badBytes);
       const sha = msg.computedSha as string;
+
       if (msg.sha !== sha) return refuse(path, { reason: "bad_sha", status: 400, message: "sha does not match bytes" });
+
       if (msg.blobMissing) {
         return refuse(path, { reason: "missing_blob", status: 400, message: "upload the file's bytes to meta/blobs first" });
       }
+
       const badPointer = checkPointer(path, bytes);
+
       if (badPointer) return refuse(path, badPointer);
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
+
       if (!this.baseMatches(cur, base)) return this.stale(ws, id, path, base, cur);
+
       if (cur && !cur.deleted && cur.sha === sha) {
         this.send(ws, { type: "accepted", id, path, version: cur.version, sha }); // nothing changed
+
         return false;
       }
+
       const version = this.insert({ path, op: "save", sha, bytes, size: bytes.length, deleted: false, ...who, source: "live" });
       this.send(ws, { type: "accepted", id, path, version, sha });
       this.broadcast(this.changeMessage(this.row(version)), att.id);
+
       return true;
     }
 
     if (msg.type === "delete") {
       const path = str(msg.path);
       const badPath = check(path);
+
       if (badPath) return refuse(msg.path, badPath);
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
+
       if (!cur || cur.deleted) {
         this.send(ws, { type: "accepted", id, path, version: cur?.version ?? 0, sha: null }); // already absent
+
         return false;
       }
+
       if (cur.version !== base) return this.stale(ws, id, path, base, cur);
       const version = this.insert({ path, op: "delete", sha: null, size: null, deleted: true, ...who, source: "live" });
       this.send(ws, { type: "accepted", id, path, version, sha: null });
       this.broadcast(this.changeMessage(this.row(version)), att.id);
+
       return true;
     }
 
@@ -616,20 +724,27 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const from = str(msg.from);
     const path = str(msg.path);
     const badFrom = checkPath(from);
+
     if (badFrom) return refuse(msg.from, badFrom);
     const badTo = checkPath(path);
+
     if (badTo) return refuse(msg.path, badTo);
     const base = int(msg.base_version, -1);
     const curFrom = this.current(from);
+
     if (!curFrom || curFrom.deleted || curFrom.version !== base) return this.stale(ws, id, from, base, curFrom);
+
     if (msg.sha !== curFrom.sha) {
       return refuse(from, { reason: "bad_sha", status: 400, message: "a rename moves bytes unchanged; send a delete and a save" });
     }
+
     const toBase = int(msg.to_base_version, -1);
     const curTo = this.current(path);
+
     if (!this.baseMatches(curTo, toBase)) return this.stale(ws, id, path, toBase, curTo);
     const fromRow = this.row(curFrom.version);
     const badPointer = fromRow.sha ? checkPointer(path, new Uint8Array(this.blob(fromRow.sha))) : null;
+
     if (badPointer) return refuse(path, badPointer);
     let fromVersion = 0;
     let version = 0;
@@ -642,16 +757,19 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     });
     this.send(ws, { type: "accepted", id, path, version, sha: fromRow.sha, from, from_version: fromVersion });
     this.broadcast(this.changeMessage(this.row(version)), att.id);
+
     return true;
   }
 
   private baseMatches(cur: Current | null, base: number): boolean {
     if (!cur) return base === 0;
+
     return cur.version === base || (cur.deleted && base === 0);
   }
 
   private stale(ws: WebSocket, id: string, path: string, base: number, cur: Current | null): boolean {
     let current: Record<string, unknown> = { version: 0, sha: null, deleted: true };
+
     if (cur) {
       const r = this.row(cur.version);
       current = {
@@ -665,7 +783,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         bytes: r.deleted || !r.sha ? undefined : toBase64(new Uint8Array(this.blob(r.sha))),
       };
     }
+
     this.send(ws, { type: "stale", id, status: 409, path, base_version: base, current });
+
     return false;
   }
 
@@ -673,6 +793,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private kv(k: string): string | null {
     const rows = this.sql.exec<any>("SELECT v FROM kv WHERE k = ?", k).toArray();
+
     return rows.length ? (rows[0].v as string | null) : null;
   }
 
@@ -686,7 +807,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private current(path: string): Current | null {
     const rows = this.sql.exec<any>("SELECT version, sha, deleted FROM files WHERE path = ?", path).toArray();
+
     if (!rows.length) return null;
+
     return { version: rows[0].version, sha: rows[0].sha, deleted: !!rows[0].deleted };
   }
 
@@ -707,12 +830,14 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         exactBuffer(n.bytes),
       );
     }
+
     const at = Date.now();
     const lfs = n.lfs !== undefined ? n.lfs : n.bytes && n.bytes.length < 1024 ? parsePointer(n.bytes) : null;
+
     const version = this.sql
       .exec<any>(
-        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha, lfs_oid, lfs_size)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
+        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha, lfs_oid, lfs_size, login)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
         n.path,
         n.op,
         n.sha,
@@ -728,8 +853,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         n.commit_sha ?? null,
         lfs?.oid ?? null,
         lfs?.size ?? null,
+        n.login ?? null,
       )
       .one().version as number;
+
     this.sql.exec(
       `INSERT INTO files (path, version, sha, deleted) VALUES (?, ?, ?, ?)
        ON CONFLICT(path) DO UPDATE SET version = excluded.version, sha = excluded.sha, deleted = excluded.deleted`,
@@ -738,6 +865,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       n.sha,
       n.deleted ? 1 : 0,
     );
+
     if (n.source !== "main") {
       this.sql.exec(
         `INSERT INTO pending (path, version, due) VALUES (?, ?, ?)
@@ -747,6 +875,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at + QUIET_MS,
       );
     }
+
     // To the event stream, only when it is on, and not during pando init's first upload
     // (thousands of files; machines catch up from history, the web refetches the tree).
     // The row is built only then: one row read per save.
@@ -756,6 +885,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: this.historyEntry(this.row(version)),
       });
     }
+
     return version;
   }
 
@@ -763,16 +893,20 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private async gated<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const monorepo = this.kv("monorepo");
+
     if (!monorepo || !this.env.MONOREPO) return fn(); // the live lane's test Worker has no gate
     const stub = this.env.MONOREPO.getByName(monorepo);
     const g0 = Date.now();
     const slot = await stub.acquireWrite(key);
     addGate(slot.ok ? slot.value.waited_ms : Date.now() - g0);
+
     if (!slot.ok) throw new Error((slot as { message?: string }).message ?? "the repo is busy");
     const lease = slot.value.lease;
+
     const renew = setInterval(() => {
       stub.renewWrite(key, lease).catch(() => {});
     }, LEASE_MS / 3);
+
     try {
       return await fn();
     } finally {
@@ -794,6 +928,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   private emit(e: StreamEvent): void {
     if (!EVENT_STREAM || !this.env.MONOREPO) return;
     this.outbox.push(e);
+
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => this.flush(), EVENTS_FLUSH_MS);
   }
@@ -803,6 +938,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const batch = this.outbox;
     this.outbox = [];
     const monorepo = this.kv("monorepo");
+
     if (!batch.length || !monorepo || !this.env.MONOREPO) return;
     const stub = this.env.MONOREPO.getByName(monorepo);
     this.sending = this.sending
@@ -838,10 +974,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // Who is connected now: every socket that said hello (A11), less one that is closing.
   private connections(except: string | null = null) {
     const out: ReturnType<MetaLayerObject["connectionRow"]>[] = [];
+
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() as Attachment | null;
+
       if (a?.hello && a.id !== except) out.push(this.connectionRow(a));
     }
+
     return out;
   }
 
@@ -856,6 +995,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   private tree(url: URL): Response {
     const q = url.searchParams;
     const dir = q.get("dir");
+
     if (dir !== null && q.get("prefix") !== null) return fail(400, "invalid_input", "send prefix or dir, not both");
     const folder = dir === null ? null : dir.replace(/^\/+|\/+$/g, "");
     const prefix = folder === null ? (q.get("prefix") ?? "") : folder === "" ? "" : `${folder}/`;
@@ -865,6 +1005,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     // SQLite compares UTF-8 bytes, and U+10FFFF is the largest character.
     const upper = prefix + "\u{10FFFF}";
     const onlyHere = folder === null ? "" : "AND instr(substr(f.path, length(?1) + 1), '/') = 0";
+
     const rows = this.sql
       .exec<any>(
         `SELECT v.* FROM files f JOIN versions v ON v.version = f.version
@@ -876,35 +1017,49 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         limit + 1,
       )
       .toArray() as VersionRow[];
+
     const more = rows.length > limit;
+
     if (more) rows.pop();
+
     const body: Record<string, unknown> = {
       head: this.head(),
       prefix,
       files: rows.map((r) => this.historyEntry(r)),
       next: more ? rows[rows.length - 1].path : null,
     };
+
     if (folder !== null) {
       body.dir = folder;
+
       if (!after) {
-        body.folders = this.sql
+        // Each subfolder with its file count and `last`: the newest version
+        // anywhere under it, a delete or a rename included. One query: the
+        // files rows hold each path's newest version.
+        const rows = this.sql
           .exec<any>(
-            `SELECT substr(rest, 1, instr(rest, '/') - 1) AS name, COUNT(*) AS files FROM (
-               SELECT substr(path, length(?1) + 1) AS rest FROM files
-               WHERE deleted = 0 AND path >= ?1 AND path < ?2
-             ) WHERE instr(rest, '/') > 0 GROUP BY name ORDER BY name`,
+            `SELECT g.name, g.files, v.* FROM (
+               SELECT substr(rest, 1, instr(rest, '/') - 1) AS name, SUM(deleted = 0) AS files, MAX(version) AS last FROM (
+                 SELECT substr(path, length(?1) + 1) AS rest, deleted, version FROM files
+                 WHERE path >= ?1 AND path < ?2
+               ) WHERE instr(rest, '/') > 0 GROUP BY name HAVING SUM(deleted = 0) > 0
+             ) g JOIN versions v ON v.version = g.last ORDER BY g.name`,
             prefix,
             upper,
           )
-          .toArray();
+          .toArray() as (VersionRow & { name: string; files: number })[];
+
+        body.folders = rows.map((r) => ({ name: r.name, files: r.files, last: this.historyEntry(r) }));
       }
     }
+
     return json(body);
   }
 
   // References (formats.md, section 4): each pointer under .pando/references/, parsed.
   private references(): Response {
     const prefix = ".pando/references/";
+
     const rows = this.sql
       .exec<any>(
         `SELECT f.path, f.version, f.sha FROM files f
@@ -913,10 +1068,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         prefix,
       )
       .toArray() as { path: string; version: number; sha: string }[];
+
     const references = rows.map((r) => {
       const path = r.path.slice(prefix.length, -".toml".length);
+
       try {
         const t = parseToml(new TextDecoder().decode(this.blob(r.sha))) as Record<string, unknown>;
+
         return {
           path,
           url: typeof t.url === "string" ? withoutCredentials(t.url) : null,
@@ -929,6 +1087,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return { path, url: null, ref: null, commit: null, version: r.version, error: `not a reference pointer: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200) };
       }
     });
+
     return json({ head: this.head(), references });
   }
 
@@ -942,53 +1101,80 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       size: r.size,
       deleted: !!r.deleted,
       author: r.author,
+      login: r.login ?? null,
       machine: r.machine,
       agent: r.agent,
       at: r.at,
       source: r.source,
     };
+
     if (!r.deleted && r.sha) msg.bytes = toBase64(new Uint8Array(this.blob(r.sha)));
+
     if (r.op === "rename" && !r.deleted) {
       msg.from = r.moved;
       msg.from_version = r.version - 1; // a rename takes two consecutive versions
     }
+
     if (r.restored_from !== null) msg.restored_from = r.restored_from;
+
     return msg;
+  }
+
+  // ---- one file for the root raw route (Durable Object RPC, monorepo/raw.ts) ----
+
+  // The path as it is now, or at a version (its latest change at or before
+  // it); null when it did not exist then or was deleted. A large file's
+  // version is its pointer: `large` names the R2 blob.
+  readFile(path: string, version: number | null): { version: number; sha: string; bytes: ArrayBuffer; large: { oid: string; size: number } | null } | null {
+    const row = this.versionAt(path, version);
+
+    if (!row || row.deleted || !row.sha) return null;
+
+    return { version: row.version, sha: row.sha, bytes: this.blob(row.sha), large: row.lfs_oid ? { oid: row.lfs_oid, size: row.lfs_size ?? 0 } : null };
   }
 
   // ---- updates from main (Durable Object RPC, called by the monorepo object) ----
 
-  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
+  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
     const shas = await Promise.all(
       input.changes.map((c) => (c.bytes === null ? null : gitBlobSha(c.bytes instanceof Uint8Array ? c.bytes : new Uint8Array(c.bytes)))),
     );
+
     if (input.monorepo && this.kv("monorepo") !== input.monorepo) this.setKv("monorepo", input.monorepo);
     const versions: number[] = [];
+
     for (const [i, c] of input.changes.entries()) {
       const bad = checkPath(c.path);
+
       if (bad && bad.reason !== "protected") continue; // .pando/ arrives this way; projects/ and local paths never
       const cur = this.current(c.path);
       let version: number;
+
       if (c.bytes === null) {
         if (!cur || cur.deleted) continue;
         version = this.insert({
           path: c.path, op: "delete", sha: null, size: null, deleted: true,
-          author: input.author ?? "main", machine: "server", agent: null, source: "main", commit_sha: input.commit,
+          author: input.author ?? "main", login: input.login ?? null, machine: "server", agent: null, source: "main", commit_sha: input.commit,
         });
       } else {
         const bytes = c.bytes instanceof Uint8Array ? c.bytes : new Uint8Array(c.bytes);
+
         if (bytes.length > MAX_BYTES) continue; // large files arrive as pointers (M7)
         const sha = shas[i] as string;
+
         if (cur && !cur.deleted && cur.sha === sha) continue;
         version = this.insert({
           path: c.path, op: "save", sha, bytes, size: bytes.length, deleted: false,
-          author: input.author ?? "main", machine: "server", agent: null, source: "main", commit_sha: input.commit,
+          author: input.author ?? "main", login: input.login ?? null, machine: "server", agent: null, source: "main", commit_sha: input.commit,
         });
       }
+
       versions.push(version);
       this.broadcast(this.changeMessage(this.row(version)));
     }
+
     this.setKv("parent", input.commit);
+
     return { versions };
   }
 
@@ -996,10 +1182,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private async scheduleCommit(): Promise<void> {
     if (!gitWriter(this.env)) return; // no Artifacts binding: versions are kept, not committed
+
     if (this.initializing()) return; // pando init commits everything when it is done
     const next = this.sql.exec<any>("SELECT MIN(due) AS due FROM pending").one().due as number | null;
+
     if (next === null) return;
     const set = await this.ctx.storage.getAlarm();
+
     if (set === null || set > next) await this.ctx.storage.setAlarm(next);
   }
 
@@ -1007,10 +1196,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // set right away while more is due.
   async alarm(): Promise<void> {
     const writer = gitWriter(this.env);
+
     if (!writer || this.initializing()) return;
+
     const due = this.sql
       .exec<any>("SELECT path, version FROM pending WHERE due <= ? ORDER BY version", Date.now() + GROUP_MS)
       .toArray() as { path: string; version: number }[];
+
     if (!due.length) return this.scheduleCommit();
 
     // Paths due together share a commit, up to COMMIT_FILES files and about
@@ -1021,13 +1213,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const key = (r: VersionRow) => (window ? "" : JSON.stringify([r.author, r.machine, r.agent]));
     const rows: VersionRow[] = [];
     let bytes = 0;
+
     for (const p of due) {
       const r = p.version === first.version ? first : this.row(p.version);
+
       if (key(r) !== key(first)) continue;
+
       if (rows.length && (rows.length >= COMMIT_FILES || bytes + (r.size ?? 0) > COMMIT_BYTES)) break;
       rows.push(r);
       bytes += r.size ?? 0;
     }
+
     try {
       await timed(
         "object",
@@ -1039,9 +1235,12 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       const retry = Math.min(int(this.kv("retry_ms"), RETRY_MIN_MS) * (this.kv("retry_ms") ? 2 : 1), RETRY_MAX_MS);
       this.setKv("retry_ms", String(retry));
       await this.ctx.storage.setAlarm(Date.now() + retry);
+
       return;
     }
+
     this.setKv("retry_ms", null);
+
     if (this.sql.exec<any>("SELECT COUNT(*) AS n FROM pending").one().n === 0) this.setKv("init_commit", null);
     await this.scheduleCommit();
   }
@@ -1050,23 +1249,30 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const changes: FileChange[] = rows.map((r) =>
       r.deleted || !r.sha ? { path: r.path, delete: true } : { path: r.path, content: new Uint8Array(this.blob(r.sha)) },
     );
+
     const last = rows[rows.length - 1];
     const author = { ...parsePerson(last.author), date: new Date(last.at) };
     const repoName = this.kv("meta_repo") ?? this.kv("monorepo");
+
     if (!repoName) throw new Error("the object does not know its monorepo yet");
     const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first), author };
+
     // Through the repo's write gate (merges into the meta layer push to the same repo), retrying Artifacts' "busy".
     const commit = (o: typeof opts) =>
       this.gated(repoName, () => retryBusy(() => writer.commit(repoName, "main", o), (e) => isBusy(e instanceof Error ? e.message : String(e))));
+
     let res = await commit(opts);
+
     if (res.status === "ref_moved") {
       res = await commit({ ...opts, parent: res.actual });
     }
+
     if (res.status === "ref_moved") throw new Error(`main moved twice (expected ${res.expected}, saw ${res.actual})`);
     const sha = res.sha;
     // Nothing awaits from here on: mark versions committed, clear what is done.
     this.setKv("parent", sha);
     this.setKv("commit_error", null);
+
     for (const r of rows) {
       this.sql.exec(
         "UPDATE versions SET commit_sha = ? WHERE path = ? AND version <= ? AND commit_sha IS NULL AND source != 'main'",
@@ -1081,7 +1287,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
 function verb(r: VersionRow): string {
   if (r.source === "restore") return "Restore";
+
   if (r.op === "rename") return r.deleted ? "Rename" : "Rename to";
+
   return r.deleted ? "Delete" : "Save";
 }
 
@@ -1090,10 +1298,12 @@ export function commitMessage(rows: VersionRow[], first = false): string {
   let body = "";
   const renameTo = rows.find((r) => r.op === "rename" && !r.deleted);
   const renameFrom = renameTo && rows.find((r) => r.op === "rename" && r.deleted && r.path === renameTo.moved);
+
   if (first) {
     title = "Start the meta layer";
   } else if (rows.length === 1) {
     const r = rows[0];
+
     if (r.source === "restore") title = `Restore ${r.path} to version ${r.restored_from}`;
     else if (r.deleted) title = `Delete ${r.path}`;
     else title = `Save ${r.path}`;
@@ -1102,28 +1312,37 @@ export function commitMessage(rows: VersionRow[], first = false): string {
   } else {
     title = `Save ${rows.length} files`;
   }
+
   if (rows.length > 1 && !(rows.length === 2 && renameTo && renameFrom)) {
     const listed = rows.slice(0, 50).map((r) => `${verb(r)} ${r.path}`);
+
     if (rows.length > 50) listed.push(`and ${rows.length - 50} more`);
     body = listed.join("\n") + "\n\n";
   }
+
   // The last saver is the author (commitRows). Everyone else in the commit is
   // a Co-authored-by line; every agent and machine gets its own line, in the
   // order they first saved. With one author, machine and agent this is the
   // shape formats.md section 6 gives.
   const last = rows[rows.length - 1];
+
   const distinct = (pick: (r: VersionRow) => string | null) =>
     [...new Set(rows.map(pick).filter((v): v is string => !!v))];
+
   const lastPerson = parsePerson(last.author);
+
   const coAuthors = distinct((r) => {
     const p = parsePerson(r.author);
+
     return p.email === lastPerson.email && p.name === lastPerson.name ? null : `${p.name} <${p.email}>`;
   });
+
   const trailers = [
     ...coAuthors.map((a) => `Co-authored-by: ${a}`),
     ...distinct((r) => r.agent).map((a) => `Pando-Agent: ${a}`),
     ...distinct((r) => r.machine).map((m) => `Pando-Machine: ${m}`),
     `Pando-Version: ${Math.max(...rows.map((r) => r.version))}`,
   ];
+
   return `${title}\n\n${body}${trailers.join("\n")}\n`;
 }

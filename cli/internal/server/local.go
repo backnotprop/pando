@@ -59,7 +59,15 @@ func (lm *localMono) view(role string) Monorepo {
 func (l *Local) repoDir(m, name string) string {
 	return filepath.Join(l.monoDir(m), "repos", name+".git")
 }
-func (l *Local) cloneURL(m, name string) string { return "file://" + l.repoDir(m, name) }
+
+// cloneURL is file://, or, for tests of git over HTTP, under
+// PANDO_TEST_CLONE_BASE (a git http-backend serving this folder).
+func (l *Local) cloneURL(m, name string) string {
+	if base := os.Getenv("PANDO_TEST_CLONE_BASE"); base != "" {
+		return strings.TrimRight(base, "/") + "/" + m + "/repos/" + name + ".git"
+	}
+	return "file://" + l.repoDir(m, name)
+}
 func apiErr(status int, code, msg string) error {
 	return &APIError{Status: status, Code: code, Message: msg}
 }
@@ -241,6 +249,7 @@ func (l *Local) CreateRepo(ctx context.Context, m, path string) (*Repo, error) {
 	for _, kv := range [][2]string{
 		{"uploadpack.allowFilter", "true"},
 		{"uploadpack.allowAnySHA1InWant", "true"},
+		{"http.receivepack", "true"}, // pushes over http-backend in tests
 	} {
 		if _, err := bare.Run(ctx, "config", kv[0], kv[1]); err != nil {
 			return nil, err

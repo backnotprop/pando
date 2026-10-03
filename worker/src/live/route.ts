@@ -25,6 +25,7 @@ export interface LiveEnv {
 export interface MetaIdentity {
   name: string;
   email?: string;
+  login?: string;
 }
 
 const ROUTE = /^\/v1\/monorepos\/([^/]+)\/([^/]+)\/meta\/(socket|history|file|restore|status|init|tree|references|blobs\/[^/]+)$/;
@@ -32,12 +33,15 @@ const ROUTE = /^\/v1\/monorepos\/([^/]+)\/([^/]+)\/meta\/(socket|history|file|re
 // metaRoute returns the path's owner and monorepo name (lower case) when the request is a meta layer route.
 export function metaRoute(request: Request): { owner: string; name: string } | null {
   const m = new URL(request.url).pathname.match(ROUTE);
+
   if (!m) return null;
+
   return monorepoRef(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
 }
 
 function blobOid(request: Request): string | null {
   const m = new URL(request.url).pathname.match(/\/meta\/blobs\/([^/]+)$/);
+
   return m ? m[1] : null;
 }
 
@@ -47,14 +51,21 @@ function blobOid(request: Request): string | null {
 export async function routeMeta(request: Request, env: LiveEnv, monorepo: string, identity?: MetaIdentity): Promise<Response | null> {
   if (!metaRoute(request)) return null;
   const oid = blobOid(request);
+
   if (oid !== null) return handleBlob(request, env.BLOBS, monorepo, oid);
   const headers = new Headers(request.headers);
-  for (const h of ["x-pando-author", "x-pando-monorepo", "x-pando-meta-repo"]) headers.delete(h);
+
+  for (const h of ["x-pando-author", "x-pando-login", "x-pando-monorepo", "x-pando-meta-repo"]) headers.delete(h);
   headers.set("x-pando-monorepo", monorepo);
   headers.set("x-pando-meta-repo", `${monorepo}--meta`); // api-v1.yaml: the meta layer's Artifacts repo
+
   if (identity) {
     headers.set("x-pando-author", identity.email ? `${identity.name} <${identity.email}>` : identity.name);
+
+    if (identity.login) headers.set("x-pando-login", identity.login);
   }
+
   const stub = env.META.get(env.META.idFromName(monorepo));
+
   return stub.fetch(new Request(request, { headers }));
 }

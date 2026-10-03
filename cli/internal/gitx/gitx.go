@@ -45,8 +45,7 @@ func (c Cmd) Run(ctx context.Context, args ...string) (string, error) {
 func (c Cmd) RunRaw(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = c.Dir
-	cmd.Env = append(os.Environ(), c.Env...)
-	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = c.environ()
 	if c.Stdin != nil {
 		cmd.Stdin = c.Stdin
 	}
@@ -64,8 +63,7 @@ func (c Cmd) RunRaw(ctx context.Context, args ...string) ([]byte, error) {
 func (c Cmd) Stream(ctx context.Context, stdout, stderr io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = c.Dir
-	cmd.Env = append(os.Environ(), c.Env...)
-	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = c.environ()
 	var errBuf bytes.Buffer
 	cmd.Stdout = stdout
 	if stderr != nil {
@@ -85,7 +83,7 @@ func (c Cmd) Stream(ctx context.Context, stdout, stderr io.Writer, args ...strin
 func (c Cmd) RunShell(ctx context.Context, script string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", append([]string{"-c", script, "pando-hook"}, args...)...)
 	cmd.Dir = c.Dir
-	cmd.Env = append(os.Environ(), c.Env...)
+	cmd.Env = c.environ()
 	if c.Stdin != nil {
 		cmd.Stdin = c.Stdin
 	}
@@ -95,6 +93,20 @@ func (c Cmd) RunShell(ctx context.Context, script string, args ...string) (strin
 		return stdout.String(), &Error{Args: []string{"(hook)"}, Stderr: stderr.String(), Err: err}
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// NoSystemConfig keeps every git pando runs from reading the system git
+// config. On a Mac that is Apple's, which sets credential.helper=osxkeychain:
+// git would hand the Pando credential to the keychain after each push or
+// fetch, and macOS shows "A keychain cannot be found to store ..." when
+// there is no keychain to store it in.
+const NoSystemConfig = "GIT_CONFIG_NOSYSTEM=1"
+
+// environ is the environment for one git command: this process's, the
+// command's extras, no system git config, and never a terminal prompt.
+func (c Cmd) environ() []string {
+	env := append(os.Environ(), c.Env...)
+	return append(env, NoSystemConfig, "GIT_TERMINAL_PROMPT=0")
 }
 
 // In is a shorthand for Cmd{Dir: dir}.

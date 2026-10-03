@@ -12,39 +12,51 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "https://pando-dev.plannotator.workers.dev").replace(/\/$/, "");
+
 const file = process.env.PANDO_CREDENTIAL_FILE ?? join(process.env.PANDO_HOME ?? join(homedir(), ".pando"), "credentials", new URL(URL_).host);
+
 let S;
+
 try {
   S = readFileSync(file, "utf8").trim();
 } catch {
   console.log(`No credential at ${file}. Run pando login first.`);
   process.exit(2);
 }
+
 const scrub = (s) => String(s).replace(/pando_[a-f0-9]{20,}/g, "<credential>").replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>");
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`));
 };
+
 const call = async (method, path, body) => {
   const res = await fetch(URL_ + path, {
     method,
     headers: { authorization: `Bearer ${S}`, ...(body ? { "content-type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
+
   const text = await res.text();
   let json = null;
+
   try {
     json = JSON.parse(text);
   } catch {}
+
   return { status: res.status, json, text, headers: res.headers };
 };
+
 const work = mkdtempSync(join(tmpdir(), "pando-smoke-"));
+
 const git = (args, cwd) => {
   const r = spawnSync(
     "git",
@@ -58,22 +70,32 @@ const git = (args, cwd) => {
       },
     },
   );
+
   return { ok: r.status === 0, out: scrub((r.stdout || "") + (r.stderr || "")) };
 };
 
 const M = `smoke-${Date.now().toString(36)}`;
+
 let O = null; // the owner (namespaces: owner/name), from the create answer
+
 let made = false;
+
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`)).status);
+
 try {
   let r = await call("GET", "/v1/user");
   check("the credential works", r.status === 200, `${r.status} as ${r.json?.login}`);
+
   // Ask about the name before it exists, from many requests (many isolates).
   for (let i = 0; i < 8; i++) await call("GET", `/v1/monorepos/${O}/${M}`);
   git(["ls-remote", `${URL_}/${O}/${M}.git`], work);
   r = await call("POST", "/v1/monorepos", { name: M, kind: "repo" });
   made = r.status === 201;
   O = r.json?.monorepo?.owner ?? null;
+
+  if (made) tw.add(`${O}/${M}`);
   let stale = 0;
+
   for (let i = 0; i < 8; i++) if ((await call("GET", `/v1/monorepos/${O}/${M}`)).status !== 200) stale++;
   check("right after creating it, no request sees a cached 404", stale === 0, `${stale} of 8 stale`);
   check("create a plain repo", made, `${r.status}`);
@@ -105,12 +127,15 @@ try {
   // The list answers at once; its facts land when the queue has computed them.
   let b = null;
   const t0 = Date.now();
+
   while (Date.now() - t0 < 30_000) {
     r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches`);
     b = r.json?.branches?.[0];
+
     if (b && !b.stale) break;
     await new Promise((res) => setTimeout(res, 300));
   }
+
   check("branch list, facts fresh", b?.name === "smoke/branch" && b?.ahead === 1 && b?.mergeable === "clean" && b?.stale === false, `${JSON.stringify({ ahead: b?.ahead, mergeable: b?.mergeable })} after ${Date.now() - t0} ms`);
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/smoke%2Fbranch/diff?format=patch`);
   writeFileSync(join(work, "p.patch"), r.text);
@@ -137,10 +162,7 @@ try {
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {
-  if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`);
-    check("delete the test monorepo", r.status === 204, `${r.status}`);
-  }
+  if (made) check("delete the test monorepo", await tw.cleanup());
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

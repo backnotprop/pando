@@ -22,8 +22,11 @@ import { withRepo } from "./monorepo/artifacts";
 import { currentTiming } from "./timing";
 
 const OID = /^[0-9a-f]{40}$/;
+
 const REPO = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
+
 const KEY = /^[a-z]+\/[0-9a-f]{40}\/[0-9a-f]{40}$/;
+
 const FOREVER = "public, max-age=31536000, immutable";
 
 function found(body: BodyInit, type: string): Response {
@@ -39,39 +42,55 @@ export class Objects extends WorkerEntrypoint<Env> {
     if (request.method !== "GET") return new Response("method\n", { status: 405, headers: { "cache-control": "no-store" } });
     const url = new URL(request.url);
     const [, kind, repo, ...rest] = url.pathname.split("/");
+
     if (!REPO.test(repo ?? "")) return missing();
     const env = this.env;
+
     if (kind === "answer") {
       const key = rest.join("/");
+
       if (!KEY.test(key) || !env.CACHE) return missing();
       const o = await env.CACHE.get(`answers/${repo}/${key}.json`);
+
       return o ? found(o.body, "application/json") : missing();
     }
+
     const oid = rest[0] ?? "";
+
     if (rest.length !== 1 || !OID.test(oid)) return missing();
+
     try {
       if (kind === "commit") {
         const c = await withRepo(env, repo, (r) => r.readCommit(oid));
+
         return c ? found(JSON.stringify(c), "application/json") : missing();
       }
+
       if (kind === "tree") {
         const t = await withRepo(env, repo, (r) => r.readTree(oid));
+
         return t ? found(JSON.stringify(t), "application/json") : missing();
       }
+
       if (kind === "blob") {
         const b = await withRepo(env, repo, (r) => r.readBlob(oid));
+
         return b ? found(b.stream(), "application/octet-stream") : missing();
       }
+
       if (kind === "log") {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 200) || 200, 1), 1000);
         const commits = await withRepo(env, repo, (r) => r.log({ ref: oid, limit }));
+
         return commits.length ? found(JSON.stringify(commits), "application/json") : missing();
       }
     } catch (err) {
       // An unknown hash can throw (INVALID_INPUT, INTERNAL_ERROR): not found, never cached.
       console.warn({ msg: "pando.objects", kind, repo, error: err instanceof Error ? err.message : String(err) });
+
       return missing();
     }
+
     return missing();
   }
 }
@@ -90,25 +109,34 @@ export interface ObjectsClient {
 
 export function objectsClient(ctx: { exports?: unknown } | ExecutionContext): ObjectsClient {
   const fetcher = (ctx as unknown as { exports: { Objects: Fetcher } }).exports.Objects;
+
   const get = async (path: string, stats?: ObjectStats): Promise<Response | null> => {
     const res = await fetcher.fetch(`https://objects.internal${path}`);
     const hit = res.headers.get("cf-cache-status") === "HIT";
+
     if (stats) stats[hit ? "hits" : "misses"]++;
     const t = currentTiming();
+
     if (t) {
       const f = hit ? "objects_hits" : "objects_misses";
       t.fields[f] = Number(t.fields[f] ?? 0) + 1;
     }
+
     if (res.status === 404) {
       await res.body?.cancel();
+
       return null;
     }
+
     if (!res.ok) throw new Error(`objects ${path.split("/")[1]}: ${res.status}`);
+
     return res;
   };
+
   return {
     async json<T>(path: string, stats?: ObjectStats) {
       const r = await get(path, stats);
+
       return r ? ((await r.json()) as T) : null;
     },
     raw: get,

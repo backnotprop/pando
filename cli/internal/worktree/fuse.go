@@ -80,7 +80,9 @@ func (f *Fuse) gitDir(s Spec) string {
 }
 
 func (f *Fuse) env(s Spec) []string {
-	env := []string{"ARTIFACT_FS_ROOT=" + f.stateDir(s)}
+	// The daemon runs git itself (clone, fetch, lazy content fetches): no
+	// system git config for it either (gitx.NoSystemConfig).
+	env := []string{"ARTIFACT_FS_ROOT=" + f.stateDir(s), gitx.NoSystemConfig}
 	if !s.Reference {
 		env = append(env, CredentialEnv(s.CloneURL)...)
 	}

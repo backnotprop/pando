@@ -10,8 +10,10 @@ import type { FeedMessage } from "./shape";
 
 export async function feedMembership(env: Env, monorepo: string, logins: string[]): Promise<void> {
   if (!env.FEED_QUEUE || !logins.length) return;
+
   try {
     const msgs: { body: FeedMessage }[] = [...new Set(logins)].map((login) => ({ body: { type: "member", monorepo, login } }));
+
     for (let i = 0; i < msgs.length; i += 100) await env.FEED_QUEUE.sendBatch(msgs.slice(i, i + 100));
   } catch (err) {
     console.error(`feed: membership messages for ${monorepo} not sent (repaired on the next home load):`, err instanceof Error ? err.message : String(err));

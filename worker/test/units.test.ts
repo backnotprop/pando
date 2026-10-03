@@ -11,8 +11,11 @@ import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection
 import type { StatusRecord } from "../src/monorepo/types";
 
 const dec = new TextDecoder();
+
 const Z = "0".repeat(40);
+
 const A = "a".repeat(40);
+
 const B = "b".repeat(40);
 
 function stream(parts: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -31,6 +34,7 @@ describe("receive-pack command section", () => {
       pkt(`${A} ${B} refs/heads/feature\n`),
       FLUSH,
     ]);
+
     const pack = new TextEncoder().encode("PACK....rest of the pack");
     // Split the body so the command section crosses chunk boundaries.
     const s = await readCommandSection(stream([body.subarray(0, 7), body.subarray(7), pack]));
@@ -40,11 +44,14 @@ describe("receive-pack command section", () => {
     ]);
     expect(s.caps.has("side-band-64k")).toBe(true);
     let rest = s.head;
+
     for (;;) {
       const { done, value } = await s.rest.read();
+
       if (done) break;
       rest = concat([rest, value]);
     }
+
     expect(dec.decode(rest).endsWith("PACK....rest of the pack")).toBe(true);
   });
 
@@ -82,6 +89,7 @@ describe("refusal and report", () => {
       pkt(`${B} refs/heads/agent/x\n`),
       FLUSH,
     ]);
+
     const refs = parseAdvertisement(bytes);
     expect(refs.get("refs/heads/main")).toBe(A);
     expect(refs.get("refs/heads/agent/x")).toBe(B);
@@ -109,6 +117,7 @@ describe("merge base, ahead and behind", () => {
     m3: { parents: ["m2", "y2"], time: 7, tree: "t" },
     z1: { parents: ["y2"], time: 8, tree: "t" },
   };
+
   const read = async (s: string) => g[s];
 
   it("a branch off an older main", async () => {
@@ -126,6 +135,7 @@ describe("merge base, ahead and behind", () => {
       c2: { parents: ["c1"], time: 5, tree: "t" },
       c3: { parents: ["c2"], time: 5, tree: "t" },
     };
+
     const out = await compareWith(async (x) => same[x], "r", "c3");
     expect(out.aheadCommits).toEqual(["c3", "c2", "c1"]);
   });
@@ -253,10 +263,12 @@ describe("the write gate", () => {
     const { WriteGate } = await import("../src/monorepo/gate");
     const g = new WriteGate(1, 80, 1000);
     const l = await g.acquire("r");
+
     for (let i = 0; i < 4; i++) {
       await new Promise((r) => setTimeout(r, 40));
       expect(g.renew("r", l)).toBe(true);
     }
+
     expect(g.stats("r").held).toBe(1);
   });
 });

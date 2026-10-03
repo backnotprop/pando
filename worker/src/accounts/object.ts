@@ -45,6 +45,7 @@ const COPY: { from: string; to: string; map: (r: Row) => Row }[] = [
   { from: "members", to: "members", map: ({ monorepo, ...r }) => ({ monorepo_id: monorepo, ...r }) },
   { from: "invites", to: "invites", map: ({ monorepo, ...r }) => ({ monorepo_id: monorepo, ...r }) },
 ];
+
 /** Statements per D1 batch while copying. */
 const COPY_BATCH = 50;
 
@@ -54,6 +55,7 @@ export class AccountsObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
   }
 
@@ -67,6 +69,7 @@ export class AccountsObject extends DurableObject<Env> {
       if (this.sql.exec("SELECT at FROM copied_to_d1").toArray().length) return;
       const db = this.env.ACCOUNTS_DB;
       const stmts: D1PreparedStatement[] = [];
+
       for (const { from, to, map } of COPY) {
         for (const raw of this.sql.exec(`SELECT * FROM ${from}`).toArray()) {
           const r = map(raw as Row);
@@ -78,11 +81,13 @@ export class AccountsObject extends DurableObject<Env> {
           );
         }
       }
+
       for (let i = 0; i < stmts.length; i += COPY_BATCH) await db.batch(stmts.slice(i, i + COPY_BATCH));
       this.sql.exec("INSERT INTO copied_to_d1 (at, rows) VALUES (?, ?)", now(), stmts.length);
       console.log({ msg: "pando.accounts", copied_to_d1: stmts.length });
       out = { copied: true, rows: stmts.length };
     });
+
     return out;
   }
 }

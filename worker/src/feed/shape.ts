@@ -17,25 +17,37 @@
 
 /** Monorepos with this many members or fewer copy their events into members' feeds (an owner limit). */
 export const FANOUT_MAX = 100;
+
 /** A new member's feed gets this many of the monorepo's latest events (an owner limit). */
 export const BACKFILL = 500;
+
 /** A feed keeps this many days of events, and at most WINDOW_MAX of them (owner limits). */
 export const WINDOW_DAYS = 7;
+
 export const WINDOW_MAX = 1_000_000;
+
 /** Monorepos read from their own logs for one page, beyond which the page names them in `skipped` (an owner limit). */
 export const LOGS_MAX = 20;
+
 /** Events per page. */
 export const PAGE_DEFAULT = 50;
+
 export const PAGE_MAX = 200;
+
 /** Frames a reconnecting socket gets before it is told to resync. */
 export const REPLAY_MAX = 500;
+
 /** A monorepo's summary line is sent at most this often (small, large). */
 export const TICK_SMALL_MS = 10_000;
+
 export const TICK_LARGE_MS = 60_000;
+
 /** Worktree ids one follower's hello may carry. */
 export const HELLO_WORKTREES_MAX = 1_000;
+
 /** Monorepos one needs-you call asks (most recently active first), beyond which they are named in `skipped`. */
 export const NEEDS_MONOREPOS_MAX = 50;
+
 /** Member lists up to this size travel in the queue message; larger ones are read from the monorepo object. */
 export const MEMBERS_INLINE_MAX = 1_000;
 
@@ -84,11 +96,15 @@ export interface Summary {
   needs: { ready: number; conflicts: number; failing: number };
   members: number;
   large: boolean;
+  /** Its projects (code repos; the meta layer's repo not counted), and their open branches (main not counted). */
+  repos: number;
+  open_branches: number;
   /** When the monorepo object computed it. */
   at: string;
 }
 
 export type NeedState = "ready" | "conflicts" | "failing";
+
 export const NEED_STATES: NeedState[] = ["ready", "conflicts", "failing"];
 
 export interface NeedChange {
@@ -133,13 +149,16 @@ export interface Key {
 /** Newest first: negative when a comes before b on the page. */
 export function byKeyDesc(a: Key, b: Key): number {
   if (a.at !== b.at) return a.at < b.at ? 1 : -1;
+
   if (a.monorepo_id !== b.monorepo_id) return a.monorepo_id < b.monorepo_id ? 1 : -1;
+
   return b.seq - a.seq;
 }
 
 /** The cursor: opaque, "older than this event". About 40 bytes. */
 export function encodeCursor(k: Key): string {
   const raw = `${k.at}|${k.monorepo_id}|${k.seq}`;
+
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
@@ -148,7 +167,9 @@ export function decodeCursor(s: string): Key | null {
     const raw = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
     const [at, monorepo_id, seq] = raw.split("|");
     const n = Number(seq);
+
     if (!at || !monorepo_id || !Number.isSafeInteger(n) || n < 0 || Number.isNaN(Date.parse(at))) return null;
+
     return { at, monorepo_id, seq: n };
   } catch {
     return null;
@@ -161,7 +182,9 @@ export function decodeCursor(s: string): Key | null {
  */
 export function seqBound(cursor: Key, monorepoId: string): number {
   if (monorepoId < cursor.monorepo_id) return Number.MAX_SAFE_INTEGER;
+
   if (monorepoId > cursor.monorepo_id) return 0;
+
   return cursor.seq;
 }
 
@@ -169,14 +192,17 @@ export function seqBound(cursor: Key, monorepoId: string): number {
 export function mergePages(lists: FeedEvent[][], limit: number): FeedEvent[] {
   const seen = new Set<string>();
   const all: FeedEvent[] = [];
+
   for (const l of lists) {
     for (const e of l) {
       const k = `${e.monorepo_id}\n${e.seq}`;
+
       if (seen.has(k)) continue;
       seen.add(k);
       all.push(e);
     }
   }
+
   return all.sort(byKeyDesc).slice(0, limit);
 }
 
@@ -189,13 +215,16 @@ export const PENDING = "~";
 
 export function effectiveAfter(after: string | null, floor: string | null): string | null {
   if (after === null) return floor;
+
   if (floor === null) return after;
+
   return after > floor ? after : floor;
 }
 
 /** Whether the feed may lack events of this monorepo that belong on a page whose last event is at `boundary` (null: the page is not full). */
 export function uncovered(after: string | null, boundary: string | null): boolean {
   if (after === null) return false;
+
   return boundary === null || after >= boundary;
 }
 
@@ -203,5 +232,6 @@ export function uncovered(after: string | null, boundary: string | null): boolea
 export function nameOf(author: unknown): string | null {
   if (typeof author !== "string" || !author) return null;
   const i = author.indexOf(" <");
+
   return (i > 0 ? author.slice(0, i) : author).trim() || null;
 }

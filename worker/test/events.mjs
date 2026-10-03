@@ -16,43 +16,60 @@ import { describeError, retryResetFetch } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const WS_ = URL_.replace(/^http/, "ws");
+
 let BOOT = process.env.PANDO_BOOTSTRAP;
+
 if (!BOOT) BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+
 const scrub = (s) => String(s).replace(/pando_[a-f0-9]{20,}/g, "<credential>").replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>");
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`));
 };
+
 // The event stream can be switched off on the server (worker/src/monorepo/stream.ts).
 let STREAM = true;
+
 let skipped = 0;
+
 const checkS = (name, ok, detail = "") => {
   if (STREAM) return check(name, ok, detail);
   skipped++;
   console.log(`SKIP  ${name}  (the event stream is on hold)`);
 };
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const call = async (method, path, secret, body, headers = {}) => {
   const res = await fetch(URL_ + path, {
     method,
     headers: { authorization: `Bearer ${secret}`, ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
   const text = await res.text();
   let json = null;
+
   try {
     json = JSON.parse(text);
   } catch {}
+
   return { status: res.status, json, text };
 };
+
 const work = mkdtempSync(join(tmpdir(), "pando-events-"));
+
 const git = (args, cwd, secret) => {
   const r = spawnSync("git", ["-c", "credential.helper=", ...(secret ? ["-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f'] : []), "-c", "init.defaultBranch=main", ...args], {
     cwd, encoding: "utf8",
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: secret ?? "", GIT_AUTHOR_NAME: "Ana", GIT_AUTHOR_EMAIL: "ana@pando.invalid", GIT_COMMITTER_NAME: "Ana", GIT_COMMITTER_EMAIL: "ana@pando.invalid" },
   });
+
   return { ok: r.status === 0, out: scrub((r.stdout || "") + (r.stderr || "")) };
 };
 
@@ -66,35 +83,51 @@ function openEvents(m, secret, since = null, topics = null) {
   ws.onopen = () => (state.open = true);
   ws.onmessage = (e) => {
     if (e.data === "pong") return frames.push({ type: "pong" });
+
     try {
       frames.push(JSON.parse(e.data));
     } catch {
       frames.push({ type: "unparsed", data: String(e.data) });
     }
   };
+
   ws.onclose = (e) => (state.closed = e.code);
   ws.onerror = (e) => (state.error = e.message ?? "error");
+
   return state;
 }
+
 async function waitFor(pred, ms = 20_000) {
   const end = Date.now() + ms;
+
   while (Date.now() < end) {
     const v = pred();
+
     if (v) return v;
     await sleep(100);
   }
+
   return null;
 }
+
 const eventsOf = (s) => s.frames.filter((f) => f.type === "event");
+
 const find = (s, pred) => (STREAM ? waitFor(() => eventsOf(s).find(pred)) : Promise.resolve(null));
+
 const blobSha = (bytes) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes])).digest("hex");
 
 const id = Date.now().toString(36);
+
 const M = `ev-${id}`;
+
 const O = `ana-${id}`; // the owner (namespaces: owner/name)
+
 const made = [];
+
 let A = null;
+
 const sockets = [];
+
 try {
   // ── Setup: two users, a monorepo with one project repo ──
   A = (await call("POST", "/v1/users", BOOT, { login: `ana-${id}`, name: "Ana Lima", email: `ana-${id}@pando.invalid`, credential_name: "ana-mbp" })).json?.credential?.secret;
@@ -116,6 +149,7 @@ try {
 
   // ── The socket: members only ──
   const outsider = openEvents(M, B);
+
   if (STREAM) await waitFor(() => outsider.closed !== null || outsider.error, 10_000);
   checkS("a non-member cannot open the event socket", !outsider.open || outsider.closed !== null, `open=${outsider.open} closed=${outsider.closed} error=${outsider.error}`);
   const ev = openEvents(M, A);
@@ -124,6 +158,7 @@ try {
   sockets.push(mainOnly);
   const caught = STREAM ? await waitFor(() => ev.frames.find((f) => f.type === "caught_up")) : null;
   checkS("the owner opens the event socket and is caught up (caught_up carries seq, a number)", !!caught && typeof caught.seq === "number", JSON.stringify(caught));
+
   if (STREAM) ev.ws.readyState === 1 && ev.ws.send("ping");
   checkS("ping gets pong", STREAM && !!(await waitFor(() => ev.frames.find((f) => f.type === "pong"), 5000)));
 
@@ -151,10 +186,12 @@ try {
   git(["commit", "-qam", "More a\n\nPando-Agent: agent-1\nPando-Worktree: projects/web/worktrees/feat-a\nPando-Machine: ana-mbp"], src);
   check("push a branch", git(["push", "-q", url, "feat/a"], src, A).ok);
   const headA = git(["rev-parse", "HEAD"], src).out.trim();
+
   if (STREAM) {
     const now = await call("GET", `/v1/monorepos/${O}/${M}/events?limit=5`, A);
     checkS("record before ack: the push's event exists as soon as git push returns", now.json?.events?.some((x) => x.kind === "branch.opened" && x.row?.head === headA));
   }
+
   e = await find(ev, (x) => x.kind === "branch.opened" && x.row?.name === "feat/a");
   checkS("event: branch.opened with the stored Branch fields (partial)", e?.collection === "branches" && e?.op === "upsert" && e?.key === `${repo}/feat/a` && e?.partial === true && e?.row?.head === headA && e?.row?.author === `ana-${id}` && !("ahead" in (e?.row ?? {})), scrub(JSON.stringify(e?.row)).slice(0, 200));
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/feat%2Fa`, A);
@@ -197,12 +234,15 @@ try {
   // feat/b's first facts (from its one-branch job) before the merge, so "last known" is defined.
   {
     const until = Date.now() + 30_000;
+
     while (Date.now() < until) {
       const b = (await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches?state=open`, A)).json?.branches?.find((x) => x.name === "feat/b");
+
       if (b && !b.stale) break;
       await new Promise((res) => setTimeout(res, 300));
     }
   }
+
   // The branch moved since the caller looked: a merge naming the older head is refused.
   const parentA = git(["rev-parse", "HEAD~1"], src).out.trim();
   r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, { expected_head: parentA });
@@ -216,10 +256,12 @@ try {
   checkS("event: merged, with merge facts on the Branch row", e?.row?.state === "merged" && e?.row?.merge_commit === mergeSha && e?.row?.merged_by === `ana-${id}` && e?.row?.merged_machine === "ana-mbp" && e?.row?.merged_agent === "agent-1" && e?.row?.forced === false && !!e?.row?.merged_at, scrub(JSON.stringify(e?.row)).slice(0, 260));
   r = await call("GET", `/v1/monorepos/${O}/${M}/heads`, A);
   check("GET heads: main is the merge commit after a merge", r.json?.heads?.[0]?.head === mergeSha);
+
   if (STREAM) {
     const latest = await call("GET", `/v1/monorepos/${O}/${M}/events?limit=1`, A);
     checkS("GET heads carries the stream's seq to resume from", r.json?.seq === latest.json?.seq, `${r.json?.seq} vs ${latest.json?.seq}`);
   }
+
   e = await find(ev, (x) => x.kind === "default_head.updated");
   checkS("event: default_head.updated to the merge commit", e?.row?.default_head === mergeSha);
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches?state=open`, A);
@@ -251,6 +293,54 @@ try {
   checkS("event: meta.saved (history entry row, no bytes)", e?.collection === "meta_files" && e?.op === "upsert" && e?.row?.size === bytes.length && e?.row?.agent === "agent-2" && !("bytes" in (e?.row ?? {})), scrub(JSON.stringify(e)).slice(0, 220));
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/tree`, A);
   check("meta/tree lists the file in one call", r.json?.files?.some((f) => f.path === "notes/today.md" && f.size === bytes.length && f.version >= 1), `${r.status} ${(r.json?.files ?? []).map((f) => f.path).join(",")}`);
+  // login beside the display name: on the event, the history and the tree
+  checkS("meta.saved carries the saver's login beside the name", e?.row?.login === `ana-${id}` && /^Ana Lima/.test(e?.row?.author ?? ""), `${e?.row?.login} / ${e?.row?.author}`);
+  const v1 = (await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s1"), 10_000))?.version;
+  r = await call("GET", `/v1/monorepos/${O}/${M}/meta/history?path=notes/today.md`, A);
+  check("meta history entries carry login", r.json?.versions?.[0]?.login === `ana-${id}`, JSON.stringify(r.json?.versions?.[0]?.login));
+  // a second file and folder, so each folder's last change is its own
+  const plan = Buffer.from("plan\n");
+  meta.send(JSON.stringify({ type: "save", id: "s2", path: "plans/q4/plan.md", base_version: 0, sha: blobSha(plan), bytes: plan.toString("base64") }));
+  const v2 = (await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s2"), 10_000))?.version;
+  r = await call("GET", `/v1/monorepos/${O}/${M}/meta/tree?dir=`, A);
+  const fNotes = r.json?.folders?.find((f) => f.name === "notes");
+  const fPlans = r.json?.folders?.find((f) => f.name === "plans");
+  check("meta/tree?dir= gives each folder its last change (who, what, when, version)", fNotes?.files === 1 && fNotes?.last?.version === v1 && fNotes?.last?.path === "notes/today.md" && fNotes?.last?.login === `ana-${id}` && typeof fNotes?.last?.at === "number" && fPlans?.last?.version === v2 && fPlans?.last?.path === "plans/q4/plan.md", JSON.stringify(r.json?.folders));
+
+  // the root raw route: a monorepo's own file, now and at a version
+  const rawGet = async (path, secret, headers = {}) => {
+    const res = await fetch(`${URL_}/${O}/${M}/raw/${path}`, { headers: { authorization: `Bearer ${secret}`, ...headers } });
+
+    return { status: res.status, headers: res.headers, text: await res.text() };
+  };
+
+  let raw = await rawGet("notes/today.md", A);
+  const etagOk = (h) => (h ?? "").replace(/^W\//, "") === `"${blobSha(bytes)}"`;
+  check("root raw: a meta file's bytes, as text, sandboxed, ETag the blob sha", raw.status === 200 && raw.text === bytes.toString() && raw.headers.get("content-type")?.startsWith("text/plain") && /sandbox/.test(raw.headers.get("content-security-policy") ?? "") && raw.headers.get("x-content-type-options") === "nosniff" && etagOk(raw.headers.get("etag")) && raw.headers.get("cache-control") === "private, no-cache", `${raw.status} ${raw.headers.get("etag")} ${raw.headers.get("cache-control")}`);
+  const raw304 = await rawGet("notes/today.md", A, { "if-none-match": raw.headers.get("etag") });
+  check("root raw: a repeat with If-None-Match is a 304", raw304.status === 304, `${raw304.status}`);
+  const edited = Buffer.from("# Notes\nhello again\n");
+  meta.send(JSON.stringify({ type: "save", id: "s3", path: "notes/today.md", base_version: v1, sha: blobSha(edited), bytes: edited.toString("base64") }));
+  await waitFor(() => metaFrames.find((f) => f.type === "accepted" && f.id === "s3"), 10_000);
+  raw = await rawGet("notes/today.md", A);
+  const rawV1 = await rawGet(`notes/today.md?v=${v1}`, A);
+  const rawV2 = await rawGet(`notes/today.md?v=${v2}`, A);
+  check("root raw: now is the new bytes; ?v= is the file as of that version, cached a year", raw.text === edited.toString() && rawV1.text === bytes.toString() && rawV2.text === bytes.toString() && rawV1.headers.get("cache-control") === "private, max-age=31536000, immutable", `${rawV1.status} ${rawV1.headers.get("cache-control")}`);
+  const before = await rawGet(`plans/q4/plan.md?v=${v1}`, A);
+  const badV = await rawGet("notes/today.md?v=x", A);
+  const none = await rawGet("notes/none.md", A);
+  const outsiderRaw = await rawGet("notes/today.md", B);
+  check("root raw: 404 before a file existed or when absent, 400 for a bad v, 403 for a non-member", before.status === 404 && none.status === 404 && badV.status === 400 && outsiderRaw.status === 403, `${before.status} ${none.status} ${badV.status} ${outsiderRaw.status}`);
+  // a large file: its pointer in the meta layer, its bytes in R2
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`pando-${id}`)]);
+  const oid = createHash("sha256").update(png).digest("hex");
+  const put = await fetch(`${URL_}/v1/monorepos/${O}/${M}/meta/blobs/${oid}`, { method: "PUT", headers: { authorization: `Bearer ${A}`, "content-length": String(png.length) }, body: png });
+  const pointer = Buffer.from(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${png.length}\n`);
+  meta.send(JSON.stringify({ type: "save", id: "s4", path: "art/logo.png", base_version: 0, sha: blobSha(pointer), bytes: pointer.toString("base64") }));
+  await waitFor(() => metaFrames.find((f) => f.id === "s4"), 10_000);
+  const big = await fetch(`${URL_}/${O}/${M}/raw/art/logo.png`, { headers: { authorization: `Bearer ${A}` } });
+  const bigBytes = Buffer.from(await big.arrayBuffer());
+  check("root raw: a large file comes from R2, as an image, ETag its SHA-256", put.status === 201 && big.status === 200 && bigBytes.equals(png) && big.headers.get("content-type") === "image/png" && (big.headers.get("etag") ?? "").replace(/^W\//, "") === `"${oid}"`, `${put.status} ${big.status} ${big.headers.get("content-type")} ${bigBytes.length} bytes`);
   meta.close();
   e = await find(ev, (x) => x.kind === "machine.disconnected");
   checkS("event: machine.disconnected, its snapshot without that socket", e?.collection === "presence" && Array.isArray(e?.row?.connections) && !e.row.connections.some((c) => c.id === e.connection?.id));
@@ -275,6 +365,7 @@ try {
   check("merge a reference pointer into the meta layer", r.status === 200, `${r.status} ${r.json?.error?.code ?? ""}`);
   e = await find(ev, (x) => x.kind === "meta.saved" && x.key === ".pando/references/research/infra/oak.toml");
   checkS("event: meta.saved for the merged pointer (source main)", e?.row?.source === "main");
+  checkS("a version merged on main carries the merger's login", e?.row?.login === `ana-${id}`, JSON.stringify(e?.row?.login));
   r = await call("GET", `/v1/monorepos/${O}/${M}/meta/references`, A);
   const ref = r.json?.references?.[0];
   check("meta/references lists it, parsed", ref?.path === "research/infra/oak" && ref?.url === "https://github.com/example/oak.git" && ref?.commit === "0123456789abcdef0123456789abcdef01234567", JSON.stringify(r.json));
@@ -285,6 +376,7 @@ try {
     r = await call("GET", `/v1/monorepos/${O}/${M}/events`, A);
     check("GET events answers 501 event_stream_on_hold while the stream is off", r.status === 501 && r.json?.error?.code === "event_stream_on_hold");
   }
+
   // ── reading back: JSON pages, replay, resync ──
   if (STREAM) {
   r = await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500`, A);
@@ -310,6 +402,7 @@ try {
   sockets.push(future);
   const rs = await waitFor(() => future.frames.find((f) => f.type === "resync"));
   checkS("a ?since= ahead of the stream gets resync, with the stream's seq", rs?.seq === all[all.length - 1].seq && typeof rs?.oldest_seq === "number");
+
   for (const s of [ev, again, future, mainOnly]) s.ws.close();
   }
 } catch (err) {
@@ -320,10 +413,12 @@ try {
       s.ws.close();
     } catch {}
   }
+
   for (const m of made) {
     const r = await call("DELETE", `/v1/monorepos/${O}/${m}?confirm=${O}/${m}`, A);
     check(`delete ${m}`, r.status === 204, `${r.status}`);
   }
+
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed${skipped ? `, ${skipped} skipped (stream on hold)` : ""}`);
   process.exit(results.every(Boolean) ? 0 : 1);

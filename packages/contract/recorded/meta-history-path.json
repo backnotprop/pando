@@ -1,0 +1,30 @@
+{
+  "schema": "MetaHistory",
+  "route": "GET .../meta/history?path=README.md",
+  "status": 200,
+  "body": {
+    "path": "README.md",
+    "head": 3,
+    "versions": [
+      {
+        "large": null,
+        "version": 1,
+        "path": "README.md",
+        "op": "save",
+        "sha": "f6aa6dab1441ad947037cd34f6ddcf3a097d41df",
+        "size": 42,
+        "deleted": false,
+        "author": "Ana Lima",
+        "login": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "agent": null,
+        "at": 1791064375089,
+        "source": "live",
+        "from": null,
+        "to": null,
+        "restored_from": null,
+        "commit": null
+      }
+    ]
+  }
+}

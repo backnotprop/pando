@@ -150,13 +150,38 @@ func credentialScope(cloneURL string) string {
 // keeps a copy of the token. The token itself never appears in config,
 // arguments or environment.
 func credentialConfig(cloneURL string) [][2]string {
+	return credentialConfigFor(cloneURL, helperExe())
+}
+
+// helperExe is the binary git runs as the credential helper: this pando.
+// PANDO_CREDENTIAL_EXE replaces it in tests, where this process is a test
+// binary.
+func helperExe() string {
+	if v := os.Getenv("PANDO_CREDENTIAL_EXE"); v != "" {
+		return v
+	}
 	exe, err := os.Executable()
 	if err != nil {
-		exe = "pando"
-	} else if r, err := filepath.EvalSymlinks(exe); err == nil {
+		return "pando"
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
 	}
-	return credentialConfigFor(cloneURL, exe)
+	return exe
+}
+
+// commandLineConfig is credentialConfig for a git that pando starts for the
+// Pando host alone (a clone, the ArtifactFS daemon): the whole helper list
+// is cleared first, so no helper from the system or the person's git config
+// (Apple's osxkeychain, a person's own) runs or stores the Pando credential.
+// A repo's own config keeps the host-scoped reset only, so a person's helpers
+// still serve their other remotes there.
+func commandLineConfig(cloneURL string) [][2]string {
+	kv := credentialConfig(cloneURL)
+	if len(kv) == 0 {
+		return nil
+	}
+	return append([][2]string{{"credential.helper", ""}}, kv...)
 }
 
 // PostBuffer is git's http.postBuffer for the Pando host: a push's pack up
@@ -190,7 +215,7 @@ func credentialConfigFor(cloneURL, exe string) [][2]string {
 // CredentialArgs is credentialConfig as `git -c` arguments.
 func CredentialArgs(cloneURL string) []string {
 	var args []string
-	for _, kv := range credentialConfig(cloneURL) {
+	for _, kv := range commandLineConfig(cloneURL) {
 		args = append(args, "-c", kv[0]+"="+kv[1])
 	}
 	return args
@@ -199,7 +224,7 @@ func CredentialArgs(cloneURL string) []string {
 // CredentialEnv is credentialConfig as GIT_CONFIG_* variables, for
 // processes that run git themselves (the ArtifactFS daemon).
 func CredentialEnv(cloneURL string) []string {
-	kv := credentialConfig(cloneURL)
+	kv := commandLineConfig(cloneURL)
 	if len(kv) == 0 {
 		return nil
 	}

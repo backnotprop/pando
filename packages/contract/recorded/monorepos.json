@@ -1,0 +1,18 @@
+{
+  "schema": "MonorepoList",
+  "route": "GET /v1/monorepos",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_38bf1e02c818ded4",
+        "owner": "rec-musxh5dd",
+        "name": "rec-musxh5dd",
+        "full_name": "rec-musxh5dd/rec-musxh5dd",
+        "kind": "monorepo",
+        "created_at": "2026-10-03T21:52:40.617Z",
+        "role": "owner"
+      }
+    ]
+  }
+}

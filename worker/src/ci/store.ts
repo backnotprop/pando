@@ -44,13 +44,18 @@ CREATE TABLE IF NOT EXISTS ci_jobs (
 
 /** Buildkite REST calls one connection makes a minute (owner limit): Buildkite allows 50 per token; 10 are left for create-build deliveries. */
 export const READS_PER_MIN = 40;
+
 /** Builds per page of the CI tab. */
 export const BUILDS_PAGE = 30;
+
 export const BUILDS_PAGE_MAX = 100;
+
 /** How far back "who pushed" looks in the event log for a commit's push. */
 const PUSH_SCAN = 5_000;
+
 /** A refused webhook is recorded at most this often per connection (unauthenticated writes stay bounded). */
 const REFUSED_EVERY_MS = 10_000;
+
 /** The app every Buildkite check carries. */
 const BUILDKITE = { app: "buildkite", creator: "app:buildkite" };
 
@@ -213,6 +218,7 @@ export function encodeCursor(sortAt: string, id: string): string {
 export function decodeCursor(s: string): { sort_at: string; id: string } | null {
   try {
     const [sort_at, id] = atob(s.replace(/-/g, "+").replace(/_/g, "/")).split("|");
+
     return sort_at && id && !Number.isNaN(Date.parse(sort_at)) ? { sort_at, id } : null;
   } catch {
     return null;
@@ -246,9 +252,11 @@ export class CiStore {
 
   connect(c: { service: "buildkite"; organization: string; api_base: string | null; webhook_token: string | null }, by: Identity): { connection: ConnectionView; webhook_token: string } {
     const m = this.host.info() ?? fail(404, "not_found", "no such monorepo");
+
     if (this.row("SELECT id FROM ci_connections WHERE service = ? AND organization = ?", c.service, c.organization)) {
       fail(409, "ci_connection_exists", `${c.service} organization ${c.organization} is connected already`);
     }
+
     // The id carries the monorepo's id, so the webhook route finds the object without a lookup table.
     const id = `${m.id}--${hexId("cic_", 6)}`;
     const token = c.webhook_token ?? hexId("", 24);
@@ -261,6 +269,7 @@ export class CiStore {
     );
     const view = this.connectionView(this.connection(id)!);
     this.host.publish({ kind: "ci.connection", collection: "ci_connections", key: id, op: "upsert", repo: null, actor: by.login, machine: by.credential_name, agent: null, row: view });
+
     return { connection: view, webhook_token: token };
   }
 
@@ -274,6 +283,7 @@ export class CiStore {
       this.host.publish({ kind: "ci.connection", collection: "ci_connections", key: id, op: "delete", repo: null, actor: by.login, machine: by.credential_name, agent: null, row: { id } });
     });
     this.rate.delete(id);
+
     return true;
   }
 
@@ -302,17 +312,22 @@ export class CiStore {
     const c = this.connection(connId) ?? fail(404, "not_found", "no such CI connection (it may have been disconnected)");
     const secret = c.webhook_secret.startsWith("plain:") ? c.webhook_secret.slice(6) : fail(501, "not_built", "encrypted webhook secrets come with C21");
     const auth = await verifyWebhook(secret, h, body, Math.floor(nowMs / 1000));
+
     if (!auth.ok) {
       const last = Date.parse(c.last_refused_at ?? "") || 0;
+
       if (nowMs - last > REFUSED_EVERY_MS) this.sql.exec("UPDATE ci_connections SET last_refused_at = ?, last_refused = ? WHERE id = ?", now(), auth.reason, connId);
       fail(401, "unauthorized", auth.reason);
     }
+
     let payload: Record<string, unknown>;
+
     try {
       payload = JSON.parse(body);
     } catch {
       fail(400, "bad_request", "the body is not JSON");
     }
+
     const event = h.event ?? (typeof payload.event === "string" ? payload.event : "");
     // The signature's time orders events Buildkite sent; with a plain token, the time they arrived. Both in whole seconds.
     const at = (auth.ts ?? Math.floor(nowMs / 1000)) * 1000;
@@ -324,6 +339,7 @@ export class CiStore {
         now(), event.slice(0, 60), out.result === "recorded" ? "recorded" : `ignored: ${out.reason}`, connId,
       );
     });
+
     return out;
   }
 
@@ -335,6 +351,7 @@ export class CiStore {
     this.ctx.storage.transactionSync(() => {
       out = this.ingest(c, "build.api", { build: b, pipeline: b.pipeline }, Math.floor(Date.now() / 1000) * 1000);
     });
+
     return out;
   }
 
@@ -342,32 +359,43 @@ export class CiStore {
   ingestJob(buildId: string, job: unknown): JobRow | null {
     const b = this.buildRow(buildId);
     const j = normalizeJob(job);
+
     if (!b || !j || j.type === "waiter") return null;
     this.ctx.storage.transactionSync(() => this.upsertJob(b, j));
+
     return this.row<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ? AND external_id = ?", b.id, j.external_id);
   }
 
   private ingest(c: ConnectionRow, event: string, payload: Record<string, unknown>, at: number): IngestResult {
     if (event === "ping") return { result: "recorded" };
     const isJob = event.startsWith("job.");
+
     if (!isJob && !event.startsWith("build.")) return { result: "ignored", reason: `event ${event || "(none)"} is not used` };
     const pipe = normalizePipeline(payload.pipeline);
     const b = normalizeBuild(payload.build, pipe);
+
     if (!b) return { result: "ignored", reason: "no build in the payload" };
+
     if (b.org && b.org !== c.organization) return { result: "ignored", reason: `a build of organization ${b.org}` };
     const existing = this.row<BuildRow>("SELECT * FROM ci_builds WHERE connection_id = ? AND external_id = ?", c.id, b.external_id);
     let build: BuildRow;
+
     if (existing) build = this.updateBuild(existing, b, at, isJob);
     else {
       const mapped = this.map(c, b);
+
       if ("ignore" in mapped) return { result: "ignored", reason: mapped.ignore };
       build = this.insertBuild(c, b, mapped, at);
     }
+
     this.upsertPipeline(c, pipe, b, build);
+
     if (isJob) {
       const j = normalizeJob(payload.job);
+
       if (j && j.type !== "waiter") this.upsertJob(build, j);
     }
+
     return { result: "recorded", build: build.id };
   }
 
@@ -380,36 +408,48 @@ export class CiStore {
   private map(c: ConnectionRow, b: NormBuild): { repo: string; delivery: string | null; pushed_by: string | null } | { ignore: string } {
     const me = this.host.info()!.id;
     const md = b.meta_data;
+
     if (md.pando_monorepo && md.pando_monorepo !== me) return { ignore: "another monorepo's build" };
     let repo: string | null = null;
     let delivery: string | null = null;
     let pushedBy: string | null = null;
+
     if (md.pando_delivery) {
       const d = this.row<{ repo: string; payload: string }>("SELECT repo, payload FROM deliveries WHERE id = ?", md.pando_delivery);
+
       if (d) {
         repo = d.repo;
         delivery = md.pando_delivery;
         const p = JSON.parse(d.payload) as { head?: string; pusher?: string };
+
         if (p.head === b.commit) pushedBy = p.pusher ?? null;
       } else if (!md.pando_monorepo) return { ignore: "another monorepo's build (its delivery is not here)" };
     }
+
     if (!repo && md.pando_monorepo === me) repo = md.pando_repo ?? null;
+
     if (!repo && !md.pando_monorepo && !md.pando_delivery) repo = this.pipelineRepo(c, b.pipeline);
+
     if (!repo || !this.row("SELECT name FROM repos WHERE name = ?", repo)) {
       return { ignore: `pipeline ${b.pipeline} builds no repo here (register a buildkite hook for it, or start its builds from Pando)` };
     }
+
     if (md.pando_rebuild_of && !pushedBy) {
       pushedBy = this.row<{ pushed_by: string | null }>("SELECT pushed_by FROM ci_builds WHERE connection_id = ? AND external_id = ?", c.id, md.pando_rebuild_of)?.pushed_by ?? null;
     }
+
     if (!pushedBy && b.commit) pushedBy = this.pusherOf(repo, b.commit);
+
     return { repo, delivery, pushed_by: pushedBy };
   }
 
   /** A pipeline's repo when one buildkite hook (or an earlier mapped build) says so, and only one repo. */
   private pipelineRepo(c: ConnectionRow, slug: string): string | null {
     const known = this.row<{ repo: string | null }>("SELECT repo FROM ci_pipelines WHERE connection_id = ? AND slug = ?", c.id, slug)?.repo;
+
     if (known) return known;
     const repos = new Set(this.hookPipelines(c).filter((h) => h.pipeline === slug).map((h) => h.repo));
+
     return repos.size === 1 ? [...repos][0] : null;
   }
 
@@ -424,13 +464,16 @@ export class CiStore {
   /** Who pushed a commit, from Pando's push events (the last PUSH_SCAN) or the merge that made it. */
   private pusherOf(repo: string, sha: string): string | null {
     const head = this.row<{ s: number | null }>("SELECT MAX(seq) AS s FROM events")?.s ?? 0;
+
     const push = this.row<{ actor: string | null }>(
       `SELECT json_extract(body, '$.actor') AS actor FROM events
        WHERE seq > ? AND kind IN ('push', 'branch.opened') AND json_extract(body, '$.repo') = ? AND json_extract(body, '$.head') = ?
        ORDER BY seq DESC LIMIT 1`,
       head - PUSH_SCAN, repo, sha,
     );
+
     if (push?.actor) return push.actor;
+
     return this.row<{ merged_by: string }>("SELECT merged_by FROM merges WHERE repo = ? AND merge_commit = ? ORDER BY id DESC LIMIT 1", repo, sha)?.merged_by ?? null;
   }
 
@@ -448,6 +491,7 @@ export class CiStore {
     );
     const row = this.buildRow(id)!;
     this.publishBuild(row);
+
     return row;
   }
 
@@ -461,6 +505,7 @@ export class CiStore {
     const fresh = fromJob
       ? !TERMINAL.has(s.state) && rank(b.state) >= rank(s.state)
       : at > s.event_ms || (at === s.event_ms && !(TERMINAL.has(s.state) && !TERMINAL.has(b.state)));
+
     if (!fresh) return s;
     this.sql.exec(
       `UPDATE ci_builds SET state = ?, service_state = ?, web_url = COALESCE(?, web_url), message = COALESCE(?, message), branch = COALESCE(?, branch),
@@ -468,7 +513,9 @@ export class CiStore {
       b.state, b.service_state, b.web_url, b.message, b.branch, b.started_at, TERMINAL.has(b.state) ? (b.finished_at ?? now()) : null, at, now(), s.id,
     );
     const row = this.buildRow(s.id)!;
+
     if (JSON.stringify(this.buildView(row)) !== JSON.stringify(this.buildView(s))) this.publishBuild(row);
+
     return row;
   }
 
@@ -480,16 +527,19 @@ export class CiStore {
          default_branch = COALESCE(excluded.default_branch, ci_pipelines.default_branch)`,
       c.id, b.pipeline, build.repo, pipe?.name ?? null, pipe?.web_url ?? null, pipe?.default_branch ?? null, build.id,
     );
+
     // The pipeline's last build: the newest by when it was created.
     const last = this.row<{ sort_at: string }>(
       "SELECT b.sort_at FROM ci_pipelines p JOIN ci_builds b ON b.id = p.last_build_id WHERE p.connection_id = ? AND p.slug = ?", c.id, b.pipeline,
     );
+
     if (!last || build.sort_at >= last.sort_at) this.sql.exec("UPDATE ci_pipelines SET last_build_id = ? WHERE connection_id = ? AND slug = ?", build.id, c.id, b.pipeline);
   }
 
   private upsertJob(build: BuildRow, j: NormJob): void {
     const s = this.row<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ? AND external_id = ?", build.id, j.external_id);
     const t = now();
+
     if (!s) {
       this.sql.exec(
         `INSERT INTO ci_jobs (build_id, external_id, name, step_key, type, state, service_state, exit_status, soft_failed, retried, web_url, created_at, started_at, finished_at, updated_at)
@@ -500,7 +550,9 @@ export class CiStore {
     } else {
       // A job's states only move forward; a retry is a new job, and the old one is marked retried.
       const fresh = !TERMINAL.has(s.state) && rank(j.state) >= rank(s.state);
+
       if (!fresh && (s.retried === 1 || !j.retried)) return;
+
       if (fresh) {
         this.sql.exec(
           `UPDATE ci_jobs SET name = COALESCE(?, name), state = ?, service_state = ?, exit_status = ?, soft_failed = ?, retried = MAX(retried, ?),
@@ -510,6 +562,7 @@ export class CiStore {
         );
       } else this.sql.exec("UPDATE ci_jobs SET retried = 1, updated_at = ? WHERE build_id = ? AND external_id = ?", t, build.id, j.external_id);
     }
+
     const row = this.row<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ? AND external_id = ?", build.id, j.external_id)!;
     this.host.publish({
       kind: "ci.job", collection: "ci_jobs", key: `${build.id}/${j.external_id}`, op: "upsert", repo: build.repo,
@@ -526,19 +579,25 @@ export class CiStore {
    */
   private check(build: BuildRow, job: JobRow): void {
     if (!job.step_key || !CHECK_TYPES.has(job.type) || !build.sha || job.retried === 1) return;
+
     const newestJob = this.row<{ external_id: string }>(
       "SELECT external_id FROM ci_jobs WHERE build_id = ? AND step_key = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", build.id, job.step_key,
     );
+
     if (newestJob?.external_id !== job.external_id) return;
+
     const newestBuild = this.row<{ n: number }>(
       "SELECT MAX(number) AS n FROM ci_builds WHERE connection_id = ? AND pipeline = ? AND repo = ? AND sha = ?", build.connection_id, build.pipeline, build.repo, build.sha,
     );
+
     if ((newestBuild?.n ?? build.number) > build.number) return;
     const c = jobCheck(this.normJob(job), build.number);
     const target = job.web_url ?? build.web_url;
+
     const last = this.row<{ state: string; description: string | null; app: string | null; target_url: string | null }>(
       "SELECT state, description, app, target_url FROM statuses WHERE repo = ? AND sha = ? AND context = ? ORDER BY id DESC LIMIT 1", build.repo, build.sha, job.step_key,
     );
+
     if (last && last.state === c.state && last.description === c.description && last.app === BUILDKITE.app && last.target_url === target) return;
     this.host.addStatus(build.repo, build.sha, { state: c.state, context: job.step_key, target_url: target, description: c.description }, null, BUILDKITE);
   }
@@ -621,24 +680,29 @@ export class CiStore {
     const paths = this.repoPaths();
     const services = this.connectionServices();
     const pipelines: PipelineView[] = [];
+
     for (const c of conns) {
       const stored = this.rows<{ slug: string; repo: string | null; name: string | null; web_url: string | null; default_branch: string | null; last_build_id: string | null }>(
         "SELECT slug, repo, name, web_url, default_branch, last_build_id FROM ci_pipelines WHERE connection_id = ? ORDER BY slug", c.id,
       );
+
       const hooks = this.hookPipelines(c);
       const seen = new Set<string>();
+
       for (const p of stored) {
         seen.add(p.slug);
         const last = p.last_build_id ? this.buildRow(p.last_build_id) : null;
         const hook = hooks.find((h) => h.pipeline === p.slug && h.repo === p.repo);
         pipelines.push(this.pipelineView(c, { ...p, hook_id: hook?.hook_id ?? null }, paths, last ? this.buildView(last, paths, services) : null));
       }
+
       for (const h of hooks) {
         if (seen.has(h.pipeline)) continue;
         seen.add(h.pipeline);
         pipelines.push(this.pipelineView(c, { slug: h.pipeline, repo: h.repo, name: null, web_url: null, default_branch: null, hook_id: h.hook_id }, paths, null));
       }
     }
+
     return { connections: conns.map((c) => this.connectionView(c)), pipelines };
   }
 
@@ -667,24 +731,29 @@ export class CiStore {
     const limit = Math.min(Math.max(q.limit, 1), BUILDS_PAGE_MAX);
     const where: string[] = [];
     const args: unknown[] = [];
+
     for (const [col, v] of [["repo", q.repo], ["branch", q.branch], ["sha", q.sha], ["pipeline", q.pipeline], ["connection_id", q.connection], ["state", q.state]] as const) {
       if (v) {
         where.push(`${col} = ?`);
         args.push(v);
       }
     }
+
     if (q.cursor) {
       const k = decodeCursor(q.cursor) ?? fail(400, "bad_request", "cursor: pass back next_cursor as it came");
       where.push("(sort_at < ? OR (sort_at = ? AND id < ?))");
       args.push(k.sort_at, k.sort_at, k.id);
     }
+
     const rows = this.rows<BuildRow>(
       `SELECT * FROM ci_builds ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY sort_at DESC, id DESC LIMIT ?`, ...args, limit + 1,
     );
+
     const more = rows.length > limit;
     const page = rows.slice(0, limit);
     const paths = this.repoPaths();
     const services = this.connectionServices();
+
     return {
       builds: page.map((b) => this.buildView(b, paths, services)),
       next_cursor: more ? encodeCursor(page[page.length - 1].sort_at, page[page.length - 1].id) : null,
@@ -694,19 +763,25 @@ export class CiStore {
   /** One build with its jobs (first scheduled first). */
   build(id: string): (BuildView & { jobs: JobView[] }) | null {
     const b = this.buildRow(id);
+
     if (!b) return null;
     const jobs = this.rows<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ? ORDER BY created_at, rowid", id);
+
     return { ...this.buildView(b, this.repoPaths(), this.connectionServices()), jobs: jobs.map((j) => this.jobView(j)) };
   }
 
   /** What a route needs to call the service about a build and maybe a job. */
   ref(buildId: string, jobId: string | null): CiRef | null {
     const b = this.buildRow(buildId);
+
     if (!b) return null;
     const c = this.connection(b.connection_id);
+
     if (!c) return null;
     const job = jobId ? this.row<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ? AND external_id = ?", buildId, jobId) : null;
+
     if (jobId && !job) return null;
+
     return { connection: this.refConnection(c), build: b, job };
   }
 
@@ -718,13 +793,17 @@ export class CiStore {
   pipeline(slug: string, connection: string | null): { connection: CiRef["connection"]; pipeline: PipelineView; configuration: string | null; configuration_fetched_at: string | null } {
     const { pipelines } = this.overview();
     const hits = pipelines.filter((p) => p.slug === slug && (!connection || p.connection === connection));
+
     if (!hits.length) fail(404, "not_found", `no pipeline ${slug} here`);
+
     if (hits.length > 1) fail(409, "ambiguous", `pipeline ${slug} is in more than one connection; add ?connection=<id>`);
     const p = hits[0];
     const c = this.connection(p.connection)!;
+
     const stored = this.row<{ configuration: string | null; config_fetched_at: string | null }>(
       "SELECT configuration, config_fetched_at FROM ci_pipelines WHERE connection_id = ? AND slug = ?", c.id, slug,
     );
+
     return { connection: this.refConnection(c), pipeline: p, configuration: stored?.configuration ?? null, configuration_fetched_at: stored?.config_fetched_at ?? null };
   }
 
@@ -744,10 +823,13 @@ export class CiStore {
   permit(connId: string, nowMs = Date.now()): { ok: true } | { ok: false; retry_after_ms: number } {
     const r = this.rate.get(connId) ?? { at: [], until: 0 };
     this.rate.set(connId, r);
+
     if (r.until > nowMs) return { ok: false, retry_after_ms: r.until - nowMs };
     r.at = r.at.filter((t) => t > nowMs - 60_000);
+
     if (r.at.length >= READS_PER_MIN) return { ok: false, retry_after_ms: r.at[0] + 60_000 - nowMs };
     r.at.push(nowMs);
+
     return { ok: true };
   }
 

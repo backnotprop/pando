@@ -1,0 +1,216 @@
+{
+  "schema": "ActivityFrame[]",
+  "route": "GET /v1/events (WebSocket)",
+  "status": 101,
+  "body": [
+    {
+      "type": "caught_up",
+      "landed": 0
+    },
+    {
+      "type": "event",
+      "landed": 1,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 1,
+        "at": "2026-10-03T21:52:48.989Z",
+        "kind": "push",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "main",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "head": "7b35a964d7bf3d15476ee09d0a8fd337441cd45d",
+          "before": null,
+          "commits": 1,
+          "head_title": "First commit"
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 5,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 10,
+        "at": "2026-10-03T21:52:52.903Z",
+        "kind": "branch.deleted",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "chore/gone",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "before": "b9b4aa0e07c66d61c41f6576e838bdcf9c775557"
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 9,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 14,
+        "at": "2026-10-03T21:52:52.925Z",
+        "kind": "status",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/ready",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "context": "ci/test",
+          "state": "success",
+          "description": null,
+          "target_url": "https://ci.example/builds/1",
+          "sha": "61af03349f556fdc868bea21d352443bd81c5aa7",
+          "duration_s": 0,
+          "app": null
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 10,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 7,
+        "at": "2026-10-03T21:52:52.249Z",
+        "kind": "branch.opened",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "chore/gone",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "head": "b9b4aa0e07c66d61c41f6576e838bdcf9c775557",
+          "before": null,
+          "commits": 1,
+          "head_title": "A branch to delete"
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 11,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 15,
+        "at": "2026-10-03T21:52:53.518Z",
+        "kind": "review",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/ready",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "verdict": "approve",
+          "comments": 0,
+          "head": "61af03349f556fdc868bea21d352443bd81c5aa7"
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 12,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 16,
+        "at": "2026-10-03T21:52:54.473Z",
+        "kind": "merged",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/merge-me",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "merge_commit": "057a40430fd2222d471dd92b9be140fc871c1d68",
+          "forced": false,
+          "title": null,
+          "head": "dd8f2676fa5c29bf98ec6b6244fcbdd18142efb3"
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 13,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 18,
+        "at": "2026-10-03T21:52:54.481Z",
+        "kind": "worktree.reported",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/ready",
+        "actor": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "summary": {
+          "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
+          "worktree": "wt-musxh5dd"
+        }
+      }
+    },
+    {
+      "type": "event",
+      "landed": 16,
+      "event": {
+        "monorepo_id": "m_38bf1e02c818ded4",
+        "monorepo": "rec-musxh5dd/rec-musxh5dd",
+        "seq": 22,
+        "at": "2026-10-03T21:52:55.343Z",
+        "kind": "meta.saved",
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "Ana Lima",
+        "machine": "ana-mbp",
+        "summary": {
+          "path": "docs/deep/notes.md",
+          "version": 3,
+          "deleted": false
+        }
+      }
+    },
+    {
+      "type": "summary",
+      "monorepo": "rec-musxh5dd/rec-musxh5dd",
+      "monorepo_id": "m_38bf1e02c818ded4",
+      "summary": {
+        "last_activity_at": "2026-10-03T21:52:55.343Z",
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 1,
+          "conflicts": 0,
+          "failing": 1
+        },
+        "members": 1,
+        "large": false,
+        "repos": 1,
+        "open_branches": 2,
+        "at": "2026-10-03T21:53:00.345Z"
+      }
+    },
+    {
+      "type": "needs",
+      "monorepo": "rec-musxh5dd/rec-musxh5dd",
+      "monorepo_id": "m_38bf1e02c818ded4",
+      "changed": [
+        {
+          "repo": "projects-web",
+          "branch": "feat/ready",
+          "state": "ready"
+        }
+      ],
+      "more": false
+    }
+  ]
+}

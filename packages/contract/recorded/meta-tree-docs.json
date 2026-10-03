@@ -1,0 +1,57 @@
+{
+  "schema": "MetaTree",
+  "route": "GET .../meta/tree?dir=docs",
+  "status": 200,
+  "body": {
+    "head": 3,
+    "prefix": "docs/",
+    "files": [
+      {
+        "large": null,
+        "version": 2,
+        "path": "docs/guide.md",
+        "op": "save",
+        "sha": "8c0d02fadc02df29eefff5ad660a022b4a8e5efd",
+        "size": 8,
+        "deleted": false,
+        "author": "Ana Lima",
+        "login": "rec-musxh5dd",
+        "machine": "ana-mbp",
+        "agent": null,
+        "at": 1791064375091,
+        "source": "live",
+        "from": null,
+        "to": null,
+        "restored_from": null,
+        "commit": null
+      }
+    ],
+    "next": null,
+    "dir": "docs",
+    "folders": [
+      {
+        "name": "deep",
+        "files": 1,
+        "last": {
+          "large": null,
+          "version": 3,
+          "path": "docs/deep/notes.md",
+          "op": "save",
+          "sha": "0a331465a2f00ff17b8f47190578a589f24eac66",
+          "size": 7,
+          "deleted": false,
+          "author": "Ana Lima",
+          "login": "rec-musxh5dd",
+          "machine": "ana-mbp",
+          "agent": null,
+          "at": 1791064375092,
+          "source": "live",
+          "from": null,
+          "to": null,
+          "restored_from": null,
+          "commit": null
+        }
+      }
+    ]
+  }
+}

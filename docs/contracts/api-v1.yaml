@@ -178,12 +178,16 @@ tags:
       Raw files (FILES.md section 3), GET or HEAD, beside the git door:
       `/{owner}/{monorepo}/projects/{repo}/raw/{path}?ref=` for a
       monorepo's project repo, `/{owner}/{name}/raw/{path}?ref=` for a plain
-      repo. The session cookie or a Bearer credential. Served so nothing
-      runs: `Content-Security-Policy: sandbox`, nosniff, images as images,
-      everything else as `text/plain` (HTML and SVG included) or, with a NUL
-      in its first 8,000 bytes, `application/octet-stream`. `ETag` is the
-      blob's hash. By branch: `private, no-cache` (a repeat is a 304); by a
-      40-character sha: `private, max-age=31536000, immutable`.
+      repo, and `/{owner}/{monorepo}/raw/{path}?v=` for a monorepo's own
+      files (the meta layer; `v` is a meta layer version, meta-sync.md).
+      Members only, by the session cookie or a Bearer credential. Served so
+      nothing runs: `Content-Security-Policy: sandbox`, nosniff, images as
+      images, everything else as `text/plain` (HTML and SVG included) or,
+      with a NUL in its first 8,000 bytes, `application/octet-stream`.
+      `ETag` is the content's hash (the git blob's; a large meta file's
+      SHA-256). By branch, or a meta file now: `private, no-cache` (a repeat
+      is a 304); by a 40-character sha or a `v`: `private, max-age=31536000,
+      immutable`.
 
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
@@ -590,6 +594,9 @@ paths:
           `more`: over 50 changed, refetch listNeeds.
         - `{"type": "joined", "monorepo", "monorepo_id", "large"}`, `{"type": "left", "monorepo", "monorepo_id"}`:
           refetch the first page and the list.
+        - `{"type": "error", "message"}`: the frame sent was not understood
+          (anything but `hello` or the text `ping`). Nothing changed; the
+          socket stays open.
         Every frame's `monorepo` is the `owner/name` label (as the index last
         heard it; a rename shows within a minute) and `monorepo_id` the id.
         The text `ping` gets `pong`. Lines of large monorepos do not come
@@ -831,14 +838,27 @@ paths:
         - presence: `machine.connected`, `machine.disconnected`. Row
           `{connections: [...]}`, the whole list of who is connected now (as in
           meta/status), plus `connection`, the one that changed.
+        - machines: `machine.updated` (upsert, a Machine row; key
+          `<login>/<credential_id>`). Sent at once for a new machine, a
+          connect, a disconnect or a change of its worktrees; for activity
+          alone at most once a minute per machine (every activity event
+          already names its `actor` and `machine`).
 
         Topics (`?topics=`, comma-separated, at most 10): `all` (default),
         `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
         `meta` (meta_files and presence), `kind:<kind>`, `feed` (the
         activity lines as the person's feed shows them, as
-        `{"type": "feed", "event": FeedEvent}` frames: the home uses it for a
-        monorepo of more than 100 members). `pando worktree follow` needs
-        only `main:<repo>`.
+        `{"type": "feed", "n", "event": FeedEvent}` frames: the home uses it
+        for a monorepo of more than 100 members, and a monorepo's pages may).
+        `pando worktree follow` needs only `main:<repo>`.
+
+        The `feed` topic's lines are numbered `n` in the order they go out
+        (a push's line goes out when its commit count is known, so `n` is not
+        `seq` order). `caught_up` then carries `feed_n`, the last number
+        sent. A socket that drops reconnects with `feed_since=<the last n it
+        saw>` and first gets every line sent after it (at most 500, else one
+        `{"type": "feed_resync", "feed_n"}`: refetch, then reconnect with that
+        `feed_n`).
 
         Presence (the home's `machines_active` and `worktrees_active`): a
         follower sends, after the socket opens and whenever a worktree is
@@ -848,9 +868,10 @@ paths:
         monorepo (not read-only mains), at most 1,000, each 1 to 64 of
         `A-Z a-z 0-9 _ -`. `machine` is optional (default: the credential's
         name). Each hello replaces the last one of that socket; presence ends
-        when the socket closes. Answer: `{"type": "hello_ok", "machine",
-        "worktrees", "machines_active", "worktrees_active"}`, or an `error`
-        frame.
+        when the socket closes. The hello also marks the socket's credential
+        connected in listMachines, with these worktrees. Answer: `{"type": "hello_ok", "machine",
+        "worktrees", "machines_active", "worktrees_active"}`, or
+        `{"type": "error", "message"}` (the socket stays open).
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
         latest `limit` with no `since`. With `Upgrade: websocket`: events after
@@ -875,6 +896,10 @@ paths:
         - name: topics
           in: query
           schema: { type: string, default: all }
+        - name: feed_since
+          in: query
+          description: "With `topics` including `feed`, on a WebSocket: replay the `feed` lines numbered after this."
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: A page of events
@@ -1787,7 +1812,7 @@ paths:
     post:
       operationId: replayHook
       summary: Replay a hook from a seq, after an outage (owners)
-      description: Every delivery of this hook with a seq above `since` goes back on the queue, oldest first, at most 1,000. Only changes made while the hook existed have deliveries.
+      description: Every delivery of this hook with a seq above `since` is sent again, oldest first, at most 1,000, each with a fresh round of five tries. Only changes made while the hook existed have deliveries.
       tags: [hooks]
       parameters:
         - name: since
@@ -1819,7 +1844,7 @@ paths:
     post:
       operationId: redeliver
       summary: Send a delivery again (owners)
-      description: The same delivery (same id and seq) goes back on the queue, with a fresh read token; its attempts continue.
+      description: The same delivery (same id and seq) is sent again now, with a fresh read token and a fresh round of five tries; `attempts` keeps counting.
       tags: [hooks]
       responses:
         "202":
@@ -1827,6 +1852,39 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Delivery" }
+  /v1/monorepos/{owner}/{monorepo}/machines:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listMachines
+      summary: The Machines tab, one row per machine (a credential), latest activity first
+      description: |
+        A machine is a credential: the row's key is (login, credential_id),
+        and it is shown by the credential's name, so two people's `laptop`s
+        stay apart. Kept by the monorepo in the same step as each change:
+        - every activity event made through the credential sets
+          `last_activity` (the line's kind, repo, branch and summary, as in
+          FeedEvent; a push's commit count and title arrive a moment later);
+        - a follower's hello on the event socket sets it `connected`, with its
+          worktrees; its last such socket closing sets it disconnected.
+        Machines with no activity yet (only connected) come after the others.
+        Browser sessions (kind `browser`) appear only once they act, never as
+        connected; show them as the web. Live: `machine.updated` on the event
+        stream.
+      tags: [worktrees]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [machines]
+                properties:
+                  machines:
+                    type: array
+                    items: { $ref: "#/components/schemas/Machine" }
   /v1/monorepos/{owner}/{monorepo}/worktrees:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -2354,8 +2412,8 @@ webhooks:
         the raw body with the hook's secret; GitHub's scheme under another
         name).
 
-        Deliveries run on a queue: at least once and not in order, like
-        GitHub's. The body's `seq` is the event stream's sequence number:
+        Deliveries leave as soon as the change is recorded (no queue):
+        at least once and not in order, like GitHub's. The body's `seq` is the event stream's sequence number:
         drop a seq you have seen, and sort by it. A try that does not get a
         2xx within 10 seconds is retried after 10 s, 1 min, 5 min and 30 min
         (5 tries over about 36 minutes); then the delivery is dead until an
@@ -2503,7 +2561,7 @@ components:
         pointed_to: { type: [string, "null"], description: "The `owner/name` it led to before." }
     User:
       type: object
-      required: [login, picture_url, created_at]
+      required: [login, name, email, picture_url, created_at]
       properties:
         login: { type: string }
         name: { type: [string, "null"] }
@@ -2596,7 +2654,7 @@ components:
     FeedSummary:
       type: object
       description: A monorepo's one line on the home.
-      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, at]
+      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, repos, open_branches, at]
       properties:
         last_activity_at: { type: [string, "null"], format: date-time, description: Its newest activity line. }
         worktrees_active: { type: integer, description: Worktrees named in the hellos of open follower sockets. }
@@ -2610,6 +2668,8 @@ components:
             failing: { type: integer }
         members: { type: integer }
         large: { type: boolean, description: "More than 100 members: its lines are read on demand, not copied to feeds." }
+        repos: { type: integer, description: "Its projects (code repos; the meta layer's own repo is not counted). A plain repo has 1." }
+        open_branches: { type: integer, description: "Open branches across those projects (not merged, not deleted, main not counted)." }
         at: { type: string, format: date-time, description: When the monorepo computed it. }
     MonorepoSummary:
       allOf:
@@ -2628,6 +2688,8 @@ components:
                 failing: { type: integer }
             members: { type: [integer, "null"] }
             large: { type: [boolean, "null"] }
+            repos: { type: [integer, "null"] }
+            open_branches: { type: [integer, "null"] }
     NeedRow:
       type: object
       required: [monorepo, monorepo_id, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]
@@ -3041,7 +3103,7 @@ components:
         status:
           type: string
           enum: [queued, retrying, delivered, failed, dead]
-          description: "`queued`: waiting for its first try. `retrying`: the last try failed; `next_attempt_at` says when the next is. `failed`: the fifth try failed. `dead`: it reached the dead-letter queue (redeliver to try again)."
+          description: "`queued`: waiting for its first try. `retrying`: the last try failed; `next_attempt_at` says when the next is. `dead`: the fifth try failed, or its hook or repo was deleted (redeliver to try again). `failed` appears only on deliveries from before 2026-10-03, between the fifth try and `dead`."
         attempts: { type: integer }
         response_code: { type: [integer, "null"] }
         error: { type: [string, "null"] }
@@ -3059,6 +3121,38 @@ components:
               response_code: { type: [integer, "null"] }
               error: { type: [string, "null"] }
               ms: { type: integer }
+    Machine:
+      type: object
+      required: [login, credential_id, name, kind, connected, connected_at, last_activity, worktrees, updated_at]
+      properties:
+        login: { type: string, description: The person. }
+        credential_id: { type: string, description: "With login, the machine's key." }
+        name: { type: string, description: "The credential's name: the machine as people see it." }
+        kind: { type: [string, "null"], enum: [machine, sandbox, bootstrap, browser, null] }
+        connected: { type: boolean, description: "An event socket of this credential said hello and is open." }
+        connected_at: { type: [string, "null"], format: date-time }
+        last_activity:
+          type: [object, "null"]
+          description: Its latest activity line in this monorepo.
+          properties:
+            seq: { type: integer }
+            at: { type: string, format: date-time }
+            kind: { type: string }
+            repo: { type: [string, "null"] }
+            repo_path: { type: [string, "null"] }
+            branch: { type: [string, "null"] }
+            summary: { type: [object, "null"], description: As FeedEvent.summary. }
+        worktrees:
+          type: array
+          description: "The worktrees its last hello named; repo, branch and path from the worktree registry (null when not reported there)."
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              repo: { type: [string, "null"] }
+              branch: { type: [string, "null"] }
+              path: { type: [string, "null"] }
+        updated_at: { type: string, format: date-time }
     Worktree:
       type: object
       required: [id, repo, branch, path, machine, kind, reported_by, created_at, last_seen_at]

@@ -58,16 +58,20 @@ export class MainMoved extends Error {
 /** "clean", "conflicts", "up_to_date" or "unknown", from a gitwrite dry run (cached per isolate by main and head). */
 export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: string, ahead: number | null): Promise<string> {
   if (ahead === 0) return "up_to_date";
+
   if (!gitwrite) return "unknown";
   const key = `${r.artifacts_name}:${main}:${head}`;
   const hit = mergeableCache.get(key);
+
   if (hit) return hit;
   let v = "unknown";
+
   try {
     const out = await gitwrite.mergeCommit(
       { artifacts: timedArtifacts(env.ARTIFACTS), name: r.artifacts_name },
       { base: r.default_branch, head, baseSha: main, message: "dry run\n", author: { name: "Pando", email: "pando@pando.invalid" }, dryRun: true },
     );
+
     // main moved while we looked: the answer is for nothing; a newer computation is coming.
     if (out.status === "ref_moved") throw new MainMoved();
     v = out.status === "mergeable" ? "clean" : out.status === "conflict" ? "conflicts" : out.status === "up_to_date" ? "up_to_date" : "unknown";
@@ -75,8 +79,11 @@ export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: s
     if (err instanceof MainMoved) throw err;
     v = "unknown";
   }
+
   if (mergeableCache.size > 5000) mergeableCache.clear();
+
   if (v !== "unknown") mergeableCache.set(key, v);
+
   return v;
 }
 
@@ -91,6 +98,7 @@ export async function pool<T, U>(items: T[], n: number, fn: (t: T) => Promise<U>
       }
     }),
   );
+
   return out;
 }
 
@@ -99,29 +107,37 @@ export function pandoTrailers(message: string): { agent: string | null; worktree
   const out = { agent: null as string | null, worktree: null as string | null, machine: null as string | null };
   const paragraphs = message.replace(/\r\n/g, "\n").trimEnd().split(/\n\s*\n/);
   const last = paragraphs.length > 1 ? paragraphs[paragraphs.length - 1] : "";
+
   for (const line of last.split("\n")) {
     const m = line.match(/^Pando-(Agent|Worktree|Machine):\s*(.*?)\s*$/i);
+
     if (!m || !m[2]) continue;
     const k = m[1].toLowerCase() as "agent" | "worktree" | "machine";
     out[k] = m[2];
   }
+
   return out;
 }
 
 /** `Co-authored-by: Name <email>` lines from a commit message's trailers (its last paragraph), as git and GitHub read them. */
 export function coAuthors(message: string): { name: string; email: string | null }[] {
   const paragraphs = message.replace(/\r\n/g, "\n").trimEnd().split(/\n\s*\n/);
+
   if (paragraphs.length < 2) return [];
   const out: { name: string; email: string | null }[] = [];
   const seen = new Set<string>();
+
   for (const line of paragraphs[paragraphs.length - 1].split("\n")) {
     const m = line.match(/^co-authored-by:\s*(.*?)\s*(?:<([^<>]*)>)?\s*$/i);
+
     if (!m || !m[1]) continue;
     const key = (m[2] || m[1]).toLowerCase();
+
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ name: m[1], email: m[2]?.trim() || null });
   }
+
   return out;
 }
 

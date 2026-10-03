@@ -1,12 +1,28 @@
 // The Pando Worker. Development deploys as pando-dev on the owner's account.
 // Pando keeps to its own resources: Workers named pando-*, the Artifacts
-// namespace pando-dev, and never anything named workspaces-*.
-// Artifacts and R2 bindings are added by the server-git lane from the docs.
+// namespace pando-dev, R2 buckets named pando-*, and never anything named
+// workspaces-*.
+//
+// Secrets (the owner types them; never in this file):
+//   npx wrangler secret put PANDO_BOOTSTRAP      the first admin credential
+//   npx wrangler secret put BUILDKITE_API_TOKEN  for buildkite hooks (M5)
+// Local dev reads them from worker/.dev.vars (gitignored).
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "pando-dev",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "artifacts": [
+    // remote: wrangler dev talks to the real Artifacts service.
+    { "binding": "ARTIFACTS", "namespace": "pando-dev", "remote": true }
+  ],
+  "r2_buckets": [
+    // For the live lane's large files (M7).
+    { "binding": "BLOBS", "bucket_name": "pando-dev-blobs" }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "MONOREPO", "class_name": "MonorepoObject" },
@@ -15,5 +31,7 @@
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["MonorepoObject", "MetaLayerObject"] }
-  ]
+  ],
+  // The contract, served at /v1/openapi.yaml.
+  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }]
 }

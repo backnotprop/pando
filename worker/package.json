@@ -7,5 +7,15 @@
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "diff": "^9.0.0",
+    "hono": "^4.13.12",
+    "smol-toml": "^1.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.147.0"
   }
 }

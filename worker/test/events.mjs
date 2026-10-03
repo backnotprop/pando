@@ -54,9 +54,10 @@ const git = (args, cwd, secret) => {
 };
 
 /** An event socket that collects frames. */
-function openEvents(m, secret, since = null) {
+function openEvents(m, secret, since = null, topics = null) {
   const frames = [];
-  const url = `${WS_}/v1/monorepos/${m}/events${since === null ? "" : `?since=${since}`}`;
+  const q = [since === null ? null : `since=${since}`, topics ? `topics=${topics}` : null].filter(Boolean).join("&");
+  const url = `${WS_}/v1/monorepos/${m}/events${q ? `?${q}` : ""}`;
   const ws = new WebSocket(url, { headers: { authorization: `Bearer ${secret}` } });
   const state = { ws, frames, open: false, closed: null, error: null };
   ws.onopen = () => (state.open = true);
@@ -115,6 +116,8 @@ try {
   checkS("a non-member cannot open the event socket", !outsider.open || outsider.closed !== null, `open=${outsider.open} closed=${outsider.closed} error=${outsider.error}`);
   const ev = openEvents(M, A);
   sockets.push(ev);
+  const mainOnly = openEvents(M, A, null, "main");
+  sockets.push(mainOnly);
   const caught = STREAM ? await waitFor(() => ev.frames.find((f) => f.type === "caught_up")) : null;
   checkS("the owner opens the event socket and is caught up", !!caught, JSON.stringify(caught));
   if (STREAM) ev.ws.readyState === 1 && ev.ws.send("ping");
@@ -140,11 +143,15 @@ try {
   git(["commit", "-qam", "More a\n\nPando-Agent: agent-1\nPando-Worktree: projects/web/worktrees/feat-a\nPando-Machine: ana-mbp"], src);
   check("push a branch", git(["push", "-q", url, "feat/a"], src, A).ok);
   const headA = git(["rev-parse", "HEAD"], src).out.trim();
+  if (STREAM) {
+    const now = await call("GET", `/v1/monorepos/${M}/events?limit=5`, A);
+    checkS("record before ack: the push's event exists as soon as git push returns", now.json?.events?.some((x) => x.kind === "branch.opened" && x.row?.head === headA));
+  }
   e = await find(ev, (x) => x.kind === "branch.opened" && x.row?.name === "feat/a");
-  checkS("event: branch.opened with the Branch row", e?.collection === "branches" && e?.op === "upsert" && e?.key === `${repo}/feat/a` && e?.row?.head === headA && e?.row?.ahead === 2 && e?.row?.author === `ana-${id}`, scrub(JSON.stringify(e?.row)).slice(0, 200));
+  checkS("event: branch.opened with the stored Branch fields (partial)", e?.collection === "branches" && e?.op === "upsert" && e?.key === `${repo}/feat/a` && e?.partial === true && e?.row?.head === headA && e?.row?.author === `ana-${id}` && !("ahead" in (e?.row ?? {})), scrub(JSON.stringify(e?.row)).slice(0, 200));
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa`, A);
-  const same = ["name", "head", "base", "author", "ahead", "behind", "mergeable", "state"].every((k) => JSON.stringify(r.json?.[k]) === JSON.stringify(e?.row?.[k]));
-  checkS("the event's row has the same shape and values as GET getBranch", same && Object.keys(r.json ?? {}).every((k) => k in (e?.row ?? {})));
+  const same = Object.keys(e?.row ?? {}).filter((k) => k !== "repo").every((k) => JSON.stringify(r.json?.[k]) === JSON.stringify(e?.row?.[k]));
+  checkS("the event's fields equal the same fields of GET getBranch", same, Object.keys(e?.row ?? {}).join(","));
 
   // ── commits with trailers ──
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/commits`, A);
@@ -159,8 +166,6 @@ try {
   await call("POST", `/v1/monorepos/${M}/repos/${repo}/statuses/${headA}`, A, { state: "success", context: "ci" }, { "x-pando-agent": "ci-bot" });
   e = await find(ev, (x) => x.kind === "status" && x.row?.sha === headA);
   checkS("event: status (Status row, agent from X-Pando-Agent)", e?.collection === "statuses" && e?.key === `${repo}/${headA}/ci` && e?.row?.state === "success" && e?.agent === "ci-bot", scrub(JSON.stringify(e)).slice(0, 160));
-  e = await find(ev, (x) => x.kind === "branch.updated" && x.row?.name === "feat/a" && x.row?.checks?.state === "success" && x.row?.checks?.statuses?.length === 1);
-  checkS("event: branch.updated with the new checks", !!e);
   await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/reviews`, A, { verdict: "comment", body: "ok" });
   e = await find(ev, (x) => x.kind === "review");
   checkS("event: review (Review row)", e?.collection === "reviews" && e?.row?.verdict === "comment" && e?.row?.branch === "feat/a");
@@ -188,8 +193,8 @@ try {
   checkS("event: merged, with merge facts on the Branch row", e?.row?.state === "merged" && e?.row?.merge_commit === mergeSha && e?.row?.merged_by === `ana-${id}` && e?.row?.merged_machine === "ana-mbp" && e?.row?.merged_agent === "agent-1" && e?.row?.forced === false && !!e?.row?.merged_at, scrub(JSON.stringify(e?.row)).slice(0, 260));
   e = await find(ev, (x) => x.kind === "default_head.updated");
   checkS("event: default_head.updated to the merge commit", e?.row?.default_head === mergeSha);
-  e = await find(ev, (x) => x.kind === "branch.updated" && x.row?.name === "feat/b" && x.row?.behind === 3);
-  checkS("event: the other open branch republished (behind 3 after the merge: the merge commit and feat/a's two)", !!e);
+  await new Promise((res) => setTimeout(res, 1500));
+  checkS("no per-branch recompute after a merge (no branch.updated for feat/b)", STREAM && !eventsOf(ev).some((x) => x.kind === "branch.updated" && x.row?.name === "feat/b"));
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/commits`, A);
   check("a merged branch still lists its 2 commits", r.json?.commits?.length === 2 && r.json.commits[0].sha === headA, `${r.json?.commits?.length}`);
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=merged`, A);
@@ -204,7 +209,7 @@ try {
   meta.send(JSON.stringify({ type: "hello", since: 0, machine: "ana-mbp", agent: "agent-2", client: "events-test/1" }));
   await waitFor(() => metaFrames.find((f) => f.type === "caught_up"), 10_000);
   e = await find(ev, (x) => x.kind === "machine.connected");
-  checkS("event: machine.connected (connection row)", e?.collection === "connections" && e?.row?.machine === "ana-mbp" && e?.row?.agent === "agent-2" && e?.row?.client === "events-test/1" && !!e?.row?.connected_at);
+  checkS("event: machine.connected carries the whole presence snapshot", e?.collection === "presence" && e?.key === "meta" && e?.row?.connections?.some((c) => c.machine === "ana-mbp" && c.agent === "agent-2" && c.client === "events-test/1" && !!c.connected_at) && e?.connection?.machine === "ana-mbp");
   r = await call("GET", `/v1/monorepos/${M}/meta/status`, A);
   check("meta/status lists who is connected now", r.json?.connections?.some((x) => x.machine === "ana-mbp" && x.agent === "agent-2"), JSON.stringify(r.json?.connections));
   const bytes = Buffer.from("# Notes\nhello\n");
@@ -215,7 +220,7 @@ try {
   check("meta/tree lists the file in one call", r.json?.files?.some((f) => f.path === "notes/today.md" && f.size === bytes.length && f.version >= 1), `${r.status} ${(r.json?.files ?? []).map((f) => f.path).join(",")}`);
   meta.close();
   e = await find(ev, (x) => x.kind === "machine.disconnected");
-  checkS("event: machine.disconnected (op delete)", e?.op === "delete" && e?.row?.machine === "ana-mbp");
+  checkS("event: machine.disconnected, its snapshot without that socket", e?.collection === "presence" && Array.isArray(e?.row?.connections) && !e.row.connections.some((c) => c.id === e.connection?.id));
 
   // references arrive through a reviewed merge into the meta layer (.pando/** is protected)
   r = await call("GET", `/v1/monorepos/${M}/repos/meta`, A);
@@ -252,7 +257,7 @@ try {
   r = await call("GET", `/v1/monorepos/${M}/events?since=0&limit=500`, A);
   const all = r.json?.events ?? [];
   const seqsOk = all.every((x, i) => i === 0 || x.seq > all[i - 1].seq);
-  checkS("GET events?since=0 returns every event in order", r.status === 200 && all.length >= 15 && seqsOk && r.json?.head === all[all.length - 1]?.seq, `${all.length} events, head ${r.json?.head}`);
+  checkS("GET events?since=0 returns every event in order", r.status === 200 && all.length >= 12 && seqsOk && r.json?.head === all[all.length - 1]?.seq, `${all.length} events, head ${r.json?.head}`);
   const live = eventsOf(ev);
   checkS("the socket got the same events as the JSON page", live.length === all.length && live.every((x, i) => x.seq === all[i].seq), `${live.length} vs ${all.length}`);
   r = await call("GET", `/v1/monorepos/${M}/events?limit=1`, A);
@@ -263,11 +268,16 @@ try {
   await waitFor(() => again.frames.find((f) => f.type === "caught_up"));
   const replay = eventsOf(again);
   checkS("a socket opened with ?since= replays what it missed, then caught_up", replay.length === all.filter((x) => x.seq > mid).length && replay[0]?.seq === mid + 1, `${replay.length} replayed`);
+  const mains = all.filter((x) => x.collection === "default_heads");
+  const gotMain = eventsOf(mainOnly);
+  checkS("a socket on ?topics=main gets only main moves, all of them", gotMain.length === mains.length && gotMain.every((x) => x.collection === "default_heads"), `${gotMain.length} of ${mains.length}`);
+  r = await call("GET", `/v1/monorepos/${M}/events?since=0&topics=main`, A);
+  checkS("GET events?topics=main filters the same way", r.json?.events?.length === mains.length);
   const future = openEvents(M, A, all[all.length - 1].seq + 1000);
   sockets.push(future);
   const rs = await waitFor(() => future.frames.find((f) => f.type === "resync"));
   checkS("a ?since= ahead of the stream gets resync", rs?.head === all[all.length - 1].seq);
-  for (const s of [ev, again, future]) s.ws.close();
+  for (const s of [ev, again, future, mainOnly]) s.ws.close();
   }
 } catch (err) {
   check("no exception", false, String(err?.stack ?? err));

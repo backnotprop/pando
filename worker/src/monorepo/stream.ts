@@ -1,9 +1,9 @@
-// The per-monorepo event stream (GET /v1/monorepos/{m}/events) is built but
-// ON HOLD (pando-ops, 2026-10-03) until the architecture lane decides where
-// events live (a Durable Object, Queues or K2). While false: nothing is
-// written to the events table, no branch rows are computed for it, the meta
-// layer forwards nothing, and the route answers 501 event_stream_on_hold.
-export const EVENT_STREAM = false;
+// The per-monorepo event stream (GET /v1/monorepos/{m}/events), on since
+// 2026-10-03 after the architecture review: events are written in the same
+// turn as the change, from the monorepo object's own rows (no Artifacts work),
+// every one kept, and sent to hibernating sockets by topic. Set false to stop
+// writing events; the route then answers 501 event_stream_on_hold.
+export const EVENT_STREAM = true;
 
 /** The topics an event is sent on (sockets subscribe with ?topics=, as acceptWebSocket tags). */
 export function eventTags(e: { kind: string; repo?: string | null; collection: string | null }): string[] {
@@ -13,7 +13,7 @@ export function eventTags(e: { kind: string; repo?: string | null; collection: s
     t.push("main");
     if (e.repo) t.push(`main:${e.repo}`);
   }
-  if (e.collection === "meta_files" || e.collection === "connections") t.push("meta");
+  if (e.collection === "meta_files" || e.collection === "presence") t.push("meta");
   return t;
 }
 

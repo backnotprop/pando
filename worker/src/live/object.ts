@@ -18,6 +18,7 @@ import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
 export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+const EVENTS_FLUSH_MS = 250; // meta events go to the monorepo's stream in one call per this much time
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
 const GROUP_MS = 2_000; // paths due within this of each other share a commit
 const RETRY_MIN_MS = 30_000;
@@ -696,11 +697,14 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at + QUIET_MS,
       );
     }
-    const entry = this.historyEntry(this.row(version));
-    this.emit({
-      kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
-      repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: entry,
-    });
+    // To the event stream, only when it is on, and not during pando init's first upload
+    // (thousands of files; machines catch up from history, the web refetches the tree).
+    if (EVENT_STREAM && this.env.MONOREPO && !this.initializing()) {
+      this.emit({
+        kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
+        repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: this.historyEntry(this.row(version)),
+      });
+    }
     return version;
   }
 
@@ -727,24 +731,31 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // ---- the monorepo's event stream (A9) ----
 
   private outbox: StreamEvent[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private sending: Promise<unknown> = Promise.resolve();
 
-  /** Queue an event for the monorepo object's stream. Sent in order, in batches, never awaited by the saver. */
+  /**
+   * Queue an event for the monorepo object's stream. Sent in order, in one
+   * call per FLUSH_MS (a burst of saves is one call), never awaited by the saver.
+   */
   private emit(e: StreamEvent): void {
     if (!EVENT_STREAM || !this.env.MONOREPO) return;
     this.outbox.push(e);
-    if (this.outbox.length > 1) return;
-    queueMicrotask(() => {
-      const batch = this.outbox;
-      this.outbox = [];
-      const monorepo = this.kv("monorepo");
-      if (!monorepo || !this.env.MONOREPO) return;
-      const stub = this.env.MONOREPO.getByName(monorepo);
-      this.sending = this.sending
-        .then(() => stub.publishMany(batch))
-        .catch((err) => console.error("meta events not sent:", err instanceof Error ? err.message : String(err)));
-      this.ctx.waitUntil(this.sending);
-    });
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => this.flush(), EVENTS_FLUSH_MS);
+  }
+
+  private flush(): void {
+    this.flushTimer = null;
+    const batch = this.outbox;
+    this.outbox = [];
+    const monorepo = this.kv("monorepo");
+    if (!batch.length || !monorepo || !this.env.MONOREPO) return;
+    const stub = this.env.MONOREPO.getByName(monorepo);
+    this.sending = this.sending
+      .then(() => stub.publishMany(batch))
+      .catch((err) => console.error("meta events not sent:", err instanceof Error ? err.message : String(err)));
+    this.ctx.waitUntil(this.sending);
   }
 
   private connectionRow(att: Attachment) {
@@ -758,19 +769,25 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     };
   }
 
-  private emitConnection(kind: string, op: "upsert" | "delete", att: Attachment): void {
+  // Presence is sent whole (who is connected now, from the live sockets), not as deltas:
+  // a close is not always reported, so a client never has to piece it together.
+  private emitConnection(kind: string, _op: "upsert" | "delete", att: Attachment): void {
+    if (!EVENT_STREAM || !this.env.MONOREPO) return;
     this.emit({
-      kind, collection: "connections", key: att.id, op, repo: "meta", actor: null,
-      machine: att.machine, agent: att.agent, row: this.connectionRow(att),
+      kind, collection: "presence", key: "meta", op: "upsert", repo: "meta", actor: null,
+      machine: att.machine, agent: att.agent,
+      // The changing socket's attachment may not be saved yet: leave it out, then add it on connect.
+      row: { connections: [...this.connections(att.id), ...(kind === "machine.connected" ? [this.connectionRow(att)] : [])] },
+      connection: this.connectionRow(att),
     });
   }
 
-  // Who is connected now: every socket that said hello (A11).
-  private connections() {
+  // Who is connected now: every socket that said hello (A11), less one that is closing.
+  private connections(except: string | null = null) {
     const out: ReturnType<MetaLayerObject["connectionRow"]>[] = [];
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() as Attachment | null;
-      if (a?.hello) out.push(this.connectionRow(a));
+      if (a?.hello && a.id !== except) out.push(this.connectionRow(a));
     }
     return out;
   }

@@ -267,6 +267,7 @@ describe("event topics", () => {
       ["all", "kind:default_head.updated", "repo:projects-web", "main", "main:projects-web"],
     );
     expect(eventTags({ kind: "meta.saved", repo: "meta", collection: "meta_files" })).toContain("meta");
+    expect(eventTags({ kind: "machine.connected", repo: "meta", collection: "presence" })).toContain("meta");
     expect(parseTopics(null)).toEqual(["all"]);
     expect(parseTopics("main,repo:projects-web")).toEqual(["main", "repo:projects-web"]);
     expect(parseTopics("nope")).toBeNull();

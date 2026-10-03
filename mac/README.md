@@ -12,7 +12,7 @@ Derived from Oak's open-source FSKit extension (Apache 2.0); see `NOTICE`.
 | Path | What it is |
 | --- | --- |
 | `project.yml` | XcodeGen spec for the app, the extension and the broker |
-| `HostApp/` | Pando.app: carries the extension and explains the one switch |
+| `HostApp/` | Pando.app: carries the extension, explains the one switch, and shows FSKit's answer on whether it is on |
 | `Extension/` | the FSKit extension (sandboxed): turns each file operation into a wire v3 request |
 | `Broker/` | `pando-broker`: relays the extension's requests to the mount's daemon socket |
 | `Tests/` | the wire harness: the extension's client and the broker against a fake daemon |
@@ -178,6 +178,15 @@ contract's section 7:
   no `getattr` first.
 - `createSymbolicLink` sends `symlink`; `setAttributes` sends `setattr`
   (size, mode, times); `reclaimItem` batches `forget`.
+- Extended attributes live in the extension's memory, per item, and are
+  dropped on remove and on unmount. Without them macOS writes every xattr
+  (`com.apple.provenance` on each new file, Finder's info) as an AppleDouble
+  `._` file through the mount: a `git clone` into a mount got a `._` file
+  beside every file, `.git/objects/pack/._pack-*.idx` included, and
+  `npm install` 65 among 118 files.
+- At debug level the extension logs each call's thread and FSKit's read and
+  write sizes:
+  `log stream --debug --predicate 'subsystem == "ai.plannotator.pando.extension"'`.
 
 ## Signing: the owner's Apple steps
 
@@ -210,12 +219,70 @@ Apple Developer account (Certificates, Identifiers & Profiles):
    ```
 
 6. First run on a Mac: put Pando.app in `/Applications`, open it once, and
-   turn on **Pando** in System Settings, General, Login Items & Extensions,
-   File System Extensions. No restart.
+   turn on **Pando** in System Settings, General, Login Items & Extensions:
+   show the extensions **By Category**, click the info button next to
+   **File System Extensions**, turn on Pando, Done. No restart.
 
-Not known until the first signed run: whether macOS asks for a password at
-the switch, whether it shows a "Background Items Added" notice for the
-broker, and whether a rebuilt app keeps the switch on.
+## What macOS 26.3 does (measured 2026-10-03)
+
+**The switch.** In the "By App" view the switch for Pando does not stay on:
+each click logs `LoginItems: Failed to enabled FSExtension: Error
+Domain=NSPOSIXErrorDomain Code=1` (11 tries). From the "By Category" view,
+File System Extensions, info button, it works. The failed clicks still set
+pluginkit's choice, so `pluginkit -m -i ai.plannotator.pando.extension`
+shows `+` while `/sbin/mount` says `Module ai.plannotator.pando.extension is
+disabled!`. pluginkit is not FSKit's answer. FSKit keeps its own per-person
+list, `~/Library/Group Containers/group.com.apple.fskit.settings/enabledModules.plist`
+(Apple DTS, developer forums thread 808594, calls it an implementation
+detail). Pando.app asks FSKit itself (`FSClient`, `isEnabled`); the `pando`
+command and the daemon read that list and fall back to pluginkit.
+
+**The broker's LaunchAgent.** `pando mac broker` (or the first FSKit
+worktree) loads it. About 10 s later macOS shows "Background Items Added":
+"“Pando” can run in the background. You can manage background…". No
+password.
+
+**Mounting.** No prompt, no password, no notification. From the daemon's
+"mounting repo" to the extension's `hello` took about 0.12 s with the
+extension already running, about 0.5 s on its first launch.
+
+**Updating Pando.app.**
+- A terminal cannot replace it: macOS's App Management protection refuses
+  every write into an installed app's bundle ("System Policy: ditto deny(1)
+  file-write-create /Applications/Pando.app/Contents/..."), with no prompt.
+  Replace it in Finder (drag onto Applications, Replace), or give the
+  terminal App Management in System Settings, Privacy & Security.
+- Replacing the app unmounts every Pando volume (the daemons log "fskit:
+  volume was unmounted" and mount again by themselves later) and **turns the
+  switch off**: FSKit rewrites its list without Pando. Turn it on again, By
+  Category as above.
+- After a Finder replace pluginkit may list nothing for Pando. Register the
+  extension again with
+  `pluginkit -a /Applications/Pando.app/Contents/Extensions/PandoExtension.appex`.
+- Every build on this Mac: unregister and delete the build product right
+  after copying it out (`pluginkit -r <build>/Contents/Extensions/PandoExtension.appex`,
+  `lsregister -u <build app>`, `rm -rf`), or System Settings shows two Pando
+  entries.
+
+**A stale FSKit agent.** After the app is installed or replaced, `fskit_agent`
+(the per-person FSKit agent) can keep the old copy's identity. A mount then
+fails with `mount: Probing resource: ... (com.apple.extensionKit.errorDomain
+error 2.)`, and extensionkitservice logs `Failed to initialize
+_EXExtensionIdentity ... Code=5`. Fix: `killall -9 fskit_agent` as yourself
+(no sudo; launchd starts it again on demand), or log out and back in. Eject
+any other FSKit volume first (an exFAT or FAT drive), because the agent
+serves those too. A plain `killall` is not enough: the agent then waits
+forever on the failed launch and, while it waits, no FSKit volume mounts.
+
+**Caching.** The kernel caches writes and sends them to the extension later
+(100 MiB of `write()` calls return in 0.07 s). `fsync` waits until the daemon
+holds every byte, but does not report a write the daemon refused. It caches
+attributes and file contents too: a change made behind the kernel stayed
+invisible to `stat` and `cat` for 30 to 45 s when the file was checked every
+15 s, and for over 90 s when it was checked ten times a second. Directory
+listings are not cached. So the daemon writes every server change through
+the mount (the fork's write-through); from a HEAD move to FSEvents took about
+0.4 s.
 
 ## Icon
 

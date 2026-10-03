@@ -190,6 +190,8 @@ try {
   checkS("event: default_head.updated to the merge commit", e?.row?.default_head === mergeSha);
   e = await find(ev, (x) => x.kind === "branch.updated" && x.row?.name === "feat/b" && x.row?.behind === 3);
   checkS("event: the other open branch republished (behind 3 after the merge: the merge commit and feat/a's two)", !!e);
+  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/feat%2Fa/commits`, A);
+  check("a merged branch still lists its 2 commits", r.json?.commits?.length === 2 && r.json.commits[0].sha === headA, `${r.json?.commits?.length}`);
   r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=merged`, A);
   const mb = r.json?.branches?.[0];
   check("GET listBranches has the merge facts too", mb?.merged_by === `ana-${id}` && mb?.merged_machine === "ana-mbp" && mb?.forced === false && mb?.merged_agent === "agent-1");

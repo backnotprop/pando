@@ -268,6 +268,14 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.row<BranchRecord>("SELECT * FROM branches WHERE repo = ? AND name = ? AND deleted_at IS NULL", repo, name);
   }
 
+  /** Where main was before the merge that landed this branch head, if Pando merged it. */
+  mergedFrom(repo: string, branch: string, head: string): string | null {
+    return this.row<{ base_before: string }>(
+      "SELECT base_before FROM merges WHERE repo = ? AND branch = ? AND head = ? ORDER BY id DESC LIMIT 1",
+      repo, branch, head,
+    )?.base_before ?? null;
+  }
+
   /** The door's one rule: main moves only by a merge (creating it is allowed). */
   checkPush(repo: string, commands: RefCommand[]): PushVerdict[] {
     const r = this.repoRow(repo);

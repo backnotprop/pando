@@ -511,7 +511,8 @@ async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
   const refs = branchesOf(await listRefs(c.env, r));
   const head = refs.get(branch);
   if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
-  const main = refs.get(r.default_branch) ?? null;
+  // A merged branch is compared with main as it was before its merge, so its page still lists its commits.
+  const main = (await c.get("stub").mergedFrom(r.name, branch, head)) ?? refs.get(r.default_branch) ?? null;
   const out = await withRepo(c.env, r.artifacts_name, async (repo) => {
     const read = commitReader(repo);
     let shas: string[];

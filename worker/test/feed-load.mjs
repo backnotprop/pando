@@ -65,11 +65,12 @@ const say = (s) => {
   out.push(s);
   console.log(s);
 };
+let me = null; // the owner of everything made here (namespaces: owner/name)
 try {
   S = HOME_CRED
     ? readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim()
     : (await call("POST", "/v1/users", BOOT, { login: `hl-${id}`, credential_name: "hl-mbp" })).json?.credential?.secret;
-  const me = (await call("GET", "/v1/user", S)).json?.login;
+  me = (await call("GET", "/v1/user", S)).json?.login;
   const names = Array.from({ length: N }, (_, i) => `hl${i}-${id}`);
   const clone = {};
   let t0 = performance.now();
@@ -83,8 +84,8 @@ try {
   say(`made ${made.length} monorepos in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   // Activity: 3 worktree reports and a status in each.
   await pool(made, 10, async (m) => {
-    for (let k = 0; k < 3; k++) await call("PUT", `/v1/monorepos/${m}/worktrees/wt${k}`, S, { repo: ".", branch: `b${k}`, path: `worktrees/b${k}`, machine: "hl-mbp", kind: "sparse" });
-    await call("POST", `/v1/monorepos/${m}/repos/${m}/statuses/${"a".repeat(40)}`, S, { state: "success", context: "ci" });
+    for (let k = 0; k < 3; k++) await call("PUT", `/v1/monorepos/${me}/${m}/worktrees/wt${k}`, S, { repo: ".", branch: `b${k}`, path: `worktrees/b${k}`, machine: "hl-mbp", kind: "sparse" });
+    await call("POST", `/v1/monorepos/${me}/${m}/repos/${m}/statuses/${"a".repeat(40)}`, S, { state: "success", context: "ci" });
   });
   // Needs: a real branch in NEEDS monorepos (ready); the first one failing.
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: S, GIT_AUTHOR_NAME: "x", GIT_AUTHOR_EMAIL: "x@pando.invalid", GIT_COMMITTER_NAME: "x", GIT_COMMITTER_EMAIL: "x@pando.invalid" };
@@ -104,7 +105,7 @@ try {
     git(["push", "-q", clone[m], "feat"], src);
     if (m === made[0]) {
       const head = git(["rev-parse", "HEAD"], src).stdout.trim();
-      await call("POST", `/v1/monorepos/${m}/repos/${m}/statuses/${head}`, S, { state: "failure", context: "ci" });
+      await call("POST", `/v1/monorepos/${me}/${m}/repos/${m}/statuses/${head}`, S, { state: "failure", context: "ci" });
     }
   }
   // Settle: every monorepo joined, needs counted.
@@ -160,7 +161,7 @@ try {
     const m = made[k % made.length];
     const wid = `live${k}`;
     const t = performance.now();
-    await call("PUT", `/v1/monorepos/${m}/worktrees/${wid}`, S, { repo: ".", branch: `l${k}`, path: `worktrees/l${k}`, machine: "hl-mbp", kind: "sparse" });
+    await call("PUT", `/v1/monorepos/${me}/${m}/worktrees/${wid}`, S, { repo: ".", branch: `l${k}`, path: `worktrees/l${k}`, machine: "hl-mbp", kind: "sparse" });
     sent.set(wid, t);
     await sleep(300);
   }
@@ -172,7 +173,7 @@ try {
   ws.onmessage = (e) => {
     try {
       const f = JSON.parse(e.data);
-      if (f.type === "event" && f.event.kind === "branch.opened") pushArrivals.set(`${f.event.monorepo}/${f.event.branch}`, performance.now());
+      if (f.type === "event" && f.event.kind === "branch.opened") pushArrivals.set(`${f.event.monorepo?.split("/")[1]}/${f.event.branch}`, performance.now());
     } catch {}
   };
   const pushSent = new Map();
@@ -210,7 +211,7 @@ try {
 } finally {
   const t0 = performance.now();
   await pool(made, 5, async (m) => {
-    const r = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, S);
+    const r = await call("DELETE", `/v1/monorepos/${me}/${m}?confirm=${me}/${m}`, S);
     if (r.status !== 204) console.log(`delete ${m}: ${r.status}`);
   });
   console.log(`deleted ${made.length} monorepos in ${((performance.now() - t0) / 1000).toFixed(1)} s`);

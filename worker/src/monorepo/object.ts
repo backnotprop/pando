@@ -1,6 +1,7 @@
 // The monorepo object: one Durable Object (SQLite) per monorepo. It keeps
-// tokens, repos, branches, reviews, statuses, merges, hooks, deliveries and
-// the worktree registry, and it runs merges one at a time.
+// repos, branches, reviews, statuses, merges, hooks, deliveries and the
+// worktree registry, and it runs merges one at a time. Users, credentials
+// and membership are in the accounts object.
 // Owned by the server-git lane.
 //
 // Its methods are RPC. A method that can fail returns an Outcome, because RPC
@@ -24,26 +25,21 @@ import type {
   Outcome,
   RepoEvent,
   RepoRecord,
-  Role,
   StatusRecord,
-  TokenInfo,
 } from "./types";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS tokens (
-  id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL,
-  email TEXT, created_at TEXT NOT NULL, created_by TEXT NOT NULL, last_used_at TEXT, revoked_at TEXT);
 CREATE TABLE IF NOT EXISTS repos (
   name TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, artifacts_name TEXT NOT NULL UNIQUE, remote TEXT NOT NULL,
   default_branch TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL, created_by TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS branches (
-  repo TEXT NOT NULL, name TEXT NOT NULL, head TEXT, creator TEXT, creator_role TEXT, title TEXT, description TEXT,
+  repo TEXT NOT NULL, name TEXT NOT NULL, head TEXT, creator TEXT, title TEXT, description TEXT,
   created_at TEXT, updated_at TEXT, merge_commit TEXT, merged_head TEXT, merged_at TEXT, merged_by TEXT, deleted_at TEXT,
   PRIMARY KEY (repo, name));
 CREATE TABLE IF NOT EXISTS reviews (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, head TEXT NOT NULL, verdict TEXT NOT NULL,
-  body TEXT, comments TEXT NOT NULL, author TEXT NOT NULL, author_role TEXT NOT NULL, created_at TEXT NOT NULL);
+  body TEXT, comments TEXT NOT NULL, author TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS reviews_branch ON reviews (repo, branch);
 CREATE TABLE IF NOT EXISTS statuses (
   id INTEGER PRIMARY KEY AUTOINCREMENT, repo TEXT NOT NULL, sha TEXT NOT NULL, context TEXT NOT NULL, state TEXT NOT NULL,
@@ -64,7 +60,7 @@ CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries (status, next_attempt_at
 CREATE INDEX IF NOT EXISTS deliveries_hook ON deliveries (hook_id, created_at);
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL, machine TEXT NOT NULL,
-  agent TEXT, kind TEXT NOT NULL, reported_by TEXT NOT NULL, reported_role TEXT NOT NULL,
+  agent TEXT, kind TEXT NOT NULL, reported_by TEXT NOT NULL,
   created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
 `;
 
@@ -161,43 +157,6 @@ export class MonorepoObject extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
   }
 
-  /** The monorepo, and the identity behind a token hash (null if unknown or revoked). */
-  session(tokenHash: string | null): { monorepo: MonorepoInfo | null; identity: Identity | null } {
-    const monorepo = this.info();
-    if (!monorepo || !tokenHash) return { monorepo, identity: null };
-    const t = this.row<{ id: string; name: string; role: Role; email: string | null; last_used_at: string | null }>(
-      "SELECT id, name, role, email, last_used_at FROM tokens WHERE hash = ? AND revoked_at IS NULL",
-      tokenHash,
-    );
-    if (!t) return { monorepo, identity: null };
-    if (!t.last_used_at || Date.now() - Date.parse(t.last_used_at) > 60_000) {
-      this.sql.exec("UPDATE tokens SET last_used_at = ? WHERE id = ?", now(), t.id);
-    }
-    return { monorepo, identity: { monorepo: monorepo.name, name: t.name, role: t.role, email: t.email, token_id: t.id } };
-  }
-
-  // ── Tokens ───────────────────────────────────────────────────────────────
-
-  addToken(t: { hash: string; name: string; role: Role; email: string | null; created_by: string }): TokenInfo {
-    const id = randomId("tok_", 6);
-    const at = now();
-    this.sql.exec(
-      "INSERT INTO tokens (id, hash, name, role, email, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      id, t.hash, t.name, t.role, t.email, at, t.created_by,
-    );
-    return { id, name: t.name, role: t.role, email: t.email, created_at: at, created_by: t.created_by, last_used_at: null };
-  }
-
-  listTokens(): TokenInfo[] {
-    return this.rows<TokenInfo>(
-      "SELECT id, name, role, email, created_at, created_by, last_used_at FROM tokens WHERE revoked_at IS NULL ORDER BY created_at",
-    );
-  }
-
-  revokeToken(id: string): boolean {
-    return this.sql.exec("UPDATE tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", now(), id).rowsWritten > 0;
-  }
-
   // ── Repos ────────────────────────────────────────────────────────────────
 
   addRepo(r: RepoRecord): Promise<Outcome<RepoRecord>> {
@@ -233,23 +192,13 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.row<BranchRecord>("SELECT * FROM branches WHERE repo = ? AND name = ? AND deleted_at IS NULL", repo, name);
   }
 
-  /** The door's rules. Returns the refused commands with git-style reasons. */
-  checkPush(repo: string, identity: Identity, commands: RefCommand[]): PushVerdict[] {
+  /** The door's one rule: main moves only by a merge (creating it is allowed). */
+  checkPush(repo: string, commands: RefCommand[]): PushVerdict[] {
     const r = this.getRepo(repo);
     const main = `refs/heads/${r?.default_branch ?? DEFAULT_BRANCH}`;
-    const refused: PushVerdict[] = [];
-    for (const c of commands) {
-      if (c.ref === main) {
-        if (c.old !== ZERO) refused.push({ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it with pando merge` });
-        continue;
-      }
-      if (!c.ref.startsWith("refs/heads/")) continue;
-      const b = this.branchRecord(repo, c.ref.slice(11));
-      if (identity.role === "agent" && b?.creator && b.creator !== identity.name) {
-        refused.push({ ref: c.ref, reason: `branch ${b.name} belongs to ${b.creator}` });
-      }
-    }
-    return refused;
+    return commands
+      .filter((c) => c.ref === main && c.old !== ZERO)
+      .map((c) => ({ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }));
   }
 
   /** Record branch heads after Artifacts accepted a push. Returns the events to deliver. */
@@ -263,10 +212,10 @@ export class MonorepoObject extends DurableObject<Env> {
       const name = u.ref.slice(11);
       const base: Omit<RepoEvent, "event"> = {
         repo, branch: name, ref: u.ref, before: u.old, head: u.new, base: null,
-        author: null, pusher: identity.name, title: null, description: null,
+        author: null, pusher: identity.login, title: null, description: null,
       };
       if (name === main) {
-        events.push({ ...base, event: "push", author: identity.name });
+        events.push({ ...base, event: "push", author: identity.login });
         continue;
       }
       let b = this.branchRecord(repo, name);
@@ -278,11 +227,11 @@ export class MonorepoObject extends DurableObject<Env> {
       const opened = !b;
       if (!b) {
         this.sql.exec(
-          `INSERT INTO branches (repo, name, head, creator, creator_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (repo, name) DO UPDATE SET head = excluded.head, creator = excluded.creator, creator_role = excluded.creator_role,
+          `INSERT INTO branches (repo, name, head, creator, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (repo, name) DO UPDATE SET head = excluded.head, creator = excluded.creator,
              title = NULL, description = NULL, created_at = excluded.created_at, updated_at = excluded.updated_at,
              merge_commit = NULL, merged_head = NULL, merged_at = NULL, merged_by = NULL, deleted_at = NULL`,
-          repo, name, u.new, identity.name, identity.role, at, at,
+          repo, name, u.new, identity.login, at, at,
         );
       } else {
         this.sql.exec("UPDATE branches SET head = ?, updated_at = ? WHERE repo = ? AND name = ?", u.new, at, repo, name);
@@ -296,15 +245,16 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** A branch made by the API (createBranch): the caller is its creator. */
-  createBranchRecord(repo: string, name: string, head: string, identity: Identity, title: string | null, description: string | null): BranchRecord {
-    this.recordPush(repo, identity, [{ old: ZERO, new: head, ref: `refs/heads/${name}` }]);
+  createBranchRecord(repo: string, name: string, head: string, identity: Identity, title: string | null, description: string | null): RepoEvent[] {
+    const events = this.recordPush(repo, identity, [{ old: ZERO, new: head, ref: `refs/heads/${name}` }]);
     if (title !== null || description !== null) {
       this.sql.exec("UPDATE branches SET title = ?, description = ? WHERE repo = ? AND name = ?", title, description, repo, name);
+      for (const e of events) Object.assign(e, { title, description });
     }
-    return this.branchRecord(repo, name)!;
+    return events;
   }
 
-  updateBranch(repo: string, name: string, patch: { title?: string; description?: string }, identity: Identity, head: string): Promise<Outcome<BranchRecord>> {
+  updateBranch(repo: string, name: string, patch: { title?: string; description?: string }, head: string): Promise<Outcome<BranchRecord>> {
     return this.guard(() => {
       let b = this.branchRecord(repo, name);
       if (!b) {
@@ -316,7 +266,6 @@ export class MonorepoObject extends DurableObject<Env> {
         );
         b = this.branchRecord(repo, name)!;
       }
-      if (identity.role === "agent" && b.creator && b.creator !== identity.name) fail(403, "not_your_branch", `branch ${name} belongs to ${b.creator}`);
       if (patch.title !== undefined) this.sql.exec("UPDATE branches SET title = ? WHERE repo = ? AND name = ?", patch.title, repo, name);
       if (patch.description !== undefined) this.sql.exec("UPDATE branches SET description = ? WHERE repo = ? AND name = ?", patch.description, repo, name);
       return this.branchRecord(repo, name)!;
@@ -329,16 +278,16 @@ export class MonorepoObject extends DurableObject<Env> {
     const id = randomId("rv_");
     const at = now();
     this.sql.exec(
-      "INSERT INTO reviews (id, repo, branch, head, verdict, body, comments, author, author_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      id, repo, branch, head, verdict, body, JSON.stringify(comments), identity.name, identity.role, at,
+      "INSERT INTO reviews (id, repo, branch, head, verdict, body, comments, author, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      id, repo, branch, head, verdict, body, JSON.stringify(comments), identity.login, at,
     );
-    return { id, branch, head, verdict, body, comments, author: identity.name, author_role: identity.role, created_at: at };
+    return { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
   }
 
   listReviews(repo: string, branch: string) {
     return this.rows<Record<string, string>>("SELECT * FROM reviews WHERE repo = ? AND branch = ? ORDER BY created_at", repo, branch).map((r) => ({
       id: r.id, branch: r.branch, head: r.head, verdict: r.verdict, body: r.body, comments: JSON.parse(r.comments),
-      author: r.author, author_role: r.author_role, created_at: r.created_at,
+      author: r.author, created_at: r.created_at,
     }));
   }
 
@@ -372,7 +321,6 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   private async mergeNow(a: MergeArgs): Promise<MergeResult> {
-    if (a.identity.role !== "person") fail(403, "merge_requires_person", "only a person merges; a person's Merge is the approval");
     const r = this.getRepo(a.repo) ?? fail(404, "not_found", `no repo ${a.repo}`);
     const refs = branchesOf(await listRefs(this.env, r));
     const head = refs.get(a.branch) ?? fail(404, "not_found", `no branch ${a.branch}`);
@@ -386,14 +334,14 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!gitwrite) fail(501, "merge_engine_unavailable", "the server-side merge engine (worker/src/gitwrite) is not wired in yet");
     const b = this.branchRecord(a.repo, a.branch);
     const message = a.message ?? mergeMessage(a.branch, b);
-    const email = a.identity.email ?? `${a.identity.name}@pando.invalid`;
+    const email = a.identity.email ?? `${a.identity.login}@users.pando.invalid`;
     let out;
     try {
       out = await gitwrite.mergeCommit(
         { artifacts: this.env.ARTIFACTS, name: r.artifacts_name },
         {
           base: r.default_branch, head, baseSha: base, message,
-          author: { name: a.identity.name, email },
+          author: { name: a.identity.name ?? a.identity.login, email },
           committer: { name: "Pando", email: "pando@pando.invalid" },
         },
       );
@@ -411,14 +359,14 @@ export class MonorepoObject extends DurableObject<Env> {
     }
     if (out.status === "ref_moved") fail(409, "ref_moved", `${r.default_branch} moved while merging; retry`);
     if (out.status === "up_to_date") {
-      return { status: "up_to_date", branch: a.branch, head, sha: base, forced: false, merged_by: a.identity.name };
+      return { status: "up_to_date", branch: a.branch, head, sha: base, forced: false, merged_by: a.identity.login };
     }
     if (out.status !== "merged") fail(502, "merge_failed", `unexpected merge result ${out.status}`);
     const at = now();
     const forced = checks.state !== "success";
     this.sql.exec(
       "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.name, forced ? 1 : 0, at,
+      a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.login, forced ? 1 : 0, at,
     );
     this.sql.exec(
       `INSERT INTO branches (repo, name, head, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -427,17 +375,17 @@ export class MonorepoObject extends DurableObject<Env> {
     );
     this.sql.exec(
       "UPDATE branches SET merge_commit = ?, merged_head = ?, merged_at = ?, merged_by = ? WHERE repo = ? AND name = ?",
-      out.sha, head, at, a.identity.name, a.repo, a.branch,
+      out.sha, head, at, a.identity.login, a.repo, a.branch,
     );
     await this.enqueue(
       [{
         event: "merged", repo: a.repo, branch: a.branch, ref: `refs/heads/${a.branch}`, before: out.old, head,
-        base: out.mergeBase, author: b?.creator ?? null, pusher: a.identity.name, title: b?.title ?? null,
+        base: out.mergeBase, author: b?.creator ?? null, pusher: a.identity.login, title: b?.title ?? null,
         description: b?.description ?? null, merge_commit: out.sha,
       }],
       a.origin,
     );
-    return { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.name };
+    return { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
   }
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────
@@ -446,7 +394,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const id = randomId("hk_");
     this.sql.exec(
       "INSERT INTO hooks (id, repo, type, url, secret, events, config, active, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-      id, repo, h.type, h.url, h.secret, JSON.stringify(h.events), h.config ? JSON.stringify(h.config) : null, now(), identity.name,
+      id, repo, h.type, h.url, h.secret, JSON.stringify(h.events), h.config ? JSON.stringify(h.config) : null, now(), identity.login,
     );
     return hookView(this.row<HookRow>("SELECT * FROM hooks WHERE id = ?", id)!);
   }
@@ -549,14 +497,13 @@ export class MonorepoObject extends DurableObject<Env> {
   putWorktree(id: string, w: { repo: string; branch: string; path: string; machine: string; agent: string | null; kind: string }, identity: Identity): Promise<Outcome<Record<string, unknown>>> {
     return this.guard(() => {
       const at = now();
-      const old = this.row<{ reported_by: string; created_at: string }>("SELECT reported_by, created_at FROM worktrees WHERE id = ?", id);
-      if (old && identity.role === "agent" && old.reported_by !== identity.name) fail(403, "not_your_worktree", `worktree ${id} was reported by ${old.reported_by}`);
+      const old = this.row<{ created_at: string }>("SELECT created_at FROM worktrees WHERE id = ?", id);
       this.sql.exec(
-        `INSERT INTO worktrees (id, repo, branch, path, machine, agent, kind, reported_by, reported_role, created_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO worktrees (id, repo, branch, path, machine, agent, kind, reported_by, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET repo = excluded.repo, branch = excluded.branch, path = excluded.path, machine = excluded.machine,
-           agent = excluded.agent, kind = excluded.kind, last_seen_at = excluded.last_seen_at`,
-        id, w.repo, w.branch, w.path, w.machine, w.agent, w.kind, identity.name, identity.role, old?.created_at ?? at, at,
+           agent = excluded.agent, kind = excluded.kind, reported_by = excluded.reported_by, last_seen_at = excluded.last_seen_at`,
+        id, w.repo, w.branch, w.path, w.machine, w.agent, w.kind, identity.login, old?.created_at ?? at, at,
       );
       return this.worktree(id)!;
     });
@@ -580,10 +527,9 @@ export class MonorepoObject extends DurableObject<Env> {
     );
   }
 
-  deleteWorktree(id: string, identity: Identity): Promise<Outcome<boolean>> {
+  deleteWorktree(id: string): Promise<Outcome<boolean>> {
     return this.guard(() => {
-      const old = this.row<{ reported_by: string }>("SELECT reported_by FROM worktrees WHERE id = ?", id) ?? fail(404, "not_found", `no worktree ${id}`);
-      if (identity.role === "agent" && old.reported_by !== identity.name) fail(403, "not_your_worktree", `worktree ${id} was reported by ${old.reported_by}`);
+      if (!this.row("SELECT id FROM worktrees WHERE id = ?", id)) fail(404, "not_found", `no worktree ${id}`);
       this.sql.exec("DELETE FROM worktrees WHERE id = ?", id);
       return true;
     });

@@ -6,7 +6,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "node test/e2e.mjs"
   },
   "dependencies": {
     "diff": "^9.0.0",
@@ -14,6 +15,7 @@
     "smol-toml": "^1.9.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261003.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
     "wrangler": "^4.147.0"

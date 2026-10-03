@@ -26,11 +26,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "MONOREPO", "class_name": "MonorepoObject" },
-      { "name": "META", "class_name": "MetaLayerObject" }
+      { "name": "META", "class_name": "MetaLayerObject" },
+      // Users, credentials and membership: one instance for the whole Worker.
+      { "name": "ACCOUNTS", "class_name": "AccountsObject" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["MonorepoObject", "MetaLayerObject"] }
+    { "tag": "v1", "new_sqlite_classes": ["MonorepoObject", "MetaLayerObject"] },
+    { "tag": "v2", "new_sqlite_classes": ["AccountsObject"] }
   ],
   // The contract, served at /v1/openapi.yaml.
   "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }]

@@ -1,7 +1,7 @@
 // The git door: smart HTTP at /<monorepo>/<repo>.git, proxied to the repo's
 // Artifacts remote with tokens the Worker mints for itself. Receive-pack is
-// checked before the pack is streamed: no push to main (except the first),
-// no agent pushing to a branch another identity created.
+// checked before the pack is streamed: main moves only by a merge (the first
+// push that creates it passes). Only members of the monorepo get through.
 
 import type { Env } from "../env";
 import { credential, errorJson, HttpError, toErrorResponse } from "../http";
@@ -10,7 +10,8 @@ import { compare } from "./graph";
 import { ZERO } from "./names";
 import { drain, parseReport, prepend, readCommandSection, refusal } from "./pktline";
 import type { Identity, RepoEvent, RepoRecord } from "./types";
-import { hashToken, monorepoStub } from "./session";
+import { monorepoStub } from "./session";
+import { authenticate, identityOf } from "../accounts/auth";
 
 const DOOR_RE = /^\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/;
 
@@ -61,18 +62,22 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   const secret = credential(req);
   if (!secret) return unauthorized();
   const stub = monorepoStub(env, monorepo);
-  const repo = await stub.getRepo(repoName);
-  if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
 
   // A hook delivery's read token: clone and fetch only, checked by Artifacts.
-  if (secret.startsWith("art_v1_")) {
+  if (/^art_v\d+_/.test(secret)) {
     if (service !== "git-upload-pack") return unauthorized();
+    const repo = await stub.getRepo(repoName);
+    if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
     return relay(await toArtifacts(req, repo, action, url.search, { authorization: req.headers.get("authorization")! }));
   }
 
-  const { monorepo: info, identity } = await stub.session(await hashToken(secret));
-  if (!info) return errorJson(404, "not_found", `no monorepo ${monorepo}`);
-  if (!identity) return unauthorized();
+  const auth = await authenticate(env, secret, monorepo);
+  if (!auth) return unauthorized();
+  if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${monorepo}`);
+  if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${monorepo}`);
+  const identity = identityOf(auth);
+  const repo = await stub.getRepo(repoName);
+  if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
 
   if (service === "git-upload-pack" || action === "info/refs") {
     const scope = service === "git-upload-pack" ? "read" : "write";
@@ -111,7 +116,7 @@ async function receivePack(
   }
   const section = await readCommandSection(body);
   const stub = monorepoStub(env, monorepo);
-  const refused = await stub.checkPush(repo.name, identity, section.commands);
+  const refused = await stub.checkPush(repo.name, section.commands);
   if (refused.length) {
     await drain(section.rest);
     const reasons = new Map(refused.map((r) => [r.ref, r.reason]));

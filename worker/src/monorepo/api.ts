@@ -2,7 +2,7 @@
 
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
-import { credential, HttpError, toErrorResponse } from "../http";
+import { HttpError, toErrorResponse } from "../http";
 import { artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
@@ -20,8 +20,10 @@ import {
   ZERO,
 } from "./names";
 import type { MonorepoObject } from "./object";
-import { hashToken, isBootstrap, monorepoStub, newToken } from "./session";
-import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoRecord, Role, StatusRecord } from "./types";
+import { hashToken, monorepoStub, newToken } from "./session";
+import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoEvent, RepoRecord, StatusRecord } from "./types";
+import { accounts, authenticate, forgetCachedAuth, identityOf, requireSecret } from "../accounts/auth";
+import type { Auth } from "../accounts/object";
 
 type Stub = DurableObjectStub<MonorepoObject>;
 type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string };
@@ -62,9 +64,9 @@ function str(v: unknown, field: string, opts: { optional?: boolean; max?: number
   return v;
 }
 
-function person(c: C, what: string): Identity {
+function owner(c: C, what: string): Identity {
   const id = c.get("identity");
-  if (id.role !== "person") throw new HttpError(403, "person_only", `only a person can ${what}`);
+  if (id.role !== "owner") throw new HttpError(403, "owner_only", `only an owner can ${what}`);
   return id;
 }
 
@@ -108,21 +110,67 @@ async function createArtifactsRepo(env: Env, name: string, description: string):
   });
 }
 
+// ── Users and credentials ─────────────────────────────────────────────────
+
+type UserVars = { auth: Auth };
+const userAuthed = async (c: Context<{ Bindings: Env; Variables: Vars & UserVars }>, next: () => Promise<void>) => {
+  const auth = await authenticate(c.env, requireSecret(c.req.raw), null);
+  if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
+  c.set("auth", auth);
+  await next();
+};
+const users = new Hono<{ Bindings: Env; Variables: Vars & UserVars }>();
+users.onError((err) => toErrorResponse(err));
+users.use("/v1/user", userAuthed);
+users.use("/v1/user/*", userAuthed);
+users.use("/v1/monorepos", userAuthed);
+
+users.get("/v1/user", (c) => {
+  const a = c.get("auth");
+  return c.json({ ...a.user, credential: a.credential });
+});
+
+users.post("/v1/user/credentials", async (c) => {
+  const a = c.get("auth");
+  const b = await body(c as unknown as C);
+  const name = str(b.name, "name", { max: 200 })!;
+  const kind = b.kind ?? "machine";
+  if (kind !== "machine" && kind !== "sandbox") bad("kind is machine or sandbox");
+  const secret = newToken();
+  const cred = await accounts(c.env).addCredential(a.user.login, { hash: await hashToken(secret), name, kind });
+  return c.json({ ...cred, secret }, 201);
+});
+
+users.get("/v1/user/credentials", async (c) => {
+  return c.json({ credentials: await accounts(c.env).listCredentials(c.get("auth").user.login) });
+});
+
+users.delete("/v1/user/credentials/:id", async (c) => {
+  if (!(await accounts(c.env).revokeCredential(c.get("auth").user.login, c.req.param("id")))) {
+    throw new HttpError(404, "not_found", "no such credential");
+  }
+  forgetCachedAuth();
+  return c.body(null, 204);
+});
+
 // ── Monorepos ─────────────────────────────────────────────────────────────
 
-api.post("/v1/monorepos", async (c) => {
-  if (!c.env.PANDO_BOOTSTRAP) throw new HttpError(503, "bootstrap_not_configured", "the Worker secret PANDO_BOOTSTRAP is not set");
-  if (!(await isBootstrap(c.env, credential(c.req.raw)))) throw new HttpError(401, "unauthorized", "creating a monorepo needs the bootstrap secret");
-  const b = await body(c);
+users.get("/v1/monorepos", async (c) => {
+  return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login) });
+});
+
+users.post("/v1/monorepos", async (c) => {
+  const a = c.get("auth");
+  const b = await body(c as unknown as C);
   if (!validMonorepoName(b.name)) bad("name: lower-case letters, digits, '.', '_', '-'; starts with a letter or digit; no '--'; at most 39 characters");
   const kind = b.kind ?? "monorepo";
   if (kind !== "monorepo" && kind !== "repo") bad("kind is monorepo or repo");
-  const personName = str(b.person, "person", { max: 100 })!;
-  const email = str(b.email, "email", { optional: true, max: 200 }) ?? null;
   const name = b.name;
+  const acc = accounts(c.env);
+  if (!(await acc.claimMonorepo(name, kind, a.user.login))) throw new HttpError(409, "monorepo_exists", `monorepo ${name} exists`);
   const stub = monorepoStub(c.env, name);
-  if (!(await stub.init(name, kind))) throw new HttpError(409, "monorepo_exists", `monorepo ${name} exists`);
   try {
+    if (!(await stub.init(name, kind))) throw new HttpError(409, "monorepo_exists", `monorepo ${name} exists`);
     const repos: RepoRecord[] = [];
     if (kind === "monorepo") {
       await createArtifactsRepo(c.env, metaArtifactsName(name), `Pando meta layer of ${name}`);
@@ -131,85 +179,68 @@ api.post("/v1/monorepos", async (c) => {
       const remote = await createArtifactsRepo(c.env, artifacts_name, `Pando repo ${name}`);
       const rec: RepoRecord = {
         name, path: ".", artifacts_name, remote, default_branch: DEFAULT_BRANCH, description: null,
-        created_at: new Date().toISOString(), created_by: personName,
+        created_at: new Date().toISOString(), created_by: a.user.login,
       };
       repos.push(unwrap(await stub.addRepo(rec)));
     }
-    const secret = newToken();
-    const tok = await stub.addToken({ hash: await hashToken(secret), name: personName, role: "person", email, created_by: "bootstrap" });
+    forgetCachedAuth();
     const info = (await stub.info())!;
     c.set("m", name);
-    return c.json({ monorepo: info, token: { ...tok, token: secret }, repos: repos.map((r) => repoView(c, r)) }, 201);
+    return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView(c as unknown as C, r)) }, 201);
   } catch (err) {
+    await acc.releaseMonorepo(name);
     await stub.destroy();
     throw err;
   }
 });
 
-// Every other route: the monorepo must exist and the token must be known.
+api.route("/", users);
+
+// Every route under one monorepo: members only.
 const authed = async (c: C, next: () => Promise<void>) => {
   const m = c.req.param("m")!;
   if (!validMonorepoName(m)) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-  const stub = monorepoStub(c.env, m);
-  const secret = credential(c.req.raw);
-  if (!secret) throw new HttpError(401, "unauthorized", "send Authorization: Bearer <pando token>");
-  let identity: Identity | null = null;
-  let info: MonorepoInfo | null;
-  if (await isBootstrap(c.env, secret)) {
-    info = await stub.info();
-    identity = { monorepo: m, name: "bootstrap", role: "person", email: null, token_id: "bootstrap", bootstrap: true };
-  } else {
-    ({ monorepo: info, identity } = await stub.session(await hashToken(secret)));
-  }
-  if (!info) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-  if (!identity) throw new HttpError(401, "unauthorized", "unknown or revoked token");
-  const isTokenCreate = c.req.method === "POST" && /\/tokens\/?$/.test(new URL(c.req.url).pathname);
-  if (identity.bootstrap && !isTokenCreate) throw new HttpError(401, "unauthorized", "the bootstrap secret only creates monorepos and tokens");
+  const auth = await authenticate(c.env, requireSecret(c.req.raw), m);
+  if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
+  if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m}`);
+  if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${m}`);
   c.set("m", m);
-  c.set("stub", stub);
-  c.set("info", info);
-  c.set("identity", identity);
+  c.set("stub", monorepoStub(c.env, m));
+  c.set("info", auth.monorepo);
+  c.set("identity", identityOf(auth));
   await next();
 };
 api.use("/v1/monorepos/:m", authed);
 api.use("/v1/monorepos/:m/*", authed);
 
-api.get("/v1/monorepos/:m", (c) => c.json(c.get("info")));
+api.get("/v1/monorepos/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role }));
 
-api.get("/v1/monorepos/:m/me", (c) => {
-  const { bootstrap: _b, ...id } = c.get("identity");
-  return c.json(id);
+// ── Members ───────────────────────────────────────────────────────────────
+
+api.get("/v1/monorepos/:m/members", async (c) => {
+  return c.json({ members: await accounts(c.env).members(c.get("m")) });
 });
 
-// ── Tokens ────────────────────────────────────────────────────────────────
-
-api.post("/v1/monorepos/:m/tokens", async (c) => {
-  const by = person(c, "make tokens");
+api.put("/v1/monorepos/:m/members/:login", async (c) => {
+  const by = owner(c, "manage members");
   const b = await body(c);
-  const name = str(b.name, "name", { max: 100 })!;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(name)) bad("name: letters, digits, '.', '_', '@', '-'");
-  if (b.role !== "person" && b.role !== "agent") bad("role is person or agent");
-  const email = str(b.email, "email", { optional: true, max: 200 }) ?? null;
-  const secret = newToken();
-  const tok = await c.get("stub").addToken({ hash: await hashToken(secret), name, role: b.role as Role, email, created_by: by.name });
-  return c.json({ ...tok, token: secret }, 201);
+  if (b.role !== "owner" && b.role !== "member") bad("role is owner or member");
+  const out = unwrap(await accounts(c.env).putMember(c.get("m"), c.req.param("login"), b.role, by.login));
+  forgetCachedAuth();
+  return c.json(out);
 });
 
-api.get("/v1/monorepos/:m/tokens", async (c) => {
-  person(c, "list tokens");
-  return c.json({ tokens: await c.get("stub").listTokens() });
-});
-
-api.delete("/v1/monorepos/:m/tokens/:id", async (c) => {
-  person(c, "revoke tokens");
-  if (!(await c.get("stub").revokeToken(c.req.param("id")))) throw new HttpError(404, "not_found", "no such token");
+api.delete("/v1/monorepos/:m/members/:login", async (c) => {
+  owner(c, "manage members");
+  unwrap(await accounts(c.env).removeMember(c.get("m"), c.req.param("login")));
+  forgetCachedAuth();
   return c.body(null, 204);
 });
 
 // ── Repos ─────────────────────────────────────────────────────────────────
 
 api.post("/v1/monorepos/:m/repos", async (c) => {
-  const by = person(c, "create repos");
+  const by = c.get("identity");
   const b = await body(c);
   const info = c.get("info");
   if (info.kind === "repo") throw new HttpError(409, "plain_repo", "a plain git repo has exactly one repo");
@@ -224,7 +255,7 @@ api.post("/v1/monorepos/:m/repos", async (c) => {
   const remote = await createArtifactsRepo(c.env, artifacts_name, description ?? `Pando repo ${info.name}/${b.path}`);
   const rec: RepoRecord = {
     name, path: b.path, artifacts_name, remote, default_branch: DEFAULT_BRANCH, description,
-    created_at: new Date().toISOString(), created_by: by.name,
+    created_at: new Date().toISOString(), created_by: by.login,
   };
   return c.json(repoView(c, unwrap(await stub.addRepo(rec))), 201);
 });
@@ -305,7 +336,6 @@ async function branchViews(c: C, r: RepoRecord, names: string[] | null, state: s
         head,
         base,
         author: rec?.creator ?? null,
-        author_role: rec?.creator_role ?? null,
         title: rec?.title ?? null,
         description: rec?.description ?? null,
         ahead,
@@ -353,7 +383,8 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   const reason = result.get(ref);
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
-  await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
+  const events = await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
+  c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
   const view = (await branchViews(c, r, [b.name], "all")).branches[0];
   return c.json(view, 201);
 });
@@ -398,7 +429,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       title: str(b.title, "title", { optional: true, max: 300 }),
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
-    unwrap(await c.get("stub").updateBranch(r.name, branch, patch, c.get("identity"), head));
+    unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head));
     return c.json((await branchViews(c, r, [branch], "all")).branches[0]);
   }
   if (rest === "diff" && method === "GET") return diff(c, r, branch);
@@ -454,7 +485,6 @@ async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
   const b = await body(c);
   const verdict = b.verdict;
   if (verdict !== "comment" && verdict !== "request_changes" && verdict !== "approve") bad("verdict is comment, request_changes or approve");
-  if (verdict === "approve" && id.role !== "person") throw new HttpError(403, "approval_requires_person", "only a person approves; agents comment");
   const text = str(b.body, "body", { optional: true, max: 100_000 }) ?? null;
   const comments = b.comments ?? [];
   if (!Array.isArray(comments) || comments.length > 1000) bad("comments must be a list");
@@ -476,7 +506,6 @@ async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
 }
 
 async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
-  person(c, "merge; a person's Merge is the approval");
   let b: Record<string, unknown> = {};
   if ((c.req.header("content-length") ?? "0") !== "0" || c.req.header("transfer-encoding")) {
     const text = await c.req.text();
@@ -532,7 +561,7 @@ api.post("/v1/monorepos/:m/repos/:r/statuses/:sha", async (c) => {
       target_url: str(b.target_url, "target_url", { optional: true, max: 2000 }) ?? null,
       description: str(b.description, "description", { optional: true, max: 1000 }) ?? null,
     },
-    c.get("identity").name,
+    c.get("identity").login,
   );
   return c.json(s, 201);
 });
@@ -554,7 +583,7 @@ api.get("/v1/monorepos/:m/repos/:r/commits/*", async (c) => {
 const EVENTS = ["push", "branch.opened", "merged"];
 
 api.post("/v1/monorepos/:m/repos/:r/hooks", async (c) => {
-  const by = person(c, "register hooks");
+  const by = owner(c, "register hooks");
   const r = await repoOf(c);
   const b = await body(c);
   const type = b.type;
@@ -587,7 +616,7 @@ api.get("/v1/monorepos/:m/repos/:r/hooks", async (c) => {
 });
 
 api.delete("/v1/monorepos/:m/repos/:r/hooks/:id", async (c) => {
-  person(c, "remove hooks");
+  owner(c, "remove hooks");
   const r = await repoOf(c);
   if (!(await c.get("stub").deleteHook(r.name, c.req.param("id")))) throw new HttpError(404, "not_found", "no such hook");
   return c.body(null, 204);
@@ -599,7 +628,7 @@ api.get("/v1/monorepos/:m/repos/:r/hooks/:id/deliveries", async (c) => {
 });
 
 api.post("/v1/monorepos/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c) => {
-  person(c, "redeliver hooks");
+  owner(c, "redeliver hooks");
   const r = await repoOf(c);
   return c.json(unwrap(await c.get("stub").redeliver(r.name, c.req.param("id"))), 202);
 });
@@ -639,8 +668,28 @@ api.get("/v1/monorepos/:m/worktrees/:id", async (c) => {
 });
 
 api.delete("/v1/monorepos/:m/worktrees/:id", async (c) => {
-  unwrap(await c.get("stub").deleteWorktree(worktreeId(c), c.get("identity")));
+  unwrap(await c.get("stub").deleteWorktree(worktreeId(c)));
   return c.body(null, 204);
 });
+
+/** Fill in each event's merge base, then hand the events to the monorepo object for delivery. */
+async function enqueueWithBases(c: C, r: RepoRecord, events: RepoEvent[]): Promise<void> {
+  if (!events.length) return;
+  try {
+    const main = branchesOf(await listRefs(c.env, r)).get(r.default_branch);
+    if (main) {
+      await withRepo(c.env, r.artifacts_name, async (repo) => {
+        const read = commitReader(repo);
+        for (const e of events) {
+          if (e.head === ZERO || e.branch === r.default_branch) continue;
+          e.base = (await compareWith(read, main, e.head).catch(() => null))?.mergeBase ?? null;
+        }
+      });
+    }
+    await c.get("stub").enqueue(events, new URL(c.req.url).origin);
+  } catch (err) {
+    console.error("queueing hook events failed:", err instanceof Error ? err.message : String(err));
+  }
+}
 
 export type { BranchRecord };

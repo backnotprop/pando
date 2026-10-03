@@ -44,7 +44,7 @@ export function credential(req: Request): string | null {
 /** Never let a token reach a log line or an error body. */
 export function redact(s: string): string {
   return s
-    .replace(/art_v1_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>")
+    .replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>")
     .replace(/pando_[a-f0-9]{20,}/g, "<pando-token>")
     .replace(/\/\/[^/@\s]+@/g, "//<credentials>@");
 }

@@ -1,32 +1,22 @@
 // Records the monorepo object keeps, as the API returns them.
 
-export type Role = "person" | "agent";
 export type Kind = "monorepo" | "repo";
+export type MemberRole = "owner" | "member";
 
+/** The caller: a user, through one of their credentials, and their role in the monorepo. */
 export interface Identity {
-  monorepo: string;
-  name: string;
-  role: Role;
+  login: string;
+  name: string | null;
   email: string | null;
-  token_id: string;
-  /** True for the PANDO_BOOTSTRAP secret, which works on two routes only. */
-  bootstrap?: boolean;
+  credential_id: string;
+  credential_name: string;
+  role: MemberRole;
 }
 
 export interface MonorepoInfo {
   name: string;
   kind: Kind;
   created_at: string;
-}
-
-export interface TokenInfo {
-  id: string;
-  name: string;
-  role: Role;
-  email: string | null;
-  created_at: string;
-  created_by: string;
-  last_used_at: string | null;
 }
 
 export interface RepoRecord {
@@ -45,7 +35,6 @@ export interface BranchRecord {
   name: string;
   head: string | null;
   creator: string | null;
-  creator_role: Role | null;
   title: string | null;
   description: string | null;
   created_at: string | null;

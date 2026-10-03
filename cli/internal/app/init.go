@@ -279,8 +279,11 @@ func printPlan(e *Env, p *detect.Plan) {
 	}
 }
 
-// ensureMonorepo finds the monorepo, or makes it with this machine's
-// credential; the signed-in user becomes its owner.
+// ensureMonorepo makes the monorepo with this machine's credential (the
+// signed-in user becomes its owner), or, if it exists, continues with it.
+// It creates first and looks up only on 409: a lookup before the create
+// would plant a "no such monorepo" answer in the Worker's per-isolate auth
+// cache, which then answers 404 for some seconds after the create.
 func ensureMonorepo(e *Env, serverURL, mono, kind string) (srv server.Server, repos []server.Repo, made bool, err error) {
 	tok, terr := e.Home.Token(serverURL)
 	if terr != nil && !strings.HasPrefix(serverURL, "file://") {
@@ -290,32 +293,29 @@ func ensureMonorepo(e *Env, serverURL, mono, kind string) (srv server.Server, re
 	if err != nil {
 		return nil, nil, false, err
 	}
+	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
+	if err == nil {
+		e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
+		return s, created.Repos, true, nil
+	}
+	if server.StatusOf(err) != 409 {
+		return nil, nil, false, err
+	}
 	m, err := s.GetMonorepo(e.Ctx, mono)
 	switch {
-	case err == nil:
-		if m.Kind != kind {
-			return nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
-		}
-		repos, err := s.ListRepos(e.Ctx, mono)
-		if err != nil {
-			return nil, nil, false, err
-		}
-		e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", mono, config.Host(serverURL), dash(m.Role))
-		return s, repos, false, nil
 	case server.StatusOf(err) == 403:
 		return nil, nil, false, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", mono, config.Host(serverURL))
-	case !errors.Is(err, server.ErrNotFound):
+	case err != nil:
 		return nil, nil, false, err
+	case m.Kind != kind:
+		return nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
 	}
-	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
+	repos, err = s.ListRepos(e.Ctx, mono)
 	if err != nil {
-		if server.StatusOf(err) == 409 {
-			return nil, nil, false, fmt.Errorf("monorepo %s already exists on %s; ask an owner to add you", mono, config.Host(serverURL))
-		}
 		return nil, nil, false, err
 	}
-	e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
-	return s, created.Repos, true, nil
+	e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", mono, config.Host(serverURL), dash(m.Role))
+	return s, repos, false, nil
 }
 
 // pushMain pushes a project's main branch through the git door, and adds a
@@ -341,7 +341,7 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 			return err
 		}
 	}
-	remote, _ := g.Run(e.Ctx, "ls-remote", "pando", "refs/heads/main")
+	remote, _ := g.Run(e.Ctx, "ls-remote", "pando", "refs/heads/main") // "" also when not reachable yet
 	if f := strings.Fields(remote); len(f) > 0 {
 		if f[0] == p.Head {
 			e.printf("%-44s main is on the server at %s\n", p.Path, short(p.Head))
@@ -349,8 +349,22 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		}
 		return fmt.Errorf("the server's main is at %s, not %s; it is left as it is (push a branch and merge it)", short(f[0]), short(p.Head))
 	}
-	if _, err := g.Run(e.Ctx, "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main"); err != nil {
-		return err
+	// A repo made a moment ago can be "not found" at the git door for a few
+	// seconds (seen on pando-dev), so that one error is retried briefly.
+	var err2 error
+	for wait := time.Second; ; wait *= 2 {
+		_, err2 = g.Run(e.Ctx, "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
+		if err2 == nil || !strings.Contains(err2.Error(), "not found") || wait > 16*time.Second {
+			break
+		}
+		select {
+		case <-e.Ctx.Done():
+			return e.Ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+	if err2 != nil {
+		return err2
 	}
 	e.printf("%-44s pushed %s %s as main\n", p.Path, p.MainBranch, short(p.Head))
 	return nil

@@ -107,9 +107,6 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	if err != nil {
 		return nil, err
 	}
-	if f, ok := drv.(*worktree.Fuse); ok {
-		f.Warn = func(m string) { e.warnf("%s", m) }
-	}
 	acct, _ := e.Home.Account(root.Server)
 	spec := worktree.Spec{
 		Root: root.Dir, Repo: repo, Branch: branch, Path: wpath, CloneURL: entry.CloneURL,

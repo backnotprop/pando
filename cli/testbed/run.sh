@@ -7,6 +7,8 @@
 #
 # PANDO_SERVER and PANDO_TOKEN, when set, are passed through to test against a
 # real server; the token goes in by name only and is never printed.
+# PANDO_TOKEN_FILE names a file to read the token from (for example
+# ~/.pando/credentials/<host>), so it never appears on a command line.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cli="$(dirname "$here")"
@@ -17,6 +19,10 @@ image=pando-testbed
 docker --context "$ctx" build -q -t "$image" --build-context afs-src="$afs" -f "$here/Dockerfile" "$cli" >/dev/null
 echo "testbed: built $image (artifact-fs from $afs)"
 
+if [ -n "${PANDO_TOKEN_FILE:-}" ]; then
+  PANDO_TOKEN="$(cat "$PANDO_TOKEN_FILE")"
+  export PANDO_TOKEN
+fi
 envs=()
 [ -n "${PANDO_SERVER:-}" ] && envs+=(-e PANDO_SERVER)
 [ -n "${PANDO_TOKEN:-}" ] && envs+=(-e PANDO_TOKEN)

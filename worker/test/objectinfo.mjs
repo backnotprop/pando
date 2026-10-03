@@ -100,7 +100,7 @@ try {
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: S },
   });
   const sizes = batch.stdout.toString().trim().split("\n").map((l) => l.split(" ")[2]);
-  check("git cat-file --batch-check in the blobless clone fetches lazily and reports sizes", batch.status === 0 && sizes.join(",") === ["0", "14", "2097152", "12345"].sort().join(",") || sizes.length === 4, sizes.join(","));
+  check("git cat-file --batch-check in the blobless clone fetches lazily and reports sizes", batch.status === 0 && [...sizes].sort().join(",") === ["0", "12345", "14", "2097152"].join(","), sizes.join(","));
 } catch (err) {
   check("no exception", false, String(err?.stack ?? err));
 } finally {

@@ -243,6 +243,8 @@ api.delete("/v1/monorepos/:m", async (c) => {
     if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
     more = listed.truncated;
   }
+  // The live meta layer: closes its sockets and clears its storage, so the name starts clean.
+  if (c.get("info").kind === "monorepo") await c.env.META.get(c.env.META.idFromName(m)).destroy();
   await stub.destroy();
   await accounts(c.env).releaseMonorepo(m);
   forgetCachedAuth();

@@ -98,6 +98,14 @@ tags:
       credentials the door answers 401 with `WWW-Authenticate: Basic`, so a
       credential helper is asked.
 
+      Protocol v2 `object-info` (sizes without downloading): Artifacts does
+      not offer it, so the door adds `object-info` to the v2 advertisement and
+      answers `command=object-info` itself, in git's own reply format
+      (`size`, then `<oid> <size>` per object; an unknown object gets
+      `<oid> ` with no size). Sizes come from a per-repo index, filled on
+      first ask and kept forever. Every other v2 command goes to Artifacts
+      unchanged.
+
       Clone and fetch also accept the 30-minute read token from a hook
       delivery (`read_token`), so CI clones from `clone_url` with no
       credential of its own.

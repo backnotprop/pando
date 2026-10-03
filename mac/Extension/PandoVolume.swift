@@ -493,6 +493,7 @@ extension PandoVolume: FSVolume.ReadWriteOperations {
     ) {
         guard let it = item as? PandoItem else { replyHandler(0, posix(EINVAL)); return }
         let want = min(length, buffer.length)
+        log.debug("read ino \(it.ino) at \(offset) length \(length)")
         readChunk(it.ino, offset: Int64(offset), filled: 0, want: want, buffer: buffer, replyHandler: replyHandler)
     }
 
@@ -533,6 +534,7 @@ extension PandoVolume: FSVolume.ReadWriteOperations {
         replyHandler: @escaping (Int, Error?) -> Void
     ) {
         guard let it = item as? PandoItem else { replyHandler(0, posix(EINVAL)); return }
+        log.debug("write ino \(it.ino) at \(offset) length \(data.count)")
         writeChunk(it.ino, data: data, offset: Int64(offset), done: 0, replyHandler: replyHandler)
     }
 

@@ -7,8 +7,14 @@ import { checkBytes, checkPath, checkPointer, MAX_BYTES, type Refusal } from "./
 import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
+import { parse as parseToml } from "smol-toml";
+import type { MonorepoObject } from "../monorepo/object";
+import type { StreamEvent } from "../monorepo/types";
+import { EVENT_STREAM } from "../monorepo/stream";
 
-export type MetaEnv = CommitEnv;
+// MONOREPO: the monorepo object, whose event stream gets meta.saved and
+// machine.connected / machine.disconnected (absent in the live lane's test Worker).
+export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
@@ -32,6 +38,8 @@ interface Attachment {
   fixed: boolean; // identity came from the Worker, not from hello
   hello: boolean;
   live: boolean; // caught up: receives every new change
+  connected_at?: string;
+  client?: string | null; // the client's own name, from hello
 }
 
 interface VersionRow {
@@ -213,6 +221,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return this.restore(request);
       case "status":
         return json(this.status());
+      case "tree":
+        return this.tree(url);
+      case "references":
+        return this.references();
       case "init":
         if (request.method !== "POST") return fail(405, "method_not_allowed", "use POST");
         return this.init(request);
@@ -237,6 +249,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       fixed: author !== null,
       hello: false,
       live: false,
+      connected_at: new Date().toISOString(),
     };
     server.serializeAttachment(att);
     return new Response(null, { status: 101, webSocket: client });
@@ -395,6 +408,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       files,
       uncommitted,
       sockets: this.ctx.getWebSockets().length,
+      connections: this.connections(),
       last_commit: this.kv("parent"),
       commit_error: gitWriter(this.env) ? this.kv("commit_error") : "no Artifacts binding: versions are kept, not committed",
     };
@@ -443,6 +457,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    const att = ws.deserializeAttachment() as Attachment | null;
+    if (att?.hello) this.emitConnection("machine.disconnected", "delete", att);
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
     } catch {
@@ -477,7 +493,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!att.fixed) att.author = name(msg.author) || "unknown";
     att.machine = name(msg.machine) || "unknown";
     att.agent = name(msg.agent) || null; // agents act as their user; the trailers name them
+    att.client = name(msg.client) || null;
+    const first = !att.hello;
     att.hello = true;
+    if (first) this.emitConnection("machine.connected", "upsert", att);
     const head = this.head();
     let since = int(msg.since);
     if (since > head) since = 0; // the client saw a different history: send everything
@@ -708,7 +727,109 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at + QUIET_MS,
       );
     }
+    const entry = this.historyEntry(this.row(version));
+    this.emit({
+      kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
+      repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: entry,
+    });
     return version;
+  }
+
+  // ---- the monorepo's event stream (A9) ----
+
+  private outbox: StreamEvent[] = [];
+  private sending: Promise<unknown> = Promise.resolve();
+
+  /** Queue an event for the monorepo object's stream. Sent in order, in batches, never awaited by the saver. */
+  private emit(e: StreamEvent): void {
+    if (!EVENT_STREAM || !this.env.MONOREPO) return;
+    this.outbox.push(e);
+    if (this.outbox.length > 1) return;
+    queueMicrotask(() => {
+      const batch = this.outbox;
+      this.outbox = [];
+      const monorepo = this.kv("monorepo");
+      if (!monorepo || !this.env.MONOREPO) return;
+      const stub = this.env.MONOREPO.getByName(monorepo);
+      this.sending = this.sending
+        .then(() => stub.publishMany(batch))
+        .catch((err) => console.error("meta events not sent:", err instanceof Error ? err.message : String(err)));
+      this.ctx.waitUntil(this.sending);
+    });
+  }
+
+  private connectionRow(att: Attachment) {
+    return {
+      id: att.id,
+      author: att.author,
+      machine: att.machine,
+      agent: att.agent,
+      client: att.client ?? null,
+      connected_at: att.connected_at ?? null,
+    };
+  }
+
+  private emitConnection(kind: string, op: "upsert" | "delete", att: Attachment): void {
+    this.emit({
+      kind, collection: "connections", key: att.id, op, repo: "meta", actor: null,
+      machine: att.machine, agent: att.agent, row: this.connectionRow(att),
+    });
+  }
+
+  // Who is connected now: every socket that said hello (A11).
+  private connections() {
+    const out: ReturnType<MetaLayerObject["connectionRow"]>[] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as Attachment | null;
+      if (a?.hello) out.push(this.connectionRow(a));
+    }
+    return out;
+  }
+
+  // ---- the tree and references (A10) ----
+
+  // Every current path, with its latest version, in one call. ?prefix= narrows it.
+  private tree(url: URL): Response {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const rows = this.sql
+      .exec<any>(
+        `SELECT v.* FROM files f JOIN versions v ON v.version = f.version
+         WHERE f.deleted = 0 AND substr(f.path, 1, ?) = ? ORDER BY f.path`,
+        prefix.length,
+        prefix,
+      )
+      .toArray() as VersionRow[];
+    return json({ head: this.head(), prefix, files: rows.map((r) => this.historyEntry(r)) });
+  }
+
+  // References (formats.md, section 4): each pointer under .pando/references/, parsed.
+  private references(): Response {
+    const prefix = ".pando/references/";
+    const rows = this.sql
+      .exec<any>(
+        `SELECT f.path, f.version, f.sha FROM files f
+         WHERE f.deleted = 0 AND substr(f.path, 1, ?) = ? AND f.path LIKE '%.toml' ORDER BY f.path`,
+        prefix.length,
+        prefix,
+      )
+      .toArray() as { path: string; version: number; sha: string }[];
+    const references = rows.map((r) => {
+      const path = r.path.slice(prefix.length, -".toml".length);
+      try {
+        const t = parseToml(new TextDecoder().decode(this.blob(r.sha))) as Record<string, unknown>;
+        return {
+          path,
+          url: typeof t.url === "string" ? t.url : null,
+          ref: typeof t.ref === "string" ? t.ref : null,
+          commit: typeof t.commit === "string" ? t.commit : null,
+          version: r.version,
+          error: null,
+        };
+      } catch (err) {
+        return { path, url: null, ref: null, commit: null, version: r.version, error: `not a reference pointer: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200) };
+      }
+    });
+    return json({ head: this.head(), references });
   }
 
   private changeMessage(r: VersionRow) {

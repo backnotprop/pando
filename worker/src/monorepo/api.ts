@@ -28,6 +28,8 @@ import { cachedRepo, forgetRepos, hashToken, monorepoStub, newToken } from "./se
 import type { BranchRecord, Identity, MonorepoInfo, Outcome, RepoEvent, RepoRecord, StatusRecord } from "./types";
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
+import { feedMembership, membersBeforeDelete } from "../feed/membership";
+import { monoreposSummary } from "../feed/routes";
 
 type Stub = DurableObjectStub<MonorepoObject>;
 type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string };
@@ -187,6 +189,7 @@ users.delete("/v1/user/credentials/:id", async (c) => {
 // ── Monorepos ─────────────────────────────────────────────────────────────
 
 users.get("/v1/monorepos", async (c) => {
+  if (c.req.query("summary") === "1") return c.json(await monoreposSummary(c.env, c.get("auth").user.login));
   return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login) });
 });
 
@@ -215,6 +218,7 @@ users.post("/v1/monorepos", async (c) => {
       repos.push(unwrap(await stub.addRepo(rec)));
     }
     forgetCachedAuth();
+    await feedMembership(c.env, name, [a.user.login]);
     const info = (await stub.info())!;
     c.set("m", name);
     return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView(c as unknown as C, r)) }, 201);
@@ -276,10 +280,12 @@ api.delete("/v1/monorepos/:m", async (c) => {
   }
   // The live meta layer: closes its sockets and clears its storage, so the name starts clean.
   if (c.get("info").kind === "monorepo") await c.env.META.get(c.env.META.idFromName(m)).destroy();
+  const leaving = await membersBeforeDelete(c.env, m);
   await stub.destroy();
   forgetRepos(m);
   await accounts(c.env).releaseMonorepo(m);
   forgetCachedAuth();
+  await feedMembership(c.env, m, leaving);
   return c.body(null, 204);
 });
 
@@ -314,6 +320,7 @@ api.get("/v1/monorepos/:m/events", async (c) => {
   if (c.req.header("upgrade")?.toLowerCase() === "websocket") {
     const headers = new Headers(c.req.raw.headers);
     headers.set("x-pando-login", c.get("identity").login);
+    headers.set("x-pando-machine", c.get("identity").credential_name);
     return stub.fetch(new Request(c.req.raw, { headers }));
   }
   const sinceQ = c.req.query("since");
@@ -338,6 +345,7 @@ api.put("/v1/monorepos/:m/members/:login", async (c) => {
   if (b.role !== "owner" && b.role !== "member") bad("role is owner or member");
   const out = unwrap(await accounts(c.env).putMember(c.get("m"), c.req.param("login"), b.role, by.login));
   forgetCachedAuth();
+  await feedMembership(c.env, c.get("m"), [out.login]);
   return c.json(out);
 });
 
@@ -345,6 +353,7 @@ api.delete("/v1/monorepos/:m/members/:login", async (c) => {
   owner(c, "manage members");
   unwrap(await accounts(c.env).removeMember(c.get("m"), c.req.param("login")));
   forgetCachedAuth();
+  await feedMembership(c.env, c.get("m"), [c.req.param("login")]);
   return c.body(null, 204);
 });
 
@@ -361,6 +370,7 @@ api.post("/v1/monorepos/:m/invites", async (c) => {
   if (role !== "owner" && role !== "member") bad("role is owner or member");
   const out = unwrap(await accounts(c.env).invite(c.get("m"), email, role, by.login));
   forgetCachedAuth();
+  if (out.status === "added") await feedMembership(c.env, c.get("m"), [out.member.login]);
   return c.json(out, out.status === "added" ? 200 : 201);
 });
 
@@ -634,6 +644,7 @@ async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
           author: { name: ci.author?.name ?? null, email: ci.author?.email ?? null, date: ci.authoredAt ? new Date(ci.authoredAt * 1000).toISOString() : null },
           committer: { name: ci.committer?.name ?? null, email: ci.committer?.email ?? null, date: new Date(ci.time * 1000).toISOString() },
           trailers: views.pandoTrailers(message),
+          co_authors: views.coAuthors(message),
         };
       }),
     );

@@ -33,6 +33,8 @@ export interface User {
   login: string;
   name: string | null;
   email: string | null;
+  /** Their WorkOS profile picture (https), refreshed on each sign-in; null when none. */
+  picture_url: string | null;
   created_at: string;
 }
 
@@ -58,9 +60,13 @@ export interface Member {
   login: string;
   /** The user's display name, if known. */
   name: string | null;
+  /** Their profile picture, or null (the web draws one). */
+  picture_url: string | null;
   role: MemberRole;
   added_at: string;
   added_by: string | null;
+  /** The newest last_used_at of any of their credentials (written at most once a minute); null if never. */
+  last_active_at: string | null;
 }
 
 export interface MonorepoEntry {
@@ -83,6 +89,8 @@ export interface SignedIn {
   email: string;
   email_verified: boolean;
   name: string | null;
+  /** WorkOS's profile_picture_url, if https. */
+  picture_url: string | null;
 }
 
 export interface Auth {
@@ -115,6 +123,7 @@ interface AuthRow {
   expires_at: string | null;
   user_name: string | null;
   user_email: string | null;
+  user_picture_url: string | null;
   user_created_at: string;
   role: MemberRole | null;
   m_name: string | null;
@@ -125,7 +134,7 @@ interface AuthRow {
 // One round trip: the credential, its user, the role and the monorepo.
 const AUTH_SQL = `
 SELECT c.id, c.login, c.name, c.kind, c.created_at, c.last_used_at, c.expires_at,
-       u.name AS user_name, u.email AS user_email, u.created_at AS user_created_at,
+       u.name AS user_name, u.email AS user_email, u.picture_url AS user_picture_url, u.created_at AS user_created_at,
        (SELECT role FROM members WHERE monorepo = ?2 AND login = c.login) AS role,
        m.name AS m_name, m.kind AS m_kind, m.created_at AS m_created_at
 FROM credentials c
@@ -133,8 +142,10 @@ JOIN users u ON u.login = c.login
 LEFT JOIN monorepos m ON m.name = ?2
 WHERE c.hash = ?1 AND c.revoked_at IS NULL`;
 
-const MEMBER_SQL =
-  "SELECT m.login, u.name, m.role, m.added_at, m.added_by FROM members m LEFT JOIN users u ON u.login = m.login";
+const MEMBER_SQL = `
+SELECT m.login, u.name, u.picture_url, m.role, m.added_at, m.added_by,
+       (SELECT MAX(last_used_at) FROM credentials WHERE login = m.login) AS last_active_at
+FROM members m LEFT JOIN users u ON u.login = m.login`;
 
 function fail(status: number, code: string, message: string): never {
   throw new HttpError(status, code, message);
@@ -251,7 +262,7 @@ export class Accounts {
     // A browser session unused for too long has ended.
     if (!row || (row.expires_at && Date.parse(row.expires_at) <= t)) return { auth: null, row: null, served };
     const auth: Auth = {
-      user: { login: row.login, name: row.user_name, email: row.user_email, created_at: row.user_created_at },
+      user: { login: row.login, name: row.user_name, email: row.user_email, picture_url: row.user_picture_url, created_at: row.user_created_at },
       credential: { id: row.id, name: row.name, kind: row.kind, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at },
       role: monorepo ? row.role : null,
       monorepo: monorepo && row.m_name ? { name: row.m_name, kind: row.m_kind!, created_at: row.m_created_at! } : null,
@@ -269,12 +280,12 @@ export class Accounts {
         u.login, u.name, u.email, at,
       );
       if (!made) fail(409, "user_exists", `user ${u.login} exists`);
-      return { user: { ...u, created_at: at }, credential: await this.insertCredential(u.login, cred) };
+      return { user: { ...u, picture_url: null, created_at: at }, credential: await this.insertCredential(u.login, cred) };
     });
   }
 
   async getUser(login: string): Promise<User | null> {
-    return this.row<User>("SELECT login, name, email, created_at FROM users WHERE login = ?1", login);
+    return this.row<User>("SELECT login, name, email, picture_url, created_at FROM users WHERE login = ?1", login);
   }
 
   private async insertCredential(login: string, c: NewCredentialRow): Promise<Credential> {
@@ -398,7 +409,8 @@ export class Accounts {
       ))?.login;
       if (login) await this.run("UPDATE users SET workos_id = ?1 WHERE login = ?2 AND workos_id IS NULL", who.workos_id, login);
     }
-    if (login) await this.run("UPDATE users SET email = ?1, name = COALESCE(?2, name) WHERE login = ?3", email, who.name, login);
+    // The picture follows WorkOS on every sign-in, a removed one too.
+    if (login) await this.run("UPDATE users SET email = ?1, name = COALESCE(?2, name), picture_url = ?3 WHERE login = ?4", email, who.name, who.picture_url, login);
     else login = await this.newUser(email, who);
     const joined: string[] = [];
     if (who.email_verified) {
@@ -428,8 +440,8 @@ export class Accounts {
     for (const login of loginsFor(email, who.name)) {
       try {
         const made = await this.run(
-          "INSERT INTO users (login, name, email, created_at, workos_id) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (login) DO NOTHING",
-          login, who.name, email, now(), who.workos_id,
+          "INSERT INTO users (login, name, email, picture_url, created_at, workos_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (login) DO NOTHING",
+          login, who.name, email, who.picture_url, now(), who.workos_id,
         );
         if (made) return login;
       } catch (err) {

@@ -183,7 +183,7 @@ describe("names", () => {
 });
 
 describe("the auth cache keeps successes only", () => {
-  const user = { login: "ana", name: null, email: null, created_at: "" };
+  const user = { login: "ana", name: null, email: null, picture_url: null, created_at: "" };
   const credential = { id: "c", name: "m", kind: "machine" as const, created_at: "", last_used_at: null };
   const mono = { name: "acme", kind: "monorepo" as const, created_at: "" };
   const auth = (over: Partial<Auth>): Auth => ({ user, credential, role: "member", monorepo: mono, ...over });
@@ -350,5 +350,66 @@ describe("RPC results are released on arrival", () => {
     expect(released(null)).toBe(null);
     expect(released(true)).toBe(true);
     expect(released({ plain: 1 })).toEqual({ plain: 1 });
+  });
+});
+
+describe("a person's picture", () => {
+  it("keeps https URLs only, at most 2,048 characters", async () => {
+    const { pictureUrl } = await import("../src/accounts/signin");
+    expect(pictureUrl("https://workoscdn.com/images/v1/123abc")).toBe("https://workoscdn.com/images/v1/123abc");
+    expect(pictureUrl("http://example.com/a.png")).toBe(null);
+    expect(pictureUrl("javascript:alert(1)")).toBe(null);
+    expect(pictureUrl("data:image/png;base64,AAAA")).toBe(null);
+    expect(pictureUrl("not a url")).toBe(null);
+    expect(pictureUrl(`https://x.example/${"a".repeat(2100)}`)).toBe(null);
+    expect(pictureUrl(null)).toBe(null);
+    expect(pictureUrl(undefined)).toBe(null);
+  });
+});
+
+describe("the home's activity feed (C25)", () => {
+  const ev = (monorepo: string, seq: number, at: string) => ({ monorepo, seq, at, kind: "push", repo: null, repo_path: null, branch: null, actor: null, machine: null, summary: null });
+  it("orders by (at, monorepo, seq), newest first, and merges sources once each", async () => {
+    const { mergePages } = await import("../src/feed/shape");
+    const a = [ev("a", 3, "2026-10-03T10:00:02.000Z"), ev("a", 2, "2026-10-03T10:00:01.000Z")];
+    const b = [ev("b", 9, "2026-10-03T10:00:02.000Z"), ev("a", 2, "2026-10-03T10:00:01.000Z"), ev("b", 1, "2026-10-03T09:00:00.000Z")];
+    const page = mergePages([a, b], 3);
+    expect(page.map((e) => `${e.monorepo}${e.seq}`)).toEqual(["b9", "a3", "a2"]);
+  });
+  it("round-trips the cursor and refuses junk", async () => {
+    const { decodeCursor, encodeCursor } = await import("../src/feed/shape");
+    const k = { at: "2026-10-03T10:00:02.123Z", monorepo: "pando-brand", seq: 41 };
+    const c = encodeCursor(k);
+    expect(c.length).toBeLessThan(64);
+    expect(decodeCursor(c)).toEqual(k);
+    expect(decodeCursor("nope")).toBeNull();
+    expect(decodeCursor(encodeCursor({ ...k, seq: -1 }))).toBeNull();
+  });
+  it("bounds one monorepo's log by the cursor", async () => {
+    const { seqBound } = await import("../src/feed/shape");
+    const c = { at: "2026-10-03T10:00:00.000Z", monorepo: "m", seq: 5 };
+    expect(seqBound(c, "a")).toBe(Number.MAX_SAFE_INTEGER); // sorts after m at the same time: all of it is older
+    expect(seqBound(c, "z")).toBe(0);
+    expect(seqBound(c, "m")).toBe(5);
+  });
+  it("knows when the window does not cover a page", async () => {
+    const { effectiveAfter, uncovered, PENDING } = await import("../src/feed/shape");
+    expect(uncovered(null, null)).toBe(false); // the whole history is in the feed
+    expect(uncovered("2026-10-01T00:00:00.000Z", "2026-10-02T00:00:00.000Z")).toBe(false);
+    expect(uncovered("2026-10-02T00:00:00.000Z", "2026-10-01T00:00:00.000Z")).toBe(true);
+    expect(uncovered("2026-10-01T00:00:00.000Z", null)).toBe(true); // the page is not full: older events may exist
+    expect(uncovered(PENDING, "2026-10-03T00:00:00.000Z")).toBe(true);
+    expect(effectiveAfter(null, "2026-09-26T00:00:00.000Z")).toBe("2026-09-26T00:00:00.000Z");
+    expect(effectiveAfter("2026-09-20T00:00:00.000Z", "2026-09-26T00:00:00.000Z")).toBe("2026-09-26T00:00:00.000Z");
+  });
+  it("reads Co-authored-by trailers", async () => {
+    const { coAuthors } = await import("../src/monorepo/views");
+    const msg = "Add a\n\nBody line\n\nCo-authored-by: Claude <noreply@anthropic.com>\nco-authored-by: Ana Lima <ana@x.dev>\nCo-authored-by: Claude <noreply@anthropic.com>\nPando-Machine: m";
+    expect(coAuthors(msg)).toEqual([{ name: "Claude", email: "noreply@anthropic.com" }, { name: "Ana Lima", email: "ana@x.dev" }]);
+    expect(coAuthors("Co-authored-by: Not <a@trailer>")).toEqual([]); // a one-paragraph message has no trailers
+  });
+  it("accepts the feed topic on a monorepo's socket", async () => {
+    const { parseTopics } = await import("../src/monorepo/stream");
+    expect(parseTopics("feed")).toEqual(["feed"]);
   });
 });

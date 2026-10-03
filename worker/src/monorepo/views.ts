@@ -25,6 +25,8 @@ export interface BranchView {
   merged_machine: string | null;
   merged_agent: string | null;
   forced: boolean | null;
+  /** The credential (machine) that last pushed the branch. */
+  pushed_machine: string | null;
   created_at: string | null;
   updated_at: string | null;
   /** True when ahead, behind, base and mergeable are not yet for the current main and head. */
@@ -102,6 +104,23 @@ export function pandoTrailers(message: string): { agent: string | null; worktree
     if (!m || !m[2]) continue;
     const k = m[1].toLowerCase() as "agent" | "worktree" | "machine";
     out[k] = m[2];
+  }
+  return out;
+}
+
+/** `Co-authored-by: Name <email>` lines from a commit message's trailers (its last paragraph), as git and GitHub read them. */
+export function coAuthors(message: string): { name: string; email: string | null }[] {
+  const paragraphs = message.replace(/\r\n/g, "\n").trimEnd().split(/\n\s*\n/);
+  if (paragraphs.length < 2) return [];
+  const out: { name: string; email: string | null }[] = [];
+  const seen = new Set<string>();
+  for (const line of paragraphs[paragraphs.length - 1].split("\n")) {
+    const m = line.match(/^co-authored-by:\s*(.*?)\s*(?:<([^<>]*)>)?\s*$/i);
+    if (!m || !m[1]) continue;
+    const key = (m[2] || m[1]).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name: m[1], email: m[2]?.trim() || null });
   }
   return out;
 }

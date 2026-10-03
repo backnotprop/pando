@@ -170,7 +170,10 @@ tags:
       and sends it again once, after 150 to 400 ms. A push that is still
       refused, or is larger, is rejected with
       `Pando: <repo> is busy with other pushes right now; push again` (every
-      ref `busy; push again`), and nothing is written: push again.
+      ref `busy; push again`), and nothing is written: push again. A call to
+      Artifacts that fails outright is handled the same way: retried once
+      for a held push, else `Pando: <repo> couldn't take this push right
+      now; push again`, never a bare HTTP 500.
 
       Raw files (FILES.md section 3), GET or HEAD, beside the git door:
       `/{owner}/{monorepo}/projects/{repo}/raw/{path}?ref=` for a

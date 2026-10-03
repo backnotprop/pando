@@ -29,10 +29,10 @@ func Status(e *Env, args []string) error {
 	case err != nil:
 		e.printf("server: %s (%v)\n", root.Server, err)
 	default:
-		if me, err := srv.Me(e.Ctx, root.Name); err != nil {
+		if m, err := srv.GetMonorepo(e.Ctx, root.Name); err != nil {
 			e.printf("server: %s, not answering for you (%v)\n", root.Server, err)
-		} else {
-			e.printf("server: %s, you are %s (%s)\n", root.Server, me.Name, me.Role)
+		} else if me, err := srv.Me(e.Ctx); err == nil {
+			e.printf("server: %s, you are %s (%s of %s)\n", root.Server, me.Login, dash(m.Role), root.Name)
 		}
 	}
 	if acct.Name != "" {

@@ -13,10 +13,22 @@ import (
 	"pando/internal/worktree"
 )
 
-// Reference is `pando reference update <path>`.
+// Reference is `pando reference update <path>` and `pando reference sync`.
 func Reference(e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "sync" {
+		fs := flags("reference sync")
+		kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse")
+		if _, err := parse(fs, args[1:]); err != nil {
+			return err
+		}
+		root, err := e.root()
+		if err != nil {
+			return err
+		}
+		return SyncReferences(e, root, *kind)
+	}
 	if len(args) == 0 || args[0] != "update" {
-		return UsageError{"pando reference update <path>"}
+		return UsageError{"pando reference update <path> | sync"}
 	}
 	fs := flags("reference update")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse, for a folder this machine mounts")
@@ -102,5 +114,45 @@ func moveLocalReference(e *Env, root *config.Root, p refs.Pointer, old, kind str
 		return nil
 	}
 	e.printf("%s here is now at %s.\n", p.Path, short(p.Commit))
+	return nil
+}
+
+// SyncReferences makes this machine's reference folders match their
+// pointers: it mounts the ones not here and moves mounted ones to their
+// pointer's commit. The meta layer's sync calls it when a pointer changes.
+func SyncReferences(e *Env, root *config.Root, kind string) error {
+	ptrs, err := refs.List(root.Dir)
+	if err != nil {
+		return err
+	}
+	for _, p := range ptrs {
+		dir := root.Abs(p.Path)
+		if _, err := os.Stat(filepath.Join(dir, "PANDO-UNAVAILABLE.txt")); err == nil {
+			_ = os.Chmod(filepath.Join(dir, "PANDO-UNAVAILABLE.txt"), 0o644)
+			_ = os.Remove(filepath.Join(dir, "PANDO-UNAVAILABLE.txt"))
+		}
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+			if err := mountReference(e, root, p, kind); err != nil {
+				e.warnf("%s: %v", p.Path, err)
+			}
+			continue
+		}
+		g := gitx.In(dir)
+		if v, _ := g.Run(e.Ctx, "config", "--get", "pando.reference"); v != "true" {
+			continue // the original repo; left as it is
+		}
+		if head, _ := g.Run(e.Ctx, "rev-parse", "HEAD"); head == p.Commit {
+			continue
+		}
+		drv, err := worktree.Pick(kind, e.Home.Dir)
+		if err != nil {
+			return err
+		}
+		if err := drv.Refresh(e.Ctx, referenceSpec(root, p)); err != nil {
+			e.warnf("%s: %v", p.Path, err)
+			continue
+		}
+		e.printf("%s: moved to %s\n", p.Path, short(p.Commit))
+	}
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 type Monorepo struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"` // "monorepo" or "repo"
+	Role      string `json:"role"` // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
 }
 
@@ -28,26 +29,40 @@ type Repo struct {
 	RequiredChecks []string `json:"required_checks,omitempty"`
 }
 
-type NewToken struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Role  string `json:"role"`
-	Token string `json:"token"` // the secret; stored at mode 600, never printed
-}
-
 // Created is the answer to createMonorepo.
 type Created struct {
 	Monorepo Monorepo `json:"monorepo"`
-	Token    NewToken `json:"token"`
 	Repos    []Repo   `json:"repos"`
 }
 
-type Identity struct {
-	Monorepo string `json:"monorepo"`
-	Name     string `json:"name"`
-	Role     string `json:"role"` // "person" or "agent"
-	Email    string `json:"email"`
-	TokenID  string `json:"token_id"`
+type User struct {
+	Login     string `json:"login"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	CreatedAt string `json:"created_at"`
+}
+
+type Credential struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"` // machine, sandbox, bootstrap
+	CreatedAt  string `json:"created_at"`
+	LastUsedAt string `json:"last_used_at"`
+	// Secret is set only when a credential is made. It is stored at mode
+	// 600 and never printed.
+	Secret string `json:"secret,omitempty"`
+}
+
+// Me is GET /v1/user: the user and the credential in use.
+type Me struct {
+	User
+	Credential Credential `json:"credential"`
+}
+
+// NewUser is the answer to createUser.
+type NewUser struct {
+	User       User       `json:"user"`
+	Credential Credential `json:"credential"`
 }
 
 type Status struct {
@@ -71,7 +86,6 @@ type Branch struct {
 	Head        string `json:"head"`
 	Base        string `json:"base"`
 	Author      string `json:"author"`
-	AuthorRole  string `json:"author_role"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Ahead       *int   `json:"ahead"`
@@ -111,7 +125,6 @@ type Review struct {
 	Verdict    string `json:"verdict"`
 	Body       string `json:"body"`
 	Author     string `json:"author"`
-	AuthorRole string `json:"author_role"`
 	CreatedAt  string `json:"created_at"`
 }
 
@@ -160,10 +173,16 @@ const (
 // Server is everything the CLI asks of a Pando server. Repos are named by
 // their URL name (RepoName), monorepos by their name.
 type Server interface {
-	// CreateMonorepo uses the bootstrap secret, not a token.
-	CreateMonorepo(ctx context.Context, bootstrap, name, kind, person, email string) (*Created, error)
+	// CreateUser uses the bootstrap secret, until sign-in exists.
+	CreateUser(ctx context.Context, bootstrap, login, name, email, credentialName string) (*NewUser, error)
+	Me(ctx context.Context) (*Me, error)
+	CreateCredential(ctx context.Context, name, kind string) (*Credential, error)
+	ListCredentials(ctx context.Context) ([]Credential, error)
+	RevokeCredential(ctx context.Context, id string) error
+
+	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
+	ListMonorepos(ctx context.Context) ([]Monorepo, error)
 	GetMonorepo(ctx context.Context, mono string) (*Monorepo, error)
-	Me(ctx context.Context, mono string) (*Identity, error)
 
 	ListRepos(ctx context.Context, mono string) ([]Repo, error)
 	GetRepo(ctx context.Context, mono, repo string) (*Repo, error)
@@ -235,7 +254,8 @@ func StatusOf(err error) int {
 	return 0
 }
 
-// Open picks the backend from the server URL. token may be empty for file://.
+// Open picks the backend from the server URL. The credential may be empty
+// for file://.
 func Open(url, token string) (Server, error) {
 	switch {
 	case url == "":

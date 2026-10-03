@@ -126,9 +126,9 @@ func (e *Env) readSecret(prompt string) (string, error) {
 	return e.readLine()
 }
 
-// open returns the server for a root, with this machine's token for it.
+// open returns the server for a root, with this machine's credential.
 func (e *Env) open(root *config.Root) (server.Server, error) {
-	tok, err := e.Home.Token(root.Server, root.Name)
+	tok, err := e.Home.Token(root.Server)
 	if err != nil && !strings.HasPrefix(root.Server, "file://") {
 		return nil, err
 	}

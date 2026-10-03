@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,7 +16,7 @@ import (
 	"pando/internal/worktree"
 )
 
-var nameRe = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?:[^-]|$)){0,38}$`)
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,38}$`)
 
 func validName(n string) bool {
 	return nameRe.MatchString(n) && !strings.Contains(n, "--") && len(n) <= 39 && n != "v1" && n != "healthz"
@@ -30,8 +29,6 @@ func Init(e *Env, args []string) error {
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
 	yes := fs.Bool("yes", false, "take the default answer to every question")
 	dry := fs.Bool("dry-run", false, "show what would happen and change nothing")
-	person := fs.String("person", "", "your name on the server (default: your login name)")
-	email := fs.String("email", "", "your email, for merge commits (default: git config user.email)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -140,13 +137,13 @@ func Init(e *Env, args []string) error {
 		mono = existing.Name
 	}
 	if mono == "" {
-		mono = filepath.Base(plan.Root)
+		mono = strings.ToLower(filepath.Base(plan.Root))
 	}
 	if !validName(mono) {
-		return fmt.Errorf("%q cannot be a monorepo name (letters, digits, '.', '_', '-'; no '--'; at most 39); pass --name", mono)
+		return fmt.Errorf("%q cannot be a monorepo name (lower-case letters, digits, '.', '_', '-'; no '--'; at most 39); pass --name", mono)
 	}
 
-	srvc, repos, err := ensureMonorepo(e, serverURL, mono, plan.Kind, *person, *email)
+	srvc, repos, err := ensureMonorepo(e, serverURL, mono, plan.Kind)
 	if err != nil {
 		return err
 	}
@@ -171,6 +168,9 @@ func Init(e *Env, args []string) error {
 			repo = &repos[0]
 		} else {
 			repo, err = srvc.CreateRepo(e.Ctx, mono, p.Path)
+			if server.StatusOf(err) == 409 {
+				repo, err = srvc.GetRepo(e.Ctx, mono, server.RepoName(mono, p.Path))
+			}
 			if err != nil {
 				e.warnf("%s: %v", p.Path, err)
 				failed++
@@ -264,86 +264,43 @@ func printPlan(e *Env, p *detect.Plan) {
 	}
 }
 
-// ensureMonorepo makes the monorepo, or finds it if this machine can already
-// reach it. Making one uses this machine's credential (pando login), or
-// PANDO_BOOTSTRAP, or a secret typed at the prompt. A monorepo token the
-// server returns is saved at mode 600 and never shown.
-func ensureMonorepo(e *Env, serverURL, mono, kind, person, email string) (server.Server, []server.Repo, error) {
-	local := strings.HasPrefix(serverURL, "file://")
-	if tok, err := e.Home.Token(serverURL, mono); err == nil || local {
-		s, err := server.Open(serverURL, tok)
-		if err != nil {
-			return nil, nil, err
-		}
-		m, err := s.GetMonorepo(e.Ctx, mono)
-		if err == nil {
-			if m.Kind != kind {
-				return nil, nil, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
-			}
-			repos, err := s.ListRepos(e.Ctx, mono)
-			if err != nil {
-				return nil, nil, err
-			}
-			e.printf("\nMonorepo %s exists on %s; continuing.\n", mono, serverURL)
-			return s, repos, nil
-		}
-		if !errors.Is(err, server.ErrNotFound) && !local {
-			return nil, nil, err
-		}
+// ensureMonorepo finds the monorepo, or makes it with this machine's
+// credential; the signed-in user becomes its owner.
+func ensureMonorepo(e *Env, serverURL, mono, kind string) (server.Server, []server.Repo, error) {
+	tok, err := e.Home.Token(serverURL)
+	if err != nil && !strings.HasPrefix(serverURL, "file://") {
+		return nil, nil, err
 	}
-	if person == "" {
-		if u, err := user.Current(); err == nil {
-			person = u.Username
-		}
-	}
-	if email == "" {
-		email, _ = gitx.Cmd{}.Run(e.Ctx, "config", "--get", "user.email")
-	}
-	bootstrap := os.Getenv("PANDO_BOOTSTRAP")
-	if bootstrap == "" && !local {
-		if b, err := os.ReadFile(e.Home.CredentialPath(serverURL)); err == nil {
-			bootstrap = strings.TrimSpace(string(b))
-		}
-	}
-	if bootstrap == "" && !local {
-		if !e.isTerminal() {
-			return nil, nil, errors.New("making a monorepo needs a signed-in machine: run pando login (or set PANDO_BOOTSTRAP)")
-		}
-		b, err := e.readSecret("Bootstrap secret for " + serverURL + " (input hidden): ")
-		if err != nil {
-			return nil, nil, err
-		}
-		bootstrap = b
-	}
-	s, err := server.Open(serverURL, "")
+	s, err := server.Open(serverURL, tok)
 	if err != nil {
 		return nil, nil, err
 	}
-	created, err := s.CreateMonorepo(e.Ctx, bootstrap, mono, kind, person, email)
+	m, err := s.GetMonorepo(e.Ctx, mono)
+	switch {
+	case err == nil:
+		if m.Kind != kind {
+			return nil, nil, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
+		}
+		repos, err := s.ListRepos(e.Ctx, mono)
+		if err != nil {
+			return nil, nil, err
+		}
+		e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", mono, config.Host(serverURL), dash(m.Role))
+		return s, repos, nil
+	case server.StatusOf(err) == 403:
+		return nil, nil, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", mono, config.Host(serverURL))
+	case !errors.Is(err, server.ErrNotFound):
+		return nil, nil, err
+	}
+	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
 	if err != nil {
 		if server.StatusOf(err) == 409 {
-			return nil, nil, fmt.Errorf("monorepo %s already exists on %s; ask its owner for a token and run `pando login %s`", mono, serverURL, mono)
+			return nil, nil, fmt.Errorf("monorepo %s already exists on %s; ask an owner to add you", mono, config.Host(serverURL))
 		}
 		return nil, nil, err
 	}
-	if !local && created.Token.Token != "" {
-		if err := e.Home.SaveToken(serverURL, mono, created.Token.Token); err != nil {
-			return nil, nil, err
-		}
-		e.printf("\nMade monorepo %s on %s. Its token for %s is saved in %s, mode 600.\n",
-			mono, serverURL, created.Token.Name, filepath.Join(e.Home.Dir, "tokens"))
-	} else {
-		e.printf("\nMade monorepo %s on %s.\n", mono, serverURL)
-	}
-	tok := created.Token.Token
-	if tok == "" {
-		tok = bootstrap
-	}
-	authed, err := server.Open(serverURL, tok)
-	if err != nil {
-		return nil, nil, err
-	}
-	return authed, created.Repos, nil
+	e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
+	return s, created.Repos, nil
 }
 
 // pushMain pushes a project's main branch through the git door, and adds a

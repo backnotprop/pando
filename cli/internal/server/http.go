@@ -20,8 +20,8 @@ type HTTP struct {
 	Client *http.Client
 }
 
-// NewHTTP makes an API client. The token goes in the Authorization header
-// and nowhere else: never in a URL, a log line or an error.
+// NewHTTP makes an API client. The credential goes in the Authorization
+// header and nowhere else: never in a URL, a log line or an error.
 func NewHTTP(base, token string) *HTTP {
 	return &HTTP{Base: strings.TrimRight(base, "/"), token: token, Client: &http.Client{Timeout: 120 * time.Second}}
 }
@@ -119,25 +119,60 @@ func repoPath(m, repo string) string { return monoPath(m) + "/repos/" + esc(repo
 
 func branchPath(m, repo, b string) string { return repoPath(m, repo) + "/branches/" + esc(b) }
 
-func (h *HTTP) CreateMonorepo(ctx context.Context, bootstrap, name, kind, person, email string) (*Created, error) {
-	out := &Created{}
-	body := map[string]string{"name": name, "kind": kind, "person": person}
-	if email != "" {
-		body["email"] = email
+func (h *HTTP) CreateUser(ctx context.Context, bootstrap, login, name, email, credentialName string) (*NewUser, error) {
+	out := &NewUser{}
+	body := map[string]string{"login": login}
+	for k, v := range map[string]string{"name": name, "email": email, "credential_name": credentialName} {
+		if v != "" {
+			body[k] = v
+		}
 	}
-	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/monorepos", body: body, bearer: bootstrap}, out)
+	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/users", body: body, bearer: bootstrap}, out)
 	return out, err
+}
+
+func (h *HTTP) Me(ctx context.Context) (*Me, error) {
+	out := &Me{}
+	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/user"}, out)
+	return out, err
+}
+
+func (h *HTTP) CreateCredential(ctx context.Context, name, kind string) (*Credential, error) {
+	out := &Credential{}
+	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/user/credentials", body: map[string]string{"name": name, "kind": kind}}, out)
+	return out, err
+}
+
+func (h *HTTP) ListCredentials(ctx context.Context) ([]Credential, error) {
+	var out struct {
+		Credentials []Credential `json:"credentials"`
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/user/credentials"}, &out)
+	return out.Credentials, err
+}
+
+func (h *HTTP) RevokeCredential(ctx context.Context, id string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: "/v1/user/credentials/" + esc(id)}, nil)
+	return err
+}
+
+func (h *HTTP) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
+	out := &Created{}
+	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/monorepos", body: map[string]string{"name": name, "kind": kind}}, out)
+	return out, err
+}
+
+func (h *HTTP) ListMonorepos(ctx context.Context) ([]Monorepo, error) {
+	var out struct {
+		Monorepos []Monorepo `json:"monorepos"`
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/monorepos"}, &out)
+	return out.Monorepos, err
 }
 
 func (h *HTTP) GetMonorepo(ctx context.Context, m string) (*Monorepo, error) {
 	out := &Monorepo{}
 	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m)}, out)
-	return out, err
-}
-
-func (h *HTTP) Me(ctx context.Context, m string) (*Identity, error) {
-	out := &Identity{}
-	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/me"}, out)
 	return out, err
 }
 
@@ -158,9 +193,6 @@ func (h *HTTP) GetRepo(ctx context.Context, m, repo string) (*Repo, error) {
 func (h *HTTP) CreateRepo(ctx context.Context, m, path string) (*Repo, error) {
 	out := &Repo{}
 	_, _, err := h.do(ctx, request{method: "POST", path: monoPath(m) + "/repos", body: map[string]string{"path": path}}, out)
-	if StatusOf(err) == http.StatusConflict {
-		return h.GetRepo(ctx, m, RepoName(m, path))
-	}
 	return out, err
 }
 

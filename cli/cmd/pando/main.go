@@ -25,7 +25,7 @@ var commands = []app.Command{
 	{Name: "diff", Usage: "diff [<branch>] [--json | --patch] [paths...]             the branch diff against main", Run: app.Diff},
 	{Name: "review", Usage: "review [<branch>] [-m <comment>]                          review in Plannotator, or comment", Run: app.Review},
 	{Name: "merge", Usage: "merge [<branch>] [--force]                                land a branch on main with a merge commit", Run: app.Merge},
-	{Name: "reference", Usage: "reference update <path>                                   move a reference to its newest commit", Run: app.Reference},
+	{Name: "reference", Usage: "reference update <path> | sync                            move a reference to its newest commit", Run: app.Reference},
 	{Name: "status", Usage: "status                                                    this folder, its worktrees and references", Run: app.Status},
 	{Name: "credential", Usage: "credential create --name <sandbox> | list | revoke <id>   credentials that act as you", Run: app.Credential},
 }

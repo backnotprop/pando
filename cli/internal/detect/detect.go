@@ -318,8 +318,10 @@ func reference(ctx context.Context, rel, abs string) (*Reference, *Question, []s
 	g := gitx.In(abs)
 	var notes []string
 	asProject := []Choice{{"l", "leave it on this machine only (adds it to local_only)"}, {"p", "make it a project (adds it to projects = [...])"}}
+	// The raw URL from config, not `git remote get-url`, which applies this
+	// machine's insteadOf rewrites (an https URL shown as git@...).
 	remote := "origin"
-	url, err := g.Run(ctx, "remote", "get-url", "origin")
+	url, err := g.Run(ctx, "config", "--get", "remote.origin.url")
 	if err != nil || url == "" {
 		remotes, _ := g.Run(ctx, "remote")
 		first := strings.Fields(remotes)
@@ -329,7 +331,7 @@ func reference(ctx context.Context, rel, abs string) (*Reference, *Question, []s
 				Choices: asProject, Default: "l"}, nil
 		}
 		remote = first[0]
-		url, _ = g.Run(ctx, "remote", "get-url", remote)
+		url, _ = g.Run(ctx, "config", "--get", "remote."+remote+".url")
 	}
 	if isLocalURL(url) {
 		return nil, &Question{Path: rel, Kind: "no-remote",

@@ -221,11 +221,7 @@ func Review(e *Env, args []string) error {
 		return err
 	}
 	name := repoName(root, repo)
-	me, err := srv.Me(e.Ctx, root.Name)
-	if err != nil {
-		return err
-	}
-	isAgent := me.Role != "person" || os.Getenv("PANDO_AGENT") != ""
+	agent := os.Getenv("PANDO_AGENT")
 	b, err := srv.GetBranch(e.Ctx, root.Name, name, branch)
 	if err != nil {
 		return fmt.Errorf("branch %s: %w", branch, err)
@@ -266,19 +262,21 @@ func Review(e *Env, args []string) error {
 			return fmt.Errorf("plannotator answered %q", d.Decision)
 		}
 	}
-	if isAgent && in.Verdict != "comment" {
-		// Approval belongs to a person; an agent's verdict is a comment.
+	if agent != "" && in.Verdict != "comment" {
+		// Approval belongs to a person; an agent's verdict is a comment
+		// that says what it would have been.
 		word := map[string]string{"approve": "Approved", "request_changes": "Changes requested"}[in.Verdict]
-		in.Body = strings.TrimSpace(word + " (agent " + me.Name + "):\n\n" + in.Body)
+		in.Body = strings.TrimSpace(word + " (agent " + agent + "):\n\n" + in.Body)
 		in.Verdict = "comment"
 	}
 	rv, err := srv.CreateReview(e.Ctx, root.Name, name, branch, in)
 	if err != nil {
 		return err
 	}
-	e.printf("Posted a %s on %s at %s as %s (%s).\n", strings.ReplaceAll(rv.Verdict, "_", " "), branch, short(rv.Head), rv.Author, rv.AuthorRole)
+	what := map[string]string{"comment": "a comment", "approve": "an approval", "request_changes": "a request for changes"}[rv.Verdict]
+	e.printf("Posted %s on %s at %s as %s.\n", dash(what), branch, short(rv.Head), rv.Author)
 	if rv.Verdict == "approve" {
-		e.printf("A person's Merge lands it: pando merge %s\n", branch)
+		e.printf("Land it with: pando merge %s\n", branch)
 	}
 	return nil
 }

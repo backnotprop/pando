@@ -18,9 +18,8 @@ import (
 
 // Local is a file:// server: one folder per monorepo, holding bare repos
 // named like the API's repos. It keeps the rules the CLI relies on: main
-// takes only its first push, only a person approves or merges, and a merge
-// writes a merge commit. Identity comes from the environment: PANDO_AGENT
-// set means an agent, otherwise a person named $USER.
+// takes only its first push, and a merge writes a merge commit. There is one
+// user, $USER in lower case.
 type Local struct {
 	Base string
 	mu   sync.Mutex
@@ -43,14 +42,11 @@ func (l *Local) repoDir(m, name string) string    { return filepath.Join(l.monoD
 func (l *Local) cloneURL(m, name string) string   { return "file://" + l.repoDir(m, name) }
 func apiErr(status int, code, msg string) error   { return &APIError{Status: status, Code: code, Message: msg} }
 func notFound(what string) error                  { return apiErr(404, "not_found", what+" not found") }
-func (l *Local) identity() (name, role string) {
-	if a := os.Getenv("PANDO_AGENT"); a != "" {
-		return a, "agent"
+func (l *Local) login() string {
+	if u := strings.ToLower(os.Getenv("USER")); u != "" {
+		return u
 	}
-	if u := os.Getenv("USER"); u != "" {
-		return u, "person"
-	}
-	return "person", "person"
+	return "local"
 }
 
 func (l *Local) load(m string) (*localMono, error) {
@@ -74,7 +70,28 @@ func (l *Local) repo(lm *localMono, r localRepo) Repo {
 	return Repo{Monorepo: lm.Name, Name: r.Name, Path: r.Path, DefaultBranch: "main", CloneURL: l.cloneURL(lm.Name, r.Name)}
 }
 
-func (l *Local) CreateMonorepo(ctx context.Context, _ string, name, kind, person, _ string) (*Created, error) {
+func (l *Local) CreateUser(_ context.Context, _ string, login, name, email, credName string) (*NewUser, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	return &NewUser{User: User{Login: login, Name: name, Email: email, CreatedAt: now},
+		Credential: Credential{ID: "cred_local", Name: credName, Kind: "machine", CreatedAt: now, Secret: "pando_local"}}, nil
+}
+
+func (l *Local) Me(_ context.Context) (*Me, error) {
+	return &Me{User: User{Login: l.login()}, Credential: Credential{ID: "cred_local", Name: "local", Kind: "machine"}}, nil
+}
+
+func (l *Local) CreateCredential(_ context.Context, name, kind string) (*Credential, error) {
+	return &Credential{ID: fmt.Sprintf("cred_%d", time.Now().UnixNano()), Name: name, Kind: kind,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339), Secret: "pando_local"}, nil
+}
+
+func (l *Local) ListCredentials(_ context.Context) ([]Credential, error) {
+	return []Credential{{ID: "cred_local", Name: "local", Kind: "machine"}}, nil
+}
+
+func (l *Local) RevokeCredential(_ context.Context, _ string) error { return nil }
+
+func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
 	l.mu.Lock()
 	if _, err := l.load(name); err == nil {
 		l.mu.Unlock()
@@ -90,8 +107,7 @@ func (l *Local) CreateMonorepo(ctx context.Context, _ string, name, kind, person
 	if err != nil {
 		return nil, err
 	}
-	out := &Created{Monorepo: Monorepo{Name: name, Kind: kind, CreatedAt: lm.CreatedAt},
-		Token: NewToken{ID: "tok_local", Name: person, Role: "person", Token: "pando_local_" + name}}
+	out := &Created{Monorepo: Monorepo{Name: name, Kind: kind, Role: "owner", CreatedAt: lm.CreatedAt}}
 	if kind == "repo" {
 		r, err := l.CreateRepo(ctx, name, ".")
 		if err != nil {
@@ -102,20 +118,26 @@ func (l *Local) CreateMonorepo(ctx context.Context, _ string, name, kind, person
 	return out, nil
 }
 
+func (l *Local) ListMonorepos(_ context.Context) ([]Monorepo, error) {
+	entries, err := os.ReadDir(l.Base)
+	if err != nil {
+		return nil, nil
+	}
+	var out []Monorepo
+	for _, e := range entries {
+		if lm, err := l.load(e.Name()); err == nil {
+			out = append(out, Monorepo{Name: lm.Name, Kind: lm.Kind, Role: "owner", CreatedAt: lm.CreatedAt})
+		}
+	}
+	return out, nil
+}
+
 func (l *Local) GetMonorepo(_ context.Context, m string) (*Monorepo, error) {
 	lm, err := l.load(m)
 	if err != nil {
 		return nil, err
 	}
-	return &Monorepo{Name: lm.Name, Kind: lm.Kind, CreatedAt: lm.CreatedAt}, nil
-}
-
-func (l *Local) Me(_ context.Context, m string) (*Identity, error) {
-	if _, err := l.load(m); err != nil {
-		return nil, err
-	}
-	name, role := l.identity()
-	return &Identity{Monorepo: m, Name: name, Role: role, TokenID: "tok_local"}, nil
+	return &Monorepo{Name: lm.Name, Kind: lm.Kind, Role: "owner", CreatedAt: lm.CreatedAt}, nil
 }
 
 func (l *Local) ListRepos(_ context.Context, m string) ([]Repo, error) {
@@ -358,10 +380,6 @@ func (l *Local) Diff(ctx context.Context, m, repo, branch string, format DiffFor
 }
 
 func (l *Local) CreateReview(ctx context.Context, m, repo, branch string, r ReviewIn) (*Review, error) {
-	name, role := l.identity()
-	if r.Verdict == "approve" && role != "person" {
-		return nil, apiErr(403, "approval_requires_person", "only a person approves; agents comment")
-	}
 	b, err := l.GetBranch(ctx, m, repo, branch)
 	if err != nil {
 		return nil, err
@@ -370,7 +388,7 @@ func (l *Local) CreateReview(ctx context.Context, m, repo, branch string, r Revi
 		r.Head = b.Head
 	}
 	rv := &Review{ID: fmt.Sprintf("rev_%d", time.Now().UnixNano()), Branch: branch, Head: r.Head, Verdict: r.Verdict,
-		Body: r.Body, Author: name, AuthorRole: role, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+		Body: r.Body, Author: l.login(), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	f, err := os.OpenFile(filepath.Join(l.monoDir(m), "reviews.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -384,10 +402,7 @@ func (l *Local) CreateReview(ctx context.Context, m, repo, branch string, r Revi
 }
 
 func (l *Local) Merge(ctx context.Context, m, repo, branch string, force bool, expectedHead string) (*MergeResult, error) {
-	who, role := l.identity()
-	if role != "person" {
-		return nil, apiErr(403, "merge_requires_person", "only a person merges")
-	}
+	who := l.login()
 	g, err := l.bare(m, repo)
 	if err != nil {
 		return nil, err
@@ -462,7 +477,7 @@ func (l *Local) PutWorktree(_ context.Context, m, id string, in WorktreeIn) erro
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	who, _ := l.identity()
+	who := l.login()
 	w := Worktree{ID: id, Repo: in.Repo, Branch: in.Branch, Path: in.Path, Machine: in.Machine, Kind: in.Kind,
 		ReportedBy: who, CreatedAt: now, LastSeenAt: now}
 	if in.Agent != nil {

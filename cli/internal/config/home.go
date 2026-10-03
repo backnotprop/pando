@@ -27,7 +27,8 @@ type Home struct {
 // Account is who this machine is signed in as on one server host. The
 // secret credential is kept apart, in ~/.pando/credentials/<host>.
 type Account struct {
-	Name  string `toml:"name"`
+	Login string `toml:"login"`
+	Name  string `toml:"name,omitempty"`
 	Email string `toml:"email,omitempty"`
 }
 
@@ -155,12 +156,6 @@ func (h *Home) Logout(server string) (bool, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	if legacy := filepath.Join(h.Dir, "tokens", safeHost(server)); dirExists(legacy) {
-		if err := os.RemoveAll(legacy); err != nil {
-			return removed, err
-		}
-		removed = true
-	}
 	if _, ok := h.Accounts[Host(server)]; ok {
 		delete(h.Accounts, Host(server))
 		return true, h.Save()
@@ -168,38 +163,25 @@ func (h *Home) Logout(server string) (bool, error) {
 	return removed, nil
 }
 
-func dirExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
 // ErrNoToken means this machine is not signed in to a server.
 var ErrNoToken = errors.New("this machine is not signed in: run `pando login` (or set PANDO_TOKEN)")
 
-// Token returns the credential to use against a server, for a monorepo.
-// Order: PANDO_TOKEN; a monorepo token from the first API version,
-// ~/.pando/tokens/<host>/<monorepo>; the machine credential
-// ~/.pando/credentials/<host> (pando login). It is never printed or logged.
-func (h *Home) Token(server, mono string) (string, error) {
+// Token returns this machine's credential for a server: PANDO_TOKEN (for
+// sandboxes), else ~/.pando/credentials/<host> (pando login). Callers never
+// print or log it.
+func (h *Home) Token(server string) (string, error) {
 	if v := os.Getenv("PANDO_TOKEN"); v != "" {
 		return strings.TrimSpace(v), nil
 	}
-	var paths []string
-	if mono != "" {
-		paths = append(paths, filepath.Join(h.Dir, "tokens", safeHost(server), mono))
+	b, err := os.ReadFile(h.CredentialPath(server))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", ErrNoToken
 	}
-	paths = append(paths, h.CredentialPath(server))
-	for _, p := range paths {
-		b, err := os.ReadFile(p)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		if t := strings.TrimSpace(string(b)); t != "" {
-			return t, nil
-		}
+	if err != nil {
+		return "", err
+	}
+	if t := strings.TrimSpace(string(b)); t != "" {
+		return t, nil
 	}
 	return "", ErrNoToken
 }
@@ -215,21 +197,4 @@ func ReadToken(r io.Reader) (string, error) {
 		return "", errors.New("empty token")
 	}
 	return t, nil
-}
-
-// SaveToken writes a monorepo's token to ~/.pando/tokens/<host>/<mono>,
-// mode 600, in folders of mode 700.
-func (h *Home) SaveToken(server, mono, token string) error {
-	p := filepath.Join(h.Dir, "tokens", safeHost(server), mono)
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, []byte(token+"\n"), 0o600); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
 }

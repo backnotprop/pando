@@ -1,4 +1,4 @@
-// OakFSItem.swift — an FSItem backed by an oak inode number.
+// PandoItem.swift — an FSItem backed by an oak inode number.
 //
 // NOTE ON FSKit API SURFACE
 // -------------------------
@@ -8,14 +8,14 @@
 // PassthroughFS sample: that sample (an older beta) declares `renameItem` under
 // `FSVolume.RenameOperations`, but in 26.1 `renameItem` belongs to
 // `FSVolume.Operations` and `RenameOperations` only carries `setVolumeName` —
-// so OakFSVolume keeps `renameItem` in its `FSVolume.Operations` conformance.
+// so PandoVolume keeps `renameItem` in its `FSVolume.Operations` conformance.
 // The oak-specific logic — mapping each operation to a `DaemonClient` call and
 // translating the reply — is what matters here and is stable regardless.
 
 import FSKit
 import Foundation
 
-final class OakFSItem: FSItem {
+final class PandoItem: FSItem {
     let ino: UInt64
     var name: FSFileName
 

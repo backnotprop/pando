@@ -8,7 +8,7 @@
 	<true/>
 	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
 	<array>
-		<string>dev.pando.mount</string>
+		<string>$(PANDO_BUNDLE_PREFIX).broker</string>
 	</array>
 </dict>
 </plist>

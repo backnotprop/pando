@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Pando</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -11,11 +13,11 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>Pando</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>EXAppExtensionAttributes</key>
 	<dict>
 		<key>EXExtensionPointIdentifier</key>
@@ -28,11 +30,13 @@
 		<key>FSRequiresSecurityScopedPathURLResources</key>
 		<true/>
 		<key>FSShortName</key>
-		<string>PandoFS</string>
+		<string>pando</string>
 		<key>FSSupportsBlockResources</key>
 		<false/>
 		<key>FSSupportsPathURLs</key>
 		<true/>
 	</dict>
+	<key>PandoBrokerMachService</key>
+	<string>$(PANDO_BUNDLE_PREFIX).broker</string>
 </dict>
 </plist>

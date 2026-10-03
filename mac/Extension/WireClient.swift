@@ -17,7 +17,7 @@ import XPC
 
 /// The mach service the broker vends. Must match the LaunchAgent MachServices
 /// key, the Rust broker, and the mach-lookup entitlement.
-private let kMachService = "dev.pando.mount"
+private let kMachService = Bundle.main.object(forInfoDictionaryKey: "PandoBrokerMachService") as? String ?? "ai.plannotator.pando.broker"
 
 /// Thread-safe request/reply client. One in-flight request at a time per
 /// connection; FSKit may call us concurrently, so we serialize on a queue.
@@ -26,7 +26,7 @@ final class DaemonClient {
     /// broker connects to it on our behalf; the sandbox stops us doing so
     /// directly.
     private let socketPath: String
-    private let queue = DispatchQueue(label: "com.oakvcs.mount.daemonclient")
+    private let queue = DispatchQueue(label: "ai.plannotator.pando.wireclient")
     private var connection: xpc_connection_t?
 
     init(socketPath: String) {
@@ -58,19 +58,19 @@ final class DaemonClient {
 
     /// Verify the daemon speaks our wire protocol before serving any VFS op.
     /// Sends `Op.hello` and checks the daemon's reported version against
-    /// `kOakProtocolVersion`. Throws `DaemonError.protocolMismatch` on any
+    /// `kWireVersion`. Throws `DaemonError.protocolMismatch` on any
     /// disagreement — including a daemon too old to understand `Hello`, which
     /// fails to decode the request and answers with an errno rather than
     /// `.hello`; that non-`.hello` reply is exactly the skew we want to catch.
     /// Call once at mount time: a mismatched `Oak Mount` app and `oak` CLI
     /// would otherwise misinterpret each other's frames.
     func handshake() throws {
-        let reply = try send(.hello(protocolVersion: kOakProtocolVersion))
+        let reply = try send(.hello(protocolVersion: kWireVersion))
         guard case let .hello(daemonVersion) = reply else {
-            throw DaemonError.protocolMismatch(mounter: kOakProtocolVersion, daemon: nil)
+            throw DaemonError.protocolMismatch(mounter: kWireVersion, daemon: nil)
         }
-        if daemonVersion != kOakProtocolVersion {
-            throw DaemonError.protocolMismatch(mounter: kOakProtocolVersion, daemon: daemonVersion)
+        if daemonVersion != kWireVersion {
+            throw DaemonError.protocolMismatch(mounter: kWireVersion, daemon: daemonVersion)
         }
     }
 

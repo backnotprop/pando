@@ -19,7 +19,7 @@ import Foundation
 /// frames. Bump in lockstep with the Rust `PROTOCOL_VERSION`.
 ///
 /// History: v1 → v2 added `Op.readlink` (symlink target resolution).
-let kOakProtocolVersion: UInt32 = 2
+let kWireVersion: UInt32 = 2
 
 enum WireKind: UInt8 {
     case dir = 0

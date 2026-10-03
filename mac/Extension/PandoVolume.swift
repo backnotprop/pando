@@ -1,8 +1,8 @@
-// OakFSVolume.swift — the volume. Every FSKit operation maps to one daemon
+// PandoVolume.swift — the volume. Every FSKit operation maps to one daemon
 // call (see Wire.swift / protocol.rs). The volume holds no filesystem state
 // itself; the daemon owns the inode tree, overlay, and reconciliation.
 //
-// See the API-surface note in OakFSItem.swift — the FSVolume.Operations /
+// See the API-surface note in PandoItem.swift — the FSVolume.Operations /
 // ReadWriteOperations conformances are reconciled against the macOS 26.1 FSKit
 // SDK. The body of each method (the daemon round-trip + reply mapping) is the
 // stable, oak-specific part.
@@ -13,31 +13,31 @@ import os
 
 private let ROOT_INO: UInt64 = 1
 
-final class OakFSVolume: FSVolume {
+final class PandoVolume: FSVolume {
     private let daemon: DaemonClient
-    private let log = Logger(subsystem: "com.oakvcs.mount.fskit", category: "volume")
+    private let log = Logger(subsystem: "ai.plannotator.pando.extension", category: "volume")
     // The owning unary file system, so volume activation can drive the shared
     // container state (`ready` ⇄ `active`). Weak: FSKit owns the volume and the
     // file system outlives it.
-    private weak var fileSystem: OakFSUnaryFileSystem?
+    private weak var fileSystem: PandoFileSystem?
 
     // Inode → item cache so FSKit gets stable FSItem identities.
     private let lock = NSLock()
-    private var items: [UInt64: OakFSItem] = [:]
+    private var items: [UInt64: PandoItem] = [:]
 
-    init(daemon: DaemonClient, volumeName: String, fileSystem: OakFSUnaryFileSystem) {
+    init(daemon: DaemonClient, volumeName: String, fileSystem: PandoFileSystem) {
         self.daemon = daemon
         self.fileSystem = fileSystem
         let volumeID = FSVolume.Identifier(uuid: UUID())
         super.init(volumeID: volumeID, volumeName: FSFileName(string: volumeName))
-        let root = OakFSItem(ino: ROOT_INO, name: FSFileName(string: ""))
+        let root = PandoItem(ino: ROOT_INO, name: FSFileName(string: ""))
         items[ROOT_INO] = root
     }
 
-    private func item(ino: UInt64, name: FSFileName) -> OakFSItem {
+    private func item(ino: UInt64, name: FSFileName) -> PandoItem {
         lock.lock(); defer { lock.unlock() }
         if let existing = items[ino] { return existing }
-        let made = OakFSItem(ino: ino, name: name)
+        let made = PandoItem(ino: ino, name: name)
         items[ino] = made
         return made
     }
@@ -49,7 +49,7 @@ final class OakFSVolume: FSVolume {
 }
 
 // MARK: - FSVolume.Operations
-extension OakFSVolume: FSVolume.Operations {
+extension PandoVolume: FSVolume.Operations {
     var supportedVolumeCapabilities: FSVolume.SupportedCapabilities {
         let caps = FSVolume.SupportedCapabilities()
         caps.supportsHardLinks = false
@@ -61,7 +61,7 @@ extension OakFSVolume: FSVolume.Operations {
 
     var volumeStatistics: FSStatFSResult {
         // Synthetic volume — report a large nominal capacity.
-        let r = FSStatFSResult(fileSystemTypeName: "OakFS")
+        let r = FSStatFSResult(fileSystemTypeName: "pando")
         r.blockSize = 4096
         r.ioSize = 1 << 20
         return r
@@ -94,11 +94,11 @@ extension OakFSVolume: FSVolume.Operations {
         of item: FSItem,
         replyHandler: @escaping (FSItem.Attributes?, Error?) -> Void
     ) {
-        guard let oakItem = item as? OakFSItem else {
+        guard let pandoItem = item as? PandoItem else {
             replyHandler(nil, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
-            let reply = try daemon.send(.getattr(ino: oakItem.ino))
+            let reply = try daemon.send(.getattr(ino: pandoItem.ino))
             guard case let .attr(a) = reply else { replyHandler(nil, errno(from: reply)); return }
             let attrs = FSItem.Attributes()
             a.apply(to: attrs)
@@ -113,7 +113,7 @@ extension OakFSVolume: FSVolume.Operations {
         inDirectory directory: FSItem,
         replyHandler: @escaping (FSItem?, FSFileName?, Error?) -> Void
     ) {
-        guard let dir = directory as? OakFSItem, let nameStr = name.string else {
+        guard let dir = directory as? PandoItem, let nameStr = name.string else {
             replyHandler(nil, nil, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
@@ -133,7 +133,7 @@ extension OakFSVolume: FSVolume.Operations {
         packer: FSDirectoryEntryPacker,
         replyHandler: @escaping (FSDirectoryVerifier, Error?) -> Void
     ) {
-        guard let dir = directory as? OakFSItem else {
+        guard let dir = directory as? PandoItem else {
             replyHandler(verifier, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
@@ -192,7 +192,7 @@ extension OakFSVolume: FSVolume.Operations {
         attributes: FSItem.SetAttributesRequest,
         replyHandler: @escaping (FSItem?, FSFileName?, Error?) -> Void
     ) {
-        guard let dir = directory as? OakFSItem, let nameStr = name.string else {
+        guard let dir = directory as? PandoItem, let nameStr = name.string else {
             replyHandler(nil, nil, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
@@ -217,13 +217,13 @@ extension OakFSVolume: FSVolume.Operations {
         fromDirectory directory: FSItem,
         replyHandler: @escaping (Error?) -> Void
     ) {
-        guard let dir = directory as? OakFSItem, let oakItem = item as? OakFSItem,
+        guard let dir = directory as? PandoItem, let pandoItem = item as? PandoItem,
               let nameStr = name.string else {
             replyHandler(fs_errorForPOSIXError(EINVAL)); return
         }
         do {
             // Pick rmdir vs unlink from the item's attributes.
-            let attrReply = try daemon.send(.getattr(ino: oakItem.ino))
+            let attrReply = try daemon.send(.getattr(ino: pandoItem.ino))
             let isDir: Bool
             if case let .attr(a) = attrReply { isDir = (a.kind == WireKind.dir.rawValue) } else { isDir = false }
             let op: Op = isDir
@@ -245,8 +245,8 @@ extension OakFSVolume: FSVolume.Operations {
         overItem: FSItem?,
         replyHandler: @escaping (FSFileName?, Error?) -> Void
     ) {
-        guard let srcDir = sourceDirectory as? OakFSItem,
-              let dstDir = destinationDirectory as? OakFSItem,
+        guard let srcDir = sourceDirectory as? PandoItem,
+              let dstDir = destinationDirectory as? PandoItem,
               let srcName = sourceName.string, let dstName = destinationName.string else {
             replyHandler(nil, fs_errorForPOSIXError(EINVAL)); return
         }
@@ -265,20 +265,20 @@ extension OakFSVolume: FSVolume.Operations {
         on item: FSItem,
         replyHandler: @escaping (FSItem.Attributes?, Error?) -> Void
     ) {
-        guard let oakItem = item as? OakFSItem else {
+        guard let pandoItem = item as? PandoItem else {
             replyHandler(nil, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
             // Only size changes (truncate) are honored; mode/uid/times are
             // read-only in oak mounts.
             if request.isValid(.size) {
-                let reply = try daemon.send(.truncate(ino: oakItem.ino, size: request.size))
+                let reply = try daemon.send(.truncate(ino: pandoItem.ino, size: request.size))
                 guard case let .attr(a) = reply else { replyHandler(nil, errno(from: reply)); return }
                 let attrs = FSItem.Attributes(); a.apply(to: attrs); replyHandler(attrs, nil)
                 return
             }
             // No-op: re-stat and return current attributes.
-            let reply = try daemon.send(.getattr(ino: oakItem.ino))
+            let reply = try daemon.send(.getattr(ino: pandoItem.ino))
             guard case let .attr(a) = reply else { replyHandler(nil, errno(from: reply)); return }
             let attrs = FSItem.Attributes(); a.apply(to: attrs); replyHandler(attrs, nil)
         } catch {
@@ -294,8 +294,8 @@ extension OakFSVolume: FSVolume.Operations {
 
     // FSKit is done with this item; drop our inode-cache entry.
     func reclaimItem(_ item: FSItem, replyHandler: @escaping (Error?) -> Void) {
-        if let oakItem = item as? OakFSItem {
-            lock.lock(); items[oakItem.ino] = nil; lock.unlock()
+        if let pandoItem = item as? PandoItem {
+            lock.lock(); items[pandoItem.ino] = nil; lock.unlock()
         }
         replyHandler(nil)
     }
@@ -307,11 +307,11 @@ extension OakFSVolume: FSVolume.Operations {
         _ item: FSItem,
         replyHandler: @escaping (FSFileName?, Error?) -> Void
     ) {
-        guard let oakItem = item as? OakFSItem else {
+        guard let pandoItem = item as? PandoItem else {
             replyHandler(nil, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
-            let reply = try daemon.send(.readlink(ino: oakItem.ino))
+            let reply = try daemon.send(.readlink(ino: pandoItem.ino))
             guard case let .data(data) = reply else { replyHandler(nil, errno(from: reply)); return }
             replyHandler(FSFileName(string: String(decoding: data, as: UTF8.self)), nil)
         } catch {
@@ -344,7 +344,7 @@ extension OakFSVolume: FSVolume.Operations {
 }
 
 // MARK: - FSVolume.ReadWriteOperations
-extension OakFSVolume: FSVolume.ReadWriteOperations {
+extension PandoVolume: FSVolume.ReadWriteOperations {
     func read(
         from item: FSItem,
         at offset: off_t,
@@ -352,12 +352,12 @@ extension OakFSVolume: FSVolume.ReadWriteOperations {
         into buffer: FSMutableFileDataBuffer,
         replyHandler: @escaping (Int, Error?) -> Void
     ) {
-        guard let oakItem = item as? OakFSItem else {
+        guard let pandoItem = item as? PandoItem else {
             replyHandler(0, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
             let reply = try daemon.send(.read(
-                ino: oakItem.ino, offset: Int64(offset), size: UInt32(length)))
+                ino: pandoItem.ino, offset: Int64(offset), size: UInt32(length)))
             guard case let .data(data) = reply else { replyHandler(0, errno(from: reply)); return }
             let n = buffer.withUnsafeMutableBytes { dst -> Int in
                 let count = min(data.count, dst.count)
@@ -376,12 +376,12 @@ extension OakFSVolume: FSVolume.ReadWriteOperations {
         at offset: off_t,
         replyHandler: @escaping (Int, Error?) -> Void
     ) {
-        guard let oakItem = item as? OakFSItem else {
+        guard let pandoItem = item as? PandoItem else {
             replyHandler(0, fs_errorForPOSIXError(EINVAL)); return
         }
         do {
             let reply = try daemon.send(.write(
-                ino: oakItem.ino, offset: Int64(offset), data: data))
+                ino: pandoItem.ino, offset: Int64(offset), data: data))
             guard case let .written(n) = reply else { replyHandler(0, errno(from: reply)); return }
             replyHandler(Int(n), nil)
         } catch {
@@ -392,7 +392,7 @@ extension OakFSVolume: FSVolume.ReadWriteOperations {
 
 // MARK: - FSVolume.PathConfOperations
 // `FSVolume.Operations` refines this, so the volume must supply these limits.
-extension OakFSVolume: FSVolume.PathConfOperations {
+extension PandoVolume: FSVolume.PathConfOperations {
     // oak doesn't expose hard links (see supportsHardLinks = false above).
     var maximumLinkCount: Int { 1 }
     var maximumNameLength: Int { 255 }

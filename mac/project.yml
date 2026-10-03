@@ -1,49 +1,47 @@
-# XcodeGen spec for the Oak Mount host app + OakFS FSKit extension.
+# XcodeGen spec for Pando.app: the host app, its FSKit file system extension,
+# and the broker helper. The Xcode project is generated, not committed:
 #
-# We keep the Xcode project as a text spec (not a binary .xcodeproj) so it
-# lives cleanly in version control. Generate the project with:
+#     brew install xcodegen      # once
+#     cd mac && xcodegen generate
 #
-#     brew install xcodegen        # one-time
-#     cd macos/OakFS && xcodegen generate
-#     open OakFS.xcodeproj
+# Unsigned build (no Apple account needed):
 #
-# or just run `make macos-app` from the repo root, which does this and builds.
+#     xcodebuild -project Pando.xcodeproj -scheme Pando -configuration Release \
+#       -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 #
-# Set DEVELOPMENT_TEAM (your Apple Team ID) below or via
-# `xcodegen generate --project-spec`-time env. Signing needs the
-# `com.apple.developer.fskit.fsmodule` entitlement granted to that team.
+# Signed build: drop CODE_SIGNING_ALLOWED=NO once the two provisioning
+# profiles named below are installed (see README.md, "The owner's Apple steps").
+#
+# Derived from Oak's macos/OakFS/project.yml (Apache 2.0, see NOTICE).
 
-name: OakFS
+name: Pando
 options:
-  bundleIdPrefix: dev.pando
+  bundleIdPrefix: ai.plannotator.pando
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
 
 settings:
   base:
-    DEVELOPMENT_TEAM: "TX8NWU7D68" # Pando spike: the owner's team
-    # Manual signing with Developer ID + explicit provisioning profiles (set
-    # per-target below). Automatic/CLI signing strips the restricted
-    # com.apple.developer.fskit.fsmodule entitlement and embeds no profile, so
-    # the extension won't load — these settings match what works in the Xcode IDE.
+    # The bundle id prefix, in one place. Every id derives from it:
+    #   host app   $(PANDO_BUNDLE_PREFIX)             ai.plannotator.pando
+    #   extension  $(PANDO_BUNDLE_PREFIX).extension   ai.plannotator.pando.extension
+    #   broker     $(PANDO_BUNDLE_PREFIX).broker      ai.plannotator.pando.broker
+    # The broker's bundle id is also its mach service name: the extension's
+    # Info.plist (PandoBrokerMachService), its sandbox exception, the broker's
+    # own Info.plist and the LaunchAgent all use $(PANDO_BUNDLE_PREFIX).broker.
+    # Not yet confirmed by the owner; change it here only.
+    PANDO_BUNDLE_PREFIX: ai.plannotator.pando
+    DEVELOPMENT_TEAM: "TX8NWU7D68" # the owner's team
+    # Manual signing with Developer ID and explicit provisioning profiles (set
+    # per target below). Automatic or command-line signing strips the
+    # restricted com.apple.developer.fskit.fsmodule entitlement and embeds no
+    # profile, and then the extension does not load.
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Developer ID Application"
-    # Hardened runtime is a hard prerequisite for Apple notarization. Without it
-    # `notarytool submit` is accepted but the ticket comes back "Invalid", so the
-    # downloaded app still trips Gatekeeper. Harmless on the compile-only CI build
-    # (CODE_SIGNING_ALLOWED=NO skips codesign entirely, so the flag is never applied).
+    # Hardened runtime, a secure timestamp and no get-task-allow: what
+    # notarization needs. CODE_SIGNING_ALLOWED=NO builds skip all of it.
     ENABLE_HARDENED_RUNTIME: YES
-    # Notarization rejects two things a plain `xcodebuild build` leaves on a
-    # Developer-ID binary when it's signed with a *development* provisioning
-    # profile:
-    #   1. No secure timestamp — codesign must contact Apple's timestamp server.
-    #      `xcodebuild build` doesn't pass --timestamp by default, so force it.
-    #   2. The com.apple.security.get-task-allow ("debugger may attach") base
-    #      entitlement, which Xcode injects for dev-profile builds. Turning off
-    #      base-entitlement injection strips it; the real entitlements (FSKit,
-    #      sandbox, mach-lookup) live in the explicit .entitlements files, so
-    #      nothing needed is lost.
     OTHER_CODE_SIGN_FLAGS: "--timestamp"
     CODE_SIGN_INJECT_BASE_ENTITLEMENTS: "NO"
     SWIFT_VERSION: "6.0"
@@ -51,34 +49,46 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
 
 targets:
-  OakMounter:
+  Pando:
     type: application
     platform: macOS
     sources:
       - path: HostApp
+      # Apache 2.0 section 4: the licences and the attribution notices travel
+      # with the binary, in Contents/Resources.
+      - path: NOTICE
+        buildPhase: resources
+      - path: LICENSE-oak-Apache-2.0
+        buildPhase: resources
+      - path: ../LICENSE
+        buildPhase: resources
     info:
       path: HostApp/Info.plist
+      properties:
+        CFBundleDisplayName: Pando
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "Pando. Apache License 2.0; notices in Contents/Resources/NOTICE."
     entitlements:
       path: HostApp/HostApp.entitlements
+      properties: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.pando.mount
-        PRODUCT_NAME: "Pando Mount"
-        PROVISIONING_PROFILE_SPECIFIER: "Mount Profile"
-        # App icon lives in HostApp/Assets.xcassets (sizes generated from the
-        # oak-web favicon). actool compiles it and merges CFBundleIconName/
-        # CFBundleIconFile into the final Info.plist automatically.
+        PRODUCT_NAME: Pando
+        PRODUCT_BUNDLE_IDENTIFIER: $(PANDO_BUNDLE_PREFIX)
+        PROVISIONING_PROFILE_SPECIFIER: "Pando Developer ID"
+        # actool compiles the icon and merges CFBundleIconName and
+        # CFBundleIconFile into the final Info.plist.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
-      - target: OakFSExtension
-        embed: true # embed the .appex into the app's Contents/Extensions
+      - target: PandoExtension
+        embed: true # into Contents/Extensions
 
-  OakFSExtension:
-    # FSKit modules are ExtensionKit extensions (EXAppExtensionAttributes), not
-    # legacy NSExtension app-extensions. This product type makes Xcode embed the
-    # .appex into the host app's Contents/Extensions/ (not Contents/PlugIns/) and
-    # apply the com.apple.developer.fskit.fsmodule provisioning profile — both
-    # required for macOS to discover and load it as a file system.
+  PandoExtension:
+    # FSKit modules are ExtensionKit extensions. This product type embeds the
+    # .appex in Contents/Extensions (not Contents/PlugIns) and applies the
+    # provisioning profile that carries com.apple.developer.fskit.fsmodule.
     type: extensionkit-extension
     platform: macOS
     sources:
@@ -86,77 +96,55 @@ targets:
     info:
       path: Extension/Info.plist
       properties:
-        # Declares this app-extension as an FSKit file-system module. Without
-        # EXAppExtensionAttributes/EXExtensionPointIdentifier, macOS never treats
-        # it as a file system and it won't appear under File System Extensions.
-        #
-        # CRITICAL: every FSKit key (FSShortName, FSSupports*, FSActivateOptionSyntax,
-        # …) must live *inside* EXAppExtensionAttributes, NOT at the Info.plist top
-        # level. FSKit reads FSShortName from within this dict; if it's hoisted to
-        # the top level the module still registers with pluginkit (because
-        # EXExtensionPointIdentifier is found) but `installedExtensionWithShortName`
-        # matches nothing, so `/sbin/mount -t OakFS` fails with "Unable to invoke
-        # task" / "No extension with fsShortName found". Apple's PassthroughFS
-        # sample nests them all here — match that layout exactly.
+        # System Settings lists the extension by this name.
+        CFBundleDisplayName: Pando
+        CFBundleName: Pando
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The broker's mach service; WireClient.swift reads it from here.
+        PandoBrokerMachService: $(PANDO_BUNDLE_PREFIX).broker
+        # Every FSKit key must sit inside EXAppExtensionAttributes, not at the
+        # top level; otherwise `mount -t pando` finds no extension.
         EXAppExtensionAttributes:
           EXExtensionPointIdentifier: com.apple.fskit.fsmodule
-          # FSActivateOptionSyntax declares the getopt syntax for the options that
-          # FSKit forwards to loadResource. `oak mount` passes the daemon socket and
-          # mount id via `-o oak_id=…,oak_socket=…` (see cli .../fskit/mod.rs); `o:`
-          # marks `-o` as taking an argument so those reach FSTaskOptions.taskOptions.
-          # Apple's PassthroughFS sample declares `u:g:m:o:`.
+          # getopt syntax for the options FSKit forwards to loadResource.
           FSActivateOptionSyntax:
             shortOptions: "o:"
-          # `oak mount` shells out to `/sbin/mount -F -t OakFS`; this is that name.
-          FSShortName: PandoFS
-          # Synthetic (path-URL) volume, not a block device.
+          # `/sbin/mount -F -t pando <state dir> <mount point>` selects this
+          # extension by its short name.
+          FSShortName: pando
+          # A path URL volume (the mount's state folder), not a block device.
           FSSupportsBlockResources: false
-          # oak mounts a synthetic FSPathURLResource (the mount state dir passed as
-          # the <resource> argument to `/sbin/mount -F`), not a /dev block device.
-          # FSKit only hands the extension a path-URL resource when this is set, so
-          # without it the mount is rejected. The PassthroughFS sample sets it too.
           FSSupportsPathURLs: true
-          # The <resource> (mount state dir) is delivered to the sandboxed extension
-          # as a security-scoped URL; PassthroughFS requires this too.
+          # The state folder arrives as a security-scoped URL.
           FSRequiresSecurityScopedPathURLResources: true
     entitlements:
-      path: Extension/OakFS.entitlements
-      # NOTE: xcodegen *manages* this file — every `xcodegen generate` (which
-      # `make macos-app` runs) overwrites it from these properties. So the
-      # entitlements must live here, not just in the .entitlements file, or they
-      # silently vanish on the next generate (which is why the restricted FSKit
-      # entitlement never shipped before).
+      path: Extension/Extension.entitlements
+      # xcodegen writes this file from these properties on every generate.
       properties:
-        # FSKit file-system modules must run in the App Sandbox, like Apple's
-        # PassthroughFS sample.
+        # FSKit modules run in the App Sandbox.
         com.apple.security.app-sandbox: true
-        # The restricted entitlement that marks this app-extension as an FSKit
-        # file-system module. Must be granted to the team's provisioning profile.
+        # Marks the extension as an FSKit module; it must come from the
+        # extension's provisioning profile.
         com.apple.developer.fskit.fsmodule: true
-        # oak-specific (the passthrough sample has no equivalent because it does
-        # direct POSIX I/O): the sandboxed extension reaches the `oak` daemon via
-        # the launchd-vended `com.oakvcs.mount` XPC mach service. The sandbox
-        # blocks mach lookups by default, so the broker name needs an explicit
-        # exception — see DaemonClient.swift.
+        # The sandbox blocks mach lookups; this lets the extension reach the
+        # broker, which relays to the mount's daemon socket.
         com.apple.security.temporary-exception.mach-lookup.global-name:
-          - dev.pando.mount
+          - $(PANDO_BUNDLE_PREFIX).broker
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.pando.mount.Extension
-        PRODUCT_MODULE_NAME: OakFSExtension
-        PROVISIONING_PROFILE_SPECIFIER: "OakFSExtension"
-        # FSKit is a system framework on macOS 26+.
+        PRODUCT_NAME: PandoExtension
+        PRODUCT_MODULE_NAME: PandoExtension
+        PRODUCT_BUNDLE_IDENTIFIER: $(PANDO_BUNDLE_PREFIX).extension
+        PROVISIONING_PROFILE_SPECIFIER: "Pando Extension Developer ID"
     dependencies:
       - sdk: FSKit.framework
 
 schemes:
-  # `make macos-app` builds `-scheme OakMounter`. xcodegen does not create
-  # schemes unless declared, so define one that builds the host app (which embeds
-  # the extension) and archives in Release.
-  OakMounter:
+  Pando:
     build:
       targets:
-        OakMounter: all
+        Pando: all
     run:
       config: Debug
     archive:

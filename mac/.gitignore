@@ -1,2 +1,4 @@
-OakFS/build-*/
-OakFS/OakFS.xcodeproj/
+build/
+build-*/
+Pando.xcodeproj/
+logs/

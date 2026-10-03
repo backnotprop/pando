@@ -1,4 +1,4 @@
-// OakFSUnaryFileSystem.swift — the FSKit module entry point.
+// PandoFileSystem.swift — the FSKit module entry point.
 //
 // An `FSUnaryFileSystem` presents a single `FSResource` as a single
 // `FSVolume`. For oak the resource is synthetic (no block device): macOS 26's
@@ -7,7 +7,7 @@
 // path through the `mount -o` options (`oak_id`, `oak_socket`); we read them
 // here to find the `oak` daemon.
 //
-// See the API-surface note in OakFSItem.swift — the conformances here are
+// See the API-surface note in PandoItem.swift — the conformances here are
 // reconciled against the macOS 26.1 FSKit SDK.
 
 import ExtensionFoundation
@@ -19,12 +19,12 @@ import os
 /// `UnaryFileSystemExtension` (macOS 15.4+) that vends the file-system object —
 /// `@main` lives here, not on `FSUnaryFileSystem` (which has no `static main`).
 @main
-struct OakFSModule: UnaryFileSystemExtension {
-    var fileSystem = OakFSUnaryFileSystem()
+struct PandoModule: UnaryFileSystemExtension {
+    var fileSystem = PandoFileSystem()
 }
 
-final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
-    private let log = Logger(subsystem: "com.oakvcs.mount.fskit", category: "module")
+final class PandoFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
+    private let log = Logger(subsystem: "ai.plannotator.pando.extension", category: "module")
 
     override init() {
         super.init()
@@ -38,7 +38,7 @@ final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
     ) {
         // `usable` with a name + a stable container/volume identifier.
         let result = FSProbeResult.usable(
-            name: "OakFS",
+            name: "Pando",
             containerID: FSContainerIdentifier(uuid: UUID()))
         replyHandler(result, nil)
     }
@@ -72,7 +72,7 @@ final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
 
         let mountID = stateDir.lastPathComponent
         let socket = stateDir.appendingPathComponent("fskit.sock").path
-        log.info("loadResource: oak mount \(mountID, privacy: .public) via \(socket, privacy: .public)")
+        log.info("loadResource: mount \(mountID, privacy: .public) via \(socket, privacy: .public)")
 
         // Volume label shown in Finder. `oak mount` writes a `volname` file
         // (the mount dir's leaf, e.g. the repo name) into the state dir; fall
@@ -80,7 +80,7 @@ final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
         let volnameURL = stateDir.appendingPathComponent("volname")
         let friendlyName = (try? String(contentsOf: volnameURL, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let volumeName = (friendlyName?.isEmpty == false) ? friendlyName! : "oak-\(mountID)"
+        let volumeName = (friendlyName?.isEmpty == false) ? friendlyName! : "pando-\(mountID)"
 
         let client = DaemonClient(socketPath: socket)
 
@@ -93,7 +93,7 @@ final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
         } catch let DaemonError.protocolMismatch(mounter, daemon) {
             let daemonStr = daemon.map { "v\($0)" } ?? "older (pre-handshake)"
             log.error(
-                "loadResource: wire-protocol mismatch — Oak Mount speaks v\(mounter, privacy: .public), oak daemon speaks \(daemonStr, privacy: .public). Update both Oak Mount and the oak CLI to the same release.")
+                "loadResource: wire version mismatch: the extension speaks v\(mounter, privacy: .public), the daemon speaks \(daemonStr, privacy: .public). Update Pando.app and the pando command together.")
             client.close()
             stateDir.stopAccessingSecurityScopedResource()
             replyHandler(nil, fs_errorForPOSIXError(EPROTONOSUPPORT))
@@ -106,7 +106,7 @@ final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
             return
         }
 
-        let volume = OakFSVolume(daemon: client, volumeName: volumeName, fileSystem: self)
+        let volume = PandoVolume(daemon: client, volumeName: volumeName, fileSystem: self)
 
         // Transition the container out of `notReady`. FSKit checks
         // `containerStatus` immediately after loadResource returns; while it's
@@ -114,7 +114,7 @@ final class OakFSUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
         // (EAGAIN). loadResource must move it to `.ready` (NOT `.active` — that's
         // also "unexpected" here and surfaces as EPROTONOSUPPORT). The
         // `ready → active` step happens when the single volume activates (see
-        // OakFSVolume.activate and the FSFileSystemBase.containerStatus diagram).
+        // PandoVolume.activate and the FSFileSystemBase.containerStatus diagram).
         containerStatus = .ready
 
         replyHandler(volume, nil)

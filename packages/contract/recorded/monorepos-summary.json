@@ -5,14 +5,14 @@
   "body": {
     "monorepos": [
       {
-        "id": "m_25a27ea827df6846",
-        "owner": "rec-musyuiou",
-        "name": "rec-musyuiou",
-        "full_name": "rec-musyuiou/rec-musyuiou",
+        "id": "m_326a047c6b391051",
+        "owner": "rec-mut00rpe",
+        "name": "rec-mut00rpe",
+        "full_name": "rec-mut00rpe/rec-mut00rpe",
         "kind": "monorepo",
-        "created_at": "2026-10-03T22:31:03.995Z",
+        "created_at": "2026-10-03T23:03:55.243Z",
         "role": "owner",
-        "last_activity_at": "2026-10-03T22:31:15.341Z",
+        "last_activity_at": "2026-10-03T23:04:08.861Z",
         "worktrees_active": 0,
         "machines_active": 0,
         "needs": {

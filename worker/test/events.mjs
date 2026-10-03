@@ -163,6 +163,16 @@ try {
   check("GET heads: main after its first push, with no Artifacts read", r.json?.heads?.[0]?.head === mainHead && r.json.heads[0].path === "projects/web" && !!r.json.heads[0].updated_at);
   let e = await find(ev, (x) => x.collection === "default_heads" && x.row?.default_head === mainHead);
   checkS("event: push of main (default_heads upsert)", e?.kind === "push" && e?.key === repo && e?.machine === "ana-mbp" && e?.actor === `ana-${id}`, scrub(JSON.stringify(e)).slice(0, 200));
+  // The first push's title arrives with its numbers (the facts job), so poll.
+  let title = null;
+
+  for (let i = 0; STREAM && i < 80 && title !== "first"; i++) {
+    title = (await call("GET", `/v1/monorepos/${O}/${M}/heads`, A)).json?.heads?.[0]?.head_title ?? null;
+
+    if (title !== "first") await sleep(250);
+  }
+
+  checkS("GET heads: main's head_title is its first push's commit title (no Artifacts read)", title === "first", JSON.stringify(title));
 
   git(["checkout", "-qb", "feat/a"], src);
   writeFileSync(join(src, "a.txt"), "a\n");
@@ -241,7 +251,9 @@ try {
   e = await find(ev, (x) => x.kind === "merged");
   checkS("event: merged, with merge facts on the Branch row", e?.row?.state === "merged" && e?.row?.merge_commit === mergeSha && e?.row?.merged_by === `ana-${id}` && e?.row?.merged_machine === "ana-mbp" && e?.row?.merged_agent === "agent-1" && e?.row?.forced === false && !!e?.row?.merged_at, scrub(JSON.stringify(e?.row)).slice(0, 260));
   r = await call("GET", `/v1/monorepos/${O}/${M}/heads`, A);
-  check("GET heads: main is the merge commit after a merge", r.json?.heads?.[0]?.head === mergeSha);
+  git(["fetch", "-q", url, "main"], src, A);
+  const mergeTitle = git(["log", "-1", "--format=%s", mergeSha], src).out.trim();
+  check("GET heads: main is the merge commit after a merge, head_title its title as git reads it", r.json?.heads?.[0]?.head === mergeSha && !!mergeTitle && r.json.heads[0].head_title === mergeTitle, `${JSON.stringify(r.json?.heads?.[0]?.head_title)} vs ${JSON.stringify(mergeTitle)}`);
 
   if (STREAM) {
     const latest = await call("GET", `/v1/monorepos/${O}/${M}/events?limit=1`, A);

@@ -163,6 +163,17 @@ interface BranchEventRow {
   updated_at: string | null;
 }
 
+/** A code repo's main as the object last moved it (GET .../heads). */
+export type RepoHead = {
+  repo: string;
+  path: string;
+  default_branch: string;
+  head: string | null;
+  /** The head commit's title, when known here. */
+  head_title: string | null;
+  updated_at: string | null;
+};
+
 /** A merge commit's branch and that branch's title (the file pages' history). */
 export interface MergedBranch {
   branch: string;
@@ -308,6 +319,9 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!rcols.includes("default_head_at")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head_at TEXT");
 
     if (!rcols.includes("required_checks")) this.sql.exec("ALTER TABLE repos ADD COLUMN required_checks TEXT");
+
+    // Main's head commit's title (its first line), when Pando knew it as main moved: a merge's message, or the first push's commit.
+    if (!rcols.includes("default_head_title")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head_title TEXT");
     const dcols = this.rows<{ name: string }>("PRAGMA table_info(deliveries)").map((c) => c.name);
 
     if (!dcols.includes("seq")) this.sql.exec("ALTER TABLE deliveries ADD COLUMN seq INTEGER");
@@ -522,18 +536,29 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Main's head as Pando last moved or saw it (pushes through the door, merges, and the Worker's reads). */
-  rememberHead(repo: string, sha: string | null): void {
+  /** Main moved (or was read once): its head, and its commit's title when known here (else null, never a stale one). */
+  rememberHead(repo: string, sha: string | null, title: string | null = null): void {
     this.sql.exec(
-      "UPDATE repos SET default_head = ?, default_head_at = ? WHERE name = ? AND (default_head IS NOT ? )",
-      sha, now(), repo, sha,
+      "UPDATE repos SET default_head = ?, default_head_at = ?, default_head_title = ? WHERE name = ? AND (default_head IS NOT ? )",
+      sha, now(), title, repo, sha,
     );
   }
 
-  /** Every code repo's main, from the object's records (no Artifacts call). */
-  heads(): { repo: string; path: string; default_branch: string; head: string | null; updated_at: string | null }[] {
-    return this.rows<{ repo: string; path: string; default_branch: string; head: string | null; updated_at: string | null }>(
-      `SELECT name AS repo, path, default_branch, default_head AS head, default_head_at AS updated_at FROM repos
-       WHERE NOT (name = 'meta' AND artifacts_name LIKE '%--meta') ORDER BY path`,
+  /**
+   * Every code repo's main, from the object's records (no Artifacts call).
+   * `head_title`: the title recorded when main moved; for a main recorded
+   * before titles were, the last merge's branch title (the first line of
+   * Pando's merge message), or null.
+   */
+  heads(): RepoHead[] {
+    return this.rows<RepoHead>(
+      `SELECT r.name AS repo, r.path, r.default_branch, r.default_head AS head,
+         COALESCE(r.default_head_title, b.title, CASE WHEN m.branch IS NOT NULL THEN 'Merge branch ''' || m.branch || '''' END) AS head_title,
+         r.default_head_at AS updated_at
+       FROM repos r
+       LEFT JOIN merges m ON m.repo = r.name AND m.merge_commit = r.default_head
+       LEFT JOIN branches b ON b.repo = m.repo AND b.name = m.branch
+       WHERE NOT (r.name = 'meta' AND r.artifacts_name LIKE '%--meta') ORDER BY r.path`,
     );
   }
 
@@ -884,7 +909,7 @@ export class MonorepoObject extends DurableObject<Env> {
       "UPDATE branches SET merge_commit = ?, merged_head = ?, merged_at = ?, merged_by = ? WHERE repo = ? AND name = ?",
       out.sha, head, at, a.identity.login, a.repo, a.branch,
     );
-    this.rememberHead(a.repo, out.sha);
+    this.rememberHead(a.repo, out.sha, message.split("\n")[0] || null);
     this.forgetRequiredIfConfig(a.repo);
     this.queueFacts({ type: "sweep", repo: a.repo, main: out.sha });
     const merge: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
@@ -1645,8 +1670,19 @@ export class MonorepoObject extends DurableObject<Env> {
     const sent = this.feed.push(seq, summary);
 
     if (sent) this.machines.pushSummary(seq, summary);
+    this.rememberHeadTitle(seq, summary.head_title);
 
     return sent;
+  }
+
+  /** A push of main (a default_heads event) got its head commit's title from the facts job: keep it while that commit is main. */
+  private rememberHeadTitle(seq: number, title: string | null): void {
+    if (!title) return;
+    const stored = this.row<{ body: string }>("SELECT body FROM events WHERE seq = ?", seq);
+    const e = stored ? parseJson(stored.body) : null;
+
+    if (!isRecord(e) || e.collection !== "default_heads" || !isRecord(e.row) || !isText(e.row.repo) || !isText(e.head)) return;
+    this.sql.exec("UPDATE repos SET default_head_title = ? WHERE name = ? AND default_head = ?", title, e.row.repo, e.head);
   }
 
   /** Activity events older than the cursor, newest first (fan-in for large monorepos and history past a feed's window). */

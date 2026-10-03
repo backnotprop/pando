@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -300,5 +301,63 @@ func TestInitRefusesAnOversizedFirstPush(t *testing.T) {
 	t.Setenv("PANDO_PUSH_LIMIT", "")
 	if out := h.ok(acme, "init"); !strings.Contains(out, "pushed main") {
 		t.Fatalf("init again, under the limit:\n%s", out)
+	}
+}
+
+// pando init's own push of main retries once when it breaks off in transit.
+// The server's receive-pack is wrapped: the first push loses its pack after
+// 200 bytes, as a dropped connection would; the second goes through.
+func TestInitRetriesABrokenPush(t *testing.T) {
+	h := newHarness(t)
+	acme := filepath.Join(h.base, "acme")
+	os.MkdirAll(acme, 0o755)
+	os.WriteFile(filepath.Join(acme, "README.md"), []byte(strings.Repeat("acme history\n", 2000)), 0o644)
+	h.git(acme, "init", "-q", "-b", "main")
+	h.git(acme, "add", "-A")
+	h.git(acme, "commit", "-q", "-m", "first")
+	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	tries := filepath.Join(h.base, "tries")
+	wrap := filepath.Join(h.base, "flaky-receive-pack")
+	os.WriteFile(wrap, []byte(`#!/bin/sh
+echo x >> '`+tries+`'
+if [ "$(wc -l < '`+tries+`')" -eq 1 ]; then
+  head -c 200 | git-receive-pack "$@"
+  exit 1
+fi
+exec git-receive-pack "$@"
+`), 0o755)
+	url := "file://" + filepath.Join(h.base, "server", "acme", "repos", "acme.git")
+	h.git(acme, "remote", "add", "pando", url)
+	h.git(acme, "config", "remote.pando.receivepack", wrap)
+
+	out := h.ok(acme, "init", "--name", "acme")
+	if !strings.Contains(out, "the push broke off") || !strings.Contains(out, "trying once more") || !strings.Contains(out, "pushed main") {
+		t.Fatalf("init:\n%s", out)
+	}
+	if b, _ := os.ReadFile(tries); strings.Count(string(b), "x") != 2 {
+		t.Fatalf("receive-pack ran %d times, want 2", strings.Count(string(b), "x"))
+	}
+	if got := h.git(acme, "ls-remote", "pando", "refs/heads/main"); !strings.HasPrefix(got, h.git(acme, "rev-parse", "HEAD")) {
+		t.Fatalf("main on the server: %q", got)
+	}
+}
+
+func TestTransportFailure(t *testing.T) {
+	for msg, want := range map[string]bool{
+		// Seen on pando-dev, 2026-10-03.
+		"error: RPC failed; curl 56 LibreSSL SSL_read: LibreSSL/3.3.6: error:1404C3FC:SSL routines:ST_OK:sslv3 alert bad record mac, errno 0": true,
+		"error: RPC failed; curl 56 GnuTLS recv error (-12): A TLS fatal alert has been received.":                                            true,
+		"send-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly":                          true,
+		" ! [remote rejected] main -> main (unpacker error)":                                                                                  true,
+		// Refusals are not retried.
+		" ! [remote rejected] main -> main (main is protected; push a branch and merge it)": false,
+		" ! [remote rejected] HEAD -> main (pre-receive hook declined)":                     false,
+		"fatal: repository 'https://x/y.git/' not found":                                    false,
+	} {
+		if got := transportFailure(errors.New(msg)); got != want {
+			t.Errorf("%q: %v, want %v", msg, got, want)
+		}
 	}
 }

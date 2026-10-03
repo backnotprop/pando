@@ -166,12 +166,28 @@ above:
   temporary file `.<name>.pando-tmp-<random>` in the same folder, which is
   then renamed over the file. A delete removes the file and any folder left
   empty. A rename moves the file when it is clean.
-- **Sending a local change.** The daemon scans the folder every 100 ms by
-  default (a big tree spaces its scans out: each waits ten times the last
-  scan's length). A changed file is sent once it has stopped changing for
-  one scan, or after 5 minutes of continuous change (the maximum hold). One
-  change per path is in flight at a time; later edits go out after the
-  answer, on top of the new version.
+- **Noticing a local change.** The daemon asks the OS which paths changed:
+  inotify on Linux (one watch per folder that syncs), FSEvents on macOS.
+  It reads a changed file once it has been quiet: at once for a file closed
+  after writing on Linux, after 50 ms for other changes on Linux, after
+  100 ms on macOS. A full walk every 30 s, and whenever the OS says it lost
+  events, is the safety net. Without notifications (another OS, inotify out
+  of watches, `PANDO_META_WATCH=off`, `pando meta sync --once`) it scans
+  every 100 ms instead (a big tree spaces its scans out: each waits ten
+  times the last scan's length), and a changed file goes out once one scan
+  sees it unchanged. Either way a file still changing goes out after 5
+  minutes (the maximum hold). One change per path is in flight at a time;
+  later edits go out after the answer, on top of the new version.
+- **Measured** (one way, write to bytes on the other machine): against a
+  local server, 114 ms on macOS and 4 ms on Linux, the same on 12,000 files;
+  this Mac to a Cloudflare container through pando-dev and back, 268 ms
+  (scanning every 100 ms: 410 ms; every 500 ms: about 1.95 s). Idle on
+  12,000 files: 0.23% of a core (scanning: 9.2%).
+- **Limits a person can hit.** inotify needs one watch per synced folder,
+  from `fs.inotify.max_user_watches`, shared by every program of the user:
+  8,192 in a Cloudflare container, 1,048,576 on recent desktop kernels.
+  Out of watches, the daemon says so, names the limit, and scans instead
+  (`sysctl fs.inotify.max_user_watches=524288` raises it).
 - **Renames are never guessed.** A delete and a create seen in one pass are
   sent as a rename only when the bytes are identical. Otherwise they go as a
   delete and a save.

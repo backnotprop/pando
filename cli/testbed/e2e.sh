@@ -187,6 +187,16 @@ pando reference update "$ref" | sed 's/^/  /'
 grep -q "commit = \"$newest\"" ".pando/references/$ref.toml" && ok "and rewrote the pointer" || fail "pointer not rewritten"
 [ -z "$(git -C "$ref" status --porcelain)" ] && ok "git status in the reference is clean after the move" || fail "reference status: $(git -C "$ref" status --porcelain | head -3)"
 
+case "$SERVER" in http*)
+  step "a second machine's main follows merges through the event stream"
+  out=$(PANDO_BIN=pando /testbed/follow-latency.sh "$SERVER" 3 2>&1)
+  echo "$out" | grep -E '^merge ' | sed 's/^/  /'
+  slow=$(echo "$out" | sed -n 's/.*moved \([0-9]*\) ms after.*/\1/p' | awk '$1 > 5000' | wc -l)
+  [ "$(echo "$out" | grep -c 'moved [0-9]* ms after')" = 3 ] && [ "$slow" = 0 ] \
+    && ok "3 merges: the follower's main moved within 5 s of each (was up to 15 s by polling)" || fail "follow: $out"
+  ;;
+esac
+
 step "as a person without root: read-only main by ArtifactFS --read-only"
 useradd -m dev >/dev/null 2>&1 || true
 chmod 666 /dev/fuse

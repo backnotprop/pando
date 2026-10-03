@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=afs /out/artifact-fs /usr/local/bin/artifact-fs
 COPY --from=pando /out/pando /usr/local/bin/pando
 COPY --chmod=0755 testbed/e2e.sh /testbed/e2e.sh
+COPY --chmod=0755 testbed/follow-latency.sh /testbed/follow-latency.sh
 ENV PANDO_MACHINE=linux-testbed
 WORKDIR /work
 CMD ["/testbed/e2e.sh"]

@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"pando/internal/app"
 	"pando/internal/meta"
@@ -35,7 +34,7 @@ var metaCommands = map[string]func([]string) int{
 				}
 				ctx, stop := context.WithCancel(context.Background())
 				defer stop()
-				app.StartFollower(ctx, dir, 15*time.Second)
+				app.StartFollower(ctx, dir)
 			}
 			return meta.CmdSync(args[1:], meta.Hooks{References: app.ReferencesHook})
 		}

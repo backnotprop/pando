@@ -75,6 +75,21 @@ type InviteResult struct {
 	Invite *Invite `json:"invite"`
 }
 
+// Head is one repo's main, from GET /v1/monorepos/{m}/heads.
+type Head struct {
+	Repo          string `json:"repo"` // the repo's URL name
+	Path          string `json:"path"`
+	DefaultBranch string `json:"default_branch"`
+	Head          string `json:"head"` // "" for an empty repo
+	UpdatedAt     string `json:"updated_at"`
+}
+
+// Heads is every code repo's main and the event stream's newest seq.
+type Heads struct {
+	Heads []Head `json:"heads"`
+	Seq   *int64 `json:"seq"` // nil when the stream is off
+}
+
 // Me is GET /v1/user: the user and the credential in use.
 type Me struct {
 	User
@@ -215,6 +230,8 @@ type Server interface {
 	RevokeInvite(ctx context.Context, mono, email string) error
 
 	ListRepos(ctx context.Context, mono string) ([]Repo, error)
+	// Heads is every repo's main, for followers (no Artifacts read).
+	Heads(ctx context.Context, mono string) (*Heads, error)
 	GetRepo(ctx context.Context, mono, repo string) (*Repo, error)
 	CreateRepo(ctx context.Context, mono, path string) (*Repo, error)
 

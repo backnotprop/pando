@@ -1,0 +1,1207 @@
+openapi: 3.1.0
+info:
+  title: Pando API
+  version: "1"
+  summary: The /v1 API of the Pando Worker.
+  description: |
+    Owner: the server-git lane. Others ask pando-ops for changes.
+
+    Shape:
+    - Every route is under `/v1/monorepos/{monorepo}`. A monorepo holds
+      repos. A plain git repo is a monorepo of kind `repo` holding exactly
+      one repo, at path `.`, and no meta layer; it uses the same routes.
+      The meta layer's routes (`/v1/monorepos/{monorepo}/meta/...`) are in
+      `meta-sync.md`.
+    - A repo has a `path` (as in `formats.md`: `projects/web`, or `.` in a
+      plain repo) and a `name`, its id in URLs: the path with each `/`
+      turned into `-` (`projects-web`). A plain repo's name is the
+      monorepo's name. Names are unique in a monorepo; `meta` is reserved.
+    - Git goes through the git door at the repo's `clone_url`,
+      `https://<host>/<monorepo>/<name>.git` (smart HTTP; see the `git`
+      tag). Pushes to the default branch are refused, except the first push
+      that creates it. An agent cannot push to a branch another identity
+      created.
+    - Every other call is JSON with `Authorization: Bearer <pando token>`.
+
+    Artifacts repos, in the namespace `pando-dev`: a project repo is
+    `<monorepo>--<name>` (`acme--projects-web`), a plain repo is
+    `<monorepo>--<monorepo>`, and the meta layer is `<monorepo>--meta`.
+    Artifacts allows letters, digits, `.`, `_` and `-`, starting with a
+    letter or digit. Pando names forbid `--`, so the split is never
+    ambiguous. These names are internal: clients use `clone_url`.
+
+    Required checks: the server reads `required_checks` from
+    `.pando/pando.toml` on main (`formats.md`, section 2). In a monorepo
+    that is the meta layer's main, table `[repos."<repo path>"]`; in a plain
+    repo, the repo's own main, table `[repos."."]`.
+
+    Tokens belong to one monorepo and have a role: `person` or `agent`.
+    People do everything. Agents read, push their own branches, comment on
+    reviews, post commit statuses and report worktrees. Only a person
+    approves, and only a person merges (a person's Merge is the approval).
+
+    The first token: the owner sets the Worker secret `PANDO_BOOTSTRAP`, then
+    calls `POST /v1/monorepos` with it as the bearer. That returns the
+    monorepo and a person token for it. The bootstrap secret also works on
+    `POST /v1/monorepos/{monorepo}/tokens`, for recovery. It works nowhere
+    else.
+
+    Branch names in paths: encode `/` as `%2F` (`agent-3%2Foauth`). Raw
+    slashes are accepted too.
+
+    Errors are JSON: `{"error": {"code": "...", "message": "..."}}`.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://pando-dev.{subdomain}.workers.dev
+    variables:
+      subdomain:
+        default: example
+security:
+  - pandoToken: []
+tags:
+  - name: git
+    description: |
+      The git door. Plain git clients use it; no Pando client is needed.
+
+      ```
+      GET  /{monorepo}/{repo}.git/info/refs?service=git-upload-pack
+      GET  /{monorepo}/{repo}.git/info/refs?service=git-receive-pack
+      POST /{monorepo}/{repo}.git/git-upload-pack
+      POST /{monorepo}/{repo}.git/git-receive-pack
+      ```
+
+      Credentials: `Authorization: Bearer <pando token>` (for example
+      `git -c http.extraHeader="Authorization: Bearer $PANDO_TOKEN" ...`),
+      or HTTP Basic with the token as the password (any username). Without
+      credentials the door answers 401 with `WWW-Authenticate: Basic`, so a
+      git credential helper works.
+
+      Clone and fetch also accept the 30-minute read token from a hook
+      delivery (`read_token`), so CI clones from `clone_url` with no Pando
+      token.
+
+      Push rules (receive-pack). The door reads the command list before the
+      pack and refuses the whole push, with git's usual
+      `! [remote rejected] <ref> (<reason>)` lines, when any command:
+      - updates or deletes the repo's default branch (`refs/heads/main`).
+        Creating it when it does not exist yet is allowed: that is the first
+        push of `pando init`;
+      - is made by an agent to a branch another identity created
+        (`branch <b> belongs to <name>`). People may push to any branch
+        except the default one.
+
+      The door records each pushed branch's head and, on its first push, its
+      creator. Then it delivers the `branch.opened` and `push` hooks.
+paths:
+  /v1/monorepos:
+    post:
+      operationId: createMonorepo
+      summary: Create a monorepo and its first person token (bootstrap secret only)
+      tags: [monorepos]
+      security:
+        - bootstrap: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, person]
+              properties:
+                name: { $ref: "#/components/schemas/Name" }
+                kind:
+                  type: string
+                  enum: [monorepo, repo]
+                  default: monorepo
+                  description: |
+                    `monorepo`: Pando also makes the meta layer's Artifacts repo
+                    (`<name>--meta`, empty); add code repos with createRepo.
+                    `repo`: a plain git repo; Pando makes its one repo (path `.`,
+                    name = the monorepo's name) and returns it in `repos`.
+                person:
+                  type: string
+                  description: Name of the person who gets the first token.
+                email:
+                  type: string
+                  description: The person's email, used on merge commits.
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [monorepo, token, repos]
+                properties:
+                  monorepo: { $ref: "#/components/schemas/Monorepo" }
+                  token: { $ref: "#/components/schemas/NewToken" }
+                  repos:
+                    type: array
+                    description: The plain repo for kind `repo`; empty for kind `monorepo`.
+                    items: { $ref: "#/components/schemas/Repo" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503":
+          description: "`bootstrap_not_configured`: the PANDO_BOOTSTRAP secret is not set."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{monorepo}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: getMonorepo
+      summary: Get a monorepo
+      tags: [monorepos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Monorepo" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/me:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: whoAmI
+      summary: The identity behind the token
+      tags: [tokens]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Identity" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/tokens:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: createToken
+      summary: Make a token for a person or an agent (people, or the bootstrap secret)
+      tags: [tokens]
+      security:
+        - pandoToken: []
+        - bootstrap: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role]
+              properties:
+                name:
+                  type: string
+                  description: Who the token is, for example `ramos` or `agent-3`. Branch ownership is by this name.
+                role: { $ref: "#/components/schemas/Role" }
+                email:
+                  type: string
+      responses:
+        "201":
+          description: Created. `token` is shown once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewToken" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listTokens
+      summary: List tokens (no secrets; people only)
+      tags: [tokens]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/Token" }
+  /v1/monorepos/{monorepo}/tokens/{token_id}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - name: token_id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: revokeToken
+      summary: Revoke a token (people only)
+      tags: [tokens]
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/repos:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: createRepo
+      summary: Create a repo in a monorepo (people only)
+      description: |
+        Makes the Artifacts repo and records it. It starts empty; the first
+        push to `main` through the door (`pando init`) creates main. Refused
+        in a monorepo of kind `repo` (it already has its one repo).
+      tags: [repos]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  description: The repo path from the root, for example `projects/web` (formats.md). Its `name` is the path with `/` turned into `-`.
+                description: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repo" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listRepos
+      summary: List repos
+      tags: [repos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [repos]
+                properties:
+                  repos:
+                    type: array
+                    items: { $ref: "#/components/schemas/Repo" }
+  /v1/monorepos/{monorepo}/repos/{repo}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getRepo
+      summary: Get a repo
+      tags: [repos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repo" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/repos/{repo}/branches:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: listBranches
+      summary: List branches with head, base, author, ahead and behind, mergeable and checks
+      description: The default branch is not in the list; its name and head are at the top.
+      tags: [branches]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, merged, all]
+            default: open
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [default_branch, default_head, branches]
+                properties:
+                  default_branch: { type: string }
+                  default_head:
+                    type: [string, "null"]
+                    description: null while the repo is empty.
+                  branches:
+                    type: array
+                    items: { $ref: "#/components/schemas/Branch" }
+    post:
+      operationId: createBranch
+      summary: Create a branch on the server, off main by default
+      description: |
+        Points a new branch at `from` (default: main's head) with no new
+        commit. The caller becomes the branch's author, so an agent owns the
+        branch it creates. 409 `branch_exists` if it exists.
+      tags: [branches]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, description: "A git branch name, for example `agent-3/oauth`. Not the default branch." }
+                from: { type: string, description: "A branch name or a full sha. Default: the default branch." }
+                title: { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/branch"
+    get:
+      operationId: getBranch
+      summary: One branch, as in the list
+      tags: [branches]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBranch
+      summary: Set the branch's title and description (its creator, or a person)
+      description: The merge commit's message is the title and description.
+      tags: [branches]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/diff:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/branch"
+    get:
+      operationId: branchDiff
+      summary: The branch diff (GitHub's three-dot diff, merge base to head)
+      description: |
+        Computed in the Worker from Artifacts reads, with no clone: the merge
+        base, a walk of the two trees that skips equal subtrees, the changed
+        blobs only, and a Myers line diff. Exact renames (the same blob moved)
+        show as `renamed`; there is no similarity rename detection.
+
+        `max_bytes` bounds the bytes of hunk lines returned. Files past the
+        budget keep their entry with `patch_omitted: budget`. A text file over
+        1 MiB on either side, or one whose diff is too big to compute, has
+        `patch_omitted: too_large` and null counts.
+      tags: [branches]
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, patch]
+            default: json
+        - name: hunks
+          in: query
+          description: "`1` to include per-file hunks in JSON."
+          schema: { type: string, enum: ["0", "1"], default: "0" }
+        - name: max_bytes
+          in: query
+          description: Budget for hunk bytes. Default 1048576, maximum 8388608.
+          schema: { type: integer, minimum: 0 }
+        - name: paths
+          in: query
+          description: Path prefixes, comma-separated or repeated (`paths=src/auth/&paths=README.md`).
+          schema: { type: string }
+      responses:
+        "200":
+          description: |
+            JSON, or `text/x-patch` for `format=patch`: a unified diff with
+            `diff --git` headers, ready for `git apply` or
+            `plannotator review --patch-file -`. In patch form, files past the
+            budget are left out and the response carries
+            `X-Pando-Diff-Omitted: <count>`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Diff" }
+            text/x-patch:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: "`no_merge_base`: the branch shares no history with the default branch."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/reviews:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/branch"
+    post:
+      operationId: createReview
+      summary: Review a branch (agents comment; only a person approves)
+      tags: [reviews]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict]
+              properties:
+                verdict:
+                  type: string
+                  enum: [comment, request_changes, approve]
+                body: { type: string }
+                head:
+                  type: string
+                  description: The sha reviewed. Defaults to the branch head now.
+                comments:
+                  type: array
+                  items: { $ref: "#/components/schemas/ReviewComment" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Review" }
+        "403":
+          description: "`approval_requires_person`: an agent sent `approve`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      operationId: listReviews
+      summary: The branch's reviews, oldest first
+      tags: [reviews]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reviews]
+                properties:
+                  reviews:
+                    type: array
+                    items: { $ref: "#/components/schemas/Review" }
+  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/merge:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/branch"
+    post:
+      operationId: mergeBranch
+      summary: Land the branch on the default branch with a merge commit (people only)
+      description: |
+        A person's Merge is the approval. Merges in one monorepo run one at a
+        time. The gate: every required check (the repo's `required_checks`;
+        with none set, every reported context) is `success` on the branch
+        head. `force=1` merges past red or missing checks, and the merge is
+        recorded as forced.
+      tags: [merges]
+      parameters:
+        - name: force
+          in: query
+          schema: { type: string, enum: ["0", "1"], default: "0" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: The merge commit message. Default "<title>\n\n<description>\n\nMerge branch '<branch>'", or "Merge branch '<branch>'" with no title.
+                expected_head:
+                  type: string
+                  description: Refuse with 409 `head_moved` unless the branch head is this sha.
+      responses:
+        "200":
+          description: Merged, or already in the default branch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MergeResult" }
+        "403":
+          description: "`merge_requires_person`"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`conflict` (with `paths`: files changed differently on both sides; merge the default branch into the branch, push, and merge again), `head_moved`, or `ref_moved` (retry)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "412":
+          description: "`checks_not_green`, with `checks`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "501":
+          description: "`merge_engine_unavailable`: the server-side merge engine is not wired in yet."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{monorepo}/repos/{repo}/files/{path}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: path
+        in: path
+        required: true
+        description: Repository-relative path; slashes as they are.
+        schema: { type: string }
+    get:
+      operationId: getFile
+      summary: One file's bytes at a ref
+      tags: [repos]
+      parameters:
+        - name: ref
+          in: query
+          description: A branch, tag or sha. Defaults to the default branch.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The raw bytes, with a sniffed Content-Type.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{monorepo}/repos/{repo}/statuses/{sha}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: sha
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: createStatus
+      summary: Report a commit status (GitHub's body)
+      tags: [statuses]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state: { $ref: "#/components/schemas/StatusState" }
+                context: { type: string, default: default }
+                target_url: { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /v1/monorepos/{monorepo}/repos/{repo}/commits/{ref}/status:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: ref
+        in: path
+        required: true
+        description: A sha or a branch name (`%2F` for slashes).
+        schema: { type: string }
+    get:
+      operationId: combinedStatus
+      summary: The combined status of a commit (latest per context)
+      tags: [statuses]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Checks" }
+  /v1/monorepos/{monorepo}/repos/{repo}/hooks:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    post:
+      operationId: createHook
+      summary: Register a hook (people only)
+      description: |
+        `web`: a signed JSON POST to `url` (see `webhooks` below).
+        `buildkite`: Pando calls Buildkite's create-build API,
+        `POST https://api.buildkite.com/v2/organizations/{organization}/pipelines/{pipeline}/builds`,
+        with the Worker secret `BUILDKITE_API_TOKEN`, for `push` events (by
+        default) on branches that are not deleted. The build gets `commit`,
+        `branch`, `message`, and `env`: `PANDO_CLONE_URL`, `PANDO_READ_TOKEN`
+        (30 minutes, read only, this repo), `PANDO_STATUS_URL`,
+        `PANDO_MONOREPO`, `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`,
+        `PANDO_DELIVERY`.
+      tags: [hooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  enum: [web, buildkite]
+                url:
+                  type: string
+                  description: Required for `web`.
+                secret:
+                  type: string
+                  description: For `web`, the HMAC key. Write only.
+                events:
+                  type: array
+                  items: { $ref: "#/components/schemas/HookEvent" }
+                  description: Default `[push, branch.opened, merged]` for web, `[push]` for buildkite.
+                buildkite:
+                  type: object
+                  required: [organization, pipeline]
+                  properties:
+                    organization: { type: string }
+                    pipeline: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Hook" }
+    get:
+      operationId: listHooks
+      summary: List hooks
+      tags: [hooks]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hooks]
+                properties:
+                  hooks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Hook" }
+  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: hook_id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deleteHook
+      summary: Remove a hook (people only)
+      tags: [hooks]
+      responses:
+        "204": { description: Removed }
+  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: hook_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listDeliveries
+      summary: The hook's deliveries, newest first (last 100)
+      tags: [hooks]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deliveries]
+                properties:
+                  deliveries:
+                    type: array
+                    items: { $ref: "#/components/schemas/Delivery" }
+  /v1/monorepos/{monorepo}/repos/{repo}/hooks/deliveries/{delivery_id}/redeliver:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: delivery_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: redeliver
+      summary: Send a delivery again, as a new delivery with a fresh read token (people only)
+      tags: [hooks]
+      responses:
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Delivery" }
+  /v1/monorepos/{monorepo}/worktrees:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listWorktrees
+      summary: Every worktree in the monorepo, across machines
+      tags: [worktrees]
+      parameters:
+        - name: machine
+          in: query
+          schema: { type: string }
+        - name: repo
+          in: query
+          description: A repo path.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [worktrees]
+                properties:
+                  worktrees:
+                    type: array
+                    items: { $ref: "#/components/schemas/Worktree" }
+  /v1/monorepos/{monorepo}/worktrees/{worktree_id}:
+    parameters:
+      - $ref: "#/components/parameters/monorepo"
+      - name: worktree_id
+        in: path
+        required: true
+        description: Made by the client (formats.md, `wt_` and 16 hex characters).
+        schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+    put:
+      operationId: putWorktree
+      summary: Report a worktree (creates it, or replaces the one with this id)
+      description: Each call also refreshes `last_seen_at`. Only the token that first reported an id, or a person, may replace it.
+      tags: [worktrees]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, branch, path, machine, kind]
+              properties:
+                repo: { type: string, description: "The repo path (`projects/web`, or `.`)." }
+                branch: { type: string }
+                path: { type: string, description: "The worktree path from the root (formats.md, section 1)." }
+                machine: { type: string }
+                agent: { type: [string, "null"], description: "The agent working in it, if any." }
+                kind: { type: string, enum: [fuse, sparse, fskit] }
+      responses:
+        "200":
+          description: The worktree as stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Worktree" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: getWorktree
+      summary: One worktree
+      tags: [worktrees]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Worktree" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: removeWorktree
+      summary: Remove a worktree from the registry (whoever reported it, or a person)
+      tags: [worktrees]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+webhooks:
+  hookDelivery:
+    post:
+      operationId: hookDelivery
+      summary: What a `web` hook receives
+      description: |
+        Headers: `X-Pando-Event` (the event), `X-Pando-Delivery` (the
+        delivery id), `X-Pando-Signature-256: sha256=<hex>` (HMAC-SHA256 of
+        the raw body with the hook's secret; GitHub's scheme under another
+        name). A delivery that does not get a 2xx within 10 seconds is retried
+        after 10 s, 1 min, 5 min and 30 min, then marked failed.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HookPayload" }
+      responses:
+        "200": { description: Any 2xx counts as delivered. }
+components:
+  securitySchemes:
+    pandoToken:
+      type: http
+      scheme: bearer
+      description: A Pando token (`pando_...`).
+    bootstrap:
+      type: http
+      scheme: bearer
+      description: The Worker secret PANDO_BOOTSTRAP.
+  parameters:
+    monorepo:
+      name: monorepo
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Name" }
+    repo:
+      name: repo
+      in: path
+      required: true
+      description: The repo's `name` (`projects-web`).
+      schema: { type: string }
+    branch:
+      name: branch
+      in: path
+      required: true
+      description: The branch name, `/` encoded as `%2F`.
+      schema: { type: string }
+  responses:
+    Error:
+      description: An error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Name:
+      type: string
+      pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?!-)){0,38}$"
+      description: "A monorepo name: letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. `v1` and `healthz` are reserved."
+    Role:
+      type: string
+      enum: [person, agent]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            paths:
+              type: array
+              items: { type: string }
+            checks: { $ref: "#/components/schemas/Checks" }
+    Monorepo:
+      type: object
+      required: [name, kind, created_at]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [monorepo, repo] }
+        created_at: { type: string, format: date-time }
+    Identity:
+      type: object
+      required: [monorepo, name, role, token_id]
+      properties:
+        monorepo: { type: string }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        email: { type: string }
+        token_id: { type: string }
+    Token:
+      type: object
+      required: [id, name, role, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        email: { type: string }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        last_used_at: { type: [string, "null"], format: date-time }
+    NewToken:
+      allOf:
+        - $ref: "#/components/schemas/Token"
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: The secret, `pando_` and 40 hex characters. Shown once; Pando keeps only its SHA-256.
+    Repo:
+      type: object
+      required: [monorepo, name, path, default_branch, clone_url, created_at]
+      properties:
+        monorepo: { type: string }
+        name: { type: string, description: The repo's id in URLs (its path with `/` turned into `-`). }
+        path: { type: string, description: "`projects/web`, or `.` for a plain repo." }
+        description: { type: [string, "null"] }
+        default_branch: { type: string, description: Always `main` for now. }
+        clone_url:
+          type: string
+          description: The git door URL, `https://<host>/<monorepo>/<name>.git`.
+        required_checks:
+          type: array
+          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists.
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+    Branch:
+      type: object
+      required: [name, head, state, checks]
+      properties:
+        name: { type: string }
+        head: { type: string }
+        base:
+          type: [string, "null"]
+          description: The merge base with the default branch; null when there is none.
+        author:
+          type: [string, "null"]
+          description: The name that created the branch with its first push through the door.
+        author_role:
+          oneOf:
+            - $ref: "#/components/schemas/Role"
+            - type: "null"
+        title: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        ahead:
+          type: [integer, "null"]
+          description: Commits on the branch that are not on the default branch.
+        behind:
+          type: [integer, "null"]
+          description: Commits on the default branch that are not on the branch.
+        mergeable:
+          type: string
+          enum: [clean, conflicts, up_to_date, unknown]
+          description: From the merge engine's dry run. `up_to_date` means the branch adds nothing.
+        checks: { $ref: "#/components/schemas/Checks" }
+        state:
+          type: string
+          enum: [open, merged]
+          description: "`merged` when the branch's current head was landed by a Pando merge."
+        merge_commit: { type: [string, "null"] }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    StatusState:
+      type: string
+      enum: [pending, success, failure, error]
+    Status:
+      type: object
+      required: [sha, context, state, created_at]
+      properties:
+        sha: { type: string }
+        context: { type: string }
+        state: { $ref: "#/components/schemas/StatusState" }
+        target_url: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        creator: { type: string }
+        created_at: { type: string, format: date-time }
+    Checks:
+      type: object
+      required: [sha, state, required, statuses]
+      description: GitHub's combined status, plus the required contexts and which are missing.
+      properties:
+        sha: { type: [string, "null"] }
+        state:
+          type: string
+          enum: [success, pending, failure, error, missing]
+          description: "`success` when the merge gate passes; `missing` when a required context has not reported."
+        required:
+          type: array
+          items: { type: string }
+        missing:
+          type: array
+          items: { type: string }
+        statuses:
+          type: array
+          description: The latest status per context.
+          items: { $ref: "#/components/schemas/Status" }
+    Diff:
+      type: object
+      required: [base_branch, base, head, merge_base, files, truncated]
+      properties:
+        base_branch: { type: string, description: The default branch. }
+        base: { type: string, description: The default branch's head. }
+        head: { type: string, description: The branch head. }
+        merge_base: { type: string, description: Where the diff starts (three-dot). }
+        truncated:
+          type: boolean
+          description: "True when any file has `patch_omitted: budget`."
+        stats:
+          type: object
+          properties:
+            files: { type: integer }
+            additions: { type: integer }
+            deletions: { type: integer }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/DiffFile" }
+    DiffFile:
+      type: object
+      required: [path, status, binary]
+      properties:
+        path: { type: string }
+        old_path: { type: string, description: Only for `renamed`. }
+        status:
+          type: string
+          enum: [added, modified, deleted, renamed]
+        old_sha: { type: [string, "null"] }
+        new_sha: { type: [string, "null"] }
+        old_mode: { type: [string, "null"] }
+        new_mode: { type: [string, "null"] }
+        binary: { type: boolean }
+        additions: { type: [integer, "null"] }
+        deletions: { type: [integer, "null"] }
+        hunks:
+          type: array
+          description: Only with `hunks=1`.
+          items: { $ref: "#/components/schemas/Hunk" }
+        patch_omitted:
+          type: string
+          enum: [binary, too_large, budget]
+    Hunk:
+      type: object
+      required: [old_start, old_lines, new_start, new_lines, lines]
+      properties:
+        old_start: { type: integer }
+        old_lines: { type: integer }
+        new_start: { type: integer }
+        new_lines: { type: integer }
+        lines:
+          type: array
+          description: Each line starts with `+`, `-`, ` `, or `\` (no newline at end of file).
+          items: { type: string }
+    ReviewComment:
+      type: object
+      required: [path, body]
+      properties:
+        path: { type: string }
+        line: { type: integer, description: A line in the new file. }
+        side: { type: string, enum: [new, old], default: new }
+        body: { type: string }
+    Review:
+      type: object
+      required: [id, branch, head, verdict, author, author_role, created_at]
+      properties:
+        id: { type: string }
+        branch: { type: string }
+        head: { type: string }
+        verdict: { type: string, enum: [comment, request_changes, approve] }
+        body: { type: [string, "null"] }
+        comments:
+          type: array
+          items: { $ref: "#/components/schemas/ReviewComment" }
+        author: { type: string }
+        author_role: { $ref: "#/components/schemas/Role" }
+        created_at: { type: string, format: date-time }
+    MergeResult:
+      type: object
+      required: [status, branch, head]
+      properties:
+        status:
+          type: string
+          enum: [merged, up_to_date]
+        branch: { type: string }
+        head: { type: string, description: The branch head that was merged. }
+        sha: { type: string, description: The merge commit (or the default branch head for `up_to_date`). }
+        base_before: { type: string, description: The default branch head before the merge. }
+        merge_base: { type: string }
+        forced: { type: boolean }
+        merged_by: { type: string }
+    HookEvent:
+      type: string
+      enum: [push, branch.opened, merged]
+      description: "`branch.opened`: the first push of a branch. `push`: any push through the door that moves or deletes a branch. `merged`: a Pando merge landed a branch."
+    Hook:
+      type: object
+      required: [id, type, events, active, created_at]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [web, buildkite] }
+        url: { type: [string, "null"] }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/HookEvent" }
+        buildkite:
+          type: [object, "null"]
+          properties:
+            organization: { type: string }
+            pipeline: { type: string }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+    Delivery:
+      type: object
+      required: [id, hook_id, event, status, attempts, created_at]
+      properties:
+        id: { type: string }
+        hook_id: { type: string }
+        event: { $ref: "#/components/schemas/HookEvent" }
+        status: { type: string, enum: [pending, delivered, failed] }
+        attempts: { type: integer }
+        response_code: { type: [integer, "null"] }
+        error: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        last_attempt_at: { type: [string, "null"], format: date-time }
+        next_attempt_at: { type: [string, "null"], format: date-time }
+    Worktree:
+      type: object
+      required: [id, repo, branch, path, machine, kind, reported_by, created_at, last_seen_at]
+      properties:
+        id: { type: string }
+        repo: { type: string }
+        branch: { type: string }
+        path: { type: string }
+        machine: { type: string }
+        agent: { type: [string, "null"] }
+        kind: { type: string, enum: [fuse, sparse, fskit] }
+        reported_by: { type: string, description: The token name that reported it. }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+    HookPayload:
+      type: object
+      required: [event, delivery_id, occurred_at, monorepo, repo, ref, clone_url]
+      properties:
+        event: { $ref: "#/components/schemas/HookEvent" }
+        delivery_id: { type: string }
+        occurred_at: { type: string, format: date-time }
+        monorepo: { type: string }
+        repo: { type: string }
+        branch: { type: string }
+        ref: { type: string, description: "`refs/heads/<branch>`" }
+        head: { type: string, description: The new head; all zeros when the branch was deleted. }
+        before: { type: string, description: The old head; all zeros for a new branch. }
+        base: { type: [string, "null"], description: The merge base with the default branch. }
+        title: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        author: { type: [string, "null"], description: The branch's creator. }
+        pusher: { type: string, description: "Who pushed; for `merged`, who merged." }
+        merge_commit: { type: string, description: Only for `merged`. }
+        diff_url: { type: string }
+        clone_url: { type: string, description: The git door URL. Clone it with `read_token`. }
+        read_token:
+          type: string
+          description: "A read-only token for this one repo, valid 30 minutes, minted for this delivery. Use it as `Authorization: Bearer <read_token>` against `clone_url`."
+        read_token_expires_at: { type: string, format: date-time }
+        status_url:
+          type: string
+          description: "`POST` a commit status here for `head` (needs a Pando token)."

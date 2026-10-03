@@ -5,7 +5,8 @@
 // environment, with the system config and inherited helpers cleared (keychain
 // safety, AGENTS.md).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Page } from "@playwright/test";
@@ -87,6 +88,31 @@ export async function saveRootFiles(page: Page, full: string, machine: string, f
   );
 
   if (problem) throw new Error(`meta save: ${problem}`);
+}
+
+/**
+ * A status as a CI service posts it: with a status token signed by the
+ * Worker's PANDO_STATUS_SECRET (read from worker/.dev.vars, never printed), so
+ * Pando stamps the service on it, as worker/test/ci.mjs does.
+ */
+export async function ciStatus(member: Machine, full: string, repo: string, sha: string, context: string, state: "pending" | "success" | "failure") {
+  const vars = readFileSync(new URL("../../worker/.dev.vars", import.meta.url), "utf8");
+  const secret = /^PANDO_STATUS_SECRET=(.*)$/m.exec(vars)?.[1];
+
+  if (!secret) throw new Error("worker/.dev.vars has no PANDO_STATUS_SECRET");
+
+  const info = await (await member.api("GET", `/v1/monorepos/${full}`)).json();
+  const claims = { m: info.id, r: repo, s: sha, a: "buildkite", h: "e2e", x: Math.floor(Date.now() / 1000) + 3600 };
+  const signed = `pst1.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
+  const token = `${signed}.${createHmac("sha256", secret).update(signed).digest("base64url")}`;
+
+  const res = await fetch(`${BASE}/v1/monorepos/${full}/repos/${repo}/statuses/${sha}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ state, context, target_url: `https://buildkite.com/pando/e2e/builds/1` }),
+  });
+
+  if (!res.ok) throw new Error(`status ${context}: ${res.status} ${await res.text()}`);
 }
 
 export class Machine {

@@ -7,7 +7,7 @@
 //   npm run shots      (the Worker with this worktree's own state; the persona `ramos` is local to it)
 import { expect, test, type Page } from "@playwright/test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BASE, browserPost, Machine, nextSignIn, saveRootFiles } from "./seed";
+import { BASE, browserPost, ciStatus, Machine, nextSignIn, saveRootFiles } from "./seed";
 
 const PROTOTYPE = pathToFileURL(fileURLToPath(new URL("../../../../../../research/design/pando-ui-2026-10-03/v3/prototype.html", import.meta.url))).href;
 
@@ -111,7 +111,7 @@ async function seed(page: Page): Promise<Showcase> {
   await saveRootFiles(page, "ramos/workspaces", "ramos-mbp", { "AGENTS.md": "# Workspaces\n\nThe monorepo for Workspaces.\n" });
   pushBranch(machine, "workspaces", ws, "main", { "README.md": "# workspaces\n" }, "Merge callout-seam: callouts keep their seam on narrow cards");
   const failing = pushBranch(sandbox, "workspaces", ws, "search-index", { "search.ts": "export {};\n" }, "search: index customer-docs on every save");
-  await sandbox.api("POST", `/v1/monorepos/ramos/workspaces/repos/projects-workspaces/statuses/${failing}`, { state: "failure", context: "e2e" });
+  await ciStatus(machine, "ramos/workspaces", "projects-workspaces", failing, "e2e", "failure");
 
   const pando = await project(page, "pando", "projects/pando");
   const fs = await project(page, "pando", "projects/artifact-fs");
@@ -130,7 +130,9 @@ async function seed(page: Page): Promise<Showcase> {
   pushBranch(machine, "pando", pando, "live", { "README.md": "# pando\n\nLarge files through R2.\n" }, "live: large files go to R2 by their sha256");
   pushBranch(machine, "pando", pando, "docs", { "README.md": "# pando\n\nThe Worker and the CLI.\n" }, "docs: the README names the parts");
   await machine.api("POST", "/v1/monorepos/ramos/pando/repos/projects-pando/branches/docs/merge");
-  pushBranch(sandbox, "pando", pando, "web-api", { "worker/src/gitwrite.ts": "export {};\n" }, "gitwrite pushes with the object's cached write token");
+  const webApi = pushBranch(sandbox, "pando", pando, "web-api", { "worker/src/gitwrite.ts": "export {};\n" }, "gitwrite pushes with the object's cached write token");
+
+  await ciStatus(machine, "ramos/pando", "projects-pando", webApi, "ci", "success");
   pushBranch(machine, "pando", pando, "cli", { "cli/main.go": "package main\n" }, "cli: pando worktree add mounts through Pando.app");
   pushBranch(sandbox, "artifact-fs", fs, "mac-mount", { "overlay.go": "package overlay\n" }, "overlay: backing files keep owner read and write");
 

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"pando/internal/config"
 	"pando/internal/server"
@@ -31,6 +32,9 @@ type Env struct {
 
 	in    *bufio.Reader
 	noted bool
+
+	mu     sync.Mutex // one line at a time from goroutines (clone mounts in parallel)
+	noteMu sync.Mutex
 
 	// Agent is the agent this command acts for, sent as X-Pando-Agent: a
 	// command's --agent, else PANDO_AGENT, else the agent recorded for the
@@ -63,9 +67,17 @@ type UsageError struct{ Msg string }
 
 func (u UsageError) Error() string { return u.Msg }
 
-func (e *Env) printf(format string, a ...any) { fmt.Fprintf(e.Stdout, format, a...) }
+func (e *Env) printf(format string, a ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fmt.Fprintf(e.Stdout, format, a...)
+}
 
-func (e *Env) warnf(format string, a ...any) { fmt.Fprintf(e.Stderr, "pando: "+format+"\n", a...) }
+func (e *Env) warnf(format string, a ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fmt.Fprintf(e.Stderr, "pando: "+format+"\n", a...)
+}
 
 // flags makes a FlagSet that reports errors as usage errors.
 func flags(name string) *flag.FlagSet {
@@ -180,9 +192,14 @@ func (e *Env) pickNew(kind string) (worktree.Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" && !e.noted {
+	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" {
+		e.noteMu.Lock()
+		first := !e.noted
 		e.noted = true
-		e.warnf("%s", n.Note())
+		e.noteMu.Unlock()
+		if first {
+			e.warnf("%s", n.Note())
+		}
 	}
 	return drv, nil
 }

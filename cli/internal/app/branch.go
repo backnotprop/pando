@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"pando/internal/config"
+	"pando/internal/gitx"
 	"pando/internal/server"
 )
 
@@ -306,11 +307,16 @@ func runPlannotator(e *Env, patch []byte) (*plannotatorDecision, error) {
 	return nil, fmt.Errorf("plannotator gave no decision: %s", strings.TrimSpace(string(out)))
 }
 
-// Merge is `pando merge <branch> [--force]`.
+// Merge is `pando merge <branch> [--force] [--wait]`. It returns once the
+// server confirms the merge. This machine's read-only main follows on its
+// own: the follower moves it within a moment, and with no follower running a
+// one-off follower is started in the background. --wait blocks until main
+// has moved (scripts).
 func Merge(e *Env, args []string) error {
 	fs := flags("merge")
 	repoFlag := fs.String("repo", "", "the repo (default: the one you are in)")
 	force := fs.Bool("force", false, "merge past red or missing checks (recorded as forced)")
+	wait := fs.Bool("wait", false, "return only once this machine's read-only main has the merge")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -328,17 +334,22 @@ func Merge(e *Env, args []string) error {
 		return err
 	}
 	name := repoName(root, repo)
-	b, err := srv.GetBranch(e.Ctx, root.Name, name, branch)
-	if err != nil {
-		return fmt.Errorf("branch %s: %w", branch, err)
-	}
-	res, err := srv.Merge(e.Ctx, root.Name, name, branch, *force, b.Head)
+	// The head this machine pushed, when the command runs in the branch's
+	// worktree: the merge is refused if the branch moved since (someone
+	// else pushed). Elsewhere the server's current head is merged, as
+	// gh pr merge does. Either way, no branch read before the merge.
+	expected := e.pushedHead(root, branch)
+	res, err := srv.Merge(e.Ctx, root.Name, name, branch, *force, expected)
 	if err != nil {
 		var ae *server.APIError
 		if errors.As(err, &ae) {
 			switch ae.Code {
 			case "checks_not_green":
-				e.printf("Checks are not green on %s:\n", short(b.Head))
+				on := branch
+				if ae.Checks != nil && ae.Checks.SHA != "" {
+					on += " at " + short(ae.Checks.SHA)
+				}
+				e.printf("Checks are not green on %s:\n", on)
 				if ae.Checks != nil {
 					for _, s := range ae.Checks.Statuses {
 						e.printf("  %-20s %s\n", s.Context, s.State)
@@ -353,8 +364,13 @@ func Merge(e *Env, args []string) error {
 					e.printf("  conflict: %s\n", p)
 				}
 				return fmt.Errorf("not merged: %s changes files main also changed; run git pull origin main in its worktree, push, and merge again", branch)
+			case "head_moved":
+				return fmt.Errorf("not merged: %s on the server is not what this worktree pushed (%s); git pull, check it, and merge again", branch, short(expected))
 			case "merge_engine_unavailable":
 				return errors.New("not merged: the server's merge engine is not wired in yet (HTTP 501)")
+			}
+			if ae.Status == 404 {
+				return fmt.Errorf("no branch %s in %s", branch, label(root, repo))
 			}
 		}
 		return err
@@ -368,8 +384,47 @@ func Merge(e *Env, args []string) error {
 		forced = ", forced past checks"
 	}
 	e.printf("Merged %s into main of %s: %s (merge commit%s, by %s)\n", branch, label(root, repo), short(res.SHA), forced, dash(res.MergedBy))
-	refreshMain(e, root, repo)
+	if !hasReadOnlyMain(root, repo) {
+		return nil
+	}
+	switch {
+	case *wait:
+		refreshMain(e, root, repo)
+	case followerRunning(root):
+		e.printf("worktrees/main follows within a moment (the follower is running)\n")
+	default:
+		if err := startFollowOnce(root); err != nil {
+			e.warnf("main did not start following in the background (%v); moving it now", err)
+			refreshMain(e, root, repo)
+		} else {
+			e.printf("worktrees/main follows within a moment\n")
+		}
+	}
 	return nil
+}
+
+// pushedHead is the head this machine last pushed for branch, when the
+// current folder is that branch's worktree (its upstream tracking ref,
+// read locally), else "".
+func (e *Env) pushedHead(root *config.Root, branch string) string {
+	if e.currentBranch(root) != branch {
+		return ""
+	}
+	sha, err := gitx.In(e.Cwd).Run(e.Ctx, "rev-parse", "--verify", "--quiet", "@{upstream}")
+	if err != nil {
+		return ""
+	}
+	return sha
+}
+
+func hasReadOnlyMain(root *config.Root, repo string) bool {
+	ws, _ := root.LoadWorktrees()
+	for _, w := range ws {
+		if w.Repo == repo && w.Branch == "main" && w.ReadOnly {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeWord is a branch's mergeable answer for people. "pending" means not

@@ -1,7 +1,20 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Empty } from "../../../../ui/controls";
+// A plain repo's branch page.
+import { createFileRoute, notFound } from "@tanstack/react-router";
+import { BranchPage, loadBranch } from "../-project/Branch";
+import { plainRepo } from "../-project/Branches";
 
-/** Project code and branch pages come in slices 2 and 3; links to them already land here. */
 export const Route = createFileRoute("/$owner/$name/branches/$")({
-  component: () => <Empty>Not built yet.</Empty>,
+  beforeLoad: async ({ context: { queryClient, monorepo } }) => {
+    const repo = await plainRepo(queryClient, monorepo);
+
+    if (!repo) throw notFound();
+
+    return { repo };
+  },
+  loader: ({ context: { queryClient, monorepo, repo }, params }) => loadBranch(queryClient, monorepo, repo, params._splat ?? ""),
+  component: function Branch() {
+    const { repo } = Route.useRouteContext();
+
+    return <BranchPage repo={repo} branch={Route.useParams()._splat ?? ""} />;
+  },
 });

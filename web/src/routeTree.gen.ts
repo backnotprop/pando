@@ -21,10 +21,17 @@ import { Route as OwnerNameMachinesRouteImport } from './routes/$owner/$name/mac
 import { Route as OwnerNameMembersRouteImport } from './routes/$owner/$name/members'
 import { Route as OwnerNameSettingsRouteImport } from './routes/$owner/$name/settings'
 import { Route as OwnerNameBlobSplatRouteImport } from './routes/$owner/$name/blob/$'
+import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$name/branches/index'
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
 import { Route as OwnerNameHistorySplatRouteImport } from './routes/$owner/$name/history/$'
-import { Route as OwnerNameProjectsSplatRouteImport } from './routes/$owner/$name/projects/$'
+import { Route as OwnerNameProjectsProjectRouteRouteImport } from './routes/$owner/$name/projects/$project/route'
 import { Route as OwnerNameTreeSplatRouteImport } from './routes/$owner/$name/tree/$'
+import { Route as OwnerNameProjectsProjectIndexRouteImport } from './routes/$owner/$name/projects/$project/index'
+import { Route as OwnerNameProjectsProjectBlobSplatRouteImport } from './routes/$owner/$name/projects/$project/blob/$'
+import { Route as OwnerNameProjectsProjectBranchesIndexRouteImport } from './routes/$owner/$name/projects/$project/branches/index'
+import { Route as OwnerNameProjectsProjectBranchesSplatRouteImport } from './routes/$owner/$name/projects/$project/branches/$'
+import { Route as OwnerNameProjectsProjectHistorySplatRouteImport } from './routes/$owner/$name/projects/$project/history/$'
+import { Route as OwnerNameProjectsProjectTreeSplatRouteImport } from './routes/$owner/$name/projects/$project/tree/$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -86,6 +93,11 @@ const OwnerNameBlobSplatRoute = OwnerNameBlobSplatRouteImport.update({
   path: '/blob/$',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
+const OwnerNameBranchesIndexRoute = OwnerNameBranchesIndexRouteImport.update({
+  id: '/branches/',
+  path: '/branches/',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
 const OwnerNameBranchesSplatRoute = OwnerNameBranchesSplatRouteImport.update({
   id: '/branches/$',
   path: '/branches/$',
@@ -96,16 +108,53 @@ const OwnerNameHistorySplatRoute = OwnerNameHistorySplatRouteImport.update({
   path: '/history/$',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
-const OwnerNameProjectsSplatRoute = OwnerNameProjectsSplatRouteImport.update({
-  id: '/projects/$',
-  path: '/projects/$',
-  getParentRoute: () => OwnerNameRouteRoute,
-} as any)
+const OwnerNameProjectsProjectRouteRoute =
+  OwnerNameProjectsProjectRouteRouteImport.update({
+    id: '/projects/$project',
+    path: '/projects/$project',
+    getParentRoute: () => OwnerNameRouteRoute,
+  } as any)
 const OwnerNameTreeSplatRoute = OwnerNameTreeSplatRouteImport.update({
   id: '/tree/$',
   path: '/tree/$',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
+const OwnerNameProjectsProjectIndexRoute =
+  OwnerNameProjectsProjectIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
+const OwnerNameProjectsProjectBlobSplatRoute =
+  OwnerNameProjectsProjectBlobSplatRouteImport.update({
+    id: '/blob/$',
+    path: '/blob/$',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
+const OwnerNameProjectsProjectBranchesIndexRoute =
+  OwnerNameProjectsProjectBranchesIndexRouteImport.update({
+    id: '/branches/',
+    path: '/branches/',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
+const OwnerNameProjectsProjectBranchesSplatRoute =
+  OwnerNameProjectsProjectBranchesSplatRouteImport.update({
+    id: '/branches/$',
+    path: '/branches/$',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
+const OwnerNameProjectsProjectHistorySplatRoute =
+  OwnerNameProjectsProjectHistorySplatRouteImport.update({
+    id: '/history/$',
+    path: '/history/$',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
+const OwnerNameProjectsProjectTreeSplatRoute =
+  OwnerNameProjectsProjectTreeSplatRouteImport.update({
+    id: '/tree/$',
+    path: '/tree/$',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -119,11 +168,18 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/members': typeof OwnerNameMembersRoute
   '/$owner/$name/settings': typeof OwnerNameSettingsRoute
   '/$owner/$name/': typeof OwnerNameIndexRoute
+  '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
-  '/$owner/$name/projects/$': typeof OwnerNameProjectsSplatRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
+  '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
+  '/$owner/$name/projects/$project/blob/$': typeof OwnerNameProjectsProjectBlobSplatRoute
+  '/$owner/$name/projects/$project/branches/$': typeof OwnerNameProjectsProjectBranchesSplatRoute
+  '/$owner/$name/projects/$project/history/$': typeof OwnerNameProjectsProjectHistorySplatRoute
+  '/$owner/$name/projects/$project/tree/$': typeof OwnerNameProjectsProjectTreeSplatRoute
+  '/$owner/$name/projects/$project/branches/': typeof OwnerNameProjectsProjectBranchesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -139,8 +195,14 @@ export interface FileRoutesByTo {
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
-  '/$owner/$name/projects/$': typeof OwnerNameProjectsSplatRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/branches': typeof OwnerNameBranchesIndexRoute
+  '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectIndexRoute
+  '/$owner/$name/projects/$project/blob/$': typeof OwnerNameProjectsProjectBlobSplatRoute
+  '/$owner/$name/projects/$project/branches/$': typeof OwnerNameProjectsProjectBranchesSplatRoute
+  '/$owner/$name/projects/$project/history/$': typeof OwnerNameProjectsProjectHistorySplatRoute
+  '/$owner/$name/projects/$project/tree/$': typeof OwnerNameProjectsProjectTreeSplatRoute
+  '/$owner/$name/projects/$project/branches': typeof OwnerNameProjectsProjectBranchesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -155,11 +217,18 @@ export interface FileRoutesById {
   '/$owner/$name/members': typeof OwnerNameMembersRoute
   '/$owner/$name/settings': typeof OwnerNameSettingsRoute
   '/$owner/$name/': typeof OwnerNameIndexRoute
+  '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
-  '/$owner/$name/projects/$': typeof OwnerNameProjectsSplatRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
+  '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
+  '/$owner/$name/projects/$project/blob/$': typeof OwnerNameProjectsProjectBlobSplatRoute
+  '/$owner/$name/projects/$project/branches/$': typeof OwnerNameProjectsProjectBranchesSplatRoute
+  '/$owner/$name/projects/$project/history/$': typeof OwnerNameProjectsProjectHistorySplatRoute
+  '/$owner/$name/projects/$project/tree/$': typeof OwnerNameProjectsProjectTreeSplatRoute
+  '/$owner/$name/projects/$project/branches/': typeof OwnerNameProjectsProjectBranchesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -175,11 +244,18 @@ export interface FileRouteTypes {
     | '/$owner/$name/members'
     | '/$owner/$name/settings'
     | '/$owner/$name/'
+    | '/$owner/$name/projects/$project'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
-    | '/$owner/$name/projects/$'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/branches/'
+    | '/$owner/$name/projects/$project/'
+    | '/$owner/$name/projects/$project/blob/$'
+    | '/$owner/$name/projects/$project/branches/$'
+    | '/$owner/$name/projects/$project/history/$'
+    | '/$owner/$name/projects/$project/tree/$'
+    | '/$owner/$name/projects/$project/branches/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -195,8 +271,14 @@ export interface FileRouteTypes {
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
-    | '/$owner/$name/projects/$'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/branches'
+    | '/$owner/$name/projects/$project'
+    | '/$owner/$name/projects/$project/blob/$'
+    | '/$owner/$name/projects/$project/branches/$'
+    | '/$owner/$name/projects/$project/history/$'
+    | '/$owner/$name/projects/$project/tree/$'
+    | '/$owner/$name/projects/$project/branches'
   id:
     | '__root__'
     | '/'
@@ -210,11 +292,18 @@ export interface FileRouteTypes {
     | '/$owner/$name/members'
     | '/$owner/$name/settings'
     | '/$owner/$name/'
+    | '/$owner/$name/projects/$project'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
-    | '/$owner/$name/projects/$'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/branches/'
+    | '/$owner/$name/projects/$project/'
+    | '/$owner/$name/projects/$project/blob/$'
+    | '/$owner/$name/projects/$project/branches/$'
+    | '/$owner/$name/projects/$project/history/$'
+    | '/$owner/$name/projects/$project/tree/$'
+    | '/$owner/$name/projects/$project/branches/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -311,6 +400,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameBlobSplatRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
+    '/$owner/$name/branches/': {
+      id: '/$owner/$name/branches/'
+      path: '/branches'
+      fullPath: '/$owner/$name/branches/'
+      preLoaderRoute: typeof OwnerNameBranchesIndexRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
     '/$owner/$name/branches/$': {
       id: '/$owner/$name/branches/$'
       path: '/branches/$'
@@ -325,11 +421,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameHistorySplatRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
-    '/$owner/$name/projects/$': {
-      id: '/$owner/$name/projects/$'
-      path: '/projects/$'
-      fullPath: '/$owner/$name/projects/$'
-      preLoaderRoute: typeof OwnerNameProjectsSplatRouteImport
+    '/$owner/$name/projects/$project': {
+      id: '/$owner/$name/projects/$project'
+      path: '/projects/$project'
+      fullPath: '/$owner/$name/projects/$project'
+      preLoaderRoute: typeof OwnerNameProjectsProjectRouteRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
     '/$owner/$name/tree/$': {
@@ -339,8 +435,79 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameTreeSplatRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
+    '/$owner/$name/projects/$project/': {
+      id: '/$owner/$name/projects/$project/'
+      path: '/'
+      fullPath: '/$owner/$name/projects/$project/'
+      preLoaderRoute: typeof OwnerNameProjectsProjectIndexRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
+    '/$owner/$name/projects/$project/blob/$': {
+      id: '/$owner/$name/projects/$project/blob/$'
+      path: '/blob/$'
+      fullPath: '/$owner/$name/projects/$project/blob/$'
+      preLoaderRoute: typeof OwnerNameProjectsProjectBlobSplatRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
+    '/$owner/$name/projects/$project/branches/': {
+      id: '/$owner/$name/projects/$project/branches/'
+      path: '/branches'
+      fullPath: '/$owner/$name/projects/$project/branches/'
+      preLoaderRoute: typeof OwnerNameProjectsProjectBranchesIndexRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
+    '/$owner/$name/projects/$project/branches/$': {
+      id: '/$owner/$name/projects/$project/branches/$'
+      path: '/branches/$'
+      fullPath: '/$owner/$name/projects/$project/branches/$'
+      preLoaderRoute: typeof OwnerNameProjectsProjectBranchesSplatRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
+    '/$owner/$name/projects/$project/history/$': {
+      id: '/$owner/$name/projects/$project/history/$'
+      path: '/history/$'
+      fullPath: '/$owner/$name/projects/$project/history/$'
+      preLoaderRoute: typeof OwnerNameProjectsProjectHistorySplatRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
+    '/$owner/$name/projects/$project/tree/$': {
+      id: '/$owner/$name/projects/$project/tree/$'
+      path: '/tree/$'
+      fullPath: '/$owner/$name/projects/$project/tree/$'
+      preLoaderRoute: typeof OwnerNameProjectsProjectTreeSplatRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
   }
 }
+
+interface OwnerNameProjectsProjectRouteRouteChildren {
+  OwnerNameProjectsProjectIndexRoute: typeof OwnerNameProjectsProjectIndexRoute
+  OwnerNameProjectsProjectBlobSplatRoute: typeof OwnerNameProjectsProjectBlobSplatRoute
+  OwnerNameProjectsProjectBranchesSplatRoute: typeof OwnerNameProjectsProjectBranchesSplatRoute
+  OwnerNameProjectsProjectHistorySplatRoute: typeof OwnerNameProjectsProjectHistorySplatRoute
+  OwnerNameProjectsProjectTreeSplatRoute: typeof OwnerNameProjectsProjectTreeSplatRoute
+  OwnerNameProjectsProjectBranchesIndexRoute: typeof OwnerNameProjectsProjectBranchesIndexRoute
+}
+
+const OwnerNameProjectsProjectRouteRouteChildren: OwnerNameProjectsProjectRouteRouteChildren =
+  {
+    OwnerNameProjectsProjectIndexRoute: OwnerNameProjectsProjectIndexRoute,
+    OwnerNameProjectsProjectBlobSplatRoute:
+      OwnerNameProjectsProjectBlobSplatRoute,
+    OwnerNameProjectsProjectBranchesSplatRoute:
+      OwnerNameProjectsProjectBranchesSplatRoute,
+    OwnerNameProjectsProjectHistorySplatRoute:
+      OwnerNameProjectsProjectHistorySplatRoute,
+    OwnerNameProjectsProjectTreeSplatRoute:
+      OwnerNameProjectsProjectTreeSplatRoute,
+    OwnerNameProjectsProjectBranchesIndexRoute:
+      OwnerNameProjectsProjectBranchesIndexRoute,
+  }
+
+const OwnerNameProjectsProjectRouteRouteWithChildren =
+  OwnerNameProjectsProjectRouteRoute._addFileChildren(
+    OwnerNameProjectsProjectRouteRouteChildren,
+  )
 
 interface OwnerNameRouteRouteChildren {
   OwnerNameActivityRoute: typeof OwnerNameActivityRoute
@@ -349,11 +516,12 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameMembersRoute: typeof OwnerNameMembersRoute
   OwnerNameSettingsRoute: typeof OwnerNameSettingsRoute
   OwnerNameIndexRoute: typeof OwnerNameIndexRoute
+  OwnerNameProjectsProjectRouteRoute: typeof OwnerNameProjectsProjectRouteRouteWithChildren
   OwnerNameBlobSplatRoute: typeof OwnerNameBlobSplatRoute
   OwnerNameBranchesSplatRoute: typeof OwnerNameBranchesSplatRoute
   OwnerNameHistorySplatRoute: typeof OwnerNameHistorySplatRoute
-  OwnerNameProjectsSplatRoute: typeof OwnerNameProjectsSplatRoute
   OwnerNameTreeSplatRoute: typeof OwnerNameTreeSplatRoute
+  OwnerNameBranchesIndexRoute: typeof OwnerNameBranchesIndexRoute
 }
 
 const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
@@ -363,11 +531,13 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameMembersRoute: OwnerNameMembersRoute,
   OwnerNameSettingsRoute: OwnerNameSettingsRoute,
   OwnerNameIndexRoute: OwnerNameIndexRoute,
+  OwnerNameProjectsProjectRouteRoute:
+    OwnerNameProjectsProjectRouteRouteWithChildren,
   OwnerNameBlobSplatRoute: OwnerNameBlobSplatRoute,
   OwnerNameBranchesSplatRoute: OwnerNameBranchesSplatRoute,
   OwnerNameHistorySplatRoute: OwnerNameHistorySplatRoute,
-  OwnerNameProjectsSplatRoute: OwnerNameProjectsSplatRoute,
   OwnerNameTreeSplatRoute: OwnerNameTreeSplatRoute,
+  OwnerNameBranchesIndexRoute: OwnerNameBranchesIndexRoute,
 }
 
 const OwnerNameRouteRouteWithChildren = OwnerNameRouteRoute._addFileChildren(

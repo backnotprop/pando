@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { activityQuery } from "../../../api/queries";
 import { ActivityList } from "../../../ui/activity";
 import { Empty } from "../../../ui/controls";
+import { MonorepoHead } from "./-frame/heads";
 
 export const Route = createFileRoute("/$owner/$name/activity")({
   loader: ({ context: { queryClient, monorepo } }) => queryClient.ensureInfiniteQueryData(activityQuery(monorepo.full)),
@@ -13,6 +14,11 @@ export const Route = createFileRoute("/$owner/$name/activity")({
     const events = log.data.pages.flatMap((p) => p.events);
     const older = { more: log.hasNextPage, loading: log.isFetchingNextPage, load: () => void log.fetchNextPage() };
 
-    return <div className="max-w-[960px]">{events.length ? <ActivityList events={events} withMonorepo={false} older={older} /> : <Empty>Nothing yet.</Empty>}</div>;
+    return (
+      <>
+        <MonorepoHead tab="activity" />
+        <div className="max-w-[960px]">{events.length ? <ActivityList events={events} withMonorepo={false} older={older} /> : <Empty>Nothing yet.</Empty>}</div>
+      </>
+    );
   },
 });

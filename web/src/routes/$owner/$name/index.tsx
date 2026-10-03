@@ -1,9 +1,10 @@
 // A monorepo opens on its code: the root folder with Clone, its README (or
 // AGENTS.md), and a quiet side column (what needs you here, the projects, the
-// latest activity). A plain repo's code is its project page (slice 3).
+// latest activity). A plain repo opens on its code at a ref, as a project does.
 import type { NeedRow } from "@pando/contract";
 import { useQueries, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { refSearch } from "../../../api/search";
 import type { MonorepoRef } from "../../../api/names";
 import type { Repo } from "@pando/contract";
 import { activityQuery, fileQuery, headsQuery, latestQuery, monorepoQuery, needsQuery, openBranchesQuery, reposQuery, treeQuery } from "../../../api/queries";
@@ -15,12 +16,17 @@ import { NeedState } from "../../-home/NeedsList";
 import { Clone } from "./-code/Clone";
 import { FileList, Readme, versionBar } from "./-code/FileList";
 import { folderRows, readmeOf } from "./-code/rows";
+import { MonorepoHead, usePlainRepo } from "./-frame/heads";
+import { loadCode, ProjectCode } from "./-project/Code";
 
 export const Route = createFileRoute("/$owner/$name/")({
-  loader: async ({ context: { queryClient, monorepo } }) => {
-    const [info] = await Promise.all([queryClient.ensureQueryData(monorepoQuery(monorepo)), queryClient.ensureQueryData(reposQuery(monorepo))]);
+  validateSearch: refSearch,
+  loaderDeps: ({ search }) => ({ ref: search.ref ?? null }),
+  loader: async ({ context: { queryClient, monorepo }, deps }) => {
+    const [info, repos] = await Promise.all([queryClient.ensureQueryData(monorepoQuery(monorepo)), queryClient.ensureQueryData(reposQuery(monorepo))]);
+    const plain = repos.find((r) => r.path === ".");
 
-    if (info.kind === "repo") return;
+    if (info.kind === "repo") return plain ? loadCode(queryClient, monorepo, plain, "", deps.ref) : undefined;
     const tree = await queryClient.ensureQueryData(treeQuery(monorepo, ""));
     const readme = readmeOf("", tree.files);
     await Promise.all([
@@ -105,13 +111,18 @@ function MiniNeeds({ rows }: { rows: readonly NeedRow[] }) {
 
 function CodeRoot() {
   const { monorepo } = Route.useRouteContext();
-  const info = useSuspenseQuery(monorepoQuery(monorepo)).data;
+  const plain = usePlainRepo();
   const repos = useSuspenseQuery(reposQuery(monorepo)).data;
   const open = useOpenCounts(monorepo, repos);
 
-  if (info.kind === "repo") return <PlainRepo full={monorepo.full} repos={repos} />;
+  if (plain) return <ProjectCode repo={plain} dir="" gitRef={Route.useLoaderDeps().ref} />;
 
-  return <Root monorepo={monorepo} repos={repos} open={open} />;
+  return (
+    <>
+      <MonorepoHead tab="code" />
+      <Root monorepo={monorepo} repos={repos} open={open} />
+    </>
+  );
 }
 
 function Root({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonly Repo[]; open: (number | undefined)[] }) {
@@ -149,20 +160,6 @@ function Root({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
         {readme ? <ReadmeFor monorepo={monorepo} path={readme} /> : null}
       </section>
       <Side monorepo={monorepo} repos={repos} open={open} />
-    </div>
-  );
-}
-
-/** A plain git repo: its files are a project's (slice 3); Clone works now. */
-function PlainRepo({ full, repos }: { full: string; repos: readonly Repo[] }) {
-  return (
-    <div className="max-w-[1000px]">
-      <div className="mb-3.5 flex items-center gap-4">
-        <span className="relative ml-auto">
-          <Clone full={full} repos={repos} plain />
-        </span>
-      </div>
-      <Empty>Not built yet.</Empty>
     </div>
   );
 }

@@ -13,6 +13,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
@@ -149,7 +152,7 @@ try {
   r = await call("POST", `${base}/hooks/${flaky}/redeliver?since=${merged.body.seq}`, S);
   check("replay from the newest seq queues nothing", r.status === 202 && r.json?.queued === 0);
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
     const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);

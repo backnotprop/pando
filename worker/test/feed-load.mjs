@@ -14,6 +14,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8811").replace(/\/$/, "");
 const WS_ = URL_.replace(/^http/, "ws");
@@ -207,7 +210,7 @@ try {
     say(`  past the window (every line from logs): ${JSON.stringify(info)}  ${fmt(past)}`);
   }
 } catch (err) {
-  console.log("exception:", String(err?.stack ?? err) + " cause: " + String(err?.cause?.stack ?? err?.cause).replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
+  console.log("exception:", describeError(err));
 } finally {
   const t0 = performance.now();
   await pool(made, 5, async (m) => {

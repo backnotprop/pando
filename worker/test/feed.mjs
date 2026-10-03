@@ -13,6 +13,9 @@ import http from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8811").replace(/\/$/, "");
 const WS_ = URL_.replace(/^http/, "ws");
@@ -394,7 +397,7 @@ try {
   r = await call("GET", "/v1/monorepos", A);
   check("GET /v1/monorepos without summary is unchanged", r.json?.monorepos?.length === 5 && !("needs" in r.json.monorepos[0]));
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   for (const s of sockets) {
     try {

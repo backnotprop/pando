@@ -11,6 +11,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const WS_ = URL_.replace(/^http/, "ws");
@@ -310,7 +313,7 @@ try {
   for (const s of [ev, again, future, mainOnly]) s.ws.close();
   }
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   for (const s of sockets) {
     try {

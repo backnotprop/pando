@@ -12,6 +12,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const BOOT = process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
@@ -164,7 +167,7 @@ try {
   r = await call("GET", `/v1/monorepos/${ana}/${renamed}`, B);
   check("its old names are gone with it", r.status === 404, `${r.status}`);
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   for (const [full, secret] of made) {
     const r = await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, secret);

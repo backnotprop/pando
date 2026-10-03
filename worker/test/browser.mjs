@@ -13,6 +13,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const ORIGIN = new URL(URL_).origin;
@@ -236,7 +239,7 @@ try {
   check("a form sign-out is sent on with 303", r.status === 303 && /sessions\/logout/.test(r.headers.get("location") ?? ""));
   for (const s of [s3.session, s4.session]) await api("POST", "/v1/logout", { session: s, origin: ORIGIN, accept: "application/json" });
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   const A = (await (await api("POST", "/v1/users", { bearer: BOOT, body: { login: `cleanup-${id}` } })).json()).credential?.secret;
   void A;

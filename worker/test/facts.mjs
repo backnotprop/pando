@@ -11,6 +11,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const N = Number(process.env.N ?? 20);
@@ -105,7 +108,7 @@ try {
   const b = r.json?.branches?.find((x) => x.name === "b5");
   check("a fresh row has ahead 1, behind 6 (3 merge commits and 3 merged commits), mergeable clean", b && b.ahead === 1 && b.behind === 6 && b.mergeable === "clean", JSON.stringify({ ahead: b?.ahead, behind: b?.behind, m: b?.mergeable }));
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
     const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);

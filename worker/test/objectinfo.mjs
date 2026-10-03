@@ -13,6 +13,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const BOOT = process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
@@ -122,7 +125,7 @@ try {
   const sizes = batch.stdout.toString().trim().split("\n").map((l) => l.split(" ")[2]);
   check("git cat-file --batch-check in the blobless clone fetches lazily and reports sizes", batch.status === 0 && [...sizes].sort().join(",") === ["0", "12345", "14", "2097152"].join(","), sizes.join(","));
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (S) await fetch(`${URL_}/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, { method: "DELETE", headers: { authorization: `Bearer ${S}` } });
   rmSync(work, { recursive: true, force: true });

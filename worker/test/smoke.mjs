@@ -12,6 +12,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "https://pando-dev.plannotator.workers.dev").replace(/\/$/, "");
 const file = process.env.PANDO_CREDENTIAL_FILE ?? join(process.env.PANDO_HOME ?? join(homedir(), ".pando"), "credentials", new URL(URL_).host);
@@ -132,7 +135,7 @@ try {
   r = await call("GET", `/v1/monorepos/${O}/${M}/members`);
   check("members carry names", r.status === 200 && r.json?.members?.[0]?.login === me?.login && "name" in (r.json?.members?.[0] ?? {}));
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
     const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`);

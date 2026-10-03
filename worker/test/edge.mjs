@@ -22,6 +22,9 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "https://pando-dev.plannotator.workers.dev").replace(/\/$/, "");
 const file = process.env.PANDO_CREDENTIAL_FILE ?? join(process.env.PANDO_HOME ?? join(homedir(), ".pando"), "credentials", new URL(URL_).host);
@@ -131,7 +134,7 @@ try {
   const c = git(["clone", "-q", "--branch", "big/3", url, clone], work, S);
   check("clone the 12 MiB branch back through the door", c.ok, `${c.ms} ms`);
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (throwaway?.id) await call("DELETE", `/v1/user/credentials/${throwaway.id}`, S);
   if (made) {

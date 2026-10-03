@@ -17,6 +17,9 @@ import { mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSyn
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 const HOOKS = process.env.PANDO_HOOKS !== "0" && /localhost|127\.0\.0\.1/.test(URL_);
@@ -442,7 +445,7 @@ try {
   r = await call("GET", `/v1/monorepos/${O}/${MM}/meta/history?path=.pando/pando.toml`, A);
   check("the merge reached the live meta layer (applyFromMain)", r.json?.versions?.some((v) => v.source === "main"), `${r.status} ${scrub(r.text).slice(0, 200)}`);
 } catch (err) {
-  check("no exception", false, scrub(err?.stack ?? err));
+  check("no exception", false, scrub(describeError(err)));
 } finally {
   server?.close();
   if (process.env.PANDO_KEEP !== "1") {

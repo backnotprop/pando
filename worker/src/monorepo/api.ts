@@ -959,7 +959,7 @@ function intParam(v: string | undefined, dflt: number, max: number, name: string
 }
 
 function walkerOf(c: C, r: RepoRecord): { w: files.Walker; obj: ReturnType<typeof objectsClient> } {
-  const obj = objectsClient(c.executionCtx);
+  const obj = objectsClient();
 
   return { w: new files.Walker(obj, r, files.requestBudget(c.env)), obj };
 }

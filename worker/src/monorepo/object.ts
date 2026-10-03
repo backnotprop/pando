@@ -40,6 +40,7 @@ import type {
   RepoRecord,
   StatusRecord,
   StreamEvent,
+  RefusalExtra,
 } from "./types";
 
 const SCHEMA = `
@@ -118,7 +119,7 @@ function randomId(prefix: string, bytes = 8): string {
   return prefix + [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-function fail(status: number, code: string, message: string, extra?: Record<string, unknown>): never {
+function fail(status: number, code: string, message: string, extra?: RefusalExtra): never {
   throw new HttpError(status, code, message, extra);
 }
 

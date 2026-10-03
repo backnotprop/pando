@@ -134,5 +134,19 @@ export interface Checks {
   statuses: StatusRecord[];
 }
 
-/** DO RPC results: errors travel as data, since RPC keeps only an error's message. */
-export type Outcome<T> = { ok: true; value: T } | { ok: false; status: number; code: string; message: string; extra?: Record<string, unknown> };
+/** What a refusal carries in its error body beside code and message (api-v1.yaml, errors). */
+export interface RefusalExtra {
+  /** A merge refused because required checks are not green: the head's checks. */
+  checks?: Checks;
+  /** A merge refused with a conflict: the paths changed differently on both sides. */
+  paths?: string[];
+  /** A CI service's rate limit: when to try again. */
+  retry_after_ms?: number;
+}
+
+/**
+ * DO RPC results: errors travel as data, since RPC keeps only an error's
+ * message. `extra` is a named, closed type: with `unknown` values the RPC stub
+ * types dropped the whole failure side (`!x.ok` narrowed to never).
+ */
+export type Outcome<T> = { ok: true; value: T } | { ok: false; status: number; code: string; message: string; extra?: RefusalExtra };

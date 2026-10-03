@@ -18,7 +18,7 @@
 
 import { Hono } from "hono";
 import type { Env } from "../env";
-import { credential, HttpError, toErrorResponse } from "../http";
+import { credential, hasControl, HttpError, toErrorResponse } from "../http";
 import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
 import { hashToken, isBootstrap, newToken } from "../monorepo/session";
 import { namespaceProblem } from "../monorepo/names";
@@ -207,17 +207,6 @@ function randomB64url(n = 32): string {
 
 async function s256(verifier: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-}
-
-/** A control character: below U+0020, or U+007F. */
-function hasControl(s: string): boolean {
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-
-    if (c < 0x20 || c === 0x7f) return true;
-  }
-
-  return false;
 }
 
 /** Only a path on this host: starts with one "/", no "//" or "/\\", no backslash or control characters. */

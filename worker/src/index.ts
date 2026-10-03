@@ -91,13 +91,20 @@ export default {
   /** The queues: last commits (monorepo/files.ts) and the feed. */
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === "pando-history") {
+      // SAFETY: only this Worker sends to pando-history (HISTORY_QUEUE.send in
+      // monorepo/files.ts, typed HistoryMessage), and this batch is that queue's.
       return handleHistoryBatch(batch as MessageBatch<HistoryMessage>, env, ctx, {
         objects: objectsClient,
         mergesFor: (id, repo) => (shas) => monorepoStub(env, id).mergedBranches(repo, shas),
       });
     }
 
-    if (batch.queue === "pando-feed") return handleFeedBatch(batch as MessageBatch<FeedMessage>, env);
+    if (batch.queue === "pando-feed") {
+      // SAFETY: only this Worker sends to pando-feed (FEED_QUEUE.sendBatch in
+      // feed/, typed FeedMessage), and this batch is that queue's.
+      return handleFeedBatch(batch as MessageBatch<FeedMessage>, env);
+    }
+
     console.error(`a batch from an unknown queue ${batch.queue}; acked`);
     batch.ackAll();
   },

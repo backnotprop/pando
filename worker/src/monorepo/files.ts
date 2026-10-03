@@ -514,13 +514,13 @@ export async function handleHistoryBatch(
   batch: MessageBatch<HistoryMessage>,
   env: Env,
   ctx: ExecutionContext,
-  deps: { objects: (ctx: { exports?: unknown } | ExecutionContext) => ObjectsClient; mergesFor: (monorepoId: string, repo: string) => MergesFor },
+  deps: { objects: () => ObjectsClient; mergesFor: (monorepoId: string, repo: string) => MergesFor },
 ): Promise<void> {
   for (const msg of batch.messages) {
     const m = msg.body;
 
     try {
-      const obj = deps.objects(ctx);
+      const obj = deps.objects();
       const rec = { name: m.repo, artifacts_name: m.artifacts } as RepoRecord;
       const w = new Walker(obj, rec, JOB_BUDGET);
       const commit = await w.commit(m.commit);

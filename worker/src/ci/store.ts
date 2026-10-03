@@ -11,7 +11,7 @@
 
 import type { Env } from "../env";
 import { HttpError, now } from "../http";
-import type { Identity, ObjectInfo, StatusRecord, StreamEvent } from "../monorepo/types";
+import type { Identity, ObjectInfo, RefusalExtra, StatusRecord, StreamEvent } from "../monorepo/types";
 import {
   CHECK_TYPES, duration, jobCheck, normalizeBuild, normalizeJob, normalizePipeline, rank, TERMINAL, verifyWebhook,
   type CiState, type NormBuild, type NormJob, type NormPipeline,
@@ -203,7 +203,7 @@ export interface PipelineView {
   last_build: BuildView | null;
 }
 
-function fail(status: number, code: string, message: string, extra?: Record<string, unknown>): never {
+function fail(status: number, code: string, message: string, extra?: RefusalExtra): never {
   throw new HttpError(status, code, message, extra);
 }
 

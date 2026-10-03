@@ -60,7 +60,7 @@ async function raw(request: Request, env: Env, ctx: ExecutionContext, url: URL, 
   const path = cleanPath(decodeURIComponent(m[4]));
 
   if (!path) throw new HttpError(404, "not_found", "a file path is needed");
-  const obj = objectsClient(ctx);
+  const obj = objectsClient();
   const w = new Walker(obj, rec, requestBudget(env));
   const stub = monorepoStub(env, info.id);
   const { commit, pinned } = await resolveCommit(env, w, (r) => stub.refHead(rec.name, r), url.searchParams.get("ref"), (sha) => stub.rememberHead(rec.name, sha));

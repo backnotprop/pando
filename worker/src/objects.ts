@@ -16,7 +16,7 @@
 // Found: `public, max-age=31536000, immutable` (a hash never changes). Not
 // found: `no-store`, since the object may be pushed later.
 
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { exports, WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "./env";
 import { withRepo } from "./monorepo/artifacts";
 import { currentTiming } from "./timing";
@@ -107,8 +107,8 @@ export interface ObjectsClient {
   raw(path: string, stats?: ObjectStats): Promise<Response | null>;
 }
 
-export function objectsClient(ctx: { exports?: unknown } | ExecutionContext): ObjectsClient {
-  const fetcher = (ctx as unknown as { exports: { Objects: Fetcher } }).exports.Objects;
+export function objectsClient(): ObjectsClient {
+  const fetcher = exports.Objects;
 
   const get = async (path: string, stats?: ObjectStats): Promise<Response | null> => {
     const res = await fetcher.fetch(`https://objects.internal${path}`);
@@ -137,7 +137,7 @@ export function objectsClient(ctx: { exports?: unknown } | ExecutionContext): Ob
     async json<T>(path: string, stats?: ObjectStats) {
       const r = await get(path, stats);
 
-      return r ? ((await r.json()) as T) : null;
+      return r ? r.json<T>() : null;
     },
     raw: get,
   };

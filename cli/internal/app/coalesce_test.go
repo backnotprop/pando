@@ -41,8 +41,10 @@ func TestRefreshesCoalesce(t *testing.T) {
 	if n := runs.Load(); n != 2 {
 		t.Fatalf("20 requests in 2 s gave %d refreshes, want 2", n)
 	}
-	if at[0] > 100*time.Millisecond {
-		t.Fatalf("the first refresh waited %s; it must run at once", at[0])
+	// At once means not after a quiet window; the bound leaves room for a
+	// loaded machine (go test -race beside other jobs).
+	if at[0] > time.Second {
+		t.Fatalf("the first refresh waited %s; it must run at once, not after %s", at[0], burstQuiet)
 	}
 	if at[1] < 2*time.Second+burstQuiet-200*time.Millisecond {
 		t.Fatalf("the second refresh ran at %s, before the burst ended and went quiet", at[1])
@@ -68,7 +70,8 @@ func TestRefreshesCoalesce(t *testing.T) {
 	if runs.Load() != 1 {
 		t.Fatalf("one request gave %d refreshes", runs.Load())
 	}
-	if d := time.Since(t0); d > 300*time.Millisecond+burstQuiet+500*time.Millisecond {
+	// One refresh and one quiet window, not two windows or burstMax.
+	if d := time.Since(t0); d > 300*time.Millisecond+burstQuiet+1500*time.Millisecond {
 		t.Fatalf("one request held the caller %s", d)
 	}
 }

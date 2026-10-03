@@ -3,12 +3,18 @@
 // started with the test overrides (the split at 2 members instead of 100, a
 // 0.5 s summary tick, and the test route):
 //
-//   npx wrangler dev --port 8811 --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1 --var FEED_RETRY_MS:200,400,600,800 > /tmp/feed-dev.log 2>&1
+//   npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to /tmp/feed-state
+//   npx wrangler dev --port 8811 --persist-to /tmp/feed-state --var FEED_FANOUT_MAX:2 --var FEED_TICK_MS:500 --var FEED_TEST:1 --var FEED_RETRY_MS:200,400,600,800 > /tmp/feed-dev.log 2>&1
 //   PANDO_URL=http://localhost:8811 PANDO_DEV_LOG=/tmp/feed-dev.log node test/feed.mjs
 //
+// Give every dev server its own --persist-to. Two wrangler dev servers on one
+// folder's .wrangler/state open the same Durable Object databases: workerd
+// then logs "internal error; reference = ...", SQLITE_BUSY and SQLITE_READONLY,
+// and checks fail at random (reproduced 2026-10-03; 0 such lines apart).
+//
 // With PANDO_DEV_LOG (the dev server's output), the run fails on any
-// undisposed RPC result, 500, uncaught exception or Pando error line logged
-// while it ran (the end of the file explains what is only counted).
+// undisposed RPC result, 500, uncaught exception, Pando error line, workerd
+// internal error, SQLITE_BUSY or SQLITE_READONLY logged while it ran.
 //
 // Credentials stay in memory and are never printed. Git never reaches the
 // macOS keychain. It deletes every monorepo it made.
@@ -503,24 +509,19 @@ try {
     await sleep(12_000);
     const lines = logLines().slice(logStart).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
     // Fails the run: an undisposed RPC result; a 500 (the Worker logs "internal error: <message>"); Pando's own
-    // error lines ("feed: ...", except the dead row this test makes on purpose); and any uncaught exception except
-    // this test's own crash.
-    // Counted, not failed (wrangler dev artifacts; pando-dev's logs are checked after each deploy and have none):
-    // - workerd's "internal error; reference = ..." lines carry no source in this log. A debug log
-    //   (WRANGLER_LOG=debug) shows miniflare's own workers failing around them, and its remote-bindings proxy
-    //   reconnecting every one or two requests, so neither can single them out;
-    // - SQLITE_READONLY: an object instance the dev runtime has already retired, writing as it starts.
+    // error lines ("feed: ...") and uncaught exceptions; workerd's "internal error; reference" and SQLITE_BUSY or
+    // SQLITE_READONLY (another dev server sharing this one's state, or a real fault). Not: this test's own crash
+    // and failed drains.
     const bad = [];
-    const counted = { internal: 0, readonly: 0, test: 0 };
+    let ours = 0;
     for (const l of lines) {
-      if (/not disposed properly/.test(l)) bad.push(l);
-      else if (/internal error; reference = /.test(l)) counted.internal++;
-      else if (/SQLITE_READONLY/.test(l) && /\[ERROR\]/.test(l)) counted.readonly++;
-      else if (/feed test: (the object dies|a failed drain)/.test(l)) counted.test++;
-      else if (/✘ \[ERROR\] (Uncaught|internal error: |feed: )/.test(l)) bad.push(l);
+      if (/feed test: (the object dies|a failed drain)/.test(l)) ours++;
+      else if (/not disposed properly|internal error; reference = |SQLITE_(BUSY|READONLY)|✘ \[ERROR\] (Uncaught|internal error: |feed: )/.test(l)) bad.push(l);
     }
-    check("the dev server logged no undisposed RPC results, no 500s and no Pando errors during the run", bad.length === 0, `${bad.length}: ${bad.slice(0, 2).join(" | ").slice(0, 200)}`);
-    console.log(`INFO  dev-only lines, counted not failed: ${counted.internal} workerd "internal error; reference", ${counted.readonly} SQLITE_READONLY; ${counted.test} from this test's crash and failed drains`);
+    const shared = bad.some((l) => /internal error; reference|SQLITE_(BUSY|READONLY)/.test(l));
+    check("the dev server logged no undisposed RPC results, 500s, Pando errors or workerd internal errors during the run", bad.length === 0,
+      `${bad.length}: ${bad.slice(0, 2).join(" | ").slice(0, 200)}${shared ? " (does another wrangler dev share this server's state? give each its own --persist-to)" : ""}`);
+    console.log(`INFO  ${ours} log lines from this test's own crash and failed drains (expected)`);
   } else console.log("SKIP  the dev server log check (set PANDO_DEV_LOG to the dev server's output)");
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);

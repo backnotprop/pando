@@ -40,9 +40,8 @@ export async function sendPushSummary(env: Env, stub: Stub, r: RepoRecord, push:
       }
     });
   } catch (err) {
-    // A repo deleted before its job ran (tests do this) is expected: a warning, not an error.
-    const log = err instanceof HttpError && err.status === 404 ? console.warn : console.error;
-    log(`feed: push summary for ${r.name}@${head.slice(0, 12)} failed; sent without numbers:`, err instanceof Error ? err.message : String(err));
+    // A repo deleted before its job ran (tests do this) is expected: nothing to say.
+    if (!(err instanceof HttpError && err.status === 404)) console.error(`feed: push summary for ${r.name}@${head.slice(0, 12)} failed; sent without numbers:`, err instanceof Error ? err.message : String(err));
   }
   await stub.feedPush(push.seq, summary);
 }

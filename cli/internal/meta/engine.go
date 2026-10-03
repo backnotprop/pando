@@ -49,7 +49,15 @@ type Engine struct {
 	done   chan struct{}
 	lock   *os.File
 
+	client    *Client
+	runCtx    context.Context
+	downloads map[string]*serverMsg // large files being downloaded, by path
+	dlRetry   map[string]time.Time  // when a failed download may try again
+	dlFails   map[string]int        // failed downloads in a row, by path
+	transfers chan struct{}         // at most 2 uploads or downloads at a time
+
 	untilSynced bool // return from Run once everything here is sent
+	textOnly    bool // CatchUp for a --text-only clone (saved in the state)
 	hooks       Hooks
 	refsChanged map[string]bool // pointers written this pass
 	hookBusy    chan struct{}   // one hook call at a time
@@ -66,15 +74,40 @@ type Hooks struct {
 type seen struct {
 	size, mtime int64
 	firstMove   time.Time // when it started changing; zero once quiet
-	sha         string    // of these bytes, once read
-	why         string    // too_large or binary: stays on this machine
+	sha         string    // git blob id of these bytes, once read
+	oid         string    // SHA-256 of a large file or binary, once read
+	why         string    // why it stays on this machine (over 100 MB)
+}
+
+// key names the bytes seen, for the refused list.
+func (c *seen) key() string {
+	if c.oid != "" {
+		return "sha256:" + c.oid
+	}
+	return c.sha
 }
 
 type event struct {
-	gen  int
-	conn *websocket.Conn
-	msg  *serverMsg
+	gen      int
+	conn     *websocket.Conn
+	msg      *serverMsg
+	err      error
+	upload   *uploadResult
+	download *downloadResult
+}
+
+type uploadResult struct {
+	op   *Op
+	ptr  Pointer
+	info os.FileInfo
 	err  error
+}
+
+type downloadResult struct {
+	m   *serverMsg
+	ptr Pointer
+	tmp string
+	err error
 }
 
 // New makes an engine for cfg.Root. Call Run (the daemon) or CatchUp (clone).
@@ -105,6 +138,12 @@ func New(cfg Config) (*Engine, error) {
 		done:        make(chan struct{}),
 		refsChanged: map[string]bool{},
 		hookBusy:    make(chan struct{}, 1),
+		client:      NewClient(cfg),
+		runCtx:      context.Background(),
+		downloads:   map[string]*serverMsg{},
+		dlRetry:     map[string]time.Time{},
+		dlFails:     map[string]int{},
+		transfers:   make(chan struct{}, 2),
 	}, nil
 }
 
@@ -115,6 +154,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		return err
 	}
 	defer e.close()
+	e.runCtx = ctx
 	e.cfg.Log.Printf("syncing %s with %s (monorepo %s, machine %s)", e.cfg.Root, e.cfg.Server, e.cfg.Monorepo, e.cfg.Machine)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -139,7 +179,7 @@ func (e *Engine) Run(ctx context.Context) error {
 // synced reports whether everything here is on the server: online, nothing
 // queued or in flight, nothing still changing or waiting to count as deleted.
 func (e *Engine) synced() bool {
-	if !e.live || len(e.st.Outbox) > 0 || len(e.inflight) > 0 || len(e.missing) > 0 {
+	if !e.live || len(e.st.Outbox) > 0 || len(e.inflight) > 0 || len(e.missing) > 0 || len(e.downloads) > 0 {
 		return false
 	}
 	for _, c := range e.cache {
@@ -158,11 +198,15 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 	}
 	defer e.close()
 	e.quiet = true
+	e.runCtx = ctx
+	if e.textOnly {
+		e.st.TextOnly = true
+	}
 	start := len(e.st.Files)
 	e.dial(ctx)
 	timeout := time.NewTimer(10 * time.Minute)
 	defer timeout.Stop()
-	for !e.live {
+	for !e.live || len(e.downloads) > 0 || e.retryingDownloads() {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -173,10 +217,26 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 				return fmt.Errorf("download: %w", ev.err)
 			}
 			e.handle(ctx, ev)
+		case <-time.After(time.Second):
+			for _, m := range e.held {
+				e.applyOne(m) // large files whose download is due again
+			}
 		}
 	}
 	e.cfg.Log.Printf("downloaded the meta layer: %d paths known (%d new), at version %d", len(e.st.Files), len(e.st.Files)-start, e.st.Cursor)
 	return nil
+}
+
+// retryingDownloads reports whether a clone should still wait for a failed
+// download. After 3 failures it stops waiting; the change stays held, so the
+// daemon asks for it again.
+func (e *Engine) retryingDownloads() bool {
+	for p := range e.dlRetry {
+		if e.held[p] != nil && e.dlFails[p] < 3 {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) open() error {
@@ -221,6 +281,9 @@ func (e *Engine) saveState() {
 	cursor := e.st.Cursor
 	for _, h := range e.held {
 		cursor = min(cursor, h.Version-1)
+	}
+	for _, d := range e.downloads {
+		cursor = min(cursor, d.Version-1)
 	}
 	saved := *e.st
 	saved.Cursor = cursor
@@ -329,6 +392,14 @@ func (e *Engine) hello(ctx context.Context) {
 }
 
 func (e *Engine) handle(ctx context.Context, ev event) {
+	if ev.upload != nil {
+		e.uploaded(ctx, ev.upload)
+		return
+	}
+	if ev.download != nil {
+		e.downloaded(ev.download)
+		return
+	}
 	if ev.gen != e.gen {
 		if ev.conn != nil {
 			ev.conn.CloseNow()
@@ -564,19 +635,31 @@ func (e *Engine) observe(rel, abs string, info fs.FileInfo, now time.Time) *Op {
 	if c.why != "" {
 		return nil
 	}
-	if c.sha == "" {
+	if c.sha == "" && c.oid == "" {
 		data, _, why, err := readSyncable(abs)
 		if err != nil {
 			return nil
 		}
-		if why != "" {
-			c.why = why
-			e.logf("%s stays on this machine (%s)", rel, strings.ReplaceAll(why, "_", " "))
+		switch why {
+		case "":
+			c.sha = gitSHA(data)
+		case "too_large", "binary": // its bytes go to R2, a pointer goes live
+			if size > MaxLarge {
+				c.why = "over 100 MB"
+				e.logf("%s stays on this machine (over 100 MB)", rel)
+				return nil
+			}
+			oid, _, err := sha256File(abs)
+			if err != nil {
+				return nil
+			}
+			c.oid = oid
+		default:
+			c.why = strings.ReplaceAll(why, "_", " ")
 			return nil
 		}
-		c.sha = gitSHA(data)
 	}
-	if f != nil && f.SHA != "" && c.sha == f.SHA {
+	if f != nil && f.SHA != "" && ((c.sha != "" && c.sha == f.SHA) || (c.oid != "" && c.oid == f.Oid)) {
 		f.Size, f.Mtime = size, mt // touched, same bytes
 		e.dirty = true
 		return nil
@@ -584,7 +667,7 @@ func (e *Engine) observe(rel, abs string, info fs.FileInfo, now time.Time) *Op {
 	if _, frozen := e.frozen[rel]; frozen {
 		return nil
 	}
-	if e.st.Refused[rel] == c.sha || e.st.Outbox[rel] != nil || e.byFrom[rel] != nil {
+	if e.st.Refused[rel] == c.key() || e.st.Outbox[rel] != nil || e.byFrom[rel] != nil {
 		return nil // refused as it is, or already queued (its bytes are read when sent)
 	}
 	var base int64
@@ -601,7 +684,7 @@ func (e *Engine) observe(rel, abs string, info fs.FileInfo, now time.Time) *Op {
 func (e *Engine) renameInto(from string, f *FileState, created []newSave) bool {
 	var match *Op
 	for _, c := range created {
-		if c.sha == f.SHA && c.op.id == "" && c.op.Kind == "save" {
+		if c.sha != "" && c.sha == f.SHA && c.op.id == "" && c.op.Kind == "save" {
 			if match != nil {
 				return false // two candidates: not a rename
 			}
@@ -689,6 +772,10 @@ func (e *Engine) send(ctx context.Context, op *Op, mayConvert bool) {
 		if err != nil {
 			return // try again on the next pass
 		}
+		if why == "too_large" || why == "binary" {
+			e.sendLarge(ctx, op, id, info)
+			return
+		}
 		if why != "" {
 			e.removeOp(op)
 			return
@@ -722,6 +809,57 @@ func (e *Engine) send(ctx context.Context, op *Op, mayConvert bool) {
 	}
 }
 
+// sendLarge uploads a large file's bytes to R2 in the background, then sends
+// its pointer as the save.
+func (e *Engine) sendLarge(ctx context.Context, op *Op, id string, info fs.FileInfo) {
+	if info.Size() > MaxLarge {
+		e.removeOp(op)
+		return
+	}
+	if op.uploading || time.Now().Before(op.retryAt) {
+		return
+	}
+	u := op.uploaded
+	if u == nil || u.info.Size() != info.Size() || !u.info.ModTime().Equal(info.ModTime()) {
+		op.uploading = true
+		abs := e.abs(op.Path)
+		go func() {
+			e.transfers <- struct{}{}
+			defer func() { <-e.transfers }()
+			ptr, after, err := e.client.UploadFile(ctx, abs)
+			e.post(event{upload: &uploadResult{op: op, ptr: ptr, info: after, err: err}})
+		}()
+		return
+	}
+	if f := e.st.Files[op.Path]; f != nil && f.Oid == u.ptr.Oid {
+		f.Size, f.Mtime = info.Size(), info.ModTime().UnixNano()
+		e.removeOp(op) // back to the synced bytes
+		return
+	}
+	text := u.ptr.text()
+	op.sentSHA, op.sentOid, op.sentSize, op.sentMt = gitSHA(text), u.ptr.Oid, info.Size(), info.ModTime().UnixNano()
+	op.id = id
+	e.inflight[id] = op
+	e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: op.sentSHA, Bytes: text})
+}
+
+func (e *Engine) uploaded(ctx context.Context, r *uploadResult) {
+	r.op.uploading = false
+	if e.st.Outbox[r.op.Path] != r.op {
+		return // dropped meanwhile
+	}
+	if r.err != nil {
+		e.logf("could not upload %s: %v; trying again soon", r.op.Path, r.err)
+		r.op.retryAt = time.Now().Add(10 * time.Second)
+		return
+	}
+	r.op.uploaded = r
+	e.logf("uploaded %s (%d bytes)", r.op.Path, r.ptr.Size)
+	if e.live && r.op.id == "" {
+		e.send(ctx, r.op, true)
+	}
+}
+
 // ---- answers ----
 
 func (e *Engine) accepted(m *serverMsg) {
@@ -731,7 +869,7 @@ func (e *Engine) accepted(m *serverMsg) {
 	}
 	switch op.Kind {
 	case "save":
-		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.sentSHA, Size: op.sentSize, Mtime: op.sentMt}
+		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.sentSHA, Oid: op.sentOid, Size: op.sentSize, Mtime: op.sentMt}
 		delete(e.st.Refused, op.Path)
 		e.logf("sent %s (version %d)", op.Path, m.Version)
 	case "delete":
@@ -759,6 +897,9 @@ func (e *Engine) refused(m *serverMsg) {
 	}
 	if op.Kind == "save" {
 		e.st.Refused[op.Path] = op.sentSHA
+		if op.sentOid != "" {
+			e.st.Refused[op.Path] = "sha256:" + op.sentOid
+		}
 	}
 	e.removeOp(op)
 	e.cfg.Log.Printf("the server refused %s: %s (%s)", m.Path, m.Message, m.Reason)
@@ -790,7 +931,11 @@ func (e *Engine) stale(m *serverMsg) {
 		p := op.Path
 		data, err := os.ReadFile(e.abs(p))
 		if err == nil && !cur.Deleted && gitSHA(data) == cur.SHA {
-			e.adopt(p, cur.Version, cur.SHA) // the same bytes won
+			e.adopt(p, cur.Version, cur.SHA, "") // the same bytes won
+			break
+		}
+		if ptr, ok := parsePointer(cur.Bytes); err == nil && ok && op.sentOid == ptr.Oid {
+			e.adopt(p, cur.Version, cur.SHA, ptr.Oid) // the same large file won
 			break
 		}
 		copyRel := ""
@@ -836,6 +981,21 @@ func (e *Engine) freeConflictName(rel string) string {
 // writeCurrent makes the local file the object's current state.
 func (e *Engine) writeCurrent(rel string, cur *Current) {
 	e.noteWrite(rel)
+	if ptr, ok := parsePointer(cur.Bytes); ok && !cur.Deleted && !e.st.TextOnly {
+		// A large file: clear the way (its bytes here are kept by the caller)
+		// and download the object's.
+		if err := removeFile(e.cfg.Root, e.abs(rel)); err != nil {
+			e.cfg.Log.Printf("could not remove %s: %v", rel, err)
+			return
+		}
+		e.st.Files[rel] = &FileState{}
+		delete(e.cache, rel)
+		e.dirty = true
+		e.applyOne(&serverMsg{Type: "change", Op: "save", Path: rel, Version: cur.Version, SHA: cur.SHA,
+			Size: int64(len(cur.Bytes)), Bytes: cur.Bytes, Author: cur.Author, Machine: cur.Machine})
+		_ = ptr
+		return
+	}
 	if cur.Deleted {
 		if err := removeFile(e.cfg.Root, e.abs(rel)); err != nil {
 			e.cfg.Log.Printf("could not remove %s: %v", rel, err)
@@ -856,8 +1016,8 @@ func (e *Engine) writeCurrent(rel string, cur *Current) {
 }
 
 // adopt records the local file as synced at version (its bytes already match).
-func (e *Engine) adopt(rel string, version int64, sha string) {
-	f := &FileState{Version: version, SHA: sha}
+func (e *Engine) adopt(rel string, version int64, sha, oid string) {
+	f := &FileState{Version: version, SHA: sha, Oid: oid}
 	if sha != "" {
 		if info, err := os.Lstat(e.abs(rel)); err == nil {
 			f.Size, f.Mtime = info.Size(), info.ModTime().UnixNano()
@@ -940,7 +1100,7 @@ func (e *Engine) move(m *serverMsg) bool {
 	e.noteWrite(from)
 	e.noteWrite(to)
 	e.st.Files[from] = &FileState{Version: m.FromVersion}
-	e.adopt(to, m.Version, m.SHA)
+	e.adopt(to, m.Version, m.SHA, ff.Oid)
 	delete(e.cache, from)
 	e.logf("%s moved %s to %s", who(m), from, to)
 	return true
@@ -970,6 +1130,18 @@ func (e *Engine) clean(rel string) bool {
 	if info.Size() == f.Size && info.ModTime().UnixNano() == f.Mtime {
 		return true
 	}
+	// The scan already hashed these bytes: no need to read them again.
+	if c := e.cache[rel]; c != nil && c.size == info.Size() && c.mtime == info.ModTime().UnixNano() && (c.sha != "" || c.oid != "") {
+		return (c.sha != "" && c.sha == f.SHA) || (c.oid != "" && c.oid == f.Oid)
+	}
+	if f.Oid != "" {
+		if oid, _, err := sha256File(e.abs(rel)); err == nil && oid == f.Oid {
+			return true
+		}
+	}
+	if info.Size() > MaxBytes {
+		return false
+	}
 	data, err := os.ReadFile(e.abs(rel))
 	return err == nil && gitSHA(data) == f.SHA
 }
@@ -991,14 +1163,18 @@ func (e *Engine) applyOne(m *serverMsg) {
 		e.held[p] = m
 		return
 	}
+	if ptr, ok := parsePointer(m.Bytes); ok && !m.Deleted && e.wantBytes(p, exists, info) {
+		e.applyLarge(m, ptr, exists, info)
+		return
+	}
 	// The file already holds these bytes: a lost answer, or the same edit.
 	if !exists && m.Deleted {
-		e.adopt(p, m.Version, "")
+		e.adopt(p, m.Version, "", "")
 		return
 	}
 	if exists && !m.Deleted && info.Size() == m.Size {
 		if data, err := os.ReadFile(abs); err == nil && gitSHA(data) == m.SHA {
-			e.adopt(p, m.Version, m.SHA)
+			e.adopt(p, m.Version, m.SHA, "")
 			return
 		}
 	}
@@ -1030,4 +1206,105 @@ func (e *Engine) applyOne(m *serverMsg) {
 		e.logf("%s saved %s (version %d)", who(m), p, m.Version)
 	}
 	e.dirty = true
+}
+
+// ---- large files from other machines ----
+
+// wantBytes reports whether a large file's bytes should be downloaded here:
+// always, except on a --text-only clone, where only files already fetched
+// (real bytes on disk, not a pointer) follow new versions.
+func (e *Engine) wantBytes(rel string, exists bool, info fs.FileInfo) bool {
+	if !e.st.TextOnly {
+		return true
+	}
+	f := e.st.Files[rel]
+	if !exists || f == nil || f.Oid == "" {
+		return false
+	}
+	if info.Size() < 1024 {
+		if b, err := os.ReadFile(e.abs(rel)); err == nil {
+			if _, isPtr := parsePointer(b); isPtr {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (e *Engine) applyLarge(m *serverMsg, ptr Pointer, exists bool, info fs.FileInfo) {
+	p := m.Path
+	abs := e.abs(p)
+	if exists && info.Size() == ptr.Size {
+		if oid, _, err := sha256File(abs); err == nil && oid == ptr.Oid {
+			e.adopt(p, m.Version, m.SHA, ptr.Oid) // already here
+			return
+		}
+	}
+	if !e.clean(p) {
+		if e.held[p] == nil {
+			e.logf("holding %s from %s: it has changes here", p, who(m))
+		}
+		e.held[p] = m
+		return
+	}
+	if d := e.downloads[p]; d != nil && d.Version >= m.Version {
+		return // already on its way
+	}
+	if t, ok := e.dlRetry[p]; ok && time.Now().Before(t) {
+		e.held[p] = m
+		return
+	}
+	delete(e.held, p)
+	e.downloads[p] = m
+	ctx := e.runCtx
+	go func() {
+		e.transfers <- struct{}{}
+		defer func() { <-e.transfers }()
+		tmp, err := e.client.DownloadTo(ctx, ptr, abs)
+		e.post(event{download: &downloadResult{m: m, ptr: ptr, tmp: tmp, err: err}})
+	}()
+}
+
+func (e *Engine) downloaded(r *downloadResult) {
+	p := r.m.Path
+	if e.downloads[p] != r.m {
+		if r.tmp != "" {
+			os.Remove(r.tmp) // a newer version is on its way
+		}
+		return
+	}
+	delete(e.downloads, p)
+	if r.err != nil {
+		e.cfg.Log.Printf("could not download %s: %v; trying again soon", p, r.err)
+		e.dlFails[p]++
+		e.dlRetry[p] = time.Now().Add(time.Duration(min(e.dlFails[p], 6)) * 10 * time.Second)
+		e.held[p] = r.m
+		return
+	}
+	delete(e.dlRetry, p)
+	delete(e.dlFails, p)
+	if f := e.st.Files[p]; f != nil && r.m.Version <= f.Version {
+		os.Remove(r.tmp)
+		return
+	}
+	if !e.clean(p) {
+		os.Remove(r.tmp)
+		e.held[p] = r.m // edited while downloading: held, fetched again once clean
+		return
+	}
+	abs := e.abs(p)
+	if err := os.Rename(r.tmp, abs); err != nil {
+		os.Remove(r.tmp)
+		e.cfg.Log.Printf("could not write %s: %v", p, err)
+		return
+	}
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return
+	}
+	e.st.Files[p] = &FileState{Version: r.m.Version, SHA: r.m.SHA, Oid: r.ptr.Oid, Size: info.Size(), Mtime: info.ModTime().UnixNano()}
+	e.cache[p] = &seen{size: info.Size(), mtime: info.ModTime().UnixNano(), oid: r.ptr.Oid}
+	e.noteWrite(p)
+	e.dirty = true
+	e.logf("%s saved %s (version %d, %d bytes from R2)", who(r.m), p, r.m.Version, r.ptr.Size)
 }

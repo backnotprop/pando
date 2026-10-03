@@ -42,6 +42,10 @@ type Version struct {
 	To           string `json:"to"`
 	RestoredFrom *int64 `json:"restored_from"`
 	Commit       string `json:"commit"`
+	Large        *struct {
+		Oid  string `json:"oid"`
+		Size int64  `json:"size"`
+	} `json:"large"`
 }
 
 // Time is when the version was saved.

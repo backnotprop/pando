@@ -37,9 +37,10 @@ The object refuses, and the client never sends:
 | Machine only | `.pando/local/**` (see `formats.md`, section 3) | `local_only` | 403 |
 | Protected | the rest of `.pando/**` (changes only through a reviewed branch, or in `pando init`'s first upload), except reference pointers `.pando/references/**`, which are live | `protected` | 403 |
 | Code | `projects/**` (code repos are not live) | `not_meta` | 403 |
-| Local only | dependencies and build output: any `node_modules/`, `.pnpm-store/`, `dist/`, `build/`, `.wrangler/`, `.next/`, `.cache/`, `__pycache__/`, `.venv/` folder; event captures `*.ndjson`, `*.jsonl`; secrets: `.env*`, `.dev.vars*`, `.secrets/`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.mobileprovision`, `*.provisionprofile`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`; noise: `.git/`, `.DS_Store`, `*.swp`, `*~`, `.#*`; Pando's own files: `*.conflict-local-*`, `.*.pando-tmp-*` | `local_only` | 403 |
-| Too large | more than 1.5 MiB (1,572,864 bytes) | `too_large` | 413 |
-| Binary | a NUL byte in the first 8,000 bytes (git's test) | `binary` | 415 |
+| Local only | dependencies and build output: any `node_modules/`, `.pnpm-store/`, `dist/`, `build/`, `.wrangler/`, `.next/`, `.cache/`, `__pycache__/`, `.venv/` folder; event captures `*.ndjson`, `*.jsonl`; secrets: `.env*`, `.dev.vars*`, `.secrets/`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.mobileprovision`, `*.provisionprofile`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`; databases: `*.sqlite`, `*.sqlite3`, `*.db` and their `-wal`, `-shm`, `-journal` files; noise: `.git/`, `.DS_Store`, `*.swp`, `*~`, `.#*`; Pando's own files: `*.conflict-local-*`, `.*.pando-tmp-*` | `local_only` | 403 |
+| Too large | more than 1.5 MiB (1,572,864 bytes) inline: send a pointer (below) | `too_large` | 413 |
+| Binary | a NUL byte in the first 8,000 bytes (git's test) inline: send a pointer | `binary` | 415 |
+| Missing blob | a Git LFS pointer whose bytes are not in R2 | `missing_blob` | 400 |
 | Bad path | empty, absolute, `\`, NUL, `.` or `..` segments, empty segments, longer than 1,024 bytes | `bad_path` | 400 |
 | Bad sha | `sha` does not match `bytes` | `bad_sha` | 400 |
 
@@ -48,7 +49,8 @@ directory or a file): such a folder is a repo or a reference, and only its
 pointer under `.pando/references/` syncs (`formats.md`, section 4). It skips
 symlinks, and anything matched by `local_only` in `.pando/pando.toml`
 (`.gitignore` syntax, `formats.md` section 2). Binaries and files over
-1.5 MiB stay on the machine that made them until the R2 step (below).
+1.5 MiB go through R2 (below), up to 100 MB; a larger file stays on the
+machine that made it.
 
 ## The WebSocket
 
@@ -229,7 +231,8 @@ changed since I last looked").
 ```
 
 `commit` is the meta layer commit that carries the version, or `null` until
-it is committed.
+it is committed. `large` is `{"oid", "size"}` when the version is a large
+file's pointer (then `size` and `sha` are the pointer's), else `null`.
 
 **`GET file?path=<path>&version=<version>`**: the bytes of the path as it
 was at that version, that is its latest change at or before it (`version`
@@ -307,11 +310,12 @@ checks tokens, the object takes `author` and `agent` from `hello` too.
 Errors on the HTTP routes have the `/v1` shape:
 `{"error": {"code": "...", "message": "..."}}`.
 
-## Later (M7): large files and binaries through R2
+## Large files and binaries through R2
 
-A binary or a file over 1.5 MiB is uploaded to R2 (`pando-dev-blobs`)
-through the Worker under its SHA-256, and the save carries a Git LFS pointer
-instead of the bytes:
+A binary, or a file over 1.5 MiB, has its bytes in R2 (bucket
+`pando-dev-blobs`, key `meta/<monorepo>/<sha256>`) and a Git LFS pointer in
+the meta layer (`formats.md`, section 5). The pointer is what is saved,
+broadcast, kept in history and committed to git:
 
 ```
 version https://git-lfs.github.com/spec/v1
@@ -319,6 +323,28 @@ oid sha256:<64 hex>
 size <bytes>
 ```
 
-Machines download the bytes in the background; with `pando clone
---text-only` they skip them until `pando fetch <path>`. The routes and
-messages for this are added here when the work starts.
+The bytes move through the Worker. No machine holds R2 keys.
+
+| Route | What |
+| --- | --- |
+| `HEAD /v1/monorepos/{monorepo}/meta/blobs/{sha256}` | 200 when the bytes are there |
+| `PUT  /v1/monorepos/{monorepo}/meta/blobs/{sha256}` | upload, `Content-Length` required, at most 100 MB (413 above, the largest request a Worker takes); R2 checks the SHA-256 (400 `bad_sha`); 200 if already there |
+| `GET  /v1/monorepos/{monorepo}/meta/blobs/{sha256}` | download |
+
+- **Saving.** The client hashes the file (SHA-256), uploads it if `HEAD`
+  says it is missing, then sends a `save` whose bytes are the pointer. The
+  object accepts a pointer only if its bytes are in R2 with that size
+  (`missing_blob` otherwise). Uploads run in the background, two at a time.
+- **Receiving.** A change whose bytes are a pointer is downloaded in the
+  background, checked against the SHA-256, and written over the file only
+  if the file is still clean; until then the old bytes stay in place.
+- **Clean.** A local large file is clean when its SHA-256 is the synced
+  pointer's.
+- **A lost race** on a large file keeps the local bytes in a conflict copy,
+  as for text, then downloads the winner's bytes.
+- **`pando clone --text-only`** (agent sandboxes) writes the pointer text in
+  place of each large file and remembers the choice. `pando fetch <path>`
+  downloads the bytes; a fetched file then follows new versions, the rest
+  stay pointers.
+- Files over 100 MB stay on the machine that made them. Bytes in R2 are
+  kept, like every version.

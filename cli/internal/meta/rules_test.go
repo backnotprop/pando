@@ -97,7 +97,7 @@ func TestRulesFromFolder(t *testing.T) {
 		os.MkdirAll(filepath.Dir(abs), 0o755)
 		os.WriteFile(abs, []byte(body), 0o644)
 	}
-	write(".pando/pando.toml", "local_only = [\"research/operational/stress-runs/\", \"*.sqlite\"]\n")
+	write(".pando/pando.toml", "local_only = [\"research/operational/stress-runs/\", \"*.csv\"]\n")
 	write("research/infra/lib/.git/HEAD", "ref: refs/heads/main\n")
 	r, err := LoadRules(root)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestRulesFromFolder(t *testing.T) {
 			t.Errorf("SkipDir(%q) = %v, want %v", rel, got, want)
 		}
 	}
-	if r.SyncFile("data/x.sqlite") || !r.SyncFile("data/x.json") {
+	if r.SyncFile("data/x.csv") || !r.SyncFile("data/x.json") {
 		t.Error("local_only from pando.toml not applied")
 	}
 	if r.Receivable("research/infra/lib/README.md") || r.Receivable("projects/web/a.md") || !r.Receivable(".pando/pando.toml") {
@@ -127,7 +127,7 @@ func TestRulesFromFolder(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	write(".pando/pando.toml", "local_only = []\n")
 	os.Chtimes(filepath.Join(root, ".pando/pando.toml"), time.Now(), time.Now().Add(time.Second))
-	if !r.Refresh() || !r.SyncFile("data/x.sqlite") {
+	if !r.Refresh() || !r.SyncFile("data/x.csv") {
 		t.Error("pando.toml not reloaded")
 	}
 }

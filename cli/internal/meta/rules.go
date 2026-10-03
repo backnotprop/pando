@@ -31,6 +31,8 @@ var localDirs = map[string]bool{
 var localSuffixes = []string{
 	".ndjson", ".jsonl", ".pem", ".key", ".p12", ".pfx", ".keystore",
 	".mobileprovision", ".provisionprofile", ".swp", "~",
+	// databases change under a running program; a copy of one is not a database
+	".sqlite", ".sqlite3", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal", ".db", ".db-wal", ".db-shm",
 }
 
 var localPrefixes = []string{".env", ".dev.vars", "id_rsa", "id_ed25519", "id_ecdsa", ".#"}

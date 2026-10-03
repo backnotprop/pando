@@ -10,5 +10,7 @@
     "bindings": [{ "name": "META", "class_name": "MetaLayerObject" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MetaLayerObject"] }],
+  // Local R2 under wrangler dev (simulated on disk, not the real bucket).
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "pando-dev-blobs" }],
   "artifacts": [{ "binding": "ARTIFACTS", "namespace": "pando-spike", "remote": true }]
 }

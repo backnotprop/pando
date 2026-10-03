@@ -18,22 +18,33 @@ import { describeError, retryResetFetch } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const ORIGIN = new URL(URL_).origin;
+
 const BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+
 const STUB_PORT = 8799;
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`.replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
 };
+
 const b64url = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 // ── the stand-in WorkOS ──
 const codes = new Map();
+
 const devices = new Map();
+
 const seen = { exchanges: [], logouts: [] };
+
 let nextUser = null;
+
 let sidN = 0;
+
 const stub = createServer((req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${STUB_PORT}`);
   let body = "";
@@ -42,53 +53,71 @@ const stub = createServer((req, res) => {
     if (req.method === "GET" && u.pathname === "/user_management/authorize") {
       const q = u.searchParams;
       const ok = q.get("response_type") === "code" && q.get("code_challenge_method") === "S256" && q.get("provider") === "authkit" && q.get("redirect_uri") === `${ORIGIN}/v1/login/callback` && q.get("client_id");
+
       if (!ok || !nextUser) return res.writeHead(400).end("bad authorize request");
       const code = b64url(createHash("sha256").update(String(Math.random())).digest());
       codes.set(code, { challenge: q.get("code_challenge"), user: nextUser });
       const back = new URL(q.get("redirect_uri"));
       back.searchParams.set("code", code);
       back.searchParams.set("state", q.get("state"));
+
       return res.writeHead(302, { location: back.toString() }).end();
     }
+
     if (req.method === "POST" && u.pathname === "/user_management/authorize/device") {
       // The device flow: the person is taken as having confirmed at once.
       const device_code = `dev_${devices.size + 1}_${Date.now()}`;
       devices.set(device_code, nextUser);
+
       return res.writeHead(200, { "content-type": "application/json" }).end(
         JSON.stringify({ device_code, user_code: "ABCD-EFGH", verification_uri: "https://example.invalid/device", verification_uri_complete: "https://example.invalid/device?code=ABCD-EFGH", expires_in: 300, interval: 1 }),
       );
     }
+
     if (req.method === "POST" && u.pathname === "/user_management/authenticate" && new URLSearchParams(body).get("grant_type") === "urn:ietf:params:oauth:grant-type:device_code") {
       const user = devices.get(new URLSearchParams(body).get("device_code"));
+
       if (!user) return res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "invalid_grant" }));
+
       return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ user, access_token: "x.e30.sig", refresh_token: "r" }));
     }
+
     if (req.method === "POST" && u.pathname === "/user_management/authenticate") {
       const f = new URLSearchParams(body);
       const c = codes.get(f.get("code"));
       seen.exchanges.push({ grant: f.get("grant_type"), secret: !!f.get("client_secret"), verifier: !!f.get("code_verifier") });
+
       if (!c || f.get("grant_type") !== "authorization_code" || b64url(createHash("sha256").update(f.get("code_verifier") ?? "").digest()) !== c.challenge) {
         return res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "invalid_grant", error_description: "bad code or verifier" }));
       }
+
       codes.delete(f.get("code"));
       const sid = `session_${++sidN}`;
       const jwt = `${b64url("{}")}.${b64url(JSON.stringify({ sub: c.user.id, sid }))}.sig`;
+
       return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ user: c.user, access_token: jwt, refresh_token: "r" }));
     }
+
     if (req.method === "GET" && u.pathname === "/user_management/sessions/logout") {
       seen.logouts.push(Object.fromEntries(u.searchParams));
+
       return res.writeHead(302, { location: u.searchParams.get("return_to") ?? "/" }).end();
     }
+
     res.writeHead(404).end();
   });
 });
+
 await new Promise((r) => stub.listen(STUB_PORT, "127.0.0.1", r));
 
 const cookiesOf = (res) => (res.headers.getSetCookie?.() ?? []);
+
 const cookieValue = (setCookies, name) => {
   const c = setCookies.find((x) => x.startsWith(`${name}=`));
+
   return c ? c.slice(name.length + 1).split(";")[0] : null;
 };
+
 /** One browser sign-in, following the redirects by hand. */
 async function signIn(user, returnTo) {
   nextUser = user;
@@ -99,8 +128,10 @@ async function signIn(user, returnTo) {
   const back = atWorkos.headers.get("location");
   const cb = await fetch(back, { redirect: "manual", headers: { cookie: `__Host-pando_login=${login}`, "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.0 Safari/605.1.15" } });
   const set = cookiesOf(cb);
+
   return { start, loginSet, cb, set, session: cookieValue(set, "__Host-pando_session"), location: cb.headers.get("location"), callbackUrl: back };
 }
+
 const api = (method, path, { session, bearer, origin, body, accept } = {}) =>
   fetch(URL_ + path, {
     method,
@@ -116,9 +147,13 @@ const api = (method, path, { session, bearer, origin, body, accept } = {}) =>
   });
 
 const id = Date.now().toString(36);
+
 const work = mkdtempSync(join(tmpdir(), "pando-browser-"));
+
 const made = [];
+
 let session = null;
+
 try {
   // A user made earlier (the bootstrap path) with the same email: the browser must sign in as them.
   const boot = await (await api("POST", "/v1/users", { bearer: BOOT, body: { login: `ana-${id}`, name: "Ana", email: `ana-${id}@pando.invalid` } })).json();
@@ -148,6 +183,7 @@ try {
 
   // ── Origin: writes and upgrades only from Pando's own pages ──
   r = await api("POST", "/v1/monorepos", { session, origin: ORIGIN, body: { name: `br-${id}` } });
+
   if (r.status === 201) made.push(`br-${id}`);
   check("a write from Pando's own origin works", r.status === 201, `${r.status}`);
   r = await api("POST", "/v1/monorepos", { session, origin: "https://other.plannotator.workers.dev", body: { name: `br2-${id}` } });
@@ -162,16 +198,20 @@ try {
   const ws = (origin) =>
     new Promise((resolve) => {
       const s = new WebSocket(`${URL_.replace(/^http/, "ws")}/v1/monorepos/ana-${id}/br-${id}/events`, { headers: { cookie: `__Host-pando_session=${session}`, ...(origin ? { origin } : {}) } });
+
       const done = (v) => {
         try {
           s.close();
         } catch {}
+
         resolve(v);
       };
+
       s.onopen = () => done("open");
       s.onerror = () => done("refused");
       setTimeout(() => done("timeout"), 8000);
     });
+
   check("the event socket opens with the cookie from Pando's own origin", (await ws(ORIGIN)) === "open");
   check("and is refused from another origin", (await ws("https://other.plannotator.workers.dev")) === "refused");
 
@@ -221,6 +261,7 @@ try {
   check("pando login's device flow signs in the same person and returns their picture", r.status === 200 && tok.user?.login === `zed-${id}` && tok.user?.picture_url === P3, `${r.status} ${tok.user?.login}`);
   me = await (await api("GET", "/v1/user", { bearer: tok.credential?.secret })).json();
   check("and GET /v1/user shows it", me.picture_url === P3 && me.credential?.kind === "machine");
+
   if (tok.credential?.id) await api("DELETE", `/v1/user/credentials/${tok.credential.id}`, { bearer: tok.credential.secret });
 
   // ── sign out ──
@@ -237,12 +278,14 @@ try {
   check("GET /v1/logout is a one-button page that posts to /v1/logout", r.status === 200 && /<form method="post" action="\/v1\/logout">/.test(page) && /frame-ancestors 'none'/.test(r.headers.get("content-security-policy") ?? ""));
   r = await api("POST", "/v1/logout", { session: s2.session, origin: ORIGIN });
   check("a form sign-out is sent on with 303", r.status === 303 && /sessions\/logout/.test(r.headers.get("location") ?? ""));
+
   for (const s of [s3.session, s4.session]) await api("POST", "/v1/logout", { session: s, origin: ORIGIN, accept: "application/json" });
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {
   const A = (await (await api("POST", "/v1/users", { bearer: BOOT, body: { login: `cleanup-${id}` } })).json()).credential?.secret;
   void A;
+
   for (const m of made) {
     // The monorepo's owner is ana: sign in once more to delete it.
     const s = await signIn({ id: `user_ana_${id}`, email: `ana-${id}@pando.invalid`, email_verified: true, first_name: "Ana" }, "/");
@@ -250,6 +293,7 @@ try {
     check(`delete ${m}`, r.status === 204, `${r.status}`);
     await api("POST", "/v1/logout", { session: s.session, origin: ORIGIN, accept: "application/json" });
   }
+
   stub.close();
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);

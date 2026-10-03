@@ -27,6 +27,7 @@ export function isFeedPath(path: string): boolean {
 export async function handleFeed(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;
   const t = startTiming("api", { method: request.method, path, monorepo: null, repo: null });
+
   const res = await runTimed(t, async () => {
     try {
       return await route(request, env);
@@ -34,7 +35,9 @@ export async function handleFeed(request: Request, env: Env): Promise<Response> 
       return toErrorResponse(err);
     }
   });
+
   finishTiming(t, { status: res.status });
+
   return res;
 }
 
@@ -45,37 +48,50 @@ function bad(message: string): never {
 function int(v: string | null, dflt: number, min: number, max: number, name: string): number {
   if (v === null || v === "") return dflt;
   const n = Number(v);
+
   if (!Number.isInteger(n) || n < min || n > max) bad(`${name} is ${min} to ${max}`);
+
   return n;
 }
 
 /** `in=owner/name` (an old name works too): the monorepo's id and its owner/name, or null for all. */
 async function monorepoParam(env: Env, url: URL): Promise<{ id: string; full: string } | null> {
   const v = url.searchParams.get("in");
+
   if (v === null || v === "") return null;
   const [o, n, extra] = v.split("/");
   const ref = extra === undefined ? monorepoRef(o, n) : null;
+
   if (!ref) bad("in: one monorepo's owner/name (the home narrows by monorepo only)");
   const m = await accounts(env).resolve(ref);
+
   if (!m) throw new HttpError(404, "not_found", `no monorepo ${ref.owner}/${ref.name} among yours`);
+
   return { id: m.id, full: m.full_name };
 }
 
 async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
+
   if (url.pathname === "/v1/_feed/test") return testRoute(request, env);
+
   if (request.method !== "GET") throw new HttpError(405, "method", "method not allowed");
   const auth = await authenticateRequest(env, request, null);
+
   if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
   const login = auth.user.login;
+
   if (url.pathname === "/v1/events") {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       const headers = new Headers(request.headers);
       headers.set("x-pando-login", login);
+
       return feedStub(env, login).fetch(new Request(request, { headers }));
     }
+
     return Response.json(await eventsPage(env, login, url));
   }
+
   return Response.json(await needsPage(env, login, url));
 }
 
@@ -83,6 +99,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 async function queueMembers(env: Env, pairs: { monorepo: string; login: string }[]): Promise<void> {
   if (!pairs.length || !env.FEED_QUEUE) return;
   const msgs = pairs.map((p) => ({ body: { type: "member", ...p } as FeedMessage }));
+
   for (let i = 0; i < msgs.length; i += 100) await env.FEED_QUEUE.sendBatch(msgs.slice(i, i + 100));
 }
 
@@ -93,6 +110,7 @@ async function reconcile(env: Env, login: string) {
   await queueMembers(env, r.added.map((monorepo) => ({ monorepo, login }))).catch((err) =>
     console.error("feed: joins not queued (retried on the next load):", err instanceof Error ? err.message : String(err)),
   );
+
   return { list, rows: r.rows as IndexRow[] };
 }
 
@@ -107,15 +125,18 @@ async function eventsPage(env: Env, login: string, url: URL) {
   const limit = int(url.searchParams.get("limit"), PAGE_DEFAULT, 1, PAGE_MAX, "limit");
   const c = url.searchParams.get("cursor");
   const cursor = c ? decodeCursor(c) : null;
+
   if (c && !cursor) bad("cursor: pass back a `next` from an earlier page");
   const inn = await monorepoParam(env, url);
   const only = inn?.id ?? null;
   const feed = feedStub(env, login);
   let p = (await feed.page(cursor, limit, only)) as unknown as WindowPage;
+
   if (p.need_list) {
     await reconcile(env, login);
     p = (await feed.page(cursor, limit, only)) as unknown as WindowPage;
   }
+
   if (inn && !p.known) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
   const readLog = (name: string) => monorepoStub(env, name).eventsBefore(cursor, limit) as Promise<FeedEvent[]>;
   const large = [...p.large].sort(byLast);
@@ -127,16 +148,19 @@ async function eventsPage(env: Env, login: string, url: URL) {
   const boundary = page.length === limit ? page[limit - 1].at : null;
   const unc = p.uncovered.filter((u) => uncovered(u.after, boundary)).sort(byLast);
   let fromLogs = false;
+
   if (unc.length) {
     const room = Math.max(0, LOGS_MAX - reading.length);
     const now = unc.slice(0, room);
     skipped.push(...unc.slice(room).map((u) => u.label ?? u.name));
+
     if (now.length) {
       lists.push(...(await Promise.all(now.map((u) => readLog(u.name)))));
       page = mergePages(lists, limit);
       fromLogs = true;
     }
   }
+
   return { events: page, next: page.length === limit ? encodeCursor(page[limit - 1]) : null, from_logs: fromLogs, skipped };
 }
 
@@ -144,8 +168,10 @@ async function eventsPage(env: Env, login: string, url: URL) {
 export async function monoreposSummary(env: Env, login: string) {
   const { list, rows } = await reconcile(env, login);
   const by = new Map(rows.map((r) => [r.name, r]));
+
   const monorepos = list.map((m) => {
     const s = by.get(m.id)?.summary ?? null;
+
     return {
       ...m,
       last_activity_at: s?.last_activity_at ?? null,
@@ -158,31 +184,39 @@ export async function monoreposSummary(env: Env, login: string) {
       open_branches: s?.open_branches ?? null,
     };
   });
+
   monorepos.sort((a, b) => ((b.last_activity_at ?? "") < (a.last_activity_at ?? "") ? -1 : (b.last_activity_at ?? "") > (a.last_activity_at ?? "") ? 1 : a.full_name < b.full_name ? -1 : 1));
+
   return { monorepos };
 }
 
 /** GET /v1/branches?state=open&needs=...: from the stored facts of the monorepos whose count is not zero. */
 async function needsPage(env: Env, login: string, url: URL) {
   const state = url.searchParams.get("state") ?? "open";
+
   if (state !== "open") bad("state: open (needs-you is about open branches)");
   const q = url.searchParams.get("needs");
   const needs = (q ? q.split(",").map((s) => s.trim()).filter(Boolean) : NEED_STATES) as NeedState[];
+
   if (!needs.length || needs.some((n) => !NEED_STATES.includes(n))) bad("needs: some of ready, conflicts, failing");
   const inn = await monorepoParam(env, url);
   const limit = int(url.searchParams.get("limit"), 100, 1, 500, "limit");
   const { rows } = await reconcile(env, login);
   let targets = rows.filter((r) => !inn || r.name === inn.id);
+
   if (inn && !targets.length) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
   // Ask only monorepos whose count is not zero (or not known yet).
   targets = targets.filter((r) => !r.summary || r.pending || needs.some((n) => (r.summary!.needs?.[n] ?? 0) > 0));
   const ordered = targets.map((r) => ({ name: r.name, label: r.label ?? r.name, last: r.summary?.last_activity_at ?? null })).sort(byLast);
   const ask = ordered.slice(0, NEEDS_MONOREPOS_MAX);
   const skipped = ordered.slice(NEEDS_MONOREPOS_MAX).map((x) => x.label);
+
   const lists = await pool(ask, 10, async (m) =>
     ((await monorepoStub(env, m.name).needsYou(needs, limit)) as NeedRow[]).map((r) => ({ monorepo: m.label, monorepo_id: m.name, ...r })),
   );
+
   const all = lists.flat().sort((a, b) => ((a.updated_at ?? "") < (b.updated_at ?? "") ? 1 : -1));
+
   return { branches: all.slice(0, limit), truncated: all.length > limit, skipped };
 }
 
@@ -197,39 +231,54 @@ async function needsPage(env: Env, login: string, url: URL) {
 
 async function testRoute(request: Request, env: Env): Promise<Response> {
   if (env.FEED_TEST !== "1") throw new HttpError(404, "not_found", "no such route");
+
   if (!(await isBootstrap(env, credential(request)))) throw new HttpError(401, "unauthorized", "the bootstrap secret only");
   const url = new URL(request.url);
+
   if (request.method === "GET") {
     const login = url.searchParams.get("login");
+
     if (login) return Response.json(await feedStub(env, login).debugState());
     const m = url.searchParams.get("monorepo");
+
     if (m) {
       const stub = monorepoStub(env, m);
+
       return Response.json({ members: await stub.feedMembers(), summary: await stub.feedSummary(), outbox: await stub.feedTestOutbox() });
     }
+
     bad("login or monorepo");
   }
+
   const b = (await request.json()) as {
     deliver?: FeedMessage[];
     trim?: { login: string; days: number };
     outbox?: { monorepo: string; crash?: "before" | "after"; fail?: number };
   };
+
   if (b.trim) return Response.json(await feedStub(env, b.trim.login).trim(b.trim.days));
+
   if (b.outbox) {
     const { monorepo, ...set } = b.outbox;
+
     return Response.json(await monorepoStub(env, monorepo).feedTestOutbox(set));
   }
+
   const out: string[] = [];
+
   for (const body of b.deliver ?? []) {
     let result = "ack";
+
     const msg = {
       id: crypto.randomUUID(), timestamp: new Date(), body, attempts: 1,
       ack() {}, retry() {
         result = "retry";
       },
     } as unknown as Message<FeedMessage>;
+
     await handleFeedBatch({ queue: "pando-feed", messages: [msg], ackAll() {}, retryAll() {} } as unknown as MessageBatch<FeedMessage>, env);
     out.push(result);
   }
+
   return Response.json({ results: out });
 }

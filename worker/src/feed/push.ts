@@ -22,20 +22,26 @@ type Stub = {
 
 export async function sendPushSummary(env: Env, stub: Stub, r: RepoRecord, push: { seq: number; before: string }, head: string, isMain: boolean): Promise<void> {
   const summary: Record<string, unknown> = { commits: null, head_title: null };
+
   try {
     await withRepo(env, r.artifacts_name, async (repo) => {
       const read = commitReader(repo);
       summary.head_title = ((await read(head)).message ?? "").split("\n")[0] || null;
+
       if (push.before !== ZERO) {
         summary.commits = (await compareWith(read, push.before, head)).ahead;
+
         return;
       }
+
       const main = isMain ? null : await stub.currentMain(r.name);
+
       if (main === head) summary.commits = 0;
       else if (main) summary.commits = (await compareWith(read, main, head)).ahead;
       else {
         const log = await repo.log({ ref: head, limit: LOG_MAX });
         summary.commits = log.length;
+
         if (log.length >= LOG_MAX) summary.commits_more = true;
       }
     });
@@ -43,5 +49,6 @@ export async function sendPushSummary(env: Env, stub: Stub, r: RepoRecord, push:
     // A repo deleted before its job ran (tests do this) is expected: nothing to say.
     if (!(err instanceof HttpError && err.status === 404)) console.error(`feed: push summary for ${r.name}@${head.slice(0, 12)} failed; sent without numbers:`, err instanceof Error ? err.message : String(err));
   }
+
   await stub.feedPush(push.seq, summary);
 }

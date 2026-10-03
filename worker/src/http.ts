@@ -19,25 +19,32 @@ export function toErrorResponse(err: unknown): Response {
   if (err instanceof HttpError) return errorJson(err.status, err.code, err.message, err.extra);
   const message = err instanceof Error ? err.message : String(err);
   console.error("internal error:", redact(message));
+
   return errorJson(500, "internal", redact(message));
 }
 
 /** The secret from `Authorization: Bearer x` or Basic `user:x`; null if absent. */
 export function credential(req: Request): string | null {
   const h = req.headers.get("authorization");
+
   if (!h) return null;
   const [scheme, value] = h.split(/\s+/, 2);
+
   if (!value) return null;
+
   if (/^bearer$/i.test(scheme)) return value.trim();
+
   if (/^basic$/i.test(scheme)) {
     try {
       const decoded = atob(value.trim());
       const i = decoded.indexOf(":");
+
       return i >= 0 ? decoded.slice(i + 1) : null;
     } catch {
       return null;
     }
   }
+
   return null;
 }
 
@@ -57,5 +64,6 @@ export function now(): string {
 /** The agent acting, from X-Pando-Agent (optional; agents act as their user). */
 export function agentHeader(req: Request): string | null {
   const v = (req.headers.get("x-pando-agent") ?? "").replace(/[\x00-\x1f\x7f]/g, "").trim();
+
   return v ? v.slice(0, 100) : null;
 }

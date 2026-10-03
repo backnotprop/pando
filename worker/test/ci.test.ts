@@ -7,7 +7,9 @@ import { mintStatusToken, stampOf, STATUS_TOKEN_TTL_S, verifyStatusToken } from 
 import { redact } from "../src/http";
 
 const SECRET = "unit-test-secret";
+
 const SHA = "a".repeat(40);
+
 const claims = { m: "m_0123456789abcdef", r: "projects-web", s: SHA, a: "buildkite", h: "hk_1" };
 
 describe("the status token", () => {
@@ -82,6 +84,7 @@ describe("a job's check", () => {
     external_id: "j", name: "ci", step_key: "ci", type: "script", service_state: "passed", state: "passed", exit_status: 0, soft_failed: false,
     retried: false, web_url: null, created_at: null, started_at: "2026-10-03T12:00:00Z", finished_at: "2026-10-03T12:01:12Z", ...o,
   });
+
   it("passed, failed, soft failed", () => {
     expect(jobCheck(job({}), 1285)).toEqual({ state: "success", description: "#1285 passed in 1 min 12 s" });
     expect(jobCheck(job({ service_state: "failed", state: "failed", exit_status: 1 }), 7)).toEqual({ state: "failure", description: "#7 failed, exit status 1" });
@@ -115,12 +118,15 @@ describe("Buildkite payloads", () => {
 describe("Buildkite's webhook signature", () => {
   const secret = "s3cret-token-0123456789";
   const body = JSON.stringify({ event: "ping" });
+
   // Computed here with Web Crypto, apart from the code under test.
   const sig = async (ts: number, key = secret) => {
     const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const mac = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(`${ts}.${body}`)));
+
     return `timestamp=${ts},signature=${[...mac].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   };
+
   it("accepts HMAC-SHA256 of '<timestamp>.<body>' within 5 minutes", async () => {
     expect(await verifyWebhook(secret, { token: null, signature: await sig(1000) }, body, 1100)).toEqual({ ok: true, ts: 1000 });
   });
@@ -143,6 +149,7 @@ describe("Buildkite's rate limit", () => {
   it("a connection makes at most READS_PER_MIN calls a minute, and waits when told", () => {
     const store = new CiStore({} as DurableObjectState, {} as never, {} as SqlStorage, {} as never);
     const t = 1_000_000;
+
     for (let i = 0; i < READS_PER_MIN; i++) expect(store.permit("c", t + i).ok).toBe(true);
     const no = store.permit("c", t + 100);
     expect(no).toEqual({ ok: false, retry_after_ms: 60_000 - 100 });

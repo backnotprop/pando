@@ -23,20 +23,28 @@ import { describeError, retryResetFetch } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8794").replace(/\/$/, "");
+
 const VARS = readFileSync(new URL("../.dev.vars", import.meta.url), "utf8");
+
 const BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(VARS)?.[1];
+
 const STATUS_SECRET = /^PANDO_STATUS_SECRET=(.*)$/m.exec(VARS)?.[1];
+
 const BK_TOKEN = /^BUILDKITE_API_TOKEN=(.*)$/m.exec(VARS)?.[1];
+
 const scrub = (s) =>
   String(s)
     .replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<token>")
     .replace(/pst1\.[A-Za-z0-9_.-]+/g, "<status-token>")
     .replace(/pando_[a-f0-9]{20,}/g, "<credential>");
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`));
 };
+
 const call = async (method, path, secret, body, headers = {}) => {
   const res = await fetch(URL_ + path, {
     method,
@@ -44,71 +52,98 @@ const call = async (method, path, secret, body, headers = {}) => {
     headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers },
     body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
   });
+
   const text = await res.text();
   let json = null;
+
   try {
     json = JSON.parse(text);
   } catch {}
+
   return { status: res.status, json, text, headers: res.headers };
 };
+
 const waitFor = async (pred, ms = 30_000) => {
   const end = Date.now() + ms;
+
   while (Date.now() < end) {
     const v = await pred();
+
     if (v) return v;
     await new Promise((r) => setTimeout(r, 250));
   }
+
   return null;
 };
+
 const b64url = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
 /** A status token made here, as the Worker makes them (to test expiry and forgery). */
 const mint = (secret, claims) => {
   const signed = "pst1." + b64url(JSON.stringify(claims));
+
   return `${signed}.${b64url(createHmac("sha256", secret).update(signed).digest())}`;
 };
+
 const claimsOf = (token) => JSON.parse(Buffer.from(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString());
 
 // ── the receivers: Buildkite's create-build, two web hooks, and a stand-in for Buildkite's REST API ──
 const got = { buildkite: [], web: [] };
+
 /** The stand-in's state: what it was asked, and what it answers. */
 const bkStub = { calls: [], badAuth: 0, logs: {}, annotations: [], artifacts: [], pipelineYaml: "steps:\n  - key: ci\n    command: npm test\n", rateLimited: false, nextNumber: 100, created: [] };
+
 const bkApi = (req, raw, res) => {
   const u = new URL(req.url, "http://x");
   bkStub.calls.push(`${req.method} ${u.pathname}`);
+
   // The Worker sends BUILDKITE_API_TOKEN as a Bearer, here and to Buildkite only (never printed).
   if (req.headers.authorization !== `Bearer ${BK_TOKEN}`) bkStub.badAuth++;
+
   if (bkStub.rateLimited) return res.writeHead(429, { "ratelimit-remaining": "0", "ratelimit-reset": "30", "content-type": "application/json" }).end('{"message":"slow down"}');
   const json = (code, v, h = {}) => res.writeHead(code, { "content-type": "application/json", "ratelimit-remaining": "40", "ratelimit-reset": "20", ...h }).end(JSON.stringify(v));
   let m;
+
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds$/.exec(u.pathname)) && req.method === "POST") {
     const body = JSON.parse(raw);
     bkStub.created.push(body);
     const n = bkStub.nextNumber++;
+
     return json(201, { ...bkBuild(m[1], n, { state: "scheduled", commit: body.commit, branch: body.branch, message: body.message, meta_data: body.meta_data }), pipeline: bkPipeline(m[1]) });
   }
+
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds\/(\d+)\/cancel$/.exec(u.pathname)) && req.method === "PUT") {
     return json(200, { ...bkBuild(m[1], Number(m[2]), { state: "canceling", ...(bkStub.builds?.[m[2]] ?? {}) }), pipeline: bkPipeline(m[1]) });
   }
+
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds\/(\d+)\/jobs\/([^/]+)\/retry$/.exec(u.pathname)) && req.method === "PUT") {
     return json(200, bkJob(`${m[3]}-retry`, "ci", { state: "scheduled", created_at: new Date(Date.now() + 1000).toISOString() }));
   }
+
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds\/(\d+)\/jobs\/([^/]+)\/log$/.exec(u.pathname))) {
     if (req.headers.accept !== "text/plain") return json(406, { message: "ask for text/plain" });
+
     return res.writeHead(200, { "content-type": "text/plain" }).end(bkStub.logs[m[3]] ?? "no log\n");
   }
+
   if (/\/builds\/\d+\/annotations$/.test(u.pathname)) return json(200, bkStub.annotations);
+
   if ((m = /\/builds\/\d+\/jobs\/([^/]+)\/artifacts\/([^/]+)\/download$/.exec(u.pathname))) {
     return res.writeHead(302, { location: `https://artifacts.example/signed/${m[2]}?expires=60` }).end();
   }
+
   if (/\/builds\/\d+\/artifacts$/.test(u.pathname)) return json(200, bkStub.artifacts);
+
   if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)$/.exec(u.pathname))) return json(200, { ...bkPipeline(m[1]), configuration: bkStub.pipelineYaml });
   json(404, { message: "Not Found" });
 };
+
 /** Buildkite's objects, as its REST API and webhooks shape them (docs read 2026-10-03). */
 const bkPipeline = (slug, org = "o") => ({
   id: `pl-${slug}`, url: `https://api.buildkite.com/v2/organizations/${org}/pipelines/${slug}`, web_url: `https://buildkite.com/${org}/${slug}`,
   name: slug, slug, repository: "https://example.invalid/repo.git", default_branch: "main", visibility: "private",
 });
+
 const bkBuild = (slug, n, o = {}, org = "o") => ({
   id: o.id ?? `bld-${slug}-${n}`, graphql_id: "x", url: `https://api.buildkite.com/v2/organizations/${org}/pipelines/${slug}/builds/${n}`,
   web_url: `https://buildkite.com/${org}/${slug}/builds/${n}`, number: n, state: o.state ?? "scheduled", blocked: false, message: o.message ?? "a build",
@@ -116,60 +151,84 @@ const bkBuild = (slug, n, o = {}, org = "o") => ({
   created_at: o.created_at ?? new Date().toISOString(), scheduled_at: o.created_at ?? new Date().toISOString(),
   started_at: o.started_at ?? null, finished_at: o.finished_at ?? null,
 });
+
 const bkJob = (id, key, o = {}) => ({
   id, graphql_id: "x", type: o.type ?? "script", name: o.name ?? key, step_key: key, state: o.state ?? "scheduled",
   web_url: `https://buildkite.com/o/p/builds/1#${id}`, log_url: "x", raw_log_url: "x", command: "npm test",
   soft_failed: o.soft_failed ?? false, exit_status: o.exit_status ?? null, created_at: o.created_at ?? new Date().toISOString(),
   started_at: o.started_at ?? null, finished_at: o.finished_at ?? null, retried: o.retried ?? false,
 });
+
 const server = createServer((req, res) => {
   let raw = "";
   req.on("data", (d) => (raw += d));
   req.on("end", () => {
     if (req.url.startsWith("/v2/")) return bkApi(req, raw, res);
     let body = null;
+
     try {
       body = JSON.parse(raw);
     } catch {}
+
     if (req.url === "/buildkite") {
       got.buildkite.push(body);
+
       return res.writeHead(201, { "content-type": "application/json" }).end("{}");
     }
+
     got.web.push({ route: req.url, body });
     res.writeHead(200).end();
   });
 });
+
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
+
 const port = server.address().port;
 
 const id = Date.now().toString(36);
+
 const work = mkdtempSync(join(tmpdir(), "pando-ci-"));
+
 // Every pando run gets a HOME of its own in the test's folder (and no system git config), so nothing it
 // does, git included, can reach the owner's git config, ~/.pando or Apple's keychain helper.
 const pandoUser = join(work, "home");
+
 mkdirSync(pandoUser);
+
 const SAFE = { HOME: pandoUser, XDG_CONFIG_HOME: join(pandoUser, ".config"), GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
+
 let bin = null;
+
 const runPando = (args, o = {}) => {
   const env = { ...process.env, ...o.env, ...SAFE };
+
   if (!env.HOME.startsWith(work) || !env.PANDO_HOME?.startsWith(work)) throw new Error("pando must run with HOME and PANDO_HOME in the test's folder");
+
   return spawnSync(bin, args, { cwd: o.cwd ?? work, env, encoding: "utf8", input: o.input });
 };
+
 const M = `ci-${id}`;
+
 const M2 = `ci2-${id}`;
+
 let O = null;
+
 let S = null;
+
 const made = [];
+
 try {
   if (!STATUS_SECRET) throw new Error("worker/.dev.vars has no PANDO_STATUS_SECRET");
   S = (await call("POST", "/v1/users", BOOT, { login: `ci-${id}` })).json?.credential?.secret;
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   O = r.json?.monorepo?.owner ?? null;
   const MID = r.json?.monorepo?.id;
+
   if (r.status === 201) made.push(M);
   const url = r.json?.repos?.[0]?.clone_url;
   const base = `/v1/monorepos/${O}/${M}/repos/${M}`;
   r = await call("POST", "/v1/monorepos", S, { name: M2, kind: "repo" });
+
   if (r.status === 201) made.push(M2);
   check("two plain repos made", made.length === 2 && MID);
 
@@ -263,8 +322,10 @@ try {
 
   const line = await waitFor(async () => {
     const page = (await call("GET", `/v1/events?limit=100`, S)).json?.events ?? [];
+
     return page.find((e) => e.kind === "status" && e.summary?.context === "gha" && e.summary?.app === "github-actions");
   }, 30_000);
+
   check("the home's activity line for a status carries app", !!line && line.actor === null);
 
   // `pando status`, the cli, in a CI step: PANDO_STATUS_URL and PANDO_STATUS_TOKEN from the build's env.
@@ -307,14 +368,18 @@ try {
     r.status === 200 && r.json.services?.[0]?.service === "buildkite" && r.json.connections?.[0]?.last_event === null && plP?.repo === M && plP.hook_id === bk?.id && plP.last_build === null && r.json.required_checks?.[0]?.repo === M);
 
   const hookUrl = `/v1/integrations/buildkite/${conn.id}`;
+
   const send = async (event, payload, o = {}) => {
     const body = JSON.stringify({ event, ...payload });
     const ts = Math.floor(Date.now() / 1000) + (o.skew ?? 0);
     const headers = { "x-buildkite-event": event };
+
     if (o.token) headers["x-buildkite-token"] = o.token === true ? WH : o.token;
     else headers["x-buildkite-signature"] = `timestamp=${ts},signature=${createHmac("sha256", o.key ?? WH).update(`${ts}.${body}`).digest("hex")}`;
+
     return call("POST", hookUrl, null, body, headers);
   };
+
   r = await call("POST", hookUrl, null, "{}", { "x-buildkite-event": "ping" });
   check("a webhook with no token or signature: 401", r.status === 401);
   r = await send("ping", {}, { token: "wrong-token-wrong-token" });
@@ -495,11 +560,14 @@ try {
     cmd.status === 0 && cliToken.length >= 32 && !cmd.stdout.includes(cliToken) && (statSync(tokFile).mode & 0o777) === 0o600 &&
     cmd.stdout.includes(cliConn?.webhook_url ?? "?") && /Settings > Notification Services/.test(cmd.stdout) && /X-Buildkite-Signature/.test(cmd.stdout), scrub(cmd.stderr).trim());
   const cliHook = `/v1/integrations/buildkite/${cliConn?.id}`;
+
   const signed = (key) => {
     const body = JSON.stringify({ event: "ping" });
     const ts = Math.floor(Date.now() / 1000);
+
     return call("POST", cliHook, null, body, { "x-buildkite-event": "ping", "x-buildkite-signature": `timestamp=${ts},signature=${createHmac("sha256", key).update(`${ts}.${body}`).digest("hex")}` });
   };
+
   r = await signed("not-the-token");
   check("a webhook signed with another key: 401", r.status === 401);
   r = await signed(cliToken);
@@ -537,6 +605,7 @@ try {
     const r = await call("DELETE", `/v1/monorepos/${O}/${name}?confirm=${O}/${name}`, S);
     check(`delete ${name}`, r.status === 204);
   }
+
   server.close();
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);

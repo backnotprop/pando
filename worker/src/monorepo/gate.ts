@@ -10,10 +10,13 @@
 
 /** Slots per Artifacts repo. */
 export const WRITE_SLOTS = 2;
+
 /** A lease lasts this long unless renewed; holders renew every LEASE_MS / 3. */
 export const LEASE_MS = 60_000;
+
 /** The longest a writer waits in the queue. */
 export const WAIT_MS = 120_000;
+
 /**
  * After the Worker's own writes (coalesced ref writes, merges, meta commits),
  * a released slot is held this much longer before the next writer gets it:
@@ -25,6 +28,7 @@ export const RELEASE_DELAY_MS = 200;
 
 export function releaseDelay(env: { GATE_RELEASE_MS?: string }): number {
   const n = Number(env.GATE_RELEASE_MS);
+
   return env.GATE_RELEASE_MS !== undefined && Number.isInteger(n) && n >= 0 && n <= 5000 ? n : RELEASE_DELAY_MS;
 }
 
@@ -62,26 +66,33 @@ export class WriteGate {
 
   private gate(key: string): Gate {
     let g = this.gates.get(key);
+
     if (!g) this.gates.set(key, (g = { held: new Map(), waiters: [] }));
+
     return g;
   }
 
   /** Wait for a slot; resolves with the lease id. */
   acquire(key: string): Promise<string> {
     const g = this.gate(key);
+
     if (g.held.size < this.slots && g.waiters.length === 0) return Promise.resolve(this.grant(key, g));
+
     return new Promise<string>((resolve, reject) => {
       const since = Date.now();
+
       const w: Waiter = {
         resolve,
         reject,
         since,
         timer: setTimeout(() => {
           const i = g.waiters.indexOf(w);
+
           if (i >= 0) g.waiters.splice(i, 1);
           reject(new GateBusy(key, Date.now() - since));
         }, this.waitMs),
       };
+
       g.waiters.push(w);
     });
   }
@@ -90,9 +101,11 @@ export class WriteGate {
   renew(key: string, lease: string): boolean {
     const g = this.gates.get(key);
     const t = g?.held.get(lease);
+
     if (!g || !t || this.releasing.has(lease)) return false;
     clearTimeout(t);
     g.held.set(lease, setTimeout(() => this.release(key, lease), this.leaseMs));
+
     return true;
   }
 
@@ -103,27 +116,35 @@ export class WriteGate {
   release(key: string, lease: string, holdMs = this.releaseDelayMs): boolean {
     const g = this.gates.get(key);
     const t = g?.held.get(lease);
+
     if (!g || !t || this.releasing.has(lease)) return false;
     clearTimeout(t);
+
     if (holdMs > 0) {
       this.releasing.add(lease);
       g.held.set(lease, setTimeout(() => this.free(key, lease), holdMs));
+
       return true;
     }
+
     this.free(key, lease);
+
     return true;
   }
 
   private free(key: string, lease: string): void {
     const g = this.gates.get(key);
     this.releasing.delete(lease);
+
     if (!g || !g.held.has(lease)) return;
     g.held.delete(lease);
+
     while (g.held.size < this.slots && g.waiters.length) {
       const w = g.waiters.shift()!;
       clearTimeout(w.timer);
       w.resolve(this.grant(key, g));
     }
+
     if (g.held.size === 0 && g.waiters.length === 0) this.gates.delete(key);
   }
 
@@ -131,6 +152,7 @@ export class WriteGate {
   async with<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const lease = await this.acquire(key);
     const renew = setInterval(() => this.renew(key, lease), Math.max(1000, Math.floor(this.leaseMs / 3)));
+
     try {
       return await fn();
     } finally {
@@ -141,6 +163,7 @@ export class WriteGate {
 
   stats(key: string): { held: number; waiting: number } {
     const g = this.gates.get(key);
+
     return { held: g?.held.size ?? 0, waiting: g?.waiters.length ?? 0 };
   }
 
@@ -148,11 +171,13 @@ export class WriteGate {
   clear(): void {
     for (const [key, g] of this.gates) {
       for (const t of g.held.values()) clearTimeout(t);
+
       for (const w of g.waiters) {
         clearTimeout(w.timer);
         w.reject(new GateBusy(key, Date.now() - w.since));
       }
     }
+
     this.gates.clear();
     this.releasing.clear();
   }
@@ -160,6 +185,7 @@ export class WriteGate {
   private grant(key: string, g: Gate): string {
     const lease = crypto.randomUUID();
     g.held.set(lease, setTimeout(() => this.release(key, lease), this.leaseMs));
+
     return lease;
   }
 }

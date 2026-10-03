@@ -27,13 +27,17 @@ import type { StatusRecord } from "../monorepo/types";
  * build gets at least 24.
  */
 export const CI_READ_TTL_S = 25 * 3600;
+
 export const CI_READ_REUSE_MS = 3600_000;
 
 export const BUILDKITE_API = "https://api.buildkite.com";
+
 /** A webhook body larger than this is refused (job events carry the pipeline's steps). */
 export const WEBHOOK_MAX_BYTES = 5 << 20;
+
 /** A signed webhook older (or newer) than this is refused: a replay. */
 export const SIGNATURE_MAX_AGE_S = 300;
+
 /** Buildkite's REST page size, at most. */
 export const PAGE_MAX = 100;
 
@@ -68,7 +72,9 @@ export function pandoBuildEnv(v: {
 
 /** One vocabulary for every CI service (RESEARCH section 6). */
 export type CiState = "queued" | "running" | "blocked" | "passed" | "failed" | "canceled" | "skipped";
+
 export const TERMINAL: ReadonlySet<CiState> = new Set(["passed", "failed", "canceled", "skipped"]);
+
 /** Later states rank higher: an older event never moves a row back. */
 export function rank(s: CiState): number {
   return TERMINAL.has(s) ? 2 : s === "queued" ? 0 : 1;
@@ -172,23 +178,30 @@ export interface NormPipeline {
 }
 
 type J = Record<string, unknown>;
+
 const str = (v: unknown, max = 2000): string | null => (typeof v === "string" && v ? v.slice(0, max) : null);
+
 const time = (v: unknown): string | null => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
+
 const obj = (v: unknown): J | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as J) : null);
 
 /** The organization's slug from an API URL (`/v2/organizations/<org>/...`) or a web URL (`buildkite.com/<org>/...`). */
 export function orgFromUrl(url: unknown): string | null {
   if (typeof url !== "string") return null;
   const api = /\/organizations\/([^/?#]+)/.exec(url);
+
   if (api) return decodeURIComponent(api[1]).toLowerCase();
   const web = /^https:\/\/buildkite\.com\/([^/?#]+)/.exec(url);
+
   return web ? decodeURIComponent(web[1]).toLowerCase() : null;
 }
 
 export function normalizePipeline(p: unknown): NormPipeline | null {
   const o = obj(p);
   const slug = str(o?.slug, 200);
+
   if (!o || !slug) return null;
+
   return {
     slug,
     name: str(o.name, 200),
@@ -204,15 +217,20 @@ export function normalizeBuild(b: unknown, pipeline: NormPipeline | null): NormB
   const number = o?.number;
   // A build's pipeline: the payload's, else the one in its own URL.
   const pipe = pipeline?.slug ?? (typeof o?.url === "string" ? /\/pipelines\/([^/]+)\/builds\//.exec(o.url)?.[1] ?? null : null);
+
   if (!o || !id || typeof number !== "number" || !Number.isSafeInteger(number) || !pipe) return null;
   const md: Record<string, string> = {};
   const raw = obj(o.meta_data);
+
   for (const k of ["pando_delivery", "pando_monorepo", "pando_repo", "pando_rebuild_of"]) {
     const v = str(raw?.[k], 200);
+
     if (v) md[k] = v;
   }
+
   const service_state = str(o.state, 40) ?? "scheduled";
   const commit = str(o.commit, 200);
+
   return {
     external_id: id,
     number,
@@ -235,9 +253,11 @@ export function normalizeBuild(b: unknown, pipeline: NormPipeline | null): NormB
 export function normalizeJob(j: unknown): NormJob | null {
   const o = obj(j);
   const id = str(o?.id, 100);
+
   if (!o || !id) return null;
   const exit = typeof o.exit_status === "number" ? o.exit_status : null;
   const service_state = str(o.state, 40) ?? "pending";
+
   return {
     external_id: id,
     name: str(o.name, 300) ?? str(o.label, 300),
@@ -262,13 +282,16 @@ export const CHECK_TYPES = new Set(["script", "trigger"]);
 
 export function duration(start: string | null, end: string | null): number | null {
   if (!start || !end) return null;
+
   return Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000));
 }
 
 export function humanDuration(s: number | null): string {
   if (s === null) return "";
+
   if (s < 60) return `${s} s`;
   const m = Math.floor(s / 60);
+
   return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
 }
 
@@ -281,6 +304,7 @@ export function jobCheck(j: NormJob, buildNumber: number): { state: StatusRecord
   const n = `#${buildNumber}`;
   const exit = j.exit_status === null ? "" : `, exit status ${j.exit_status}`;
   const took = humanDuration(duration(j.started_at, j.finished_at));
+
   switch (j.service_state) {
     case "broken":
       return { state: "error", description: `${n} not run` };
@@ -289,6 +313,7 @@ export function jobCheck(j: NormJob, buildNumber: number): { state: StatusRecord
     case "timed_out":
       return { state: "failure", description: `${n} timed out` };
   }
+
   switch (j.state) {
     case "passed":
       return { state: "success", description: `${n} passed${took ? ` in ${took}` : ""}` };
@@ -315,12 +340,15 @@ function hex(bytes: ArrayBuffer): string {
 export function same(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let d = 0;
+
   for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+
   return d === 0;
 }
 
 export async function signBody(secret: string, ts: number, body: string): Promise<string> {
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+
   return hex(await crypto.subtle.sign("HMAC", key, enc.encode(`${ts}.${body}`)));
 }
 
@@ -332,12 +360,18 @@ export async function verifyWebhook(secret: string, h: { token: string | null; s
     const parts = Object.fromEntries(h.signature.split(",").map((p) => p.trim().split("=", 2) as [string, string]));
     const ts = Number(parts.timestamp);
     const sig = parts.signature ?? "";
+
     if (!Number.isSafeInteger(ts) || !/^[0-9a-f]{64}$/.test(sig)) return { ok: false, reason: "malformed X-Buildkite-Signature" };
+
     if (Math.abs(nowS - ts) > SIGNATURE_MAX_AGE_S) return { ok: false, reason: "X-Buildkite-Signature is older than 5 minutes" };
+
     if (!same(await signBody(secret, ts, body), sig)) return { ok: false, reason: "X-Buildkite-Signature does not match" };
+
     return { ok: true, ts };
   }
+
   if (h.token) return same(h.token, secret) ? { ok: true, ts: null } : { ok: false, reason: "X-Buildkite-Token does not match" };
+
   return { ok: false, reason: "no X-Buildkite-Signature or X-Buildkite-Token" };
 }
 
@@ -359,6 +393,8 @@ export const p = encodeURIComponent;
 export function rateWaitMs(res: Response): number | null {
   const reset = Math.max(Number(res.headers.get("ratelimit-reset") ?? 0) || 0, Number(res.headers.get("ratelimit-user-reset") ?? 0) || 0);
   const spent = res.headers.get("ratelimit-remaining") === "0" || res.headers.get("ratelimit-user-remaining") === "0";
+
   if (res.status === 429 || spent) return Math.max(1, reset || 60) * 1000;
+
   return null;
 }

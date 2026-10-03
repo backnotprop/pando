@@ -19,55 +19,77 @@ import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const HOME_CRED = !!process.env.USE_HOME_CRED;
+
 const BOOT = HOME_CRED ? null : (process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1]);
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + String(detail).slice(0, 300) + ")" : ""}`.replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
 };
+
 let S = null;
+
 const call = async (method, path, body, headers = {}) => {
   const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${S}`, ...(body ? { "content-type": "application/json" } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   let json = null;
+
   try {
     json = JSON.parse(text);
   } catch {}
+
   return { status: res.status, json, text, headers: res.headers };
 };
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const work = mkdtempSync(join(tmpdir(), "pando-files-"));
+
 const git = (args, cwd) => {
   const r = spawnSync("git", ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", ...args], {
     cwd, encoding: "utf8",
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: S ?? "", GIT_AUTHOR_NAME: "Ana", GIT_AUTHOR_EMAIL: "ana@pando.invalid", GIT_COMMITTER_NAME: "Ana", GIT_COMMITTER_EMAIL: "ana@pando.invalid" },
   });
+
   return { ok: r.status === 0, out: `${r.stdout}${r.stderr}`.replace(/pando_[a-f0-9]+/g, "<credential>"), stdout: r.stdout };
 };
+
 const write = (dir, path, content) => {
   mkdirSync(join(dir, path, ".."), { recursive: true });
   writeFileSync(join(dir, path), content);
 };
 
 const id = Date.now().toString(36);
+
 let O = `files-${id}`;
+
 const A = `fa-${id}`;
+
 const B = `fb-${id}`;
+
 const made = [];
+
 const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`)).status);
+
 try {
   if (HOME_CRED) {
     S = readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim();
     O = (await call("GET", "/v1/user")).json?.login;
   } else S = (await call("POST", "/v1/users", { login: O }, { authorization: `Bearer ${BOOT}` })).json?.credential?.secret;
+
   for (const m of [A, B]) {
     const r = await call("POST", "/v1/monorepos", { name: m, kind: "repo" });
+
     if (r.status === 201) {
       made.push(m);
       tw.add(`${O}/${m}`);
     }
   }
+
   check("two plain repos", made.length === 2);
   const urlOf = (m) => `${URL_}/${O}/${m}.git`;
   const base = (m) => `/v1/monorepos/${O}/${m}/repos/${m}`;
@@ -104,8 +126,10 @@ try {
   const head = git(["rev-parse", "HEAD"], src).stdout.trim();
   const oracleLast = (path) => git(["log", "-1", "--first-parent", "--format=%H", "--", path], src).stdout.trim();
   const oracleLog = (path) => git(["log", "--first-parent", "--format=%H", "--", path], src).stdout.trim().split("\n").filter(Boolean);
+
   const lsTree = (ref, path = "") => git(["ls-tree", ref, ...(path ? [`${path}/`] : [])], src).stdout.trim().split("\n").filter(Boolean).map((l) => {
     const [meta, name] = l.split("\t");
+
     return { type: meta.split(" ")[1], name: name.split("/").pop() };
   });
 
@@ -121,12 +145,15 @@ try {
   check("at a sha (c1: no b.txt yet)", r.status === 200 && r.json?.commit === c1 && !r.json.entries.some((e) => e.name === "b.txt"), `${r.status}`);
   const paged = [];
   let cursor = null;
+
   for (let i = 0; i < 20; i++) {
     r = await call("GET", `${base(A)}/tree?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
     paged.push(...(r.json?.entries ?? []).map((e) => e.name));
     cursor = r.json?.next;
+
     if (!cursor) break;
   }
+
   check("pages of 2 walk the same entries", paged.length === want.length && new Set(paged).size === want.length, paged.join(","));
   r = await call("GET", `${base(A)}/tree?path=README.md`);
   check("a file is not a folder (404 not_a_folder)", r.status === 404 && r.json?.error?.code === "not_a_folder", `${r.status}`);
@@ -137,11 +164,14 @@ try {
   const lastAll = async (path) => {
     for (let i = 0; i < 60; i++) {
       const x = await call("GET", `${base(A)}/tree/last-commits${path ? `?path=${path}` : ""}`);
+
       if (x.json?.complete) return { ...x, tries: i + 1 };
       await sleep(x.json?.retry_after_ms ?? 1000);
     }
+
     return null;
   };
+
   let lc = await lastAll("");
   const rootOk = lc && want.every((w) => lc.json.entries[w.name]?.sha === oracleLast(w.name));
   check("last commits at the root match git log -1 --first-parent", rootOk, lc ? `${lc.tries} tries; ${want.map((w) => `${w.name}:${lc.json.entries[w.name]?.sha?.slice(0, 7)}/${oracleLast(w.name).slice(0, 7)}`).join(" ")}` : "never complete");
@@ -155,15 +185,20 @@ try {
   const histAll = async (path, limit = 30) => {
     const shas = [];
     let next = null;
+
     for (let i = 0; i < 100; i++) {
       const x = await call("GET", `${base(A)}/history?path=${path}&limit=${limit}${next ? `&cursor=${next}` : ""}`);
+
       if (x.status !== 200) return { error: `${x.status} ${x.text.slice(0, 120)}` };
       shas.push(...x.json.commits.map((c) => c.sha));
       next = x.json.next;
+
       if (!next) break;
     }
+
     return { shas };
   };
+
   for (const [path, limit] of [["src/a.txt", 30], ["src", 30], ["src", 1], ["docs/guide.md", 30]]) {
     const h = await histAll(path, limit);
     const o = oracleLog(path);
@@ -185,10 +220,12 @@ try {
   check("HEAD has the headers and no body", r.status === 200 && r.text === "" && r.headers.get("etag") === etag);
   r = await call("GET", rawUrl(A, "src/a.txt", c1));
   check("raw at a sha: the old bytes, cached a year", r.text === "one\n" && r.headers.get("cache-control") === "private, max-age=31536000, immutable", r.headers.get("cache-control"));
+
   for (const [path, type] of [["index.html", "text/plain"], ["logo.svg", "text/plain"], ["pic.png", "image/png"], ["bin.dat", "application/octet-stream"]]) {
     r = await call("GET", rawUrl(A, path));
     check(`raw ${path} is ${type}`, r.status === 200 && (r.headers.get("content-type") ?? "").startsWith(type), r.headers.get("content-type"));
   }
+
   r = await call("GET", rawUrl(A, "src"));
   check("raw on a folder is a 404", r.status === 404 && r.json?.error?.code === "not_a_file", `${r.status}`);
   r = await call("GET", `/${O}/${A}/projects/${A}/raw/README.md`);

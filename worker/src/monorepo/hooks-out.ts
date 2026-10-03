@@ -24,10 +24,13 @@ type Row = Record<string, SqlStorageValue>;
 
 /** Calls in flight at once, one delivery each (a slow receiver holds its own call only). */
 const CALLS_AT_ONCE = 20;
+
 /** Rows handed out per round; the rest go in the next. */
 const ROUND_MAX = 60;
+
 /** A handed-out row is sent again after this if no answer came (a POST times out after 10 s). */
 export const LEASE_MS = 60_000;
+
 /** The lease under HOOKS_TEST=1: longer than hooks.mjs's slow receiver (4 s), short enough to wait for. */
 const TEST_LEASE_MS = 6_000;
 
@@ -64,6 +67,7 @@ export class HooksOut {
   /** `tries`: the tries in the current round (attempts counts them all). */
   ensureSchema(): void {
     const cols = this.rows<{ name: string }>("PRAGMA table_info(deliveries)").map((c) => c.name);
+
     if (!cols.includes("tries")) {
       this.sql.exec("ALTER TABLE deliveries ADD COLUMN tries INTEGER NOT NULL DEFAULT 0");
       // Rows the queue was retrying keep their place in the schedule.
@@ -81,6 +85,7 @@ export class HooksOut {
 
   private delays(): number[] {
     const v = this.env.HOOK_RETRY_DELAYS?.split(",").map((x) => Number(x.trim()));
+
     return v && v.length && v.every((n) => Number.isInteger(n) && n >= 0 && n <= 43_200) ? v : RETRY_DELAYS_S;
   }
 
@@ -92,6 +97,7 @@ export class HooksOut {
     this.ctx.waitUntil(
       Promise.resolve().then(() => {
         this.kicked = false;
+
         return this.sendDue();
       }),
     );
@@ -100,9 +106,11 @@ export class HooksOut {
   /** Make rows due now (redeliver, replay): a new round of tries. */
   requeue(ids: string[]): void {
     const at = now();
+
     for (const id of ids) {
       this.sql.exec("UPDATE deliveries SET status = 'queued', tries = 0, next_attempt_at = ?, sent_at = NULL WHERE id = ?", at, id);
     }
+
     if (ids.length) this.kick();
   }
 
@@ -110,8 +118,10 @@ export class HooksOut {
   private take(limit: number): { jobs: HookJob[]; lease: string } {
     const m = this.info();
     const lease = now();
+
     if (!m) return { jobs: [], lease };
     const expired = new Date(Date.now() - this.lease()).toISOString();
+
     const due = this.rows<{ id: string; hook_id: string; repo: string; payload: string; tries: number; created_at: string; next_attempt_at: string | null }>(
       `SELECT id, hook_id, repo, payload, tries, created_at, next_attempt_at FROM deliveries
        WHERE status IN ('queued', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
@@ -119,16 +129,21 @@ export class HooksOut {
        ORDER BY created_at, rowid LIMIT ?`,
       lease, expired, limit,
     );
+
     const jobs: HookJob[] = [];
     const mains = new Map<string, string | null>();
+
     for (const d of due) {
       const hook = this.rows<HookRow>("SELECT * FROM hooks WHERE id = ?", d.hook_id)[0];
       const repo = this.repoOf(d.repo);
+
       if (!hook || !repo) {
         this.sql.exec("UPDATE deliveries SET status = 'dead', next_attempt_at = NULL, sent_at = NULL, error = ? WHERE id = ?", "its hook or repo was deleted", d.id);
         continue;
       }
+
       this.sql.exec("UPDATE deliveries SET sent_at = ? WHERE id = ?", lease, d.id);
+
       if (!mains.has(d.repo)) mains.set(d.repo, this.mainOf(d.repo));
       const payload = JSON.parse(d.payload) as StoredPayload;
       payload.monorepo_id ??= m.id; // rows from before namespaces
@@ -137,7 +152,9 @@ export class HooksOut {
         attempt: d.tries + 1, due: Date.parse(d.next_attempt_at ?? d.created_at),
       });
     }
+
     if (jobs.length) this.armAt(Date.now() + this.lease() + 1_000);
+
     return { jobs, lease };
   }
 
@@ -146,6 +163,7 @@ export class HooksOut {
     try {
       for (let round = 0; round < 20; round++) {
         const { jobs, lease } = this.take(ROUND_MAX);
+
         if (!jobs.length) return;
         await pool(jobs, CALLS_AT_ONCE, (j) => this.drain([j], lease));
       }
@@ -156,20 +174,24 @@ export class HooksOut {
 
   private async drain(jobs: HookJob[], lease: string): Promise<void> {
     let results: HookResult[];
+
     try {
       results = released(await this.ctx.exports.HooksDrain.run(jobs));
+
       if (this.crashNext) {
         // Tests only: the receiver has the delivery; the object dies before recording it.
         this.crashNext = false;
         await this.ctx.storage.sync();
         await new Promise((r) => setTimeout(r, 200)); // the push's own answer goes out first
         this.ctx.abort("hooks test: the object dies after a delivery was sent, before its answer is recorded");
+
         return;
       }
     } catch (err) {
       const error = `the delivery call failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
       results = jobs.map(() => ({ ok: false, code: null, error, ms: 0 }));
     }
+
     jobs.forEach((j, i) => this.record(j, results[i] ?? { ok: false, code: null, error: "no answer", ms: 0 }, lease));
   }
 
@@ -195,6 +217,7 @@ export class HooksOut {
          next_attempt_at = ?, sent_at = NULL WHERE id = ? AND sent_at = ?`,
       status, j.attempt, r.code, r.ok ? null : r.error, at, next === null ? null : new Date(next).toISOString(), j.delivery_id, lease,
     );
+
     if (next !== null) this.armAt(next);
   }
 
@@ -207,6 +230,7 @@ export class HooksOut {
     const leased = this.rows<{ t: string | null }>(`SELECT MIN(sent_at) AS t FROM deliveries WHERE ${live} AND sent_at IS NOT NULL`)[0]?.t;
     const times = [retry ? Date.parse(retry) : Infinity, leased ? Date.parse(leased) + this.lease() + 1_000 : Infinity];
     const t = Math.min(...times);
+
     if (t < Infinity) this.armAt(t);
   }
 
@@ -217,6 +241,7 @@ export class HooksOut {
   /** Make the object die right after the next delivery's call answers, before it is recorded. */
   test(set: { crash?: boolean } = {}): { crash: boolean; lease_ms: number } {
     if (this.env.HOOKS_TEST === "1" && set.crash !== undefined) this.crashNext = set.crash;
+
     return { crash: this.crashNext, lease_ms: this.lease() };
   }
 }

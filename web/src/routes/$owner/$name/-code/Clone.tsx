@@ -2,7 +2,7 @@
 // the whole monorepo, and one project's plain git URL.
 import { Popover } from "@base-ui/react/popover";
 import { useState } from "react";
-import type { Repo } from "../../../../api/pending";
+import type { Repo } from "@pando/contract";
 import { Cmd } from "../../../../ui/controls";
 import { Chevron } from "../../../../ui/Icons";
 
@@ -14,7 +14,7 @@ export function Clone({ full, repos, plain }: { full: string; repos: readonly Re
 
   return (
     <Popover.Root>
-      <Popover.Trigger className="inline-flex h-8 cursor-pointer items-center justify-center rounded-[7px] bg-bark px-3.5 text-[13.5px] leading-[normal] font-semibold whitespace-nowrap text-soil hover:bg-bark-hi">
+      <Popover.Trigger className="inline-flex h-8 cursor-pointer items-center justify-center rounded-[7px] bg-bark px-3.5 text-[13.5px] leading-[16px] font-semibold whitespace-nowrap text-soil hover:bg-bark-hi">
         Clone
         <Chevron className="ml-1.5 block size-[13px]" />
       </Popover.Trigger>
@@ -34,7 +34,7 @@ export function Clone({ full, repos, plain }: { full: string; repos: readonly Re
                       aria-label="Project"
                       value={repo.path}
                       onChange={(e) => setPath(e.target.value)}
-                      className="h-7 min-w-0 rounded-[7px] border border-rootline bg-air pr-[26px] pl-2 font-mono text-[12.5px] leading-[normal] text-bark focus:border-ash focus:outline-none"
+                      className="h-7 min-w-0 rounded-[7px] border border-rootline bg-air pr-[26px] pl-2 font-mono text-[12.5px] leading-[15px] text-bark focus:border-ash focus:outline-none"
                     >
                       {repos.map((r) => (
                         <option key={r.path}>{r.path}</option>

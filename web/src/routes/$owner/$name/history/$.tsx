@@ -12,7 +12,7 @@ import { Cmd, lnk } from "../../../../ui/controls";
 import { CommitIcon } from "../../../../ui/Icons";
 import { blobLink } from "../../../../ui/paths";
 import { ago, day, useNow } from "../../../../ui/time";
-import { useEndOfList } from "../../../../ui/useEndOfList";
+import { Older } from "../../../../ui/Older";
 import { saverOf } from "../-code/FileList";
 
 export const Route = createFileRoute("/$owner/$name/history/$")({
@@ -42,7 +42,7 @@ function VersionRow({ v, current, fresh, onRestore }: { v: MetaVersion; current:
         </p>
       </div>
       <div className="flex items-center gap-4">
-        <span className="font-mono text-[12.5px] leading-[normal] text-ash">v{v.version}</span>
+        <span className="font-mono text-[12.5px] leading-[15px] text-ash">v{v.version}</span>
         {current ? (
           <span className="text-[12px] text-ash">current</span>
         ) : (
@@ -77,7 +77,6 @@ function History() {
     },
   });
 
-  const end = useEndOfList<HTMLDivElement>(log.hasNextPage && !log.isFetchingNextPage ? () => void log.fetchNextPage() : null);
   const versions = log.data.pages.flatMap((p) => p.versions);
   const days: { day: string; versions: MetaVersion[] }[] = [];
 
@@ -99,7 +98,7 @@ function History() {
       </div>
       {days.map((d, i) => (
         <section key={d.day} className={i ? "mt-7" : ""}>
-          <h3 className="mb-2.5 flex items-center gap-2 text-[13px] leading-[normal] text-bark-dim">
+          <h3 className="mb-2.5 flex items-center gap-2 text-[13px] leading-[15px] text-bark-dim">
             <CommitIcon className="size-3.5 text-ash" />
             Saves on {d.day}
           </h3>
@@ -110,7 +109,7 @@ function History() {
           </ul>
         </section>
       ))}
-      <div ref={end} aria-hidden="true" />
+      {log.hasNextPage ? <Older more loading={log.isFetchingNextPage} load={() => void log.fetchNextPage()} none="" /> : null}
     </div>
   );
 }

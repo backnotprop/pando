@@ -41,6 +41,7 @@ The object refuses, and the client never sends:
 | Too large | more than 1.5 MiB (1,572,864 bytes) inline: send a pointer (below) | `too_large` | 413 |
 | Binary | a NUL byte in the first 8,000 bytes (git's test) inline: send a pointer | `binary` | 415 |
 | Missing blob | a Git LFS pointer whose bytes are not in R2 | `missing_blob` | 400 |
+| Credentials | a reference pointer (`.pando/references/**.toml`) whose `url` carries a user or password | `credentials` | 400 |
 | Bad path | empty, absolute, `\`, NUL, `.` or `..` segments, empty segments, longer than 1,024 bytes | `bad_path` | 400 |
 | Bad sha | `sha` does not match `bytes` | `bad_sha` | 400 |
 
@@ -165,11 +166,28 @@ above:
   temporary file `.<name>.pando-tmp-<random>` in the same folder, which is
   then renamed over the file. A delete removes the file and any folder left
   empty. A rename moves the file when it is clean.
-- **Sending a local change.** The daemon polls the folder (twice a second by
-  default). A changed file is sent once it has stopped changing for one
-  poll, or after 5 minutes of continuous change (the maximum hold). One
-  change per path is in flight at a time; later edits go out after the
-  answer, on top of the new version.
+- **Noticing a local change.** The daemon asks the OS which paths changed:
+  inotify on Linux (one watch per folder that syncs), FSEvents on macOS.
+  It reads a changed file once it has been quiet: at once for a file closed
+  after writing on Linux, after 50 ms for other changes on Linux, after
+  100 ms on macOS. A full walk every 30 s, and whenever the OS says it lost
+  events, is the safety net. Without notifications (another OS, inotify out
+  of watches, `PANDO_META_WATCH=off`, `pando meta sync --once`) it scans
+  every 100 ms instead (a big tree spaces its scans out: each waits ten
+  times the last scan's length), and a changed file goes out once one scan
+  sees it unchanged. Either way a file still changing goes out after 5
+  minutes (the maximum hold). One change per path is in flight at a time;
+  later edits go out after the answer, on top of the new version.
+- **Measured** (one way, write to bytes on the other machine): against a
+  local server, 114 ms on macOS and 4 ms on Linux, the same on 12,000 files;
+  this Mac to a Cloudflare container through pando-dev and back, 268 ms
+  (scanning every 100 ms: 410 ms; every 500 ms: about 1.95 s). Idle on
+  12,000 files: 0.23% of a core (scanning: 9.2%).
+- **Limits a person can hit.** inotify needs one watch per synced folder,
+  from `fs.inotify.max_user_watches`, shared by every program of the user:
+  8,192 in a Cloudflare container, 1,048,576 on recent desktop kernels.
+  Out of watches, the daemon says so, names the limit, and scans instead
+  (`sysctl fs.inotify.max_user_watches=524288` raises it).
 - **Renames are never guessed.** A delete and a create seen in one pass are
   sent as a rename only when the bytes are identical. Otherwise they go as a
   delete and a save.
@@ -251,15 +269,32 @@ or `{"unchanged": true, "version"}` when the file already holds those bytes.
 `hello`, `{"id", "author", "machine", "agent", "client", "connected_at"}`
 (`client` is hello's optional `client` field).
 
-**`GET tree?prefix=<path prefix>`**: every current path in one call, sorted,
-each as a history entry (above): `{"head", "prefix", "files": [...]}`.
-Deleted paths are left out. `prefix` is a plain string match on the path.
+**`GET tree`**: the current paths, sorted, a page at a time, each as a
+history entry (above). Deleted paths are left out.
+
+- `prefix=<string>`: paths that start with it (a plain string match).
+- `dir=<folder>`: one folder (`""` is the root): the files directly in it,
+  and on the first page its subfolders with how many files each holds.
+- `limit=`: 1 to 5,000, default 1,000. `after=<path>`: continue after that
+  path; pass the previous page's `next`.
+- Not both `prefix` and `dir` (400).
+
+```json
+{"head": 431, "prefix": "docs/", "dir": "docs", "files": [...],
+ "folders": [{"name": "deep", "files": 12}], "next": "docs/two.md"}
+```
+
+`next` is `null` on the last page. `dir` and `folders` are there only with
+`dir=`. Both filters are a range on the path index, so a page costs its own
+size, not the tree's: on 60,000 files a page of 1,000 is 310 KB in 5 ms, and
+a folder listing 2 to 30 ms.
 
 **`GET references`**: the reference pointers under `.pando/references/`
 (formats.md, section 4), parsed:
 `{"head", "references": [{"path", "url", "ref", "commit", "version", "error"}]}`.
 `path` is the reference's folder (`research/infra/oak`); `error` says why
-a pointer did not parse.
+a pointer did not parse. `url` never shows a user or password: they are
+removed (a live save of such a pointer is refused, see `credentials`).
 
 Added by the web-api lane (2026-10-03) for the web screens; the live lane
 owns this contract.

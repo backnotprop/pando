@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -63,6 +64,7 @@ func localOnlyName(name string) bool {
 // Rules decide which paths of a meta layer sync. Paths are relative to the
 // root, with / separators.
 type Rules struct {
+	mu     sync.RWMutex // the Linux watcher's goroutine reads the rules too
 	root   string
 	first  bool            // pando init's first upload: .pando/ (but not .pando/local/) goes too
 	extra  []ignorePattern // local_only from .pando/pando.toml
@@ -78,6 +80,8 @@ func LoadRules(root string) (*Rules, error) {
 func (r *Rules) tomlPath() string { return filepath.Join(r.root, ".pando", "pando.toml") }
 
 func (r *Rules) reload() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.extra = nil
 	r.tomlMt = 0
 	info, err := os.Stat(r.tomlPath())
@@ -102,13 +106,23 @@ func (r *Rules) reload() error {
 	return nil
 }
 
+// setFirst makes pando init's first upload carry .pando/ (not .pando/local/).
+func (r *Rules) setFirst(on bool) {
+	r.mu.Lock()
+	r.first = on
+	r.mu.Unlock()
+}
+
 // Refresh reloads pando.toml when it changed. It reports whether it did.
 func (r *Rules) Refresh() bool {
 	var mt int64
 	if info, err := os.Stat(r.tomlPath()); err == nil {
 		mt = info.ModTime().UnixNano()
 	}
-	if mt == r.tomlMt {
+	r.mu.RLock()
+	same := mt == r.tomlMt
+	r.mu.RUnlock()
+	if same {
 		return false
 	}
 	_ = r.reload()
@@ -127,7 +141,10 @@ func (r *Rules) SkipDir(rel string) bool {
 	if parts[0] == ".pando" {
 		// Only reference pointers are live inside .pando/ (all of it but
 		// .pando/local/ on the first upload).
-		if r.first {
+		r.mu.RLock()
+		first := r.first
+		r.mu.RUnlock()
+		if first {
 			return len(parts) >= 2 && parts[1] == "local"
 		}
 		return len(parts) >= 2 && parts[1] != "references"
@@ -148,7 +165,10 @@ func (r *Rules) SkipDir(rel string) bool {
 
 // SyncFile reports whether a file at rel, in a folder the scan entered, syncs.
 func (r *Rules) SyncFile(rel string) bool {
-	if why := refusal(rel); why != "" && !(why == "protected" && r.first) {
+	r.mu.RLock()
+	first := r.first
+	r.mu.RUnlock()
+	if why := refusal(rel); why != "" && !(why == "protected" && first) {
 		return false
 	}
 	return !r.extraMatch(rel, false)
@@ -229,6 +249,8 @@ func checkBytes(b []byte) string {
 }
 
 func (r *Rules) extraMatch(rel string, isDir bool) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, p := range r.extra {
 		if p.match(rel, isDir) {
 			return true

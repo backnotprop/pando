@@ -1,7 +1,8 @@
 // A Worker with only the meta layer routes, for testing the live lane with
 // `wrangler dev` before it is wired into src/index.ts. Never deployed.
 //
-// POST /test/destroy calls the object's destroy() for an e2e-* monorepo.
+// POST /test/destroy calls the object's destroy() for an e2e-* monorepo, and
+// POST /test/apply-from-main its applyFromMain().
 // With the Artifacts binding (wrangler.artifacts.jsonc), POST /test/meta-repo
 // makes, reads and deletes the meta layer repo of a test monorepo. It only
 // touches repos named e2e-*--meta.
@@ -74,6 +75,15 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/healthz") return new Response("ok\n");
     if (path === "/test/meta-repo" && request.method === "POST") return testRoute(request, env);
+    if (path === "/test/apply-from-main" && request.method === "POST") {
+      // What the monorepo object does after a reviewed merge into the meta layer's main.
+      const b = (await request.json()) as { monorepo: string; commit: string; changes: { path: string; text: string | null }[] };
+      if (!/^e2e-[a-z0-9-]+$/.test(b.monorepo)) return Response.json({ error: "test monorepos are e2e-*" }, { status: 400 });
+      const changes = b.changes.map((c) => ({ path: c.path, bytes: c.text === null ? null : new TextEncoder().encode(c.text) }));
+      return Response.json(
+        await env.META.get(env.META.idFromName(b.monorepo)).applyFromMain({ monorepo: b.monorepo, commit: b.commit, author: "Reviewer <r@example.com>", changes }),
+      );
+    }
     if (path === "/test/destroy" && request.method === "POST") {
       // What DELETE /v1/monorepos/{m} does to the meta layer object.
       const { monorepo } = (await request.json()) as { monorepo: string };

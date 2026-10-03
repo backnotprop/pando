@@ -6,7 +6,16 @@ export const MAX_BYTES = 1_572_864; // 1.5 MiB: Durable Object rows hold 2 MB
 const BINARY_SNIFF = 8000; // git's test: a NUL in the first 8,000 bytes
 
 export type Refusal = {
-  reason: "protected" | "not_meta" | "local_only" | "too_large" | "binary" | "bad_path" | "bad_sha" | "missing_blob";
+  reason:
+    | "protected"
+    | "not_meta"
+    | "local_only"
+    | "too_large"
+    | "binary"
+    | "bad_path"
+    | "bad_sha"
+    | "missing_blob"
+    | "credentials";
   status: number;
   message: string;
 };
@@ -101,6 +110,28 @@ export function checkBytes(bytes: Uint8Array): Refusal | null {
   const n = Math.min(bytes.length, BINARY_SNIFF);
   for (let i = 0; i < n; i++) {
     if (bytes[i] === 0) return { reason: "binary", status: 415, message: "binary files go to R2: send a pointer" };
+  }
+  return null;
+}
+
+// A reference pointer (.pando/references/**.toml, formats.md section 4) never
+// carries a user or password in its url: every member's machine and the web
+// screens show it. Checked on each live save of a pointer.
+const URL_LINE = /^\s*url\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/m;
+
+export function checkPointer(path: string, bytes: Uint8Array): Refusal | null {
+  if (!path.startsWith(".pando/references/") || !path.endsWith(".toml")) return null;
+  const m = new TextDecoder().decode(bytes).match(URL_LINE);
+  const raw = m ? (m[1] ?? m[2] ?? "") : "";
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    // scp-like git addresses (git@github.com:org/repo.git) name a user, never a password
+    return null;
+  }
+  if (u.username || u.password) {
+    return { reason: "credentials", status: 400, message: "a reference url never carries a user or password: remove it, git uses your own login" };
   }
   return null;
 }

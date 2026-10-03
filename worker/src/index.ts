@@ -10,6 +10,7 @@ import contract from "../../docs/contracts/api-v1.yaml";
 import type { Env } from "./env";
 import { errorJson, HttpError, toErrorResponse } from "./http";
 import { authenticateRequest } from "./accounts/auth";
+import { finishTiming, runTimed, startTiming } from "./timing";
 import { metaRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath } from "./monorepo/door";
@@ -26,6 +27,14 @@ const META_RE = /^\/v1\/monorepos\/[^/]+\/meta(\/|$)/;
 
 /** The meta layer (live lane): members only, `init` for owners; the object gets the user as the author. */
 async function meta(request: Request, env: Env): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  const t = startTiming("api", { method: request.method, path, monorepo: path.split("/")[3] ?? null, repo: "meta" });
+  const res = await runTimed(t, () => metaInner(request, env));
+  finishTiming(t, { status: res.status });
+  return res;
+}
+
+async function metaInner(request: Request, env: Env): Promise<Response> {
   try {
     const m = metaRoute(request);
     if (!m) return errorJson(404, "not_found", "no such meta layer route");

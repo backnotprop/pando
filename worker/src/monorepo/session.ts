@@ -1,9 +1,11 @@
 // Pando tokens: made here, stored as SHA-256 hashes in the monorepo object.
 
 import type { Env } from "../env";
+import { timedStub } from "../timing";
 
+/** The monorepo object; its calls count as object time on the request's pando.timing line. */
 export function monorepoStub(env: Env, monorepo: string) {
-  return env.MONOREPO.getByName(monorepo);
+  return timedStub(env.MONOREPO.getByName(monorepo));
 }
 
 export function newToken(): string {

@@ -1,6 +1,7 @@
 // Talking to one Artifacts repo: reads through the Workers binding, writes
 // through git's receive-pack with a write token minted for the one push.
 import { concat, ZERO_SHA, type TreeEntry } from "./objects";
+import { timeArtifacts } from "../timing";
 
 export interface GitRepo {
   artifacts: Artifacts;
@@ -137,7 +138,8 @@ export class OpenRepo {
       const body = concat([pktLine(line), FLUSH, pack]);
       let res: Response;
       try {
-        res = await fetch(`${info.remote}/git-receive-pack`, {
+        // Timed for the caller's pando.timing line (worker/src/timing.ts), when there is one.
+        res = await timeArtifacts("http POST git-receive-pack (gitwrite)", this.name, () => fetch(`${info.remote}/git-receive-pack`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${token.plaintext}`,
@@ -145,7 +147,7 @@ export class OpenRepo {
             accept: "application/x-git-receive-pack-result",
           },
           body,
-        });
+        }));
       } catch (e) {
         throw new GitWriteError("artifacts", `receive-pack request failed: ${(e as Error).message}`);
       }

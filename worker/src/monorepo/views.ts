@@ -4,6 +4,7 @@
 
 import type { Env } from "../env";
 import { gitwrite } from "./merge-port";
+import { timedArtifacts } from "../timing";
 import type { Checks, RepoRecord } from "./types";
 
 export interface BranchView {
@@ -62,7 +63,7 @@ export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: s
   let v = "unknown";
   try {
     const out = await gitwrite.mergeCommit(
-      { artifacts: env.ARTIFACTS, name: r.artifacts_name },
+      { artifacts: timedArtifacts(env.ARTIFACTS), name: r.artifacts_name },
       { base: r.default_branch, head, baseSha: main, message: "dry run\n", author: { name: "Pando", email: "pando@pando.invalid" }, dryRun: true },
     );
     // main moved while we looked: the answer is for nothing; a newer computation is coming.

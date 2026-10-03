@@ -2,6 +2,7 @@
 // by the accounts object, with the caller's role in one monorepo.
 
 import type { Env } from "../env";
+import { timedStub } from "../timing";
 import { credential, HttpError } from "../http";
 import { hashToken } from "../monorepo/session";
 import type { Identity } from "../monorepo/types";
@@ -15,7 +16,7 @@ const cache = new Map<string, { at: number; auth: AuthResult | null }>();
 export type AuthResult = Auth;
 
 export function accounts(env: Env) {
-  return env.ACCOUNTS.getByName("accounts");
+  return timedStub(env.ACCOUNTS.getByName("accounts"));
 }
 
 /**

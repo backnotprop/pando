@@ -14,7 +14,7 @@
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { withRepo } from "./artifacts";
-import { requiredChecks } from "./checks";
+import { requiredKept } from "./checks";
 import { commitReader, compareWith, type CommitReader } from "./graph";
 import { MainMoved, mergeableOf, pool } from "./views";
 import type { RepoRecord } from "./types";
@@ -98,14 +98,14 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
   if (m.type === "branch") {
     const main = await stub.currentMain(m.repo);
     if (!main) return { computed: 0, abandoned: true };
-    const required = await requiredChecks(env, info, r);
+    const required = await requiredKept(env, info, r);
     const f = await computeFacts(env, r, main, m.head);
     return { computed: (await stub.writeFacts(m.repo, m.branch, f, required)) ? 1 : 0, abandoned: false };
   }
   const cands = await stub.factsCandidates(m.repo, m.main, SWEEP_DAYS, SWEEP_MAX);
   if (cands.main !== m.main) return { computed: 0, abandoned: true }; // a newer main has its own sweep
   if (!cands.branches.length) return { computed: 0, abandoned: false };
-  const required = await requiredChecks(env, info, r);
+  const required = await requiredKept(env, info, r);
   let computed = 0;
   let abandoned = false;
   await withRepo(env, r.artifacts_name, async (repo) => {

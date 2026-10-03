@@ -8,6 +8,8 @@ import type { Identity } from "../monorepo/types";
 import type { Auth } from "./object";
 
 const CACHE_MS = 15_000;
+/** An unknown credential is answered from cache this long (bad tokens stop reaching the accounts object). */
+const UNKNOWN_MS = 5_000;
 const cache = new Map<string, { at: number; auth: AuthResult | null }>();
 
 export type AuthResult = Auth;
@@ -35,9 +37,11 @@ export async function authenticate(env: Env, secret: string, monorepo: string | 
   const hash = await hashToken(secret);
   const key = `${hash}\n${monorepo ?? ""}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.auth;
+  if (hit && Date.now() - hit.at < (hit.auth ? CACHE_MS : UNKNOWN_MS)) return hit.auth;
   const auth = (await accounts(env).authenticate(hash, monorepo)) as AuthResult | null;
-  if (cacheable(auth, monorepo)) {
+  if (cacheable(auth, monorepo) || auth === null) {
+    // Successes for CACHE_MS; an unknown credential for UNKNOWN_MS (C3). Never a
+    // missing monorepo or a non-member: another isolate may fix that any moment.
     if (cache.size > 10_000) cache.clear();
     cache.set(key, { at: Date.now(), auth });
   } else {

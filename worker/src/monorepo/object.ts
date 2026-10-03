@@ -10,7 +10,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
-import { branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
+import { branchesOf, listRefs, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, retryBusy, WriteGate } from "./gate";
 import { combine, requiredChecks } from "./checks";
 import { attempt, hookView, RETRY_DELAYS_MS, wants, type HookRow, type StoredPayload } from "./hooks";
@@ -268,6 +268,43 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.repoRow(name);
   }
 
+  /**
+   * An Artifacts token for one of this monorepo's repos (C3): minted here,
+   * once per repo and scope for the whole service, reused for about 10
+   * minutes. Handed to the Worker's isolates, which never log it. `fresh`
+   * mints anew (Artifacts refused the cached one).
+   */
+  async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number }> {
+    const m = this.info()?.name;
+    if (!m || !name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
+    return repoTokenEntry(this.env, name, scope, generation, "local", fresh);
+  }
+
+  // ── Required checks, kept here (C3) ──────────────────────────────────────
+
+  /** The repo's required checks as last read, or null when unknown (read them, then setRequiredChecks). */
+  storedRequired(repo: string): string[] | null {
+    const v = this.row<{ v: string | null }>("SELECT required_checks AS v FROM repos WHERE name = ?", repo)?.v;
+    return v ? (JSON.parse(v) as string[]) : null;
+  }
+
+  setRequiredChecks(repo: string, list: string[]): void {
+    this.sql.exec("UPDATE repos SET required_checks = ? WHERE name = ?", JSON.stringify(list), repo);
+  }
+
+  /**
+   * .pando/pando.toml lives on main of the meta layer's repo (a monorepo) or
+   * of the repo itself (a plain repo), and main moves only by a merge or main's
+   * first push. When that happens there, forget the stored lists.
+   */
+  private forgetRequiredIfConfig(repo: string): void {
+    const m = this.info();
+    const r = this.repoRow(repo);
+    if (!m || !r) return;
+    if (m.kind === "repo") this.sql.exec("UPDATE repos SET required_checks = NULL WHERE name = ?", repo);
+    else if (r.artifacts_name === metaArtifactsName(m.name)) this.sql.exec("UPDATE repos SET required_checks = NULL");
+  }
+
   /** Main's head as Pando last moved or saw it (pushes through the door, merges, and the Worker's reads). */
   rememberHead(repo: string, sha: string | null): void {
     this.sql.exec(
@@ -336,6 +373,7 @@ export class MonorepoObject extends DurableObject<Env> {
       };
       if (name === main) {
         this.rememberHead(repo, u.new === ZERO ? null : u.new);
+        this.forgetRequiredIfConfig(repo);
         if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new });
         events.push({ ...base, event: "push", author: identity.login });
         this.publish({
@@ -440,9 +478,12 @@ export class MonorepoObject extends DurableObject<Env> {
     );
   }
 
+  /** The merge gate reads the required checks fresh (and keeps them for the lists). */
   private async checksFor(r: RepoRecord, sha: string): Promise<Checks> {
     const m = this.info()!;
-    return combine(sha, await requiredChecks(this.env, m, r), this.statuses(r.name, sha));
+    const required = await requiredChecks(this.env, m, r);
+    this.setRequiredChecks(r.name, required);
+    return combine(sha, required, this.statuses(r.name, sha));
   }
 
   // ── Merge ────────────────────────────────────────────────────────────────
@@ -453,7 +494,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private async mergeNow(a: MergeArgs): Promise<MergeResult> {
     const r = (await this.getRepo(a.repo)) ?? fail(404, "not_found", `no repo ${a.repo}`);
-    const refs = branchesOf(await listRefs(this.env, r));
+    const refs = branchesOf(await listRefs(this.env, r, "local"));
     const head = refs.get(a.branch) ?? fail(404, "not_found", `no branch ${a.branch}`);
     const base = refs.get(r.default_branch) ?? fail(409, "no_main", `${r.default_branch} does not exist yet`);
     if (a.branch === r.default_branch) fail(400, "bad_request", `cannot merge ${r.default_branch} into itself`);
@@ -519,6 +560,7 @@ export class MonorepoObject extends DurableObject<Env> {
       out.sha, head, at, a.identity.login, a.repo, a.branch,
     );
     this.rememberHead(a.repo, out.sha);
+    this.forgetRequiredIfConfig(a.repo);
     this.queueFacts({ type: "sweep", repo: a.repo, main: out.sha });
     const merge = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
     this.publishBranch("merged", a.repo, a.branch, a.identity, { merge });
@@ -903,7 +945,7 @@ export class MonorepoObject extends DurableObject<Env> {
       "UPDATE branches SET ahead = ?, behind = ?, merge_base = ?, mergeable = ?, facts_main = ?, facts_head = ?, facts_at = ? WHERE repo = ? AND name = ?",
       f.ahead, f.behind, f.merge_base, f.mergeable, f.main, f.head, now(), repo, name,
     );
-    this.sql.exec("UPDATE repos SET required_checks = ? WHERE name = ?", JSON.stringify(required), repo);
+    // `required` is for this row only: the kept list changes only through storedRequired's owners.
     const row = this.branchRows(repo, { names: [name], state: "all", required }).branches[0];
     if (row) this.publish({ kind: "branch.updated", collection: "branches", key: `${repo}/${name}`, op: "upsert", repo, actor: null, machine: null, agent: null, row: { repo, ...row }, partial: false });
     return true;
@@ -1051,7 +1093,7 @@ export class MonorepoObject extends DurableObject<Env> {
         }
         try {
           const result = await retryBusy(
-            () => updateRefs(this.env, r, batch.map((e) => e.cmd)),
+            () => updateRefs(this.env, r, batch.map((e) => e.cmd), "local"),
             (e) => e instanceof HttpError && e.code === "repo_busy",
           );
           for (const e of batch) e.done(result.has(e.cmd.ref) ? result.get(e.cmd.ref)! : "no status in Artifacts' report");

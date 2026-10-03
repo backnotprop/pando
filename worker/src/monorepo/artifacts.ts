@@ -25,13 +25,42 @@ const tokenCache = new Map<string, { token: string; expiresAt: number }>();
  * by the repo's record too, so a token for a deleted repo is never reused for
  * a new repo of the same name.
  */
-export async function repoToken(env: Env, name: string, scope: "read" | "write", generation = ""): Promise<string> {
+/**
+ * Where a repo token comes from. "object": the monorepo object, which mints
+ * one per repo and scope for the whole service (C3), so isolates do not each
+ * mint their own. "local": mint with the binding here (the object itself).
+ */
+export type TokenSource = "object" | "local";
+
+/** The monorepo of an Artifacts repo name (`<monorepo>--<repo>`; Pando names forbid "--"). */
+function monorepoOf(artifactsName: string): string {
+  return artifactsName.slice(0, artifactsName.indexOf("--"));
+}
+
+export async function repoTokenEntry(
+  env: Env,
+  name: string,
+  scope: "read" | "write",
+  generation = "",
+  source: TokenSource = "object",
+  fresh = false,
+): Promise<{ token: string; expiresAt: number }> {
   const key = `${name}\n${scope}\n${generation}`;
   const hit = tokenCache.get(key);
-  if (hit && hit.expiresAt - Date.now() > TOKEN_REUSE_MS) return hit.token;
-  const t = await withRepo(env, name, (repo) => repo.createToken(scope, TOKEN_TTL_SECONDS));
-  tokenCache.set(key, { token: t.plaintext, expiresAt: Date.parse(t.expiresAt) || Date.now() + TOKEN_TTL_SECONDS * 1000 });
-  return t.plaintext;
+  if (!fresh && hit && hit.expiresAt - Date.now() > TOKEN_REUSE_MS) return hit;
+  let entry: { token: string; expiresAt: number };
+  if (source === "local") {
+    const t = await withRepo(env, name, (repo) => repo.createToken(scope, TOKEN_TTL_SECONDS));
+    entry = { token: t.plaintext, expiresAt: Date.parse(t.expiresAt) || Date.now() + TOKEN_TTL_SECONDS * 1000 };
+  } else {
+    entry = await env.MONOREPO.getByName(monorepoOf(name)).artifactsToken(name, scope, generation, fresh);
+  }
+  tokenCache.set(key, entry);
+  return entry;
+}
+
+export async function repoToken(env: Env, name: string, scope: "read" | "write", generation = "", source: TokenSource = "object", fresh = false): Promise<string> {
+  return (await repoTokenEntry(env, name, scope, generation, source, fresh)).token;
 }
 
 /** A fresh read token for a hook delivery (30 minutes). Not cached. */
@@ -87,26 +116,26 @@ export async function gitRequest(
   path: string,
   scope: "read" | "write",
   init: RequestInit & { headers?: Record<string, string> },
+  source: TokenSource = "object",
 ): Promise<Response> {
-  const send = async () =>
+  const send = async (fresh: boolean) =>
     fetch(`${repo.remote}${path}`, {
       ...init,
-      headers: { ...init.headers, authorization: `Bearer ${await repoToken(env, repo.artifacts_name, scope, repo.created_at)}` },
+      headers: { ...init.headers, authorization: `Bearer ${await repoToken(env, repo.artifacts_name, scope, repo.created_at, source, fresh)}` },
     });
-  const res = await send();
+  const res = await send(false);
   // A cached token Artifacts no longer accepts: mint a new one and retry once,
   // when the request body can be sent again (not a stream).
   if ((res.status === 401 || res.status === 403) && !(init.body instanceof ReadableStream)) {
     await res.body?.cancel();
-    tokenCache.delete(`${repo.artifacts_name}\n${scope}\n${repo.created_at ?? ""}`);
-    return send();
+    return send(true);
   }
   return res;
 }
 
 /** Every ref in the repo (`refs/heads/main` -> sha). Empty for an empty repo. */
-export async function listRefs(env: Env, repo: ArtifactsRef): Promise<Map<string, string>> {
-  const res = await gitRequest(env, repo, "/info/refs?service=git-upload-pack", "read", { method: "GET" });
+export async function listRefs(env: Env, repo: ArtifactsRef, source: TokenSource = "object"): Promise<Map<string, string>> {
+  const res = await gitRequest(env, repo, "/info/refs?service=git-upload-pack", "read", { method: "GET" }, source);
   if (!res.ok) throw new HttpError(502, "artifacts", `Artifacts answered ${res.status} listing refs`);
   return parseAdvertisement(new Uint8Array(await res.arrayBuffer()));
 }
@@ -118,17 +147,24 @@ export function branchesOf(refs: Map<string, string>): Map<string, string> {
 }
 
 /** Move refs to commits that already exist (no new objects). */
-export async function updateRefs(env: Env, repo: ArtifactsRef, commands: RefCommand[]): Promise<Map<string, string | null>> {
+export async function updateRefs(env: Env, repo: ArtifactsRef, commands: RefCommand[], source: TokenSource = "object"): Promise<Map<string, string | null>> {
   const caps = ["report-status", "agent=pando"];
   const body = await updateRefsRequest(commands, caps);
-  const res = await gitRequest(env, repo, "/git-receive-pack", "write", {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-git-receive-pack-request",
-      accept: "application/x-git-receive-pack-result",
+  const res = await gitRequest(
+    env,
+    repo,
+    "/git-receive-pack",
+    "write",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-git-receive-pack-request",
+        accept: "application/x-git-receive-pack-result",
+      },
+      body,
     },
-    body,
-  });
+    source,
+  );
   if (!res.ok) throw new HttpError(502, "artifacts", `Artifacts answered ${res.status} to a ref update`);
   const report = parseReport(new Uint8Array(await res.arrayBuffer()), new Set(caps));
   if (report.error) {

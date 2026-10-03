@@ -164,6 +164,13 @@ tags:
       when it does not exist yet is allowed: that is the first push of
       `pando init`. Main moves only by a merge.
 
+      Busy repos. Artifacts runs about 2 receive-packs at once per repo and
+      answers others "busy". The door holds a push of up to 1 MiB in memory
+      and sends it again once, after 150 to 400 ms. A push that is still
+      refused, or is larger, is rejected with
+      `Pando: <repo> is busy with other pushes right now; push again` (every
+      ref `busy; push again`), and nothing is written: push again.
+
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.

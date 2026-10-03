@@ -223,6 +223,12 @@ func (h *HTTP) GetMonorepo(ctx context.Context, m string) (*Monorepo, error) {
 	return out, err
 }
 
+func (h *HTTP) Heads(ctx context.Context, m string) (*Heads, error) {
+	out := &Heads{}
+	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/heads"}, out)
+	return out, err
+}
+
 func (h *HTTP) ListRepos(ctx context.Context, m string) ([]Repo, error) {
 	var out struct {
 		Repos []Repo `json:"repos"`

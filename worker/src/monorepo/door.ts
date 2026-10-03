@@ -8,7 +8,8 @@ import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "
 import { gitRequest, listRefs } from "./artifacts";
 import { compare } from "./graph";
 import { ZERO } from "./names";
-import { drain, parseReport, prepend, readCommandSection, refusal } from "./pktline";
+import { drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
+import { LEASE_MS } from "./gate";
 import type { Identity, RepoEvent, RepoRecord } from "./types";
 import { monorepoStub } from "./session";
 import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
@@ -147,33 +148,59 @@ async function receivePack(
     });
   }
 
-  const res = await gitRequest(env, repo, "/git-receive-pack", "write", {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-git-receive-pack-request",
-      accept: "application/x-git-receive-pack-result",
-    },
-    body: prepend(section.head, section.rest),
-  });
-  if (!res.ok || !res.body) return relay(res);
+  // One of the repo's two write slots (gate.ts). git waits here while the slot is taken.
+  const slot = await stub.acquireWrite(repo.artifacts_name);
+  if (!slot.ok) {
+    await drain(section.rest);
+    return gitError(`Pando: ${repo.name} is busy with other writes; try the push again`);
+  }
+  const lease = slot.value.lease;
+  const renew = setInterval(() => {
+    stub.renewWrite(repo.artifacts_name, lease).catch(() => {});
+  }, LEASE_MS / 3);
+  let bytes: Uint8Array;
+  let res: Response;
+  try {
+    res = await gitRequest(env, repo, "/git-receive-pack", "write", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-git-receive-pack-request",
+        accept: "application/x-git-receive-pack-result",
+      },
+      body: prepend(section.head, section.rest),
+    });
+    // The whole report, before git sees it: the push is recorded first (it is small).
+    bytes = new Uint8Array(await res.arrayBuffer());
+  } finally {
+    clearInterval(renew);
+    await stub.releaseWrite(repo.artifacts_name, lease).catch(() => false);
+  }
+  const headers = { "content-type": res.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
+  if (!res.ok) return new Response(bytes, { status: res.status, headers });
 
-  // Send the report to git as it comes, and read a copy to record the push.
-  const [toClient, toUs] = res.body.tee();
-  ctx.waitUntil(
-    (async () => {
-      const bytes = new Uint8Array(await new Response(toUs).arrayBuffer());
-      const report = parseReport(bytes, section.caps);
-      if (report.unpack !== "ok") return;
-      const accepted = section.commands.filter((c) => report.refs.get(c.ref) === null);
-      if (!accepted.length) return;
-      const events = await stub.recordPush(repo.name, identity, accepted);
-      if (!events.length) return;
-      await stub.publishRepoEvents(repo.name, events, identity);
-      await withBases(env, repo, events);
-      await stub.enqueue(events, origin);
-    })().catch((err) => console.error("recording a push failed:", err instanceof Error ? err.message : String(err))),
-  );
-  return relay(res, toClient);
+  // Record before ack: branch heads and their events are written before git gets its report.
+  const report = parseReport(bytes, section.caps);
+  if (report.error) console.warn(`receive-pack on ${repo.artifacts_name}: ${report.error}`);
+  const accepted = report.unpack === "ok" ? section.commands.filter((c) => report.refs.get(c.ref) === null) : [];
+  if (accepted.length) {
+    const events = await stub.recordPush(repo.name, identity, accepted);
+    if (events.length) {
+      ctx.waitUntil(
+        (async () => {
+          await withBases(env, repo, events);
+          await stub.enqueue(events, origin);
+        })().catch((err) => console.error("queueing hooks for a push failed:", err instanceof Error ? err.message : String(err))),
+      );
+    }
+  }
+  return new Response(bytes, { headers });
+}
+
+/** An `ERR` pkt-line: git prints "remote error: <message>". */
+function gitError(message: string): Response {
+  return new Response(pkt(`ERR ${message}\n`), {
+    headers: { "content-type": "application/x-git-receive-pack-result", "cache-control": "no-cache" },
+  });
 }
 
 /** Fill in each event's merge base with the default branch, best effort. */

@@ -11,6 +11,7 @@ import { parse as parseToml } from "smol-toml";
 import type { MonorepoObject } from "../monorepo/object";
 import type { StreamEvent } from "../monorepo/types";
 import { EVENT_STREAM } from "../monorepo/stream";
+import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
 
 // MONOREPO: the monorepo object, whose event stream gets meta.saved and
 // machine.connected / machine.disconnected (absent in the live lane's test Worker).
@@ -703,6 +704,26 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     return version;
   }
 
+  // ---- the write gate (held by the monorepo object) ----
+
+  private async gated<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const monorepo = this.kv("monorepo");
+    if (!monorepo || !this.env.MONOREPO) return fn(); // the live lane's test Worker has no gate
+    const stub = this.env.MONOREPO.getByName(monorepo);
+    const slot = await stub.acquireWrite(key);
+    if (!slot.ok) throw new Error((slot as { message?: string }).message ?? "the repo is busy");
+    const lease = slot.value.lease;
+    const renew = setInterval(() => {
+      stub.renewWrite(key, lease).catch(() => {});
+    }, LEASE_MS / 3);
+    try {
+      return await fn();
+    } finally {
+      clearInterval(renew);
+      await stub.releaseWrite(key, lease).catch(() => false);
+    }
+  }
+
   // ---- the monorepo's event stream (A9) ----
 
   private outbox: StreamEvent[] = [];
@@ -917,9 +938,12 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const repoName = this.kv("meta_repo") ?? this.kv("monorepo");
     if (!repoName) throw new Error("the object does not know its monorepo yet");
     const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first), author };
-    let res = await writer.commit(repoName, "main", opts);
+    // Through the repo's write gate (merges into the meta layer push to the same repo), retrying Artifacts' "busy".
+    const commit = (o: typeof opts) =>
+      this.gated(repoName, () => retryBusy(() => writer.commit(repoName, "main", o), (e) => isBusy(e instanceof Error ? e.message : String(e))));
+    let res = await commit(opts);
     if (res.status === "ref_moved") {
-      res = await writer.commit(repoName, "main", { ...opts, parent: res.actual });
+      res = await commit({ ...opts, parent: res.actual });
     }
     if (res.status === "ref_moved") throw new Error(`main moved twice (expected ${res.expected}, saw ${res.actual})`);
     const sha = res.sha;

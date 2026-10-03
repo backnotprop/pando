@@ -29,6 +29,7 @@ type Config struct {
 	Backoff     []time.Duration // reconnect waits (default 5, 10, 30, 60 s)
 	PingEvery   time.Duration   // default 30 s
 	FullScan    time.Duration   // with file-change notifications: the safety-net scan (default 30 s)
+	NoWatch     bool            // scan instead of OS file-change notifications (PANDO_META_WATCH=off)
 	MaxInFlight int             // default 64
 
 	Log *log.Logger
@@ -110,6 +111,7 @@ func LoadConfig(root string) (Config, error) {
 		c.Author = v // "Name <email>"; once the Worker checks credentials, the account decides
 	}
 	c.Agent = os.Getenv("PANDO_AGENT")
+	c.NoWatch = os.Getenv("PANDO_META_WATCH") == "off"
 	c.defaults()
 	return c, nil
 }

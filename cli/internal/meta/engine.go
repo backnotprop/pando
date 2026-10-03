@@ -172,7 +172,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer e.close()
 	e.runCtx = ctx
 	how := fmt.Sprintf("scanning every %s", e.cfg.Poll)
-	if !e.untilSynced { // pando meta sync --once and pando init scan once instead
+	if !e.untilSynced && !e.cfg.NoWatch { // pando meta sync --once and pando init scan once instead
 		w, err := startWatcher(e.cfg.Root, e.rules)
 		if err == nil {
 			e.watch = w

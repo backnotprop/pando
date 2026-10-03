@@ -21,6 +21,7 @@ const N = Number(process.env.N ?? 10);
 const NEEDS = Math.min(N, Number(process.env.NEEDS ?? 5));
 const RUNS = Number(process.env.RUNS ?? 20);
 const LIVE = Number(process.env.LIVE ?? 20);
+const PUSHES = Number(process.env.PUSHES ?? 5);
 const HOME_CRED = !!process.env.USE_HOME_CRED;
 const BOOT = HOME_CRED ? null : (process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1]);
 const TEST_ROUTE = process.env.FEED_TEST_ROUTE !== "0";
@@ -144,17 +145,37 @@ try {
   say(`  GET /v1/branches?needs=...         ${fmt(lat.needs)}`);
   say(`  home load (the three at once)      ${fmt(lat.home)}`);
 
-  // ── Event to the live socket ──
+  // ── Event to the live socket: the person's (through pando-feed), and each monorepo's own with topics=feed (no queue) ──
   const ws = new WebSocket(`${WS_}/v1/events`, { headers: { authorization: `Bearer ${S}` } });
   const arrivals = new Map();
+  const direct = new Map(); // the same lines on the monorepos' own sockets
+  const pushArrivals = new Map();
+  const pushDirect = new Map();
+  const seen = (f, now, lines, pushes) => {
+    const e = f.event;
+    if (e?.kind === "worktree.reported") lines.set(e.summary.worktree, now);
+    if (e?.kind === "branch.opened") pushes.set(`${e.monorepo}/${e.branch}`, now);
+  };
   ws.onmessage = (e) => {
     try {
       const f = JSON.parse(e.data);
-      if (f.type === "event" && f.event.kind === "worktree.reported") arrivals.set(f.event.summary.worktree, performance.now());
+      if (f.type === "event") seen(f, performance.now(), arrivals, pushArrivals);
     } catch {}
   };
   await new Promise((r) => (ws.onopen = r));
   ws.send(JSON.stringify({ type: "hello" }));
+  const monoSockets = [];
+  for (const m of made.slice(0, Math.min(made.length, Math.max(LIVE, 1)))) {
+    const ms = new WebSocket(`${WS_}/v1/monorepos/${m}/events?topics=feed`, { headers: { authorization: `Bearer ${S}` } });
+    ms.onmessage = (e) => {
+      try {
+        const f = JSON.parse(e.data);
+        if (f.type === "feed") seen(f, performance.now(), direct, pushDirect);
+      } catch {}
+    };
+    await new Promise((r) => (ms.onopen = r));
+    monoSockets.push(ms);
+  }
   const sent = new Map();
   for (let k = 0; k < LIVE; k++) {
     const m = made[k % made.length];
@@ -164,20 +185,15 @@ try {
     sent.set(wid, t);
     await sleep(300);
   }
-  await sleep(3000);
+  await sleep(10_000);
   const d = [...sent].filter(([w]) => arrivals.has(w)).map(([w, t]) => arrivals.get(w) - t);
-  say(`  event to the live socket (worktree report sent to frame received, ${d.length}/${LIVE})  ${d.length ? fmt(d) : "none"}`);
+  say(`  worktree report to the person's socket (pando-feed; sent to frame, ${d.length}/${LIVE})  ${d.length ? fmt(d) : "none"}`);
+  const dd = [...sent].filter(([w]) => direct.has(w)).map(([w, t]) => direct.get(w) - t);
+  say(`  worktree report to its monorepo's socket (topics=feed, no queue; ${dd.length}/${LIVE})  ${dd.length ? fmt(dd) : "none"}`);
   // A push goes through the branch-facts job first (commit count, head title), then the feed.
-  const pushArrivals = new Map();
-  ws.onmessage = (e) => {
-    try {
-      const f = JSON.parse(e.data);
-      if (f.type === "event" && f.event.kind === "branch.opened") pushArrivals.set(`${f.event.monorepo}/${f.event.branch}`, performance.now());
-    } catch {}
-  };
   const pushSent = new Map();
-  for (let k = 0; k < Math.min(NEEDS, 5); k++) {
-    const m = made[k];
+  for (let k = 0; k < Math.min(PUSHES, NEEDS * 50); k++) {
+    const m = made[k % NEEDS];
     const src = join(work, m);
     git(["checkout", "-q", "main"], src);
     git(["checkout", "-qb", `p${k}`], src);
@@ -189,9 +205,13 @@ try {
     pushSent.set(`${m}/p${k}`, { t, git: performance.now() - t });
     await sleep(4000); // git runs synchronously here: wait for the frame before the next push blocks the loop
   }
+  await sleep(6000);
   const pd = [...pushSent].filter(([k]) => pushArrivals.has(k)).map(([k, v]) => pushArrivals.get(k) - v.t - v.git);
-  say(`  a push to the live socket (git push returned to frame received, ${pd.length}/${pushSent.size})  ${pd.length ? fmt(pd) : "none"}`);
+  say(`  a push to the person's socket (git push returned to frame, ${pd.length}/${pushSent.size})  ${pd.length ? fmt(pd) : "none"}`);
+  const pdd = [...pushSent].filter(([k]) => pushDirect.has(k)).map(([k, v]) => pushDirect.get(k) - v.t - v.git);
+  say(`  a push to its monorepo's socket (topics=feed, after the facts job; ${pdd.length}/${pushSent.size})  ${pdd.length ? fmt(pdd) : "none"}`);
   ws.close();
+  for (const ms of monoSockets) ms.close();
 
   // ── Past the window: trim the feed to nothing; pages read the monorepos' logs ──
   if (TEST_ROUTE) {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,6 +34,11 @@ const (
 
 // refreshMainFn is the refresh itself; tests count calls through it.
 var refreshMainFn = refreshMainLocked
+
+// refreshesRunning counts requestMainRefresh calls under way in this
+// process, the slot's hold included. Tests wait for 0 before their folders
+// are removed, so no refresh in the background outlives its test.
+var refreshesRunning atomic.Int32
 
 type refreshLock struct{ f *os.File }
 
@@ -77,6 +83,8 @@ func lockRefresh(root *config.Root, repo string, wait bool) (*refreshLock, error
 // requestMainRefresh asks for a repo's read-only mains here to move to the
 // server's main, coalescing with any refresh already running.
 func requestMainRefresh(e *Env, root *config.Root, repo string) {
+	refreshesRunning.Add(1)
+	defer refreshesRunning.Add(-1)
 	_, dirty := refreshPaths(root, repo)
 	for {
 		lk, err := lockRefresh(root, repo, false)

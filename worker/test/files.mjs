@@ -5,20 +5,22 @@
 //
 //   npx wrangler dev --port 8797 [--var FILES_BUDGET:1]
 //   PANDO_URL=http://localhost:8797 node test/files.mjs
+//   PANDO_URL=https://pando-dev... USE_HOME_CRED=1 node test/files.mjs   (as the signed-in user)
 //
 // With FILES_BUDGET=1 the walks stop early, so the queue path (last commits)
 // and short history pages run too. Credentials stay in memory; git never
 // reaches the keychain; it deletes what it made.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
 
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
-const BOOT = process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+const HOME_CRED = !!process.env.USE_HOME_CRED;
+const BOOT = HOME_CRED ? null : (process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1]);
 const results = [];
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
@@ -49,12 +51,15 @@ const write = (dir, path, content) => {
 };
 
 const id = Date.now().toString(36);
-const O = `files-${id}`;
+let O = `files-${id}`;
 const A = `fa-${id}`;
 const B = `fb-${id}`;
 const made = [];
 try {
-  S = (await call("POST", "/v1/users", { login: O }, { authorization: `Bearer ${BOOT}` })).json?.credential?.secret;
+  if (HOME_CRED) {
+    S = readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim();
+    O = (await call("GET", "/v1/user")).json?.login;
+  } else S = (await call("POST", "/v1/users", { login: O }, { authorization: `Bearer ${BOOT}` })).json?.credential?.secret;
   for (const m of [A, B]) {
     const r = await call("POST", "/v1/monorepos", { name: m, kind: "repo" });
     if (r.status === 201) made.push(m);
@@ -167,7 +172,7 @@ try {
   const etag = r.headers.get("etag");
   check(
     "raw by branch: the bytes, text/plain, sandboxed, nosniff, revalidated by ETag",
-    r.status === 200 && r.text === "# files\n" && /^text\/plain/.test(r.headers.get("content-type")) && /sandbox/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-content-type-options") === "nosniff" && r.headers.get("cache-control") === "private, no-cache" && /^"[0-9a-f]{40}"$/.test(etag ?? ""),
+    r.status === 200 && r.text === "# files\n" && /^text\/plain/.test(r.headers.get("content-type")) && /sandbox/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-content-type-options") === "nosniff" && r.headers.get("cache-control") === "private, no-cache" && /^(W\/)?"[0-9a-f]{40}"$/.test(etag ?? ""),
     `${r.status} ${r.headers.get("content-type")} ${r.headers.get("cache-control")}`,
   );
   r = await call("GET", rawUrl(A, "README.md"), null, { "if-none-match": etag });

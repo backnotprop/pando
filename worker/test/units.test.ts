@@ -486,3 +486,16 @@ describe("the file pages (FILES.md)", () => {
     expect(requestBudget({ FILES_BUDGET: "1" }).misses).toBe(1);
   });
 });
+
+describe("raw ETags", () => {
+  it("If-None-Match matches weakly: W/, lists and *", async () => {
+    const { matchesEtag } = await import("../src/monorepo/files");
+    const oid = "a".repeat(40);
+    expect(matchesEtag(`"${oid}"`, oid)).toBe(true);
+    expect(matchesEtag(`W/"${oid}"`, oid)).toBe(true);
+    expect(matchesEtag(`"x", W/"${oid}"`, oid)).toBe(true);
+    expect(matchesEtag("*", oid)).toBe(true);
+    expect(matchesEtag(`"${"b".repeat(40)}"`, oid)).toBe(false);
+    expect(matchesEtag(null, oid)).toBe(false);
+  });
+});

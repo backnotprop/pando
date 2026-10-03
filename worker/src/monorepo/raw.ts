@@ -11,7 +11,7 @@ import { HttpError, toErrorResponse } from "../http";
 import { authenticateRequest } from "../accounts/auth";
 import { objectsClient } from "../objects";
 import { finishTiming, runTimed, startTiming } from "../timing";
-import { cleanPath, rawResponse, requestBudget, resolveCommit, Walker } from "./files";
+import { cleanPath, matchesEtag, rawResponse, requestBudget, resolveCommit, Walker } from "./files";
 import { monorepoRef } from "./names";
 import { cachedRepo, monorepoStub } from "./session";
 
@@ -56,7 +56,7 @@ async function raw(request: Request, env: Env, ctx: ExecutionContext, url: URL, 
   if (entry.type === "tree") throw new HttpError(404, "not_a_file", `${path} is a folder`);
   if (entry.type === "gitlink") throw new HttpError(404, "not_a_file", `${path} is a submodule`);
   const etag = `"${entry.oid}"`;
-  if (request.headers.get("if-none-match") === etag) {
+  if (matchesEtag(request.headers.get("if-none-match"), entry.oid)) {
     return new Response(null, { status: 304, headers: { etag, "cache-control": pinned ? "private, max-age=31536000, immutable" : "private, no-cache" } });
   }
   const blob = await obj.raw(`/blob/${rec.artifacts_name}/${entry.oid}`);

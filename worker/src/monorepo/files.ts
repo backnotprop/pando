@@ -315,6 +315,20 @@ export async function walkHistory(w: Walker, start: string, path: string, limit:
   return { changes, next: walked >= WALK_MAX ? null : next, walked, budgetCut, capped: walked >= WALK_MAX };
 }
 
+
+/**
+ * If-None-Match, compared weakly (RFC 9110 13.1.2): Cloudflare's edge turns a
+ * strong ETag into W/"..." when it compresses the answer, and the browser
+ * sends that back. A list and "*" are allowed.
+ */
+export function matchesEtag(header: string | null, oid: string): boolean {
+  if (!header) return false;
+  return header.split(",").some((t) => {
+    const v = t.trim();
+    return v === "*" || v.replace(/^W\//, "") === `"${oid}"`;
+  });
+}
+
 // ── Raw ───────────────────────────────────────────────────────────────────
 
 const IMAGES: Record<string, string> = {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"pando/internal/config"
 	"pando/internal/server"
@@ -50,6 +51,20 @@ func newHarness(t *testing.T) *harness {
 	}
 	for _, k := range []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"} {
 		t.Setenv(k, "pat@example.com")
+	}
+	// pando merge starts a one-off follower in the background; in tests,
+	// a goroutine instead of a second process (which would be this test
+	// binary). followed counts them.
+	prev := startFollowOnce
+	t.Cleanup(func() { startFollowOnce = prev })
+	startFollowOnce = func(root *config.Root) error {
+		go func() {
+			e, err := NewEnv(context.Background(), strings.NewReader(""), io.Discard, io.Discard)
+			if err == nil {
+				followMains(e, root)
+			}
+		}()
+		return nil
 	}
 	return &harness{t: t, base: base, server: "file://" + filepath.Join(base, "server")}
 }
@@ -193,12 +208,13 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	}
 	out = h.ok(wt, "merge")
 	t.Setenv("PANDO_AGENT", "")
-	if !strings.Contains(out, "Merged agent-1/oauth into main of projects/app") || !strings.Contains(out, "projects/app/worktrees/main now at") {
+	if !strings.Contains(out, "Merged agent-1/oauth into main of projects/app") || !strings.Contains(out, "worktrees/main follows within a moment") {
 		t.Fatalf("merge:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(mainDir, "src/oauth.go")); err != nil {
-		t.Fatal("worktrees/main did not follow the merge")
-	}
+	waitUntil(t, "worktrees/main to follow the merge", func() bool {
+		_, err := os.Stat(filepath.Join(mainDir, "src/oauth.go"))
+		return err == nil
+	})
 	if parents := h.git(mainDir, "log", "-1", "--format=%p"); len(strings.Fields(parents)) != 2 {
 		t.Fatalf("main's head is not a merge commit: %q", parents)
 	}
@@ -475,5 +491,85 @@ func TestCloneMountsMainsInParallel(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(clone, "projects", fmt.Sprintf("p%d", i), "worktrees", "main", "README.md")); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for start := time.Now(); time.Since(start) < 15*time.Second; time.Sleep(20 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// pando merge: with a follower running it does not start another; --wait
+// moves main before returning; a worktree that pushed one head refuses to
+// merge a branch that moved since.
+func TestMergeFollowerAndWait(t *testing.T) {
+	h := newHarness(t)
+	acme := filepath.Join(h.base, "acme")
+	os.MkdirAll(acme, 0o755)
+	os.WriteFile(filepath.Join(acme, "README.md"), []byte("acme\n"), 0o644)
+	h.git(acme, "init", "-q", "-b", "main")
+	h.git(acme, "add", "-A")
+	h.git(acme, "commit", "-q", "-m", "first")
+	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	h.ok(acme, "init")
+	clone := filepath.Join(h.base, "c")
+	h.ok(h.base, "clone", "acme", clone, "--server", h.server)
+	root, _ := config.LoadRoot(clone)
+	started := 0
+	startFollowOnce = func(*config.Root) error { started++; return nil }
+
+	branch := func(name string) string {
+		h.ok(clone, "worktree", "add", ".", name)
+		wt := filepath.Join(clone, "worktrees", name)
+		os.WriteFile(filepath.Join(wt, name+".txt"), []byte(name), 0o644)
+		h.git(wt, "add", "-A")
+		h.git(wt, "commit", "-q", "-m", name)
+		h.git(wt, "push", "-q")
+		return wt
+	}
+	mainHead := func() string { return h.git(filepath.Join(clone, "worktrees", "main"), "rev-parse", "HEAD") }
+
+	// A follower holds the lock: merge starts nothing and says main follows.
+	holdFollowerLock(root)
+	if !followerRunning(root) {
+		t.Fatal("the lock is not seen as held")
+	}
+	before := mainHead()
+	out := h.ok(branch("b1"), "merge")
+	if started != 0 || !strings.Contains(out, "follows within a moment (the follower is running)") || mainHead() != before {
+		t.Fatalf("with a follower: started %d\n%s", started, out)
+	}
+	for _, f := range heldLocks {
+		f.Close()
+	}
+	heldLocks = nil
+
+	// --wait moves main before returning.
+	out = h.ok(branch("b2"), "merge", "--wait")
+	if !strings.Contains(out, "worktrees/main now at") || mainHead() == before {
+		t.Fatalf("--wait:\n%s", out)
+	}
+	// No follower: one background follower is started.
+	h.ok(branch("b3"), "merge")
+	if started != 1 {
+		t.Fatalf("background followers started: %d", started)
+	}
+	// The branch moved on the server after this worktree pushed: refused.
+	wt4 := branch("b4")
+	other := filepath.Join(h.base, "other")
+	h.git(h.base, "clone", "-q", "--branch", "b4", root.Repos[0].CloneURL, other)
+	os.WriteFile(filepath.Join(other, "late.txt"), []byte("late"), 0o644)
+	h.git(other, "add", "-A")
+	h.git(other, "commit", "-q", "-m", "late")
+	h.git(other, "push", "-q")
+	if out, err := h.pando(wt4, "", "merge"); err == nil || !strings.Contains(out+err.Error(), "is not what this worktree pushed") {
+		t.Fatalf("a moved branch must be refused: %v\n%s", err, out)
 	}
 }

@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/coder/websocket"
@@ -375,6 +378,65 @@ func sortedKeys(m map[string]string) []string {
 	return out
 }
 
+// followerLock is the lock a running follower holds, so pando merge knows
+// main will follow without its help.
+func followerLock(root *config.Root) string {
+	return filepath.Join(config.LocalDir(root.Dir), "follower.lock")
+}
+
+// holdFollowerLock takes the follower lock for as long as the process runs.
+// A second follower for the same folder still runs; it just does not hold it.
+func holdFollowerLock(root *config.Root) {
+	f, err := os.OpenFile(followerLock(root), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return
+	}
+	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		f.Close()
+		return
+	}
+	heldLocks = append(heldLocks, f) // kept open, and locked, until the process exits
+}
+
+var heldLocks []*os.File
+
+// followerRunning reports whether a follower holds this folder's lock.
+func followerRunning(root *config.Root) bool {
+	f, err := os.OpenFile(followerLock(root), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true
+	}
+	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false
+}
+
+// startFollowOnce moves this folder's read-only mains in a detached
+// `pando worktree follow --once`, so pando merge need not wait for it. Tests
+// replace it.
+var startFollowOnce = func(root *config.Root) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	logf, err := os.OpenFile(filepath.Join(config.LocalDir(root.Dir), "follow-once.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	cmd := exec.Command(exe, "worktree", "follow", "--once")
+	cmd.Dir = root.Dir
+	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
 // Follow is `pando worktree follow [--once] [--poll 5m]`: keep this
 // machine's read-only mains at the server's main until stopped.
 func Follow(e *Env, args []string) error {
@@ -392,6 +454,7 @@ func Follow(e *Env, args []string) error {
 		followMains(e, root)
 		return nil
 	}
+	holdFollowerLock(root)
 	(&follower{e: e, root: root}).run(e.Ctx, *poll)
 	return nil
 }
@@ -408,5 +471,6 @@ func StartFollower(ctx context.Context, dir string) {
 	if err != nil {
 		return
 	}
+	holdFollowerLock(root)
 	go (&follower{e: e, root: root}).run(ctx, followSafety)
 }

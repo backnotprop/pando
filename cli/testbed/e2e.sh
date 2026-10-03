@@ -163,7 +163,9 @@ step "worktrees/main is read-only and follows a merge"
 cd /work/acme
 if (echo x > worktrees/main/README.md) 2>/dev/null; then fail "wrote into worktrees/main"; else ok "writing into worktrees/main fails ($(touch worktrees/main/x 2>&1 | sed 's/.*: //'))"; fi
 pando diff feat-x | sed 's/^/  /'
-pando merge feat-x | sed 's/^/  /'
+merged=$(pando merge feat-x) && echo "$merged" | sed 's/^/  /'
+echo "$merged" | grep -q "follows within a moment" && ok "pando merge returns once the server merged; main follows on its own" || fail "merge: $merged"
+for _ in $(seq 1 150); do grep -q "changed in the mount" worktrees/main/pkg3/f1.go 2>/dev/null && break; sleep 0.1; done
 grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main shows the merged change" || fail "main did not follow the merge"
 [ -f worktrees/main/notes.txt ] && ok "worktrees/main has the merged notes.txt" || fail "notes.txt missing in main"
 [ -z "$(git -C worktrees/main status --porcelain)" ] && ok "git status in worktrees/main is clean after the merge" || fail "main status: $(git -C worktrees/main status --porcelain | head -3)"
@@ -244,7 +246,7 @@ cd worktrees/feat
 # its packs: a daemon that is not root must still write its backing file.
 (umask 0222 && printf "ro-data\n" > ro.txt) && echo "ro0444=$(stat -c %a ro.txt):$(cat ro.txt)" && rm -f ro.txt
 git clone -q --no-local "file://$HOME/src" clone-in && git -C clone-in fsck --no-progress && echo "clone-in=ok" && rm -rf clone-in
-echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
+echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge --wait feat >/dev/null
 echo "main-content=$(tr "\n" " " < worktrees/main/a.txt)"
 pando worktree remove worktrees/feat >/dev/null && echo "removed=yes"
 ' 2>&1) || true

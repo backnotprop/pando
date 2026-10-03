@@ -8,6 +8,7 @@ import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
+import { EVENT_STREAM } from "./stream";
 import {
   artifactsRepoName,
   DEFAULT_BRANCH,
@@ -263,6 +264,7 @@ api.delete("/v1/monorepos/:m", async (c) => {
 // ── The event stream ──────────────────────────────────────────────────────
 
 api.get("/v1/monorepos/:m/events", async (c) => {
+  if (!EVENT_STREAM) throw new HttpError(501, "event_stream_on_hold", "the event stream is built but on hold until the architecture review decides where events live");
   const stub = c.get("stub");
   if (c.req.header("upgrade")?.toLowerCase() === "websocket") {
     const headers = new Headers(c.req.raw.headers);

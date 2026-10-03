@@ -103,10 +103,7 @@ export async function compareWith(read: CommitReader, base: string, head: string
     if (side === FROM_HEAD) aheadCommits.push(sha);
     else if (side === FROM_BASE) behind++;
   }
-  const times = new Map<string, number>();
-  for (const sha of aheadCommits) times.set(sha, (await read(sha)).time);
-  aheadCommits.sort((a, b) => times.get(b)! - times.get(a)! || (a < b ? -1 : 1));
-  return { mergeBase: bases[0] ?? null, ahead: aheadCommits.length, behind, aheadCommits };
+  return { mergeBase: bases[0] ?? null, ahead: aheadCommits.length, behind, aheadCommits: await newestFirst(read, head, aheadCommits) };
 }
 
 export async function compare(env: Env, artifactsName: string, base: string, head: string): Promise<Comparison> {
@@ -162,4 +159,39 @@ class Heap {
   anyLive(flags: Map<string, number>): boolean {
     return this.items.some((it) => !((flags.get(it.sha) ?? 0) & STALE));
   }
+}
+
+/**
+ * `commits` in git log's order: every commit before its parents (a reverse
+ * post-order walk from `head`), so commits made in the same second still list
+ * the newer one first. Commits the walk does not reach go last, newest first.
+ */
+async function newestFirst(read: CommitReader, head: string, commits: string[]): Promise<string[]> {
+  const set = new Set(commits);
+  const done = new Set<string>();
+  const post: string[] = [];
+  const stack: { sha: string; next: number }[] = set.has(head) ? [{ sha: head, next: 0 }] : [];
+  if (set.has(head)) done.add(head);
+  while (stack.length) {
+    const top = stack[stack.length - 1];
+    const parents = (await read(top.sha)).parents;
+    if (top.next < parents.length) {
+      const p = parents[top.next++];
+      if (set.has(p) && !done.has(p)) {
+        done.add(p);
+        stack.push({ sha: p, next: 0 });
+      }
+      continue;
+    }
+    post.push(top.sha);
+    stack.pop();
+  }
+  const ordered = post.reverse();
+  const rest = commits.filter((c) => !done.has(c));
+  if (rest.length) {
+    const times = new Map<string, number>();
+    for (const sha of rest) times.set(sha, (await read(sha)).time);
+    rest.sort((a, b) => times.get(b)! - times.get(a)!);
+  }
+  return [...ordered, ...rest];
 }

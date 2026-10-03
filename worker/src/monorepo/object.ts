@@ -16,6 +16,7 @@ import { attempt, hookView, RETRY_DELAYS_MS, wants, type HookRow, type StoredPay
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { branchViews } from "./views";
+import { EVENT_STREAM } from "./stream";
 import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
 import type {
@@ -639,6 +640,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** Record an event and send it to every open event socket. Returns its seq. */
   publish(e: StreamEvent): number {
+    if (!EVENT_STREAM) return 0;
     const at = now();
     const { seq: _s, at: _a, ...rest } = e;
     const body = JSON.stringify(rest);
@@ -735,7 +737,7 @@ export class MonorepoObject extends DurableObject<Env> {
    * overtaken by an earlier one's slower computation.
    */
   publishBranches(repo: string, items: { name: string; kind: string; extra?: Record<string, unknown> }[], by: Identity | null): Promise<void> {
-    if (!items.length) return Promise.resolve();
+    if (!EVENT_STREAM || !items.length) return Promise.resolve();
     return this.serial(`events:${repo}`, async () => {
       const r = this.repoRow(repo);
       const m = this.info();
@@ -772,6 +774,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** A status was posted: the branches whose head is that commit. */
   private async publishBranchesAt(repo: string, sha: string, by: Identity): Promise<void> {
+    if (!EVENT_STREAM) return;
     const r = this.repoRow(repo);
     if (!r) return;
     const refs = branchesOf(await listRefs(this.env, r).catch(() => new Map<string, string>()));
@@ -781,6 +784,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** After a merge: the merged branch, main's head, and up to BRANCHES_AFTER_MERGE open branches. */
   private async publishAfterMerge(repo: string, branch: string, result: MergeResult, by: Identity): Promise<void> {
+    if (!EVENT_STREAM) return;
     const r = this.repoRow(repo);
     if (!r) return;
     await this.publishBranches(repo, [

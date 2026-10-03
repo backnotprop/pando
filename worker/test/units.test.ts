@@ -119,6 +119,17 @@ describe("merge base, ahead and behind", () => {
     expect(await compareWith(read, "m3", "z1")).toEqual({ mergeBase: "y2", ahead: 1, behind: 1, aheadCommits: ["z1"] });
   });
 
+  it("lists a branch's own commits newest first even within one second", async () => {
+    const same: Record<string, CommitInfo> = {
+      r: { parents: [], time: 1, tree: "t" },
+      c1: { parents: ["r"], time: 5, tree: "t" },
+      c2: { parents: ["c1"], time: 5, tree: "t" },
+      c3: { parents: ["c2"], time: 5, tree: "t" },
+    };
+    const out = await compareWith(async (x) => same[x], "r", "c3");
+    expect(out.aheadCommits).toEqual(["c3", "c2", "c1"]);
+  });
+
   it("the same commit", async () => {
     expect(await compareWith(read, "m3", "m3")).toEqual({ mergeBase: "m3", ahead: 0, behind: 0, aheadCommits: [] });
   });

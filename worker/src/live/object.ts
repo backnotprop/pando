@@ -10,6 +10,7 @@ import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./co
 import { parse as parseToml } from "smol-toml";
 import type { MonorepoObject } from "../monorepo/object";
 import type { StreamEvent } from "../monorepo/types";
+import { EVENT_STREAM } from "../monorepo/stream";
 
 // MONOREPO: the monorepo object, whose event stream gets meta.saved and
 // machine.connected / machine.disconnected (absent in the live lane's test Worker).
@@ -709,7 +710,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   /** Queue an event for the monorepo object's stream. Sent in order, in batches, never awaited by the saver. */
   private emit(e: StreamEvent): void {
-    if (!this.env.MONOREPO) return;
+    if (!EVENT_STREAM || !this.env.MONOREPO) return;
     this.outbox.push(e);
     if (this.outbox.length > 1) return;
     queueMicrotask(() => {

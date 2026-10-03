@@ -20,6 +20,7 @@ func Clone(e *Env, args []string) error {
 	fs := flags("clone")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse, for worktrees/main and references")
+	textOnly := fs.Bool("text-only", false, "keep the meta layer's large files and binaries as pointers until pando fetch (agent sandboxes)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -73,7 +74,7 @@ func Clone(e *Env, args []string) error {
 			e.printf("meta layer: none on a file:// server\n")
 		default:
 			start := time.Now()
-			if err := meta.Clone(e.Ctx, dir); err != nil {
+			if err := meta.Clone(e.Ctx, dir, meta.CloneOptions{TextOnly: *textOnly}); err != nil {
 				e.warnf("meta layer: %v", err)
 			} else {
 				e.printf("meta layer: downloaded in %.1fs; keep it live with pando meta sync\n", time.Since(start).Seconds())

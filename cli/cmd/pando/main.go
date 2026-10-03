@@ -23,6 +23,7 @@ var metaCommands = map[string]func([]string) int{
 	"history": meta.CmdHistory,
 	"restore": meta.CmdRestore,
 	"resolve": meta.CmdResolve,
+	"fetch":   meta.CmdFetch,
 	"meta": func(args []string) int {
 		if len(args) > 0 && args[0] == "sync" {
 			// The one daemon of a monorepo: the meta layer, and its
@@ -72,6 +73,7 @@ var metaUsage = []string{
 	"history <path> [--limit n] [--json]                       every saved version of a meta layer file",
 	"restore <path> --to <version | HH:MM>                     write an old version back, as a new save",
 	"resolve [<path>...]                                       unfreeze a file after a conflict",
+	"fetch <path>...                                           download large meta layer files kept as pointers",
 }
 
 var commands = []app.Command{
@@ -79,7 +81,7 @@ var commands = []app.Command{
 	{Name: "logout", Usage: "logout [--server <url>]                                   sign this machine out", Run: app.Logout},
 	{Name: "auth", Usage: "auth status                                               who this machine is signed in as", Run: app.Auth},
 	{Name: "init", Usage: "init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder", Run: app.Init},
-	{Name: "clone", Usage: "clone <name> [folder]                                     set up a Pando repo or monorepo on this machine", Run: app.Clone},
+	{Name: "clone", Usage: "clone <name> [folder] [--text-only]                       set up a Pando repo or monorepo on this machine", Run: app.Clone},
 	{Name: "worktree", Usage: "worktree add <repo> <branch> | list | remove <path> | follow   one branch, one folder, one agent", Run: app.Worktree},
 	{Name: "branch", Usage: "branch list [--repo <path>] [--all]                       branches with ahead, behind and checks", Run: app.Branch},
 	{Name: "diff", Usage: "diff [<branch>] [--json | --patch] [paths...]             the branch diff against main", Run: app.Diff},

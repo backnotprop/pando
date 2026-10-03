@@ -8,11 +8,34 @@ import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "
 import { gitRequest, listRefs } from "./artifacts";
 import { compare } from "./graph";
 import { ZERO } from "./names";
-import { drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
-import { LEASE_MS } from "./gate";
+import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
+import { isBusy, LEASE_MS } from "./gate";
 import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
 
 /** Count the pack bytes git sends (push_bytes on the timing line). */
+/**
+ * A push up to this size is held in memory, so the door can send it to
+ * Artifacts again when Artifacts answers that the repo is busy (about 2
+ * receive-packs run at once per repo). Larger pushes stream through and can
+ * still be refused; the person pushes again.
+ */
+export const BUSY_REPLAY_MAX = 1 << 20;
+/** The wait before the one retry: jittered, so two refused pushes do not collide again. */
+const BUSY_WAIT_MS = [150, 400] as const;
+
+/** Read up to `max` bytes after `head`. `all` when the body ended within them. */
+async function bufferUpTo(head: Uint8Array, reader: ReadableStreamDefaultReader<Uint8Array>, max: number): Promise<{ all: boolean; bytes: Uint8Array }> {
+  const chunks: Uint8Array[] = [head];
+  let n = head.byteLength;
+  while (n <= max) {
+    const { done, value } = await reader.read();
+    if (done) return { all: true, bytes: concat(chunks) };
+    chunks.push(value);
+    n += value.byteLength;
+  }
+  return { all: false, bytes: concat(chunks) };
+}
+
 function countBytes(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const t = currentTiming(); // the stream's callbacks may run outside the request's context
   let n = 0;
@@ -220,38 +243,66 @@ async function receivePack(
     });
   }
 
+  // Small pushes are read in full first (before taking a slot), so a busy answer can be replayed.
+  const buffered = await bufferUpTo(section.head, section.rest, BUSY_REPLAY_MAX);
+  // Tests only: take the first attempt as busy without sending it.
+  let fakeBusy = env.DOOR_TEST === "1" && req.headers.get("x-pando-test-busy") === "1";
+
   // One of the repo's two write slots (gate.ts). git waits here while the slot is taken.
   const g0 = Date.now();
   const slot = await stub.acquireWrite(repo.artifacts_name);
   addGate(slot.ok ? slot.value.waited_ms : Date.now() - g0);
   note({ refs: section.commands.length });
   if (!slot.ok) {
-    await drain(section.rest);
-    return gitError(`Pando: ${repo.name} is busy with other writes; try the push again`);
+    if (!buffered.all) await drain(section.rest);
+    return busyRefusal(section, `Pando: ${repo.name} is busy with other writes; push again`);
   }
   const lease = slot.value.lease;
   const renew = setInterval(() => {
     stub.renewWrite(repo.artifacts_name, lease).catch(() => {});
   }, LEASE_MS / 3);
-  let bytes: Uint8Array;
-  let res: Response;
-  try {
-    res = await gitRequest(env, repo, "/git-receive-pack", "write", {
+  let bytes: Uint8Array = new Uint8Array(0);
+  let res: Response | null = null;
+  let busy = false;
+  const send = async () => {
+    if (fakeBusy) {
+      fakeBusy = false;
+      return { res: null, bytes: pkt("ERR artifacts_git_receive_pack_busy (test)\n"), busy: true };
+    }
+    if (buffered.all) note({ push_bytes: buffered.bytes.byteLength });
+    const r = await gitRequest(env, repo, "/git-receive-pack", "write", {
       method: "POST",
       headers: {
         "content-type": "application/x-git-receive-pack-request",
         accept: "application/x-git-receive-pack-result",
       },
-      body: countBytes(prepend(section.head, section.rest)),
+      body: buffered.all ? buffered.bytes : countBytes(prepend(buffered.bytes, section.rest)),
     });
     // The whole report, before git sees it: the push is recorded first (it is small).
-    bytes = new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => res.arrayBuffer()));
+    const b = new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => r.arrayBuffer()));
+    // Busy: Artifacts' code, and no pack taken (a branch could be named like the code).
+    const refusedBusy = isBusy(new TextDecoder().decode(b.subarray(0, 512))) && parseReport(b, section.caps).unpack !== "ok";
+    return { res: r, bytes: b, busy: refusedBusy };
+  };
+  try {
+    ({ res, bytes, busy } = await send());
+    if (busy && buffered.all) {
+      // Artifacts was mid-push with others: wait a moment and send the same pack again, once, in the same slot.
+      await new Promise((r) => setTimeout(r, BUSY_WAIT_MS[0] + Math.random() * (BUSY_WAIT_MS[1] - BUSY_WAIT_MS[0])));
+      ({ res, bytes, busy } = await send());
+      note({ busy_retry: busy ? "failed" : "ok" });
+    } else if (busy) {
+      if (!res) await drain(section.rest); // the test's unsent large push
+      note({ busy_retry: "too_large" });
+    }
   } finally {
     clearInterval(renew);
     await stub.releaseWrite(repo.artifacts_name, lease, false).catch(() => false);
   }
-  const headers = { "content-type": res.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
-  if (!res.ok) return new Response(bytes, { status: res.status, headers });
+  // Still busy: a plain message, not Artifacts' code.
+  if (busy) return busyRefusal(section, `Pando: ${repo.name} is busy with other pushes right now; push again`);
+  const headers = { "content-type": res!.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
+  if (!res!.ok) return new Response(bytes, { status: res!.status, headers });
 
   // Record before ack: branch heads and their events are written before git gets its report.
   const report = parseReport(bytes, section.caps);
@@ -262,9 +313,10 @@ async function receivePack(
   return new Response(bytes, { headers });
 }
 
-/** An `ERR` pkt-line: git prints "remote error: <message>". */
-function gitError(message: string): Response {
-  return new Response(pkt(`ERR ${message}\n`), {
+/** Every ref refused with `message` (side-band aware: git prints it, then "! [remote rejected] ... (busy; push again)"). */
+function busyRefusal(section: { commands: import("./pktline").RefCommand[]; caps: Set<string> }, message: string): Response {
+  const reasons = new Map(section.commands.map((c) => [c.ref, "busy; push again"]));
+  return new Response(refusal(section.commands, reasons, section.caps, message), {
     headers: { "content-type": "application/x-git-receive-pack-result", "cache-control": "no-cache" },
   });
 }

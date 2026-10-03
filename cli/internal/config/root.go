@@ -28,11 +28,15 @@ type RepoEntry struct {
 }
 
 // Root is .pando/local/root.json plus where it was found.
+// Version 2 (owner/name monorepos) adds Owner and ID; a version 1 root has
+// neither and is upgraded on first use (app.upgradeRoot).
 type Root struct {
 	Dir     string      `json:"-"`
 	Version int         `json:"version"`
 	Kind    string      `json:"kind"`
-	Name    string      `json:"name"`
+	Owner   string      `json:"owner,omitempty"` // the monorepo's owner: a login (an organization later)
+	Name    string      `json:"name"`            // its name within the owner
+	ID      string      `json:"id,omitempty"`    // permanent; a rename or transfer keeps it
 	Server  string      `json:"server"`
 	Repos   []RepoEntry `json:"repos"`
 }
@@ -77,9 +81,21 @@ func LoadRoot(dir string) (*Root, error) {
 	return r, nil
 }
 
-// Save writes root.json.
+// FullName is owner/name, how the monorepo is named everywhere (just the
+// name in a version 1 root, before its upgrade).
+func (r *Root) FullName() string {
+	if r.Owner == "" {
+		return r.Name
+	}
+	return r.Owner + "/" + r.Name
+}
+
+// Save writes root.json: version 2 once the owner is known.
 func (r *Root) Save() error {
 	r.Version = 1
+	if r.Owner != "" {
+		r.Version = 2
+	}
 	sort.Slice(r.Repos, func(i, j int) bool { return r.Repos[i].Path < r.Repos[j].Path })
 	return writeJSON(filepath.Join(LocalDir(r.Dir), "root.json"), r)
 }

@@ -27,12 +27,7 @@ func Clone(e *Env, args []string) error {
 		return err
 	}
 	if len(pos) < 1 || len(pos) > 2 {
-		return UsageError{"pando clone <name> [folder]"}
-	}
-	mono := pos[0]
-	dir := e.abs(mono)
-	if len(pos) == 2 {
-		dir = e.abs(pos[1])
+		return UsageError{"pando clone <owner/name | name> [folder]"}
 	}
 	serverURL := strings.TrimRight(*srv, "/")
 	if serverURL == "" {
@@ -41,18 +36,25 @@ func Clone(e *Env, args []string) error {
 	if serverURL == "" {
 		return errors.New("no Pando server: pass --server <url>, set PANDO_SERVER, or run `pando login --server <url>`")
 	}
-	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-		return fmt.Errorf("%s exists and is not empty", dir)
-	}
-	root := &config.Root{Dir: dir, Name: mono, Server: serverURL}
+	root := &config.Root{Server: serverURL}
 	s, err := e.open(root)
 	if err != nil {
 		return err
 	}
-	m, err := s.GetMonorepo(e.Ctx, mono)
+	m, err := resolveMonorepo(e, s, pos[0])
 	if err != nil {
-		return fmt.Errorf("monorepo %s on %s: %w", mono, serverURL, err)
+		return err
 	}
+	// The folder is the monorepo's name (not owner/name), as git clone does.
+	dir := e.abs(m.Name)
+	if len(pos) == 2 {
+		dir = e.abs(pos[1])
+	}
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		return fmt.Errorf("%s exists and is not empty", dir)
+	}
+	mono := m.Full()
+	root.Dir, root.Owner, root.Name, root.ID = dir, m.Owner, m.Name, m.ID
 	repos, err := s.ListRepos(e.Ctx, mono)
 	if err != nil {
 		return err

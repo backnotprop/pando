@@ -10,14 +10,38 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
+// Monorepo is named owner/name, like a GitHub repo; ID is permanent
+// (a rename or transfer changes the name, never the id).
 type Monorepo struct {
+	ID        string `json:"id"`
+	Owner     string `json:"owner"`
 	Name      string `json:"name"`
-	Kind      string `json:"kind"` // "monorepo" or "repo"
-	Role      string `json:"role"` // the caller's: "owner" or "member"
+	FullName  string `json:"full_name"` // owner/name
+	Kind      string `json:"kind"`      // "monorepo" or "repo"
+	Role      string `json:"role"`      // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
+}
+
+// Full is owner/name (from full_name, or built when the server left it out).
+func (m Monorepo) Full() string {
+	switch {
+	case m.FullName != "":
+		return m.FullName
+	case m.Owner != "":
+		return m.Owner + "/" + m.Name
+	}
+	return m.Name
+}
+
+// ReplacedAlias says a create or rename took a name an old monorepo name
+// had pointed to: that old name no longer leads where it did.
+type ReplacedAlias struct {
+	FullName  string `json:"full_name"`
+	PointedTo string `json:"pointed_to"`
 }
 
 type Repo struct {
@@ -31,8 +55,9 @@ type Repo struct {
 
 // Created is the answer to createMonorepo.
 type Created struct {
-	Monorepo Monorepo `json:"monorepo"`
-	Repos    []Repo   `json:"repos"`
+	Monorepo      Monorepo       `json:"monorepo"`
+	Repos         []Repo         `json:"repos"`
+	ReplacedAlias *ReplacedAlias `json:"replaced_alias"`
 }
 
 type User struct {
@@ -224,7 +249,9 @@ type Server interface {
 	RevokeCredential(ctx context.Context, id string) error
 
 	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
-	ListMonorepos(ctx context.Context) ([]Monorepo, error)
+	// ListMonorepos lists the caller's monorepos; with a name, only those
+	// named so (any owner), the caller's own namespace first.
+	ListMonorepos(ctx context.Context, name string) ([]Monorepo, error)
 	GetMonorepo(ctx context.Context, mono string) (*Monorepo, error)
 	// DeleteMonorepo deletes it, its repos and their history (owners).
 	DeleteMonorepo(ctx context.Context, mono string) error
@@ -259,9 +286,21 @@ type Server interface {
 // A plain repo (path ".") is named after its monorepo.
 func RepoName(mono, path string) string {
 	if path == "." || path == "" {
-		return mono
+		return mono[strings.LastIndexByte(mono, '/')+1:] // the monorepo's name, without its owner
 	}
 	return strings.ReplaceAll(path, "/", "-")
+}
+
+// MonorepoPath is a monorepo's API path, /v1/monorepos/<owner>/<name>, for
+// a full name owner/name. Every monorepo URL the cli builds starts here
+// (the API, the event socket, the meta layer's routes and socket). Git
+// URLs come from the server's clone_url, never built.
+func MonorepoPath(full string) string {
+	parts := strings.Split(full, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return "/v1/monorepos/" + strings.Join(parts, "/")
 }
 
 // APIError is a non-2xx answer: {"error": {"code", "message", ...}}.

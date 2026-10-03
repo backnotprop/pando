@@ -88,7 +88,7 @@ func LoadConfig(root string) (Config, error) {
 		if r.Kind == config.KindRepo {
 			return c, errors.New("a plain git repo has no meta layer")
 		}
-		c.Monorepo, c.Server = r.Name, r.Server
+		c.Monorepo, c.Server = r.FullName(), r.Server // owner/name
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return c, err
 	}

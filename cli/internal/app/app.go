@@ -204,8 +204,20 @@ func (e *Env) pickNew(kind string) (worktree.Driver, error) {
 	return drv, nil
 }
 
-// root finds the Pando root above the current folder.
-func (e *Env) root() (*config.Root, error) { return config.FindRoot(e.Cwd) }
+// root finds the Pando root above the current folder, upgrading a version 1
+// root to owner/name first (upgrade.go).
+func (e *Env) root() (*config.Root, error) {
+	root, err := config.FindRoot(e.Cwd)
+	if err != nil {
+		return nil, err
+	}
+	if root.Owner == "" {
+		if err := e.upgradeRoot(root); err != nil {
+			return nil, fmt.Errorf("this folder's monorepo %s needs its owner/name from the server: %w", root.Name, err)
+		}
+	}
+	return root, nil
+}
 
 // agent is the agent name in force: --agent, else PANDO_AGENT.
 func agentName(flagValue string) string {
@@ -234,7 +246,7 @@ func (e *Env) repoArg(root *config.Root, arg string) (string, error) {
 	if r, ok := root.RepoFor(rel); ok && (r == "." || strings.HasPrefix(rel, r+"/worktrees")) {
 		return r, nil
 	}
-	return "", fmt.Errorf("%s is not a repo in %s (repos: %s)", rel, root.Name, repoList(root))
+	return "", fmt.Errorf("%s is not a repo in %s (repos: %s)", rel, root.FullName(), repoList(root))
 }
 
 func repoList(root *config.Root) string {
@@ -284,7 +296,7 @@ func repoName(root *config.Root, path string) string {
 	if e, ok := root.Repo(path); ok && e.Name != "" {
 		return e.Name
 	}
-	return server.RepoName(root.Name, path)
+	return server.RepoName(root.FullName(), path)
 }
 
 func short(s string) string {
@@ -300,7 +312,7 @@ var errSilent = errors.New("")
 // for a plain repo (path ".").
 func label(root *config.Root, repo string) string {
 	if repo == "." {
-		return root.Name
+		return root.FullName()
 	}
 	return repo
 }

@@ -10,11 +10,12 @@
 // Give every dev server its own --persist-to. Two wrangler dev servers on one
 // folder's .wrangler/state open the same Durable Object databases: workerd
 // then logs "internal error; reference = ...", SQLITE_BUSY and SQLITE_READONLY,
-// and checks fail at random (reproduced 2026-10-03; 0 such lines apart).
+// and checks fail at random (reproduced 2026-10-03; no SQLite errors apart).
 //
 // With PANDO_DEV_LOG (the dev server's output), the run fails on any
-// undisposed RPC result, 500, uncaught exception, Pando error line, workerd
-// internal error, SQLITE_BUSY or SQLITE_READONLY logged while it ran.
+// undisposed RPC result, 500, uncaught exception, Pando error line,
+// SQLITE_BUSY or SQLITE_READONLY logged while it ran (workerd's bare
+// "internal error" lines are counted: see the check at the end).
 //
 // Credentials stay in memory and are never printed. Git never reaches the
 // macOS keychain. It deletes every monorepo it made.
@@ -529,19 +530,24 @@ try {
     await sleep(12_000);
     const lines = logLines().slice(logStart).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
     // Fails the run: an undisposed RPC result; a 500 (the Worker logs "internal error: <message>"); Pando's own
-    // error lines ("feed: ...") and uncaught exceptions; workerd's "internal error; reference" and SQLITE_BUSY or
-    // SQLITE_READONLY (another dev server sharing this one's state, or a real fault). Not: this test's own crash
-    // and failed drains.
+    // error lines ("feed: ...") and uncaught exceptions; SQLITE_BUSY or SQLITE_READONLY (another dev server sharing
+    // this one's state). Not: this test's own crash and failed drains.
+    // Counted, not failed: workerd's bare "internal error; reference" lines. With shared state they come with the
+    // SQLite errors above; on a server with its own state they still appear amid Artifacts traffic through wrangler
+    // dev's remote-bindings proxy, with no JavaScript exception near them in a debug log and no check failing.
+    // pando-dev, which has no proxy, has logged none; its logs are read after each deploy.
     const bad = [];
     let ours = 0;
+    let internal = 0;
     for (const l of lines) {
       if (/feed test: (the object dies|a failed drain)/.test(l)) ours++;
-      else if (/not disposed properly|internal error; reference = |SQLITE_(BUSY|READONLY)|✘ \[ERROR\] (Uncaught|internal error: |feed: )/.test(l)) bad.push(l);
+      else if (/^✘ \[ERROR\] Error: internal error; reference = /.test(l)) internal++;
+      else if (/not disposed properly|SQLITE_(BUSY|READONLY)|✘ \[ERROR\] (Uncaught|internal error: |feed: )/.test(l)) bad.push(l);
     }
-    const shared = bad.some((l) => /internal error; reference|SQLITE_(BUSY|READONLY)/.test(l));
-    check("the dev server logged no undisposed RPC results, 500s, Pando errors or workerd internal errors during the run", bad.length === 0,
+    const shared = bad.some((l) => /SQLITE_(BUSY|READONLY)/.test(l));
+    check("the dev server logged no undisposed RPC results, 500s, Pando errors or SQLite lock errors during the run", bad.length === 0,
       `${bad.length}: ${bad.slice(0, 2).join(" | ").slice(0, 200)}${shared ? " (does another wrangler dev share this server's state? give each its own --persist-to)" : ""}`);
-    console.log(`INFO  ${ours} log lines from this test's own crash and failed drains (expected)`);
+    console.log(`INFO  ${internal} workerd "internal error; reference" lines (counted, not failed); ${ours} from this test's own crash and failed drains`);
   } else console.log("SKIP  the dev server log check (set PANDO_DEV_LOG to the dev server's output)");
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);

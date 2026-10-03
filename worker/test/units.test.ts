@@ -219,3 +219,64 @@ describe("Pando's commit trailers", () => {
     expect(pandoTrailers("T\n\nSigned-off-by: x\npando-machine: box")).toEqual({ agent: null, worktree: null, machine: "box" });
   });
 });
+
+describe("the write gate", () => {
+  it("lets two in at once, the rest in order", async () => {
+    const { WriteGate } = await import("../src/monorepo/gate");
+    const g = new WriteGate(2, 1000, 1000);
+    const order: string[] = [];
+    const l1 = await g.acquire("r");
+    const l2 = await g.acquire("r");
+    const w3 = g.acquire("r").then((l) => (order.push("third"), l));
+    const w4 = g.acquire("r").then((l) => (order.push("fourth"), l));
+    expect(g.stats("r")).toEqual({ held: 2, waiting: 2 });
+    g.release("r", l1);
+    await w3;
+    g.release("r", l2);
+    await w4;
+    expect(order).toEqual(["third", "fourth"]);
+  });
+
+  it("frees a slot whose lease runs out, and turns away a writer that waits too long", async () => {
+    const { WriteGate, GateBusy } = await import("../src/monorepo/gate");
+    const g = new WriteGate(1, 50, 200);
+    await g.acquire("r"); // never released: the lease ends after 50 ms
+    const next = await g.acquire("r");
+    expect(typeof next).toBe("string");
+    const slow = new WriteGate(1, 10_000, 50);
+    await slow.acquire("r");
+    await expect(slow.acquire("r")).rejects.toBeInstanceOf(GateBusy);
+  });
+
+  it("renewing keeps a lease alive", async () => {
+    const { WriteGate } = await import("../src/monorepo/gate");
+    const g = new WriteGate(1, 80, 1000);
+    const l = await g.acquire("r");
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 40));
+      expect(g.renew("r", l)).toBe(true);
+    }
+    expect(g.stats("r").held).toBe(1);
+  });
+});
+
+describe("event topics", () => {
+  it("tags main moves, repos, kinds and the meta layer", async () => {
+    const { eventTags, parseTopics } = await import("../src/monorepo/stream");
+    expect(eventTags({ kind: "default_head.updated", repo: "projects-web", collection: "default_heads" })).toEqual(
+      ["all", "kind:default_head.updated", "repo:projects-web", "main", "main:projects-web"],
+    );
+    expect(eventTags({ kind: "meta.saved", repo: "meta", collection: "meta_files" })).toContain("meta");
+    expect(eventTags({ kind: "machine.connected", repo: "meta", collection: "presence" })).toContain("meta");
+    expect(parseTopics(null)).toEqual(["all"]);
+    expect(parseTopics("main,repo:projects-web")).toEqual(["main", "repo:projects-web"]);
+    expect(parseTopics("nope")).toBeNull();
+  });
+});
+
+describe("ERR answers from receive-pack", () => {
+  it("are read as errors, not as a missing unpack line", () => {
+    const r = parseReport(pkt("ERR artifacts_git_receive_pack_busy\n"), new Set(["report-status"]));
+    expect(r.error).toBe("artifacts_git_receive_pack_busy");
+  });
+});

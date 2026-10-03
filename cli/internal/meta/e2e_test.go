@@ -242,8 +242,10 @@ func (m *machine) config() Config {
 	}
 }
 
-func (m *machine) start() {
-	e, err := New(m.config())
+func (m *machine) start() { m.startWith(m.config()) }
+
+func (m *machine) startWith(cfg Config) {
+	e, err := New(cfg)
 	if err != nil {
 		m.t.Fatal(err)
 	}
@@ -396,6 +398,8 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 		"data/cache.sqlite",
 	}
 	atRoot := []string{".env", ".pando/pando.toml", ".pando/local/mine.json", "projects/web/README.md"}
+	// A nested repo's .git comes first, as git clone makes it.
+	a.write("research/infra/lib/.git/HEAD", "ref: refs/heads/main\n")
 	for _, p := range local {
 		a.write(p, "stays\n")
 	}
@@ -403,7 +407,6 @@ func TestE2ELocalOnlyStays(t *testing.T) {
 		a.writeRoot(p, "stays\n")
 	}
 	pointer := ".pando/references/" + env.p("research/infra/lib.toml")
-	a.write("research/infra/lib/.git/HEAD", "ref: refs/heads/main\n")
 	a.write("big.txt", strings.Repeat("a", MaxBytes+1))
 	a.write("image.dat", "\x89PNG\x00\x01")
 	a.writeRoot(pointer, "url = \"https://example.com/lib.git\"\n")
@@ -1348,5 +1351,202 @@ func TestE2EDestroy(t *testing.T) {
 	})
 	if _, ok := carl.read("doomed.md"); ok {
 		t.Error("a new machine received a file from before the delete")
+	}
+}
+
+// A reference pointer never carries a user or password in its url.
+func TestE2EReferenceCredentialsRefused(t *testing.T) {
+	env := newEnv(t)
+	send, next := rawSocket(t, env.server, env.mono)
+	cases := []struct {
+		url, reason string
+	}{
+		{"https://user:not-a-real-token@example.com/lib.git", "credentials"},
+		{"https://token@example.com/lib.git", "credentials"},
+		{"https://example.com/lib.git", ""},
+		{"git@github.com:org/lib.git", ""},
+	}
+	for i, c := range cases {
+		body := []byte(fmt.Sprintf("url = %q\nref = \"refs/heads/main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n", c.url))
+		p := ".pando/references/" + env.p(fmt.Sprintf("ref%d.toml", i))
+		send(saveMsg{Type: "save", ID: strconv.Itoa(i), Path: p, SHA: gitSHA(body), Bytes: body})
+		m := next("")
+		if c.reason == "" && m.Type != "accepted" {
+			t.Errorf("%s: got %s %s, want accepted", c.url, m.Type, m.Reason)
+		}
+		if c.reason != "" && (m.Type != "refused" || m.Reason != c.reason) {
+			t.Errorf("%s: got %s %s, want refused %s", c.url, m.Type, m.Reason, c.reason)
+		}
+	}
+	// Through an engine: the pointer stays on the machine that wrote it.
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
+	bad := ".pando/references/" + env.p("leaky.toml")
+	a.writeRoot(bad, "url = \"https://user:not-a-real-token@example.com/x.git\"\n")
+	a.write("after.md", "after\n")
+	waitContent(t, b, "after.md", "after\n")
+	if _, ok := b.readRoot(bad); ok {
+		t.Error("a pointer with credentials reached ben")
+	}
+}
+
+func getJSON(t *testing.T, env *testEnv, route string, out any) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, env.server+"/v1/monorepos/"+url.PathEscape(env.mono)+"/meta/"+route, nil)
+	if tok := os.Getenv("PANDO_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	json.NewDecoder(resp.Body).Decode(out)
+	return resp.StatusCode
+}
+
+type treePage struct {
+	Files []struct {
+		Path  string `json:"path"`
+		Large *struct {
+			Size int64 `json:"size"`
+		} `json:"large"`
+	} `json:"files"`
+	Folders []struct {
+		Name  string `json:"name"`
+		Files int    `json:"files"`
+	} `json:"folders"`
+	Next *string `json:"next"`
+}
+
+func (p treePage) paths() []string {
+	var out []string
+	for _, f := range p.Files {
+		out = append(out, f.Path)
+	}
+	return out
+}
+
+// GET tree: pages, prefix as a range (emoji too), dir= for one folder.
+func TestE2ETree(t *testing.T) {
+	env := newEnv(t)
+	env.own(t, "tree") // exact listings need a monorepo of its own
+	a := env.machine(t, "ana")
+	files := []string{"AGENTS.md", "b.md", "docs/one.md", "docs/two.md", "docs/deep/three.md", "📁notes/a.md", "📁notes/b.md", "research/x/y/z.md"}
+	for _, p := range files {
+		a.write(p, "x\n")
+	}
+	a.write("art/render.bin", randomBinary(2048))
+	waitFor(t, "every file on the server", func() bool {
+		var p treePage
+		getJSON(t, env, "tree", &p)
+		return len(p.Files) == len(files)+1
+	})
+
+	// Every file, two at a time, through next.
+	var all []string
+	after := ""
+	pages := 0
+	for {
+		var p treePage
+		route := "tree?limit=2"
+		if after != "" {
+			route += "&after=" + url.QueryEscape(after)
+		}
+		if code := getJSON(t, env, route, &p); code != 200 {
+			t.Fatalf("%s: %d", route, code)
+		}
+		pages++
+		all = append(all, p.paths()...)
+		if p.Next == nil {
+			break
+		}
+		after = *p.Next
+	}
+	if len(all) != len(files)+1 || pages != 5 || !slices.IsSorted(all) {
+		t.Errorf("paged tree: %d pages, %v", pages, all)
+	}
+
+	var p treePage
+	getJSON(t, env, "tree?prefix="+url.QueryEscape("📁notes/"), &p)
+	if !slices.Equal(p.paths(), []string{"📁notes/a.md", "📁notes/b.md"}) {
+		t.Errorf("emoji prefix: %v", p.paths())
+	}
+	p = treePage{}
+	getJSON(t, env, "tree?prefix=docs/", &p)
+	if len(p.Files) != 3 {
+		t.Errorf("prefix docs/: %v", p.paths())
+	}
+	p = treePage{}
+	getJSON(t, env, "tree?prefix=art/", &p)
+	if len(p.Files) != 1 || p.Files[0].Large == nil || p.Files[0].Large.Size != 2048 {
+		t.Errorf("a large file in tree: %+v", p.Files)
+	}
+
+	// dir=: the root's files and folders, then one folder.
+	p = treePage{}
+	getJSON(t, env, "tree?dir=", &p)
+	folders := map[string]int{}
+	for _, f := range p.Folders {
+		folders[f.Name] = f.Files
+	}
+	if !slices.Equal(p.paths(), []string{"AGENTS.md", "b.md"}) ||
+		folders["docs"] != 3 || folders["📁notes"] != 2 || folders["research"] != 1 || folders["art"] != 1 || len(folders) != 4 {
+		t.Errorf("dir= (root): files %v folders %v", p.paths(), folders)
+	}
+	p = treePage{}
+	getJSON(t, env, "tree?dir=docs", &p)
+	if !slices.Equal(p.paths(), []string{"docs/one.md", "docs/two.md"}) || len(p.Folders) != 1 || p.Folders[0].Name != "deep" {
+		t.Errorf("dir=docs: files %v folders %+v", p.paths(), p.Folders)
+	}
+	var e struct {
+		Error struct{ Code string } `json:"error"`
+	}
+	if code := getJSON(t, env, "tree?dir=docs&prefix=docs/", &e); code != 400 {
+		t.Errorf("dir and prefix together: %d", code)
+	}
+}
+
+// applyFromMain (a reviewed merge into the meta layer's main) reaches every
+// machine; GET references shows pointer urls without a user or password.
+func TestE2EApplyFromMainAndReferences(t *testing.T) {
+	env := newEnv(t)
+	if env.shared || strings.HasPrefix(env.server, "https://") {
+		t.Skip("uses the local test Worker's /test/apply-from-main")
+	}
+	a := env.machine(t, "ana")
+	body, _ := json.Marshal(map[string]any{
+		"monorepo": env.mono, "commit": strings.Repeat("ab", 20),
+		"changes": []map[string]any{
+			{"path": ".pando/pando.toml", "text": "local_only = [\"scratch/\"]\n"},
+			{"path": ".pando/references/research/lib.toml", "text": "url = \"https://user:not-a-real-token@example.com/lib.git\"\nref = \"refs/heads/main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n"},
+			{"path": ".pando/references/research/plain.toml", "text": "url = \"git@github.com:org/plain.git\"\nref = \"refs/heads/main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n"},
+		},
+	})
+	resp, err := http.Post(env.server+"/test/apply-from-main", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	waitFor(t, ".pando/pando.toml from main on ana", func() bool {
+		got, _ := a.readRoot(".pando/pando.toml")
+		return got == "local_only = [\"scratch/\"]\n"
+	})
+	h, err := env.client().History(context.Background(), ".pando/pando.toml", 1)
+	if err != nil || h.Versions[0].Source != "main" || h.Versions[0].Commit != strings.Repeat("ab", 20) {
+		t.Errorf("history of a change from main: %+v %v", h, err)
+	}
+	var refs struct {
+		References []struct {
+			Path, URL string
+		} `json:"references"`
+	}
+	getJSON(t, env, "references", &refs)
+	got := map[string]string{}
+	for _, r := range refs.References {
+		got[r.Path] = r.URL
+	}
+	if got["research/lib"] != "https://example.com/lib.git" || got["research/plain"] != "git@github.com:org/plain.git" {
+		t.Errorf("references: %v", got)
 	}
 }

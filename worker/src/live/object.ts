@@ -3,7 +3,7 @@
 // WebSocket, and commits changes to the meta layer's main after 10 s of quiet.
 // Owned by the live lane. The wire is docs/contracts/meta-sync.md.
 import { DurableObject } from "cloudflare:workers";
-import { checkBytes, checkPath, MAX_BYTES, type Refusal } from "./rules";
+import { checkBytes, checkPath, checkPointer, MAX_BYTES, type Refusal } from "./rules";
 import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
@@ -18,6 +18,8 @@ import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
 export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+const TREE_LIMIT = 1000; // GET tree: files per page by default
+const TREE_MAX = 5000; // and at most
 const EVENTS_FLUSH_MS = 250; // meta events go to the monorepo's stream in one call per this much time
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
 const GROUP_MS = 2_000; // paths due within this of each other share a commit
@@ -59,6 +61,8 @@ interface VersionRow {
   source: Source;
   restored_from: number | null;
   commit_sha: string | null;
+  lfs_oid: string | null; // a large file's SHA-256 when the version is its pointer
+  lfs_size: number | null; // and the large file's own size
 }
 
 interface Current {
@@ -81,6 +85,7 @@ interface NewVersion {
   source: Source;
   restored_from?: number | null;
   commit_sha?: string | null;
+  lfs?: { oid: string; size: number } | null; // read from bytes when not given
 }
 
 export interface MainChange {
@@ -90,6 +95,21 @@ export interface MainChange {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
+}
+
+// A reference url as shown to people: without a user or password. New
+// pointers with credentials are refused (rules.ts); older ones, or ones
+// merged on main, are shown without them.
+function withoutCredentials(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (!u.username && !u.password) return raw;
+    u.username = "";
+    u.password = "";
+    return u.toString();
+  } catch {
+    return raw; // git@host:path names a user, never a password
+  }
 }
 
 // A name from the client (author, machine, agent), kept short: it lives in
@@ -128,7 +148,24 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.createSchema();
+    this.migrate();
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  // Objects made before the lfs_* columns existed: add them, and fill them
+  // from the stored pointers once.
+  private migrate(): void {
+    const cols = this.sql.exec<any>("PRAGMA table_info(versions)").toArray().map((c) => c.name as string);
+    if (cols.includes("lfs_oid")) return;
+    this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_oid TEXT");
+    this.sql.exec("ALTER TABLE versions ADD COLUMN lfs_size INTEGER");
+    const small = this.sql
+      .exec<any>("SELECT version, sha FROM versions WHERE sha IS NOT NULL AND deleted = 0 AND size < 1024")
+      .toArray() as { version: number; sha: string }[];
+    for (const r of small) {
+      const ptr = parsePointer(new Uint8Array(this.blob(r.sha)));
+      if (ptr) this.sql.exec("UPDATE versions SET lfs_oid = ?, lfs_size = ? WHERE version = ?", ptr.oid, ptr.size, r.version);
+    }
   }
 
   private createSchema(): void {
@@ -148,7 +185,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at INTEGER NOT NULL,
         source TEXT NOT NULL,
         restored_from INTEGER,
-        commit_sha TEXT
+        commit_sha TEXT,
+        lfs_oid TEXT,
+        lfs_size INTEGER
       );
       CREATE INDEX IF NOT EXISTS versions_by_path ON versions(path, version);
       CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, version INTEGER NOT NULL, sha TEXT, deleted INTEGER NOT NULL);
@@ -260,9 +299,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private historyEntry(r: VersionRow) {
     // A large file's version is its pointer: show the file's own size and hash.
-    const ptr = r.sha && !r.deleted && (r.size ?? 0) < 1024 ? parsePointer(new Uint8Array(this.blob(r.sha))) : null;
     return {
-      large: ptr ? { oid: ptr.oid, size: ptr.size } : null,
+      large: r.lfs_oid ? { oid: r.lfs_oid, size: r.lfs_size } : null,
       version: r.version,
       path: r.path,
       op: r.op,
@@ -339,6 +377,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       agent,
       source: "restore",
       restored_from: target.version,
+      lfs: target.lfs_oid ? { oid: target.lfs_oid, size: target.lfs_size ?? 0 } : null,
     });
     this.broadcast(this.changeMessage(this.row(version)));
     await this.scheduleCommit();
@@ -540,6 +579,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       if (msg.blobMissing) {
         return refuse(path, { reason: "missing_blob", status: 400, message: "upload the file's bytes to meta/blobs first" });
       }
+      const badPointer = checkPointer(path, bytes);
+      if (badPointer) return refuse(path, badPointer);
       const base = int(msg.base_version, -1);
       const cur = this.current(path);
       if (!this.baseMatches(cur, base)) return this.stale(ws, id, path, base, cur);
@@ -587,11 +628,16 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const curTo = this.current(path);
     if (!this.baseMatches(curTo, toBase)) return this.stale(ws, id, path, toBase, curTo);
     const fromRow = this.row(curFrom.version);
+    const badPointer = fromRow.sha ? checkPointer(path, new Uint8Array(this.blob(fromRow.sha))) : null;
+    if (badPointer) return refuse(path, badPointer);
     let fromVersion = 0;
     let version = 0;
     this.ctx.storage.transactionSync(() => {
       fromVersion = this.insert({ path: from, op: "rename", sha: null, size: null, deleted: true, moved: path, ...who, source: "live" });
-      version = this.insert({ path, op: "rename", sha: fromRow.sha, size: fromRow.size, deleted: false, moved: from, ...who, source: "live" });
+      version = this.insert({
+        path, op: "rename", sha: fromRow.sha, size: fromRow.size, deleted: false, moved: from, ...who, source: "live",
+        lfs: fromRow.lfs_oid ? { oid: fromRow.lfs_oid, size: fromRow.lfs_size ?? 0 } : null,
+      });
     });
     this.send(ws, { type: "accepted", id, path, version, sha: fromRow.sha, from, from_version: fromVersion });
     this.broadcast(this.changeMessage(this.row(version)), att.id);
@@ -661,10 +707,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       );
     }
     const at = Date.now();
+    const lfs = n.lfs !== undefined ? n.lfs : n.bytes && n.bytes.length < 1024 ? parsePointer(n.bytes) : null;
     const version = this.sql
       .exec<any>(
-        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
+        `INSERT INTO versions (path, op, sha, size, deleted, moved, author, machine, agent, at, source, restored_from, commit_sha, lfs_oid, lfs_size)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING version`,
         n.path,
         n.op,
         n.sha,
@@ -678,6 +725,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         n.source,
         n.restored_from ?? null,
         n.commit_sha ?? null,
+        lfs?.oid ?? null,
+        lfs?.size ?? null,
       )
       .one().version as number;
     this.sql.exec(
@@ -699,6 +748,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     }
     // To the event stream, only when it is on, and not during pando init's first upload
     // (thousands of files; machines catch up from history, the web refetches the tree).
+    // The row is built only then: one row read per save.
     if (EVENT_STREAM && this.env.MONOREPO && !this.initializing()) {
       this.emit({
         kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
@@ -794,18 +844,59 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- the tree and references (A10) ----
 
-  // Every current path, with its latest version, in one call. ?prefix= narrows it.
+  // Current paths, sorted, a page at a time (meta-sync.md, "GET tree").
+  //   ?prefix=  paths that start with it (a plain string match)
+  //   ?dir=     one folder: its files, and on the first page its subfolders with file counts
+  //   ?limit=   1 to 5000, default 1000;  ?after=<path> continues from `next`
+  // Both filters are a range on the path index; nothing reads the whole tree
+  // into memory, and the object keeps serving saves between pages.
   private tree(url: URL): Response {
-    const prefix = url.searchParams.get("prefix") ?? "";
+    const q = url.searchParams;
+    const dir = q.get("dir");
+    if (dir !== null && q.get("prefix") !== null) return fail(400, "invalid_input", "send prefix or dir, not both");
+    const folder = dir === null ? null : dir.replace(/^\/+|\/+$/g, "");
+    const prefix = folder === null ? (q.get("prefix") ?? "") : folder === "" ? "" : `${folder}/`;
+    const limit = Math.min(Math.max(int(q.get("limit"), TREE_LIMIT), 1), TREE_MAX);
+    const after = q.get("after") ?? "";
+    // Every path that starts with `prefix` sorts in [prefix, prefix + U+10FFFF):
+    // SQLite compares UTF-8 bytes, and U+10FFFF is the largest character.
+    const upper = prefix + "\u{10FFFF}";
+    const onlyHere = folder === null ? "" : "AND instr(substr(f.path, length(?1) + 1), '/') = 0";
     const rows = this.sql
       .exec<any>(
         `SELECT v.* FROM files f JOIN versions v ON v.version = f.version
-         WHERE f.deleted = 0 AND substr(f.path, 1, ?) = ? ORDER BY f.path`,
-        prefix.length,
+         WHERE f.deleted = 0 AND f.path >= ?1 AND f.path < ?2 AND f.path > ?3 ${onlyHere}
+         ORDER BY f.path LIMIT ?4`,
         prefix,
+        upper,
+        after,
+        limit + 1,
       )
       .toArray() as VersionRow[];
-    return json({ head: this.head(), prefix, files: rows.map((r) => this.historyEntry(r)) });
+    const more = rows.length > limit;
+    if (more) rows.pop();
+    const body: Record<string, unknown> = {
+      head: this.head(),
+      prefix,
+      files: rows.map((r) => this.historyEntry(r)),
+      next: more ? rows[rows.length - 1].path : null,
+    };
+    if (folder !== null) {
+      body.dir = folder;
+      if (!after) {
+        body.folders = this.sql
+          .exec<any>(
+            `SELECT substr(rest, 1, instr(rest, '/') - 1) AS name, COUNT(*) AS files FROM (
+               SELECT substr(path, length(?1) + 1) AS rest FROM files
+               WHERE deleted = 0 AND path >= ?1 AND path < ?2
+             ) WHERE instr(rest, '/') > 0 GROUP BY name ORDER BY name`,
+            prefix,
+            upper,
+          )
+          .toArray();
+      }
+    }
+    return json(body);
   }
 
   // References (formats.md, section 4): each pointer under .pando/references/, parsed.
@@ -825,7 +916,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         const t = parseToml(new TextDecoder().decode(this.blob(r.sha))) as Record<string, unknown>;
         return {
           path,
-          url: typeof t.url === "string" ? t.url : null,
+          url: typeof t.url === "string" ? withoutCredentials(t.url) : null,
           ref: typeof t.ref === "string" ? t.ref : null,
           commit: typeof t.commit === "string" ? t.commit : null,
           version: r.version,

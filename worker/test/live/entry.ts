@@ -8,12 +8,22 @@
 // touches repos named e2e-*--meta.
 import { commitChanges } from "../../src/gitwrite";
 import { metaRoute, routeMeta, type LiveEnv } from "../../src/live/route";
+import { isRecord, isText, type Json } from "../../src/parse";
 
 export { MetaLayerObject } from "../../src/live/object";
 
 interface Env extends LiveEnv {
   ARTIFACTS?: Artifacts;
 }
+
+/** A change for applyFromMain: a path and its new text, or null to delete it. */
+type TestChange = { path: string; text: string | null };
+
+function isTestChange(v: Json): v is TestChange {
+  return isRecord(v) && isText(v.path) && (v.text === null || isText(v.text));
+}
+
+const bad = (error: string) => Response.json({ error }, { status: 400 });
 
 async function readPath(repo: ArtifactsRepo, path: string): Promise<string | null> {
   const [head] = await repo.log({ ref: "main", limit: 1 });
@@ -37,13 +47,15 @@ async function readPath(repo: ArtifactsRepo, path: string): Promise<string | nul
 
 async function testRoute(request: Request, env: Env): Promise<Response> {
   if (!env.ARTIFACTS) return Response.json({ error: "no Artifacts binding" }, { status: 400 });
-  const body = (await request.json()) as { monorepo: string; action: string; path?: string; content?: string };
+  const body = await request.json<Json>();
 
-  if (!/^e2e-[a-z0-9-]+$/.test(body.monorepo) || body.monorepo.includes("--")) {
-    return Response.json({ error: "test monorepos are e2e-*" }, { status: 400 });
-  }
+  if (!isRecord(body) || !isText(body.monorepo) || !isText(body.action)) return bad("send {monorepo, action, path?, content?}");
+
+  if (!/^e2e-[a-z0-9-]+$/.test(body.monorepo) || body.monorepo.includes("--")) return bad("test monorepos are e2e-*");
 
   const name = `${body.monorepo}--meta`;
+  const path = isText(body.path) ? body.path : null;
+  const content = isText(body.content) ? body.content : null;
 
   switch (body.action) {
     case "create": {
@@ -65,7 +77,7 @@ async function testRoute(request: Request, env: Env): Promise<Response> {
     case "read": {
       const repo = await env.ARTIFACTS.get(name);
 
-      return Response.json({ content: await readPath(repo, body.path ?? "") });
+      return Response.json({ content: await readPath(repo, path ?? "") });
     }
 
     case "move-main": {
@@ -76,7 +88,7 @@ async function testRoute(request: Request, env: Env): Promise<Response> {
 
       const r = await commitChanges({ artifacts: env.ARTIFACTS, name }, "main", {
         parent: head?.hash ?? null,
-        changes: [{ path: body.path ?? "elsewhere.md", content: body.content ?? "moved\n" }],
+        changes: [{ path: path ?? "elsewhere.md", content: content ?? "moved\n" }],
         message: "Merge a reviewed branch\n",
         author: { name: "Reviewer", email: "reviewer@example.com" },
       });
@@ -98,9 +110,13 @@ export default {
 
     if (path === "/test/apply-from-main" && request.method === "POST") {
       // What the monorepo object does after a reviewed merge into the meta layer's main.
-      const b = (await request.json()) as { monorepo: string; commit: string; changes: { path: string; text: string | null }[] };
+      const b = await request.json<Json>();
 
-      if (!/^e2e-[a-z0-9-]+$/.test(b.monorepo)) return Response.json({ error: "test monorepos are e2e-*" }, { status: 400 });
+      if (!isRecord(b) || !isText(b.monorepo) || !isText(b.commit) || !Array.isArray(b.changes) || !b.changes.every(isTestChange)) {
+        return bad("send {monorepo, commit, changes: [{path, text}]}");
+      }
+
+      if (!/^e2e-[a-z0-9-]+$/.test(b.monorepo)) return bad("test monorepos are e2e-*");
       const changes = b.changes.map((c) => ({ path: c.path, bytes: c.text === null ? null : new TextEncoder().encode(c.text) }));
 
       return Response.json(
@@ -110,11 +126,13 @@ export default {
 
     if (path === "/test/destroy" && request.method === "POST") {
       // What DELETE /v1/monorepos/{m} does to the meta layer object.
-      const { monorepo } = (await request.json()) as { monorepo: string };
+      const b = await request.json<Json>();
 
-      if (!/^e2e-[a-z0-9-]+$/.test(monorepo)) return Response.json({ error: "test monorepos are e2e-*" }, { status: 400 });
+      if (!isRecord(b) || !isText(b.monorepo)) return bad("send {monorepo}");
 
-      return Response.json(await env.META.get(env.META.idFromName(monorepo)).destroy());
+      if (!/^e2e-[a-z0-9-]+$/.test(b.monorepo)) return bad("test monorepos are e2e-*");
+
+      return Response.json(await env.META.get(env.META.idFromName(b.monorepo)).destroy());
     }
 
     // Paths are /v1/monorepos/{owner}/{name}/meta/... (namespaces); with no

@@ -20,6 +20,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { request } from "./http.mjs";
 
 const URL_ = (process.env.PANDO_URL ?? "").replace(/\/$/, "");
 
@@ -39,13 +40,9 @@ const SETTLE_MS = Number(process.env.SETTLE_MS ?? 20_000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const call = async (method, path, secret, body) => {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const r = await request(URL_, method, path, { secret, body });
 
-  return { status: res.status, json: await res.json().catch(() => null), ray: res.headers.get("cf-ray") };
+  return { ...r, ray: r.headers.get("cf-ray") };
 };
 
 const results = [];

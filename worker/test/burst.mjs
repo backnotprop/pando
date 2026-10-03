@@ -12,6 +12,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { throwaways } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
 
@@ -21,11 +22,7 @@ const P = Number(process.env.P ?? 10);
 
 const MIX = Number(process.env.MIX ?? 0);
 
-const call = async (method, path, secret, body) => {
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-
-  return { status: res.status, json: await res.json().catch(() => null) };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const work = mkdtempSync(join(tmpdir(), "pando-burst-"));
 

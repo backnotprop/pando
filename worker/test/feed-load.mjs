@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -53,16 +54,9 @@ const call = async (method, path, secret, body, retry = true) => {
 };
 
 const call1 = async (method, path, secret, body) => {
-  const t = performance.now();
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
-  const text = await res.text();
-  let json = null;
+  const r = await request(URL_, method, path, { secret, body });
 
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, ms: performance.now() - t, bytes: text.length };
+  return { ...r, bytes: r.text.length };
 };
 
 async function pool(items, n, fn) {
@@ -261,9 +255,9 @@ try {
   }
 
   await sleep(10_000);
-  const d = [...sent].filter(([w]) => arrivals.has(w)).map(([w, t]) => arrivals.get(w) - t);
+  const d = sent.entries().filter(([w]) => arrivals.has(w)).map(([w, t]) => arrivals.get(w) - t).toArray();
   say(`  worktree report to the person's socket (outbox drain; sent to frame, ${d.length}/${LIVE})  ${d.length ? fmt(d) : "none"}`);
-  const dd = [...sent].filter(([w]) => direct.has(w)).map(([w, t]) => direct.get(w) - t);
+  const dd = sent.entries().filter(([w]) => direct.has(w)).map(([w, t]) => direct.get(w) - t).toArray();
   say(`  worktree report to its monorepo's socket (topics=feed, no queue; ${dd.length}/${LIVE})  ${dd.length ? fmt(dd) : "none"}`);
   // A push goes through the branch-facts job first (commit count, head title), then the feed.
   const pushSent = new Map();
@@ -283,9 +277,9 @@ try {
   }
 
   await sleep(6000);
-  const pd = [...pushSent].filter(([k]) => pushArrivals.has(k)).map(([k, v]) => pushArrivals.get(k) - v.t - v.git);
+  const pd = pushSent.entries().filter(([k]) => pushArrivals.has(k)).map(([k, v]) => pushArrivals.get(k) - v.t - v.git).toArray();
   say(`  a push to the person's socket (git push returned to frame, ${pd.length}/${pushSent.size})  ${pd.length ? fmt(pd) : "none"}`);
-  const pdd = [...pushSent].filter(([k]) => pushDirect.has(k)).map(([k, v]) => pushDirect.get(k) - v.t - v.git);
+  const pdd = pushSent.entries().filter(([k]) => pushDirect.has(k)).map(([k, v]) => pushDirect.get(k) - v.t - v.git).toArray();
   say(`  a push to its monorepo's socket (topics=feed, after the facts job; ${pdd.length}/${pushSent.size})  ${pdd.length ? fmt(pdd) : "none"}`);
   ws.close();
   stopping = true;
@@ -298,10 +292,10 @@ try {
     const m = made[lastK % NEEDS];
     let row = null;
 
-    for (let i = 0; i < 50 && !(row?.last_activity?.branch === `p${lastK}` && typeof row.last_activity.summary?.commits === "number"); i++) {
+    for (let i = 0; i < 50 && !(row?.last_activity?.branch === `p${lastK}` && Number.isInteger(row.last_activity.summary?.commits)); i++) {
       row = ((await call("GET", `/v1/monorepos/${me}/${m}/machines`, S)).json?.machines ?? []).find((x) => x.login === me) ?? null;
 
-      if (!(row?.last_activity?.branch === `p${lastK}` && typeof row?.last_activity?.summary?.commits === "number")) await sleep(200);
+      if (!(row?.last_activity?.branch === `p${lastK}` && Number.isInteger(row?.last_activity?.summary?.commits))) await sleep(200);
     }
 
     say(`  machines: the pusher's row after the last push: ${JSON.stringify({ name: row?.name, kind: row?.last_activity?.kind, branch: row?.last_activity?.branch, commits: row?.last_activity?.summary?.commits })}`);

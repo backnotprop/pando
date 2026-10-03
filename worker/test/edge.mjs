@@ -23,6 +23,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -43,22 +44,7 @@ const check = (name, ok, detail = "") => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const call = async (method, path, secret, body) => {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const work = mkdtempSync(join(tmpdir(), "pando-edge-"));
 

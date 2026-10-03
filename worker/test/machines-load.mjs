@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { request } from "./http.mjs";
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8811").replace(/\/$/, "");
 
@@ -25,18 +26,7 @@ const HOME_CRED = !!process.env.USE_HOME_CRED;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const call = async (method, path, secret, body) => {
-  const t = performance.now();
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
-  const text = await res.text();
-  let json = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  return { status: res.status, json, ms: performance.now() - t };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const q = (xs, p) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))];
 

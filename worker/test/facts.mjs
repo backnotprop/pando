@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
+import { request } from "./http.mjs";
 
 retryResetFetch();
 
@@ -26,13 +27,7 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`);
 };
 
-const call = async (method, path, secret, body) => {
-  const t = Date.now();
-  const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  const json = await res.json().catch(() => null);
-
-  return { status: res.status, json, ms: Date.now() - t };
-};
+const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
 
 const work = mkdtempSync(join(tmpdir(), "pando-facts-"));
 
@@ -69,7 +64,7 @@ async function untilFresh(t0, maxMs) {
 
     try {
       r = await list(M);
-    } catch (err) {
+    } catch {
       samples.push(`${((Date.now() - t0) / 1000).toFixed(0)}s:dropped`);
       await new Promise((res) => setTimeout(res, 1000));
       continue;

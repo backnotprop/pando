@@ -38,9 +38,10 @@
   "cache": { "enabled": true, "cross_version_cache": true },
   "exports": {
     "default": { "type": "worker", "cache": { "enabled": false } },
-    "Objects": { "type": "worker", "cache": { "enabled": true } },
-    // The feed's drain (RPC only, which is never cached); listed off so it stays so.
-    "FeedDrain": { "type": "worker", "cache": { "enabled": false } }
+    "Objects": { "type": "worker", "cache": { "enabled": true } }
+    // FeedDrain is not listed: it has RPC methods only, which are never cached,
+    // and the platform refuses cache options for it ("unknown entrypoint", code
+    // 10375). Give it no fetch() while caching is on at the top level.
   },
   // Branch facts (ahead, behind, mergeable) computed on change: a sweep per new
   // main head, a job per pushed branch. The consumer is this Worker's queue().

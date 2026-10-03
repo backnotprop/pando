@@ -3,7 +3,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { agentHeader, HttpError, toErrorResponse } from "../http";
-import { finishTiming, runTimed, startTiming, timedArtifacts } from "../timing";
+import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, updateRefs, withRepo } from "./artifacts";
 import { combine, requiredKept } from "./checks";
 import { toPatch, treeDiff } from "./diff";
@@ -17,6 +17,7 @@ import {
   DEFAULT_BRANCH,
   isSha,
   metaArtifactsName,
+  monorepoRef,
   repoNameFor,
   validBranchName,
   validMonorepoName,
@@ -32,7 +33,8 @@ import { feedMembership, membersBeforeDelete } from "../feed/membership";
 import { monoreposSummary } from "../feed/routes";
 
 type Stub = DurableObjectStub<MonorepoObject>;
-type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string };
+// m: the monorepo's id (storage); full: its owner/name (what people see).
+type Vars = { identity: Identity; info: MonorepoInfo; stub: Stub; m: string; full: string };
 type C = Context<{ Bindings: Env; Variables: Vars }>;
 
 export const api = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -42,12 +44,12 @@ api.onError((err) => toErrorResponse(err));
 // One pando.timing line per request (timing.ts): where its time went.
 api.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  const m = path.match(/^\/v1\/monorepos\/([^/]+)(?:\/repos\/([^/]+))?/);
+  const m = path.match(/^\/v1\/monorepos\/([^/]+)\/([^/]+)(?:\/repos\/([^/]+))?/);
   const t = startTiming("api", {
     method: c.req.method,
     path,
-    monorepo: m?.[1] ?? null,
-    repo: m?.[2] ?? null,
+    monorepo: m ? `${m[1]}/${m[2]}`.toLowerCase() : null,
+    repo: m?.[3] ?? null,
     colo: (c.req.raw as Request & { cf?: { colo?: string } }).cf?.colo,
   });
   try {
@@ -94,13 +96,20 @@ function owner(c: C, what: string): Identity {
   return id;
 }
 
+/** git URLs (NAMESPACES.md): /owner/monorepo/repo.git, or /owner/name.git for a plain repo. */
 function cloneUrl(c: C, repoName: string): string {
-  return `${new URL(c.req.url).origin}/${c.get("m")}/${repoName}.git`;
+  const origin = new URL(c.req.url).origin;
+  return c.get("info").kind === "repo" ? `${origin}/${c.get("full")}.git` : `${origin}/${c.get("full")}/${repoName}.git`;
+}
+
+/** The raw path after /v1/monorepos/{o}/{m}/repos/{r}/{what}/, as sent (any case, an old name). */
+function rawTail(c: C): string {
+  return new URL(c.req.url).pathname.split("/").slice(8).join("/");
 }
 
 function repoView(c: C, r: RepoRecord, required?: string[]) {
   return {
-    monorepo: c.get("m"),
+    monorepo: c.get("full"),
     name: r.name,
     path: r.path,
     description: r.description,
@@ -188,29 +197,37 @@ users.delete("/v1/user/credentials/:id", async (c) => {
 
 // ── Monorepos ─────────────────────────────────────────────────────────────
 
+// ?name=<name>: the caller's monorepos with that name, under any owner, their own first (pando clone <name>).
 users.get("/v1/monorepos", async (c) => {
   if (c.req.query("summary") === "1") return c.json(await monoreposSummary(c.env, c.get("auth").user.login));
-  return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login) });
+  const name = c.req.query("name")?.toLowerCase();
+  if (name !== undefined && !validMonorepoName(name)) return c.json({ monorepos: [] });
+  return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login, name) });
 });
 
 users.post("/v1/monorepos", async (c) => {
   const a = c.get("auth");
   const b = await body(c as unknown as C);
-  if (!validMonorepoName(b.name)) bad("name: lower-case letters, digits, '.', '_', '-'; starts with a letter or digit; no '--'; at most 39 characters");
+  const name = typeof b.name === "string" ? b.name.toLowerCase() : null;
+  if (!validMonorepoName(name)) bad("name: letters, digits, '.', '_', '-'; starts with a letter or digit; no '--'; at most 39 characters");
   const kind = b.kind ?? "monorepo";
   if (kind !== "monorepo" && kind !== "repo") bad("kind is monorepo or repo");
-  const name = b.name;
+  // owner: your own namespace (organizations come later).
+  const ownerName = typeof b.owner === "string" ? b.owner.toLowerCase() : a.user.login;
+  if (ownerName !== a.user.login) throw new HttpError(403, "not_your_namespace", `you can make monorepos under ${a.user.login} only (organizations come later)`);
   const acc = accounts(c.env);
-  if (!(await acc.claimMonorepo(name, kind, a.user.login))) throw new HttpError(409, "monorepo_exists", `monorepo ${name} exists`);
-  const stub = monorepoStub(c.env, name);
+  const claimed = await acc.claimMonorepo(ownerName, name, kind, a.user.login);
+  if (!claimed) throw new HttpError(409, "monorepo_exists", `${ownerName}/${name} exists`);
+  const { info, replaced_alias } = claimed;
+  const stub = monorepoStub(c.env, info.id);
   try {
-    if (!(await stub.init(name, kind))) throw new HttpError(409, "monorepo_exists", `monorepo ${name} exists`);
+    if (!(await stub.init(info.id, info.full_name, kind))) throw new HttpError(409, "monorepo_exists", `${info.full_name} exists`);
     const repos: RepoRecord[] = [];
     if (kind === "monorepo") {
-      await createArtifactsRepo(c.env, metaArtifactsName(name), `Pando meta layer of ${name}`);
+      await createArtifactsRepo(c.env, metaArtifactsName(info.id), `Pando meta layer of ${info.full_name}`);
     } else {
-      const artifacts_name = artifactsRepoName(name, name);
-      const remote = await createArtifactsRepo(c.env, artifacts_name, `Pando repo ${name}`);
+      const artifacts_name = artifactsRepoName(info.id, name);
+      const remote = await createArtifactsRepo(c.env, artifacts_name, `Pando repo ${info.full_name}`);
       const rec: RepoRecord = {
         name, path: ".", artifacts_name, remote, default_branch: DEFAULT_BRANCH, description: null,
         created_at: new Date().toISOString(), created_by: a.user.login,
@@ -218,12 +235,13 @@ users.post("/v1/monorepos", async (c) => {
       repos.push(unwrap(await stub.addRepo(rec)));
     }
     forgetCachedAuth();
-    await feedMembership(c.env, name, [a.user.login]);
-    const info = (await stub.info())!;
-    c.set("m", name);
-    return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView(c as unknown as C, r)) }, 201);
+    await feedMembership(c.env, info.id, [a.user.login]);
+    c.set("m", info.id);
+    c.set("full", info.full_name);
+    c.set("info", info);
+    return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView(c as unknown as C, r)), replaced_alias }, 201);
   } catch (err) {
-    await acc.releaseMonorepo(name);
+    await acc.releaseMonorepo(info.id);
     await stub.destroy();
     throw err;
   }
@@ -233,30 +251,48 @@ api.route("/", users);
 
 // Every route under one monorepo: members only.
 const authed = async (c: C, next: () => Promise<void>) => {
-  const m = c.req.param("m")!;
-  if (!validMonorepoName(m)) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-  const auth = await authenticateRequest(c.env, c.req.raw, m);
+  const asked = `${c.req.param("o")}/${c.req.param("m")}`;
+  const ref = monorepoRef(c.req.param("o"), c.req.param("m"));
+  if (!ref) throw new HttpError(404, "not_found", `no monorepo ${asked}`);
+  const auth = await authenticateRequest(c.env, c.req.raw, ref);
   if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
-  if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-  if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${m}`);
-  c.set("m", m);
-  c.set("stub", monorepoStub(c.env, m));
+  if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${ref.owner}/${ref.name}`);
+  if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${auth.monorepo.full_name}`);
+  c.set("m", auth.monorepo.id);
+  c.set("full", auth.monorepo.full_name);
+  c.set("stub", monorepoStub(c.env, auth.monorepo.id));
   c.set("info", auth.monorepo);
+  note({ monorepo: auth.monorepo.full_name, monorepo_id: auth.monorepo.id });
   c.set("identity", { ...identityOf(auth), agent: agentHeader(c.req.raw) });
   await next();
 };
-api.use("/v1/monorepos/:m", authed);
-api.use("/v1/monorepos/:m/*", authed);
+api.use("/v1/monorepos/:o/:m", authed);
+api.use("/v1/monorepos/:o/:m/*", authed);
 
-api.get("/v1/monorepos/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role }));
+api.get("/v1/monorepos/:o/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role }));
 
-api.delete("/v1/monorepos/:m", async (c) => {
+// Rename or transfer: the label moves, the id and everything stored stay. The old name keeps working (an alias).
+api.patch("/v1/monorepos/:o/:m", async (c) => {
+  owner(c, "rename or transfer a monorepo");
+  const b = await body(c);
+  const info = c.get("info");
+  const to = monorepoRef(b.owner === undefined ? info.owner : String(b.owner), b.name === undefined ? info.name : String(b.name));
+  if (!to) bad("name: letters, digits, '.', '_', '-'; owner: a person's login");
+  const out = unwrap(await accounts(c.env).renameMonorepo(info.id, to));
+  await c.get("stub").setLabel(out.info.full_name);
+  forgetCachedAuth();
+  return c.json({ ...out.info, role: "owner", replaced_alias: out.replaced_alias });
+});
+
+api.delete("/v1/monorepos/:o/:m", async (c) => {
   owner(c, "delete a monorepo");
   const m = c.get("m");
-  if (c.req.query("confirm") !== m) bad(`add ?confirm=${m} to delete the monorepo, its repos and their history`);
+  const info = c.get("info");
+  // The full owner/name, typed out (GitHub's way): a bare name is too easy to get wrong across owners.
+  if (c.req.query("confirm")?.toLowerCase() !== info.full_name) bad(`add ?confirm=${info.full_name} to delete ${info.full_name}, its repos and their history`);
   const stub = c.get("stub");
-  // Every Artifacts repo it owns: the recorded ones, and any other <m>--* in
-  // the namespace (names forbid "--", so the prefix is the monorepo's alone).
+  // Every Artifacts repo it owns: the recorded ones, and any other <id>--* in
+  // the namespace (ids and old names have no "--", so the prefix is its alone).
   const names = new Set(await stub.artifactsRepos());
   let cursor: string | undefined;
   do {
@@ -291,7 +327,7 @@ api.delete("/v1/monorepos/:m", async (c) => {
 
 // ── Heads: every repo's main, for followers ───────────────────────────────
 
-api.get("/v1/monorepos/:m/heads", async (c) => {
+api.get("/v1/monorepos/:o/:m/heads", async (c) => {
   const stub = c.get("stub");
   const heads = await stub.heads();
   // A repo made before Pando kept heads: read it once from Artifacts and keep it.
@@ -314,7 +350,7 @@ api.get("/v1/monorepos/:m/heads", async (c) => {
 
 // ── The event stream ──────────────────────────────────────────────────────
 
-api.get("/v1/monorepos/:m/events", async (c) => {
+api.get("/v1/monorepos/:o/:m/events", async (c) => {
   if (!EVENT_STREAM) throw new HttpError(501, "event_stream_on_hold", "the event stream is built but on hold until the architecture review decides where events live");
   const stub = c.get("stub");
   if (c.req.header("upgrade")?.toLowerCase() === "websocket") {
@@ -335,11 +371,11 @@ api.get("/v1/monorepos/:m/events", async (c) => {
 
 // ── Members ───────────────────────────────────────────────────────────────
 
-api.get("/v1/monorepos/:m/members", async (c) => {
+api.get("/v1/monorepos/:o/:m/members", async (c) => {
   return c.json({ members: await accounts(c.env).members(c.get("m")) });
 });
 
-api.put("/v1/monorepos/:m/members/:login", async (c) => {
+api.put("/v1/monorepos/:o/:m/members/:login", async (c) => {
   const by = owner(c, "manage members");
   const b = await body(c);
   if (b.role !== "owner" && b.role !== "member") bad("role is owner or member");
@@ -349,7 +385,7 @@ api.put("/v1/monorepos/:m/members/:login", async (c) => {
   return c.json(out);
 });
 
-api.delete("/v1/monorepos/:m/members/:login", async (c) => {
+api.delete("/v1/monorepos/:o/:m/members/:login", async (c) => {
   owner(c, "manage members");
   unwrap(await accounts(c.env).removeMember(c.get("m"), c.req.param("login")));
   forgetCachedAuth();
@@ -361,7 +397,7 @@ api.delete("/v1/monorepos/:m/members/:login", async (c) => {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-api.post("/v1/monorepos/:m/invites", async (c) => {
+api.post("/v1/monorepos/:o/:m/invites", async (c) => {
   const by = owner(c, "invite people");
   const b = await body(c);
   const email = str(b.email, "email", { max: 200 })!;
@@ -374,11 +410,11 @@ api.post("/v1/monorepos/:m/invites", async (c) => {
   return c.json(out, out.status === "added" ? 200 : 201);
 });
 
-api.get("/v1/monorepos/:m/invites", async (c) => {
+api.get("/v1/monorepos/:o/:m/invites", async (c) => {
   return c.json({ invites: await accounts(c.env).invites(c.get("m")) });
 });
 
-api.delete("/v1/monorepos/:m/invites/:email", async (c) => {
+api.delete("/v1/monorepos/:o/:m/invites/:email", async (c) => {
   owner(c, "revoke invites");
   if (!(await accounts(c.env).revokeInvite(c.get("m"), decodeURIComponent(c.req.param("email"))))) {
     throw new HttpError(404, "not_found", "no such invite");
@@ -388,7 +424,7 @@ api.delete("/v1/monorepos/:m/invites/:email", async (c) => {
 
 // ── Repos ─────────────────────────────────────────────────────────────────
 
-api.post("/v1/monorepos/:m/repos", async (c) => {
+api.post("/v1/monorepos/:o/:m/repos", async (c) => {
   const by = c.get("identity");
   const b = await body(c);
   const info = c.get("info");
@@ -400,8 +436,8 @@ api.post("/v1/monorepos/:m/repos", async (c) => {
   const stub = c.get("stub");
   const existing = (await stub.listRepos()).find((r) => r.name === name || r.path === b.path);
   if (existing) throw new HttpError(409, "repo_exists", `a repo named ${existing.name} at ${existing.path} exists`);
-  const artifacts_name = artifactsRepoName(info.name, name);
-  const remote = await createArtifactsRepo(c.env, artifacts_name, description ?? `Pando repo ${info.name}/${b.path}`);
+  const artifacts_name = artifactsRepoName(info.id, name);
+  const remote = await createArtifactsRepo(c.env, artifacts_name, description ?? `Pando repo ${info.full_name}/${b.path}`);
   const rec: RepoRecord = {
     name, path: b.path, artifacts_name, remote, default_branch: DEFAULT_BRANCH, description,
     created_at: new Date().toISOString(), created_by: by.login,
@@ -409,11 +445,11 @@ api.post("/v1/monorepos/:m/repos", async (c) => {
   return c.json(repoView(c, unwrap(await stub.addRepo(rec))), 201);
 });
 
-api.get("/v1/monorepos/:m/repos", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos", async (c) => {
   return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(c, r)) });
 });
 
-api.get("/v1/monorepos/:m/repos/:r", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => {
   const r = await repoOf(c);
   return c.json(repoView(c, r, await requiredKept(c.env, c.get("info"), r)));
 });
@@ -462,7 +498,7 @@ async function branchViews(
   return list;
 }
 
-api.get("/v1/monorepos/:m/repos/:r/branches", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const r = await repoOf(c);
   const state = c.req.query("state") ?? "open";
   if (!["open", "merged", "all"].includes(state)) bad("state is open, merged or all");
@@ -472,7 +508,7 @@ api.get("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   return c.json(list);
 });
 
-api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
+api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const r = await repoOf(c);
   const b = await body(c);
   if (!validBranchName(b.name) || b.name === r.default_branch) bad("name must be a valid git branch name other than the default branch");
@@ -501,9 +537,7 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
 
 /** /branches/<name>[/diff|/reviews|/merge], with the name raw or %2F-encoded. */
 function branchPath(c: C): { branch: string; rest: string } {
-  const raw = new URL(c.req.url).pathname;
-  const prefix = `/v1/monorepos/${c.get("m")}/repos/${c.req.param("r")}/branches/`;
-  let tail = raw.slice(prefix.length);
+  let tail = rawTail(c);
   let rest = "";
   for (const s of ["/diff", "/reviews", "/merge", "/commits"]) {
     if (tail.endsWith(s)) {
@@ -522,7 +556,7 @@ function branchPath(c: C): { branch: string; rest: string } {
   return { branch, rest };
 }
 
-api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
+api.all("/v1/monorepos/:o/:m/repos/:r/branches/*", async (c) => {
   const { branch, rest } = branchPath(c);
   const r = await repoOf(c);
   const method = c.req.method;
@@ -712,11 +746,9 @@ async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
 
 // ── Files ─────────────────────────────────────────────────────────────────
 
-api.get("/v1/monorepos/:m/repos/:r/files/*", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos/:r/files/*", async (c) => {
   const r = await repoOf(c);
-  const raw = new URL(c.req.url).pathname;
-  const prefix = `/v1/monorepos/${c.get("m")}/repos/${r.name}/files/`;
-  const path = decodeURIComponent(raw.slice(prefix.length));
+  const path = decodeURIComponent(rawTail(c));
   if (!path || path.split("/").some((s) => !s || s === "." || s === "..")) bad("bad path");
   const ref = c.req.query("ref") ?? r.default_branch;
   const blob = await withRepo(c.env, r.artifacts_name, (repo) => repo.readFile({ ref, path }));
@@ -726,7 +758,7 @@ api.get("/v1/monorepos/:m/repos/:r/files/*", async (c) => {
 
 // ── Statuses ──────────────────────────────────────────────────────────────
 
-api.post("/v1/monorepos/:m/repos/:r/statuses/:sha", async (c) => {
+api.post("/v1/monorepos/:o/:m/repos/:r/statuses/:sha", async (c) => {
   const r = await repoOf(c);
   const sha = c.req.param("sha");
   if (!isSha(sha)) bad("sha must be a full 40-character sha");
@@ -747,12 +779,11 @@ api.post("/v1/monorepos/:m/repos/:r/statuses/:sha", async (c) => {
   return c.json(s, 201);
 });
 
-api.get("/v1/monorepos/:m/repos/:r/commits/*", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos/:r/commits/*", async (c) => {
   const r = await repoOf(c);
-  const raw = new URL(c.req.url).pathname;
-  const prefix = `/v1/monorepos/${c.get("m")}/repos/${r.name}/commits/`;
-  if (!raw.endsWith("/status")) throw new HttpError(404, "not_found", "no such route");
-  const ref = decodeURIComponent(raw.slice(prefix.length, -"/status".length));
+  const tail = rawTail(c);
+  if (!tail.endsWith("/status")) throw new HttpError(404, "not_found", "no such route");
+  const ref = decodeURIComponent(tail.slice(0, -"/status".length));
   const sha = isSha(ref) ? ref : branchesOf(await listRefs(c.env, r)).get(ref);
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${ref}`);
   const required = await requiredKept(c.env, c.get("info"), r);
@@ -763,7 +794,7 @@ api.get("/v1/monorepos/:m/repos/:r/commits/*", async (c) => {
 
 const EVENTS = ["push", "branch.opened", "merged"];
 
-api.post("/v1/monorepos/:m/repos/:r/hooks", async (c) => {
+api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
   const by = owner(c, "register hooks");
   const r = await repoOf(c);
   const b = await body(c);
@@ -791,24 +822,24 @@ api.post("/v1/monorepos/:m/repos/:r/hooks", async (c) => {
   return c.json(await c.get("stub").addHook(r.name, { type, url, secret, events: events as string[], config }, by), 201);
 });
 
-api.get("/v1/monorepos/:m/repos/:r/hooks", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
   const r = await repoOf(c);
   return c.json({ hooks: await c.get("stub").listHooks(r.name) });
 });
 
-api.delete("/v1/monorepos/:m/repos/:r/hooks/:id", async (c) => {
+api.delete("/v1/monorepos/:o/:m/repos/:r/hooks/:id", async (c) => {
   owner(c, "remove hooks");
   const r = await repoOf(c);
   if (!(await c.get("stub").deleteHook(r.name, c.req.param("id")))) throw new HttpError(404, "not_found", "no such hook");
   return c.body(null, 204);
 });
 
-api.get("/v1/monorepos/:m/repos/:r/hooks/:id/deliveries", async (c) => {
+api.get("/v1/monorepos/:o/:m/repos/:r/hooks/:id/deliveries", async (c) => {
   const r = await repoOf(c);
   return c.json({ deliveries: await c.get("stub").listDeliveries(r.name, c.req.param("id")) });
 });
 
-api.post("/v1/monorepos/:m/repos/:r/hooks/:id/redeliver", async (c) => {
+api.post("/v1/monorepos/:o/:m/repos/:r/hooks/:id/redeliver", async (c) => {
   owner(c, "replay hooks");
   const r = await repoOf(c);
   const since = Number(c.req.query("since"));
@@ -816,7 +847,7 @@ api.post("/v1/monorepos/:m/repos/:r/hooks/:id/redeliver", async (c) => {
   return c.json(unwrap(await c.get("stub").replayHook(r.name, c.req.param("id"), since)), 202);
 });
 
-api.post("/v1/monorepos/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c) => {
+api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c) => {
   owner(c, "redeliver hooks");
   const r = await repoOf(c);
   return c.json(unwrap(await c.get("stub").redeliver(r.name, c.req.param("id"))), 202);
@@ -824,7 +855,7 @@ api.post("/v1/monorepos/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c) =
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 
-api.get("/v1/monorepos/:m/worktrees", async (c) => {
+api.get("/v1/monorepos/:o/:m/worktrees", async (c) => {
   return c.json({ worktrees: await c.get("stub").listWorktrees({ machine: c.req.query("machine"), repo: c.req.query("repo") }) });
 });
 
@@ -834,7 +865,7 @@ function worktreeId(c: C): string {
   return id;
 }
 
-api.put("/v1/monorepos/:m/worktrees/:id", async (c) => {
+api.put("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
   const id = worktreeId(c);
   const b = await body(c);
   const kind = b.kind;
@@ -850,13 +881,13 @@ api.put("/v1/monorepos/:m/worktrees/:id", async (c) => {
   return c.json(unwrap(await c.get("stub").putWorktree(id, w, c.get("identity"))));
 });
 
-api.get("/v1/monorepos/:m/worktrees/:id", async (c) => {
+api.get("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
   const w = await c.get("stub").getWorktree(worktreeId(c));
   if (!w) throw new HttpError(404, "not_found", "no such worktree");
   return c.json(w);
 });
 
-api.delete("/v1/monorepos/:m/worktrees/:id", async (c) => {
+api.delete("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
   unwrap(await c.get("stub").deleteWorktree(worktreeId(c), c.get("identity")));
   return c.body(null, 204);
 });

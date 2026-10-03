@@ -9,7 +9,7 @@ import (
 // Members is `pando members list | invite | remove`. The monorepo is named,
 // or the one the current folder is in.
 func Members(e *Env, args []string) error {
-	usage := UsageError{"pando members list [<monorepo>] | invite [<monorepo>] <email> [--owner] | remove [<monorepo>] <login | email>"}
+	usage := UsageError{"pando members list [<owner/name>] | invite [<owner/name>] <email> [--owner] | remove [<owner/name>] <login | email>"}
 	if len(args) == 0 {
 		return usage
 	}
@@ -29,13 +29,20 @@ func Members(e *Env, args []string) error {
 	if len(pos) == n+1 {
 		mono, pos = pos[0], pos[1:]
 	} else if root, err := e.root(); err == nil {
-		mono = root.Name
+		mono = root.FullName()
 	} else {
 		return UsageError{"which monorepo? name it, or run this inside its folder"}
 	}
 	srv, _, err := e.signedIn(*srvFlag)
 	if err != nil {
 		return err
+	}
+	if _, _, full := splitFull(mono); !full {
+		m, err := resolveMonorepo(e, srv, mono)
+		if err != nil {
+			return err
+		}
+		mono = m.Full()
 	}
 	switch args[0] {
 	case "list", "ls":

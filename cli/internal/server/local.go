@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,13 +33,29 @@ type localRepo struct {
 }
 
 type localMono struct {
+	ID        string      `json:"id"`
+	Owner     string      `json:"owner"`
 	Name      string      `json:"name"`
 	Kind      string      `json:"kind"`
 	CreatedAt string      `json:"created_at"`
 	Repos     []localRepo `json:"repos"`
 }
 
-func (l *Local) monoDir(m string) string { return filepath.Join(l.Base, m) }
+// A monorepo lives at <base>/<owner>/<name>; m is always owner/name
+// (owners are lower case, matched without regard to case).
+func (l *Local) monoDir(m string) string {
+	owner, name, ok := strings.Cut(m, "/")
+	if !ok {
+		return filepath.Join(l.Base, "_no_owner_", m) // never made: not found
+	}
+	return filepath.Join(l.Base, strings.ToLower(owner), name)
+}
+
+func (lm *localMono) full() string { return lm.Owner + "/" + lm.Name }
+
+func (lm *localMono) view(role string) Monorepo {
+	return Monorepo{ID: lm.ID, Owner: lm.Owner, Name: lm.Name, FullName: lm.full(), Kind: lm.Kind, Role: role, CreatedAt: lm.CreatedAt}
+}
 func (l *Local) repoDir(m, name string) string {
 	return filepath.Join(l.monoDir(m), "repos", name+".git")
 }
@@ -67,11 +85,11 @@ func (l *Local) load(m string) (*localMono, error) {
 
 func (l *Local) save(lm *localMono) error {
 	sort.Slice(lm.Repos, func(i, j int) bool { return lm.Repos[i].Path < lm.Repos[j].Path })
-	return writeJSONFile(filepath.Join(l.monoDir(lm.Name), "monorepo.json"), lm)
+	return writeJSONFile(filepath.Join(l.monoDir(lm.full()), "monorepo.json"), lm)
 }
 
 func (l *Local) repo(lm *localMono, r localRepo) Repo {
-	return Repo{Monorepo: lm.Name, Name: r.Name, Path: r.Path, DefaultBranch: "main", CloneURL: l.cloneURL(lm.Name, r.Name)}
+	return Repo{Monorepo: lm.full(), Name: r.Name, Path: r.Path, DefaultBranch: "main", CloneURL: l.cloneURL(lm.full(), r.Name)}
 }
 
 func (l *Local) CreateUser(_ context.Context, _ string, login, name, email, credName string) (*NewUser, error) {
@@ -96,13 +114,16 @@ func (l *Local) ListCredentials(_ context.Context) ([]Credential, error) {
 func (l *Local) RevokeCredential(_ context.Context, _ string) error { return nil }
 
 func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
+	full := l.login() + "/" + name
 	l.mu.Lock()
-	if _, err := l.load(name); err == nil {
+	if _, err := l.load(full); err == nil {
 		l.mu.Unlock()
-		return nil, apiErr(409, "monorepo_exists", "monorepo "+name+" exists")
+		return nil, apiErr(409, "monorepo_exists", "monorepo "+full+" exists")
 	}
-	lm := &localMono{Name: name, Kind: kind, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
-	if err := os.MkdirAll(l.monoDir(name), 0o755); err != nil {
+	id := make([]byte, 8)
+	rand.Read(id)
+	lm := &localMono{ID: "m_" + hex.EncodeToString(id), Owner: l.login(), Name: name, Kind: kind, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := os.MkdirAll(l.monoDir(full), 0o755); err != nil {
 		l.mu.Unlock()
 		return nil, err
 	}
@@ -111,9 +132,9 @@ func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created
 	if err != nil {
 		return nil, err
 	}
-	out := &Created{Monorepo: Monorepo{Name: name, Kind: kind, Role: "owner", CreatedAt: lm.CreatedAt}}
+	out := &Created{Monorepo: lm.view("owner")}
 	if kind == "repo" {
-		r, err := l.CreateRepo(ctx, name, ".")
+		r, err := l.CreateRepo(ctx, full, ".")
 		if err != nil {
 			return nil, err
 		}
@@ -122,18 +143,27 @@ func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created
 	return out, nil
 }
 
-func (l *Local) ListMonorepos(_ context.Context) ([]Monorepo, error) {
-	entries, err := os.ReadDir(l.Base)
-	if err != nil {
-		return nil, nil
-	}
-	var out []Monorepo
-	for _, e := range entries {
-		if lm, err := l.load(e.Name()); err == nil {
-			out = append(out, Monorepo{Name: lm.Name, Kind: lm.Kind, Role: "owner", CreatedAt: lm.CreatedAt})
+// ListMonorepos lists every monorepo under every owner (the one local user
+// sees all), only those named name when given, the user's own first.
+func (l *Local) ListMonorepos(_ context.Context, name string) ([]Monorepo, error) {
+	files, _ := filepath.Glob(filepath.Join(l.Base, "*", "*", "monorepo.json"))
+	var mine, others []Monorepo
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		lm := &localMono{}
+		if json.Unmarshal(b, lm) != nil || lm.Owner == "" || (name != "" && !strings.EqualFold(lm.Name, name)) {
+			continue
+		}
+		if lm.Owner == l.login() {
+			mine = append(mine, lm.view("owner"))
+		} else {
+			others = append(others, lm.view("member"))
 		}
 	}
-	return out, nil
+	return append(mine, others...), nil
 }
 
 func (l *Local) GetMonorepo(_ context.Context, m string) (*Monorepo, error) {
@@ -141,7 +171,12 @@ func (l *Local) GetMonorepo(_ context.Context, m string) (*Monorepo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Monorepo{Name: lm.Name, Kind: lm.Kind, Role: "owner", CreatedAt: lm.CreatedAt}, nil
+	role := "member"
+	if lm.Owner == l.login() {
+		role = "owner"
+	}
+	v := lm.view(role)
+	return &v, nil
 }
 
 func (l *Local) ListRepos(_ context.Context, m string) ([]Repo, error) {

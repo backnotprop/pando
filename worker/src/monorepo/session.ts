@@ -3,9 +3,9 @@
 import type { Env } from "../env";
 import { timedStub } from "../timing";
 
-/** The monorepo object; its calls count as object time on the request's pando.timing line. */
-export function monorepoStub(env: Env, monorepo: string) {
-  return timedStub(env.MONOREPO.getByName(monorepo));
+/** The monorepo object, by the monorepo's id; its calls count as object time on the request's pando.timing line. */
+export function monorepoStub(env: Env, monorepoId: string) {
+  return timedStub(env.MONOREPO.getByName(monorepoId));
 }
 
 export function newToken(): string {
@@ -38,11 +38,13 @@ const repoCache = new Map<string, { at: number; rec: import("./types").RepoRecor
  * repo has a new created_at, which keys its tokens, so a stale record only
  * costs one refused token and a retry.
  */
-export async function cachedRepo(env: Env, monorepo: string, name: string): Promise<import("./types").RepoRecord | null> {
-  const key = `${monorepo}/${name}`;
+export async function cachedRepo(env: Env, monorepoId: string, name: string | null): Promise<import("./types").RepoRecord | null> {
+  // name null: a plain repo's one repo (its git URL has no repo name).
+  const key = `${monorepoId}/${name ?? "."}`;
   const hit = repoCache.get(key);
   if (hit && Date.now() - hit.at < REPO_CACHE_MS) return hit.rec;
-  const rec = await monorepoStub(env, monorepo).getRepo(name);
+  const stub = monorepoStub(env, monorepoId);
+  const rec = name === null ? ((await stub.listRepos()).find((r) => r.path === ".") ?? null) : await stub.getRepo(name);
   if (rec) {
     if (repoCache.size > 10_000) repoCache.clear();
     repoCache.set(key, { at: Date.now(), rec });
@@ -51,6 +53,6 @@ export async function cachedRepo(env: Env, monorepo: string, name: string): Prom
 }
 
 /** Forget a monorepo's cached records (it was deleted here). */
-export function forgetRepos(monorepo: string): void {
-  for (const k of repoCache.keys()) if (k.startsWith(`${monorepo}/`)) repoCache.delete(k);
+export function forgetRepos(monorepoId: string): void {
+  for (const k of repoCache.keys()) if (k.startsWith(`${monorepoId}/`)) repoCache.delete(k);
 }

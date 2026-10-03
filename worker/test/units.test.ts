@@ -164,7 +164,8 @@ describe("names", () => {
     expect(validMonorepoName("acme")).toBe(true);
     expect(validMonorepoName("Acme")).toBe(false);
     expect(validMonorepoName("a--b")).toBe(false);
-    expect(validMonorepoName("v1")).toBe(false);
+    // Reserved names guard namespaces now (the first URL segment), not monorepo names.
+    expect(validMonorepoName("v1")).toBe(true);
   });
   it("repo paths become URL names", () => {
     expect(validRepoPath("projects/web")).toBe(true);
@@ -185,7 +186,7 @@ describe("names", () => {
 describe("the auth cache keeps successes only", () => {
   const user = { login: "ana", name: null, email: null, picture_url: null, created_at: "" };
   const credential = { id: "c", name: "m", kind: "machine" as const, created_at: "", last_used_at: null };
-  const mono = { name: "acme", kind: "monorepo" as const, created_at: "" };
+  const mono = { id: "m_1", owner: "ana", name: "acme", full_name: "ana/acme", kind: "monorepo" as const, created_at: "" };
   const auth = (over: Partial<Auth>): Auth => ({ user, credential, role: "member", monorepo: mono, ...over });
 
   it("caches a member of an existing monorepo", () => {
@@ -368,17 +369,17 @@ describe("a person's picture", () => {
 });
 
 describe("the home's activity feed (C25)", () => {
-  const ev = (monorepo: string, seq: number, at: string) => ({ monorepo, seq, at, kind: "push", repo: null, repo_path: null, branch: null, actor: null, machine: null, summary: null });
+  const ev = (monorepo_id: string, seq: number, at: string) => ({ monorepo_id, monorepo: `o/${monorepo_id}`, seq, at, kind: "push", repo: null, repo_path: null, branch: null, actor: null, machine: null, summary: null });
   it("orders by (at, monorepo, seq), newest first, and merges sources once each", async () => {
     const { mergePages } = await import("../src/feed/shape");
     const a = [ev("a", 3, "2026-10-03T10:00:02.000Z"), ev("a", 2, "2026-10-03T10:00:01.000Z")];
     const b = [ev("b", 9, "2026-10-03T10:00:02.000Z"), ev("a", 2, "2026-10-03T10:00:01.000Z"), ev("b", 1, "2026-10-03T09:00:00.000Z")];
     const page = mergePages([a, b], 3);
-    expect(page.map((e) => `${e.monorepo}${e.seq}`)).toEqual(["b9", "a3", "a2"]);
+    expect(page.map((e) => `${e.monorepo_id}${e.seq}`)).toEqual(["b9", "a3", "a2"]);
   });
   it("round-trips the cursor and refuses junk", async () => {
     const { decodeCursor, encodeCursor } = await import("../src/feed/shape");
-    const k = { at: "2026-10-03T10:00:02.123Z", monorepo: "pando-brand", seq: 41 };
+    const k = { at: "2026-10-03T10:00:02.123Z", monorepo_id: "m_0123456789abcdef", seq: 41 };
     const c = encodeCursor(k);
     expect(c.length).toBeLessThan(64);
     expect(decodeCursor(c)).toEqual(k);
@@ -387,7 +388,7 @@ describe("the home's activity feed (C25)", () => {
   });
   it("bounds one monorepo's log by the cursor", async () => {
     const { seqBound } = await import("../src/feed/shape");
-    const c = { at: "2026-10-03T10:00:00.000Z", monorepo: "m", seq: 5 };
+    const c = { at: "2026-10-03T10:00:00.000Z", monorepo_id: "m", seq: 5 };
     expect(seqBound(c, "a")).toBe(Number.MAX_SAFE_INTEGER); // sorts after m at the same time: all of it is older
     expect(seqBound(c, "z")).toBe(0);
     expect(seqBound(c, "m")).toBe(5);
@@ -411,5 +412,44 @@ describe("the home's activity feed (C25)", () => {
   it("accepts the feed topic on a monorepo's socket", async () => {
     const { parseTopics } = await import("../src/monorepo/stream");
     expect(parseTopics("feed")).toEqual(["feed"]);
+  });
+});
+
+describe("namespaces", () => {
+  it("a namespace: 1 to 39 of a-z, 0-9, single inner hyphens; not reserved", async () => {
+    const { namespaceProblem } = await import("../src/monorepo/names");
+    expect(namespaceProblem("ramos")).toBe(null);
+    expect(namespaceProblem("ana-lima")).toBe(null);
+    expect(namespaceProblem("a".repeat(39))).toBe(null);
+    expect(namespaceProblem("a".repeat(40))).toBe("invalid");
+    expect(namespaceProblem("ana-")).toBe("invalid");
+    expect(namespaceProblem("-ana")).toBe("invalid");
+    expect(namespaceProblem("ana--lima")).toBe("invalid");
+    expect(namespaceProblem("Ana")).toBe("invalid"); // callers lower-case first
+    expect(namespaceProblem("ana.lima")).toBe("invalid");
+    expect(namespaceProblem("v1")).toBe("reserved");
+    expect(namespaceProblem("settings")).toBe("reserved");
+    expect(namespaceProblem("docs")).toBe("reserved"); // the app's /docs goes to the docs site
+  });
+  it("owner/name from a path, matched without case", async () => {
+    const { monorepoRef } = await import("../src/monorepo/names");
+    expect(monorepoRef("Ramos", "Pando")).toEqual({ owner: "ramos", name: "pando" });
+    expect(monorepoRef("ramos", "a--b")).toBe(null);
+    expect(monorepoRef("ramos-", "pando")).toBe(null);
+    expect(monorepoRef(undefined, "pando")).toBe(null);
+  });
+  it("new ids are m_ and 16 hex", async () => {
+    const { newMonorepoId } = await import("../src/monorepo/names");
+    expect(newMonorepoId()).toMatch(/^m_[0-9a-f]{16}$/);
+  });
+  it("logins from an email skip reserved names and never end in a hyphen", async () => {
+    const { loginsFor } = await import("../src/accounts/store");
+    const first = (email: string, n = 3) => [...loginsFor(email, null)].slice(0, n);
+    expect(first("ana@example.com")).toEqual(["ana", "ana-2", "ana-3"]);
+    expect(first("login@example.com", 2)).toEqual(["login-2", "login-3"]);
+    expect(first("Ana.Lima+tag@example.com", 1)).toEqual(["ana-lima-tag"]);
+    const cut = first(`${"a".repeat(31)}.b@example.com`, 2);
+    expect(cut).toEqual(["a".repeat(31), `${"a".repeat(31)}-2`]);
+    expect(first("@example.com", 1)).toEqual(["user"]);
   });
 });

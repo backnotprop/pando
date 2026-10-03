@@ -30,7 +30,7 @@ import type {
   Checks,
   Identity,
   Kind,
-  MonorepoInfo,
+  ObjectInfo,
   Outcome,
   RepoEvent,
   RepoRecord,
@@ -148,8 +148,16 @@ export class MonorepoObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.feed = new FeedOut(ctx, env, this.sql, () => this.info()?.name ?? null);
+    this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
     this.ensureSchema();
+    // A monorepo made before namespaces has no label yet: read it once from accounts.
+    const m = this.info();
+    if (m && m.label === m.id && env.ACCOUNTS_DB) {
+      void ctx.blockConcurrencyWhile(async () => {
+        const r = await env.ACCOUNTS_DB.prepare("SELECT owner || '/' || name AS label FROM monorepos WHERE id = ?1").bind(m.id).first<{ label: string }>().catch(() => null);
+        if (r?.label) this.setLabel(r.label);
+      });
+    }
   }
 
   private ensureSchema(): void {
@@ -203,18 +211,24 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── The monorepo ─────────────────────────────────────────────────────────
 
-  info(): MonorepoInfo | null {
+  /** The meta row `name` holds the storage key: the id (a monorepo made before namespaces: its old name). */
+  info(): ObjectInfo | null {
     const m = Object.fromEntries(this.rows<{ k: string; v: string }>("SELECT k, v FROM meta").map((r) => [r.k, r.v]));
     if (!m.name) return null;
-    return { name: m.name, kind: m.kind as Kind, created_at: m.created_at };
+    return { id: m.name, label: m.label ?? m.name, kind: m.kind as Kind, created_at: m.created_at };
   }
 
-  /** Make the monorepo. False if it exists already. */
-  init(name: string, kind: Kind): boolean {
+  /** Make the monorepo, keyed by its id and labelled owner/name. False if it exists already. */
+  init(id: string, label: string, kind: Kind): boolean {
     if (this.info()) return false;
     const at = now();
-    for (const [k, v] of [["name", name], ["kind", kind], ["created_at", at]]) this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?)", k, v);
+    for (const [k, v] of [["name", id], ["label", label], ["kind", kind], ["created_at", at]]) this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?)", k, v);
     return true;
+  }
+
+  /** The monorepo's owner/name after a rename or a transfer (hook payloads and logs use it). */
+  setLabel(label: string): void {
+    this.sql.exec("INSERT INTO meta (k, v) VALUES ('label', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", label);
   }
 
   /** Undo a monorepo whose creation failed half way, or delete one. */
@@ -238,7 +252,7 @@ export class MonorepoObject extends DurableObject<Env> {
   artifactsRepos(): string[] {
     const m = this.info();
     const names = new Set(this.rows<{ artifacts_name: string }>("SELECT artifacts_name FROM repos").map((r) => r.artifacts_name));
-    if (m?.kind === "monorepo") names.add(metaArtifactsName(m.name));
+    if (m?.kind === "monorepo") names.add(metaArtifactsName(m.id));
     return [...names];
   }
 
@@ -274,7 +288,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (r || name !== "meta") return r;
     const m = this.info();
     if (m?.kind !== "monorepo") return null;
-    const artifacts_name = metaArtifactsName(m.name);
+    const artifacts_name = metaArtifactsName(m.id);
     let remote: string;
     try {
       remote = await withRepo(this.env, artifacts_name, async (repo) => (await repo.info()).remote);
@@ -296,7 +310,7 @@ export class MonorepoObject extends DurableObject<Env> {
    * mints anew (Artifacts refused the cached one).
    */
   async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number }> {
-    const m = this.info()?.name;
+    const m = this.info()?.id;
     if (!m || !name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
     const t0 = Date.now();
     const e = await repoTokenEntry(this.env, name, scope, generation, "local", fresh);
@@ -327,7 +341,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const r = this.repoRow(repo);
     if (!m || !r) return;
     if (m.kind === "repo") this.sql.exec("UPDATE repos SET required_checks = NULL WHERE name = ?", repo);
-    else if (r.artifacts_name === metaArtifactsName(m.name)) this.sql.exec("UPDATE repos SET required_checks = NULL");
+    else if (r.artifacts_name === metaArtifactsName(m.id)) this.sql.exec("UPDATE repos SET required_checks = NULL");
   }
 
   /** Main's head as Pando last moved or saw it (pushes through the door, merges, and the Worker's reads). */
@@ -531,10 +545,10 @@ export class MonorepoObject extends DurableObject<Env> {
   // ── Merge ────────────────────────────────────────────────────────────────
 
   merge(args: MergeArgs): Promise<Outcome<MergeResult>> {
-    const m = this.info()?.name ?? null;
+    const m = this.info();
     return this.guard(() =>
       this.serial(`merge:${args.repo}`, () =>
-        timed("object", { route: "merge", monorepo: m, repo: args.repo, branch: args.branch }, () => this.mergeNow(args)),
+        timed("object", { route: "merge", monorepo: m?.label ?? null, monorepo_id: m?.id ?? null, repo: args.repo, branch: args.branch }, () => this.mergeNow(args)),
       ),
     );
   }
@@ -551,7 +565,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const stored = this.branchRecord(a.repo, a.branch)?.head ?? null;
     const storedMain = this.currentMain(a.repo);
     // The meta layer's main also moves by the live layer's commits, which this object does not record.
-    const isMeta = r.artifacts_name === metaArtifactsName(this.info()!.name);
+    const isMeta = r.artifacts_name === metaArtifactsName(this.info()!.id);
     if (!readRefs && !isMeta && a.expected_head && stored === a.expected_head && storedMain) {
       return { head: stored, base: storedMain, read: false };
     }
@@ -659,7 +673,7 @@ export class MonorepoObject extends DurableObject<Env> {
       }],
       a.origin,
     );
-    if (r.artifacts_name === metaArtifactsName(this.info()!.name)) {
+    if (r.artifacts_name === metaArtifactsName(this.info()!.id)) {
       // The merge has landed; machines get it on the live layer's next try if this fails.
       await this.applyToMetaLayer(out.old, out.sha, a.identity).catch((err) =>
         console.error("applyFromMain failed:", redact(err instanceof Error ? err.message : String(err))),
@@ -672,7 +686,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** A merge landed on the meta layer's main: hand the changed files to the live meta layer. */
   private async applyToMetaLayer(before: string, commit: string, who: Identity): Promise<void> {
-    const m = this.info()!.name;
+    const m = this.info()!.id;
     const changes = await withRepo(this.env, metaArtifactsName(m), async (repo) => {
       const [a, b] = await Promise.all([repo.readCommit(before), repo.readCommit(commit)]);
       if (!a || !b) throw new HttpError(502, "artifacts", "the merge's commits could not be read");
@@ -746,7 +760,7 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const e of events) {
       const hooks = this.rows<HookRow>("SELECT * FROM hooks WHERE repo = ?", e.repo).filter((h) => wants(h, e));
       for (const h of hooks) {
-        const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.name, origin: origin ?? "" };
+        const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.label, monorepo_id: m.id, plain: m.kind === "repo", origin: origin ?? "" };
         const id = this.insertDelivery(h.id, e.repo, e.event, e.seq ?? null, JSON.stringify(payload));
         if (id) ids.push(id);
       }
@@ -778,7 +792,7 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   private async sendDeliveries(ids: string[]): Promise<void> {
-    const m = this.info()?.name;
+    const m = this.info()?.id;
     if (!m || !this.env.HOOKS) return;
     try {
       for (let i = 0; i < ids.length; i += 100) {
@@ -1069,7 +1083,7 @@ export class MonorepoObject extends DurableObject<Env> {
   private queueFacts(
     m: ({ type: "sweep"; repo: string; main: string } | { type: "branch"; repo: string; branch: string; head: string }) & { push?: { seq: number; before: string } },
   ): void {
-    const monorepo = this.info()?.name;
+    const monorepo = this.info()?.id;
     if (!monorepo || !this.env.BRANCH_FACTS) return;
     this.ctx.waitUntil(
       this.env.BRANCH_FACTS.send({ ...m, monorepo }).catch((err) =>
@@ -1254,7 +1268,7 @@ export class MonorepoObject extends DurableObject<Env> {
         const q = this.refQueues.get(key);
         if (!q || q.length === 0) return;
         // One timing line per batch (timing.ts): the gate wait, then Artifacts.
-        const t = startTiming("object", { route: "ref-batch", monorepo: this.info()?.name ?? null, repo: r.name });
+        const t = startTiming("object", { route: "ref-batch", monorepo: this.info()?.label ?? null, monorepo_id: this.info()?.id ?? null, repo: r.name });
         let lease: string;
         try {
           lease = await runTimed(t, () => timeGate(() => this.gate.acquire(key)));
@@ -1315,7 +1329,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!login) return null;
     const large = this.feed.isLarge();
     const events = large ? [] : this.feed.before(null, n);
-    return { kind: m.kind, large, events, complete: events.length < n, summary: this.feed.summary() };
+    return { kind: m.kind, full_name: m.label, large, events, complete: events.length < n, summary: this.feed.summary() };
   }
 
   /** The branch-facts job's commit count and head title for a push: the push goes out to feeds. */

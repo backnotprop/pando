@@ -10,7 +10,7 @@ import type { Env } from "../env";
 import { credential, HttpError, toErrorResponse } from "../http";
 import { accounts, authenticateRequest } from "../accounts/auth";
 import { isBootstrap, monorepoStub } from "../monorepo/session";
-import { validMonorepoName } from "../monorepo/names";
+import { monorepoRef } from "../monorepo/names";
 import { pool } from "../monorepo/views";
 import { finishTiming, runTimed, startTiming } from "../timing";
 import { feedStub, handleFeedBatch } from "./consumer";
@@ -49,11 +49,16 @@ function int(v: string | null, dflt: number, min: number, max: number, name: str
   return n;
 }
 
-function monorepoParam(url: URL): string | null {
+/** `in=owner/name` (an old name works too): the monorepo's id and its owner/name, or null for all. */
+async function monorepoParam(env: Env, url: URL): Promise<{ id: string; full: string } | null> {
   const v = url.searchParams.get("in");
   if (v === null || v === "") return null;
-  if (!validMonorepoName(v)) bad("in: one monorepo's name (the home narrows by monorepo only)");
-  return v;
+  const [o, n, extra] = v.split("/");
+  const ref = extra === undefined ? monorepoRef(o, n) : null;
+  if (!ref) bad("in: one monorepo's owner/name (the home narrows by monorepo only)");
+  const m = await accounts(env).resolve(ref);
+  if (!m) throw new HttpError(404, "not_found", `no monorepo ${ref.owner}/${ref.name} among yours`);
+  return { id: m.id, full: m.full_name };
 }
 
 async function route(request: Request, env: Env): Promise<Response> {
@@ -84,7 +89,7 @@ async function queueMembers(env: Env, pairs: { monorepo: string; login: string }
 /** The person's monorepos from the accounts (the truth), and the feed's index made to match. */
 async function reconcile(env: Env, login: string) {
   const list = await accounts(env).monoreposOf(login);
-  const r = await feedStub(env, login).reconcile(list.map((m) => ({ name: m.name, kind: m.kind })));
+  const r = await feedStub(env, login).reconcile(list.map((m) => ({ name: m.id, kind: m.kind, label: m.full_name })));
   await queueMembers(env, r.added.map((monorepo) => ({ monorepo, login }))).catch((err) =>
     console.error("feed: joins not queued (retried on the next load):", err instanceof Error ? err.message : String(err)),
   );
@@ -103,18 +108,20 @@ async function eventsPage(env: Env, login: string, url: URL) {
   const c = url.searchParams.get("cursor");
   const cursor = c ? decodeCursor(c) : null;
   if (c && !cursor) bad("cursor: pass back a `next` from an earlier page");
-  const only = monorepoParam(url);
+  const inn = await monorepoParam(env, url);
+  const only = inn?.id ?? null;
   const feed = feedStub(env, login);
   let p = (await feed.page(cursor, limit, only)) as unknown as WindowPage;
   if (p.need_list) {
     await reconcile(env, login);
     p = (await feed.page(cursor, limit, only)) as unknown as WindowPage;
   }
-  if (only && !p.known) throw new HttpError(404, "not_found", `no monorepo ${only} among yours`);
+  if (inn && !p.known) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
   const readLog = (name: string) => monorepoStub(env, name).eventsBefore(cursor, limit) as Promise<FeedEvent[]>;
   const large = [...p.large].sort(byLast);
   const reading = large.slice(0, LOGS_MAX);
-  const skipped = large.slice(LOGS_MAX).map((x) => x.name);
+  // skipped: owner/names, for people.
+  const skipped = large.slice(LOGS_MAX).map((x) => x.label ?? x.name);
   const lists: FeedEvent[][] = [p.events, ...(await Promise.all(reading.map((x) => readLog(x.name))))];
   let page = mergePages(lists, limit);
   const boundary = page.length === limit ? page[limit - 1].at : null;
@@ -123,7 +130,7 @@ async function eventsPage(env: Env, login: string, url: URL) {
   if (unc.length) {
     const room = Math.max(0, LOGS_MAX - reading.length);
     const now = unc.slice(0, room);
-    skipped.push(...unc.slice(room).map((u) => u.name));
+    skipped.push(...unc.slice(room).map((u) => u.label ?? u.name));
     if (now.length) {
       lists.push(...(await Promise.all(now.map((u) => readLog(u.name)))));
       page = mergePages(lists, limit);
@@ -138,7 +145,7 @@ export async function monoreposSummary(env: Env, login: string) {
   const { list, rows } = await reconcile(env, login);
   const by = new Map(rows.map((r) => [r.name, r]));
   const monorepos = list.map((m) => {
-    const s = by.get(m.name)?.summary ?? null;
+    const s = by.get(m.id)?.summary ?? null;
     return {
       ...m,
       last_activity_at: s?.last_activity_at ?? null,
@@ -149,7 +156,7 @@ export async function monoreposSummary(env: Env, login: string) {
       large: s?.large ?? null,
     };
   });
-  monorepos.sort((a, b) => ((b.last_activity_at ?? "") < (a.last_activity_at ?? "") ? -1 : (b.last_activity_at ?? "") > (a.last_activity_at ?? "") ? 1 : a.name < b.name ? -1 : 1));
+  monorepos.sort((a, b) => ((b.last_activity_at ?? "") < (a.last_activity_at ?? "") ? -1 : (b.last_activity_at ?? "") > (a.last_activity_at ?? "") ? 1 : a.full_name < b.full_name ? -1 : 1));
   return { monorepos };
 }
 
@@ -160,18 +167,18 @@ async function needsPage(env: Env, login: string, url: URL) {
   const q = url.searchParams.get("needs");
   const needs = (q ? q.split(",").map((s) => s.trim()).filter(Boolean) : NEED_STATES) as NeedState[];
   if (!needs.length || needs.some((n) => !NEED_STATES.includes(n))) bad("needs: some of ready, conflicts, failing");
-  const only = monorepoParam(url);
+  const inn = await monorepoParam(env, url);
   const limit = int(url.searchParams.get("limit"), 100, 1, 500, "limit");
   const { rows } = await reconcile(env, login);
-  let targets = rows.filter((r) => !only || r.name === only);
-  if (only && !targets.length) throw new HttpError(404, "not_found", `no monorepo ${only} among yours`);
+  let targets = rows.filter((r) => !inn || r.name === inn.id);
+  if (inn && !targets.length) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
   // Ask only monorepos whose count is not zero (or not known yet).
   targets = targets.filter((r) => !r.summary || r.pending || needs.some((n) => (r.summary!.needs?.[n] ?? 0) > 0));
-  const ordered = targets.map((r) => ({ name: r.name, last: r.summary?.last_activity_at ?? null })).sort(byLast);
+  const ordered = targets.map((r) => ({ name: r.name, label: r.label ?? r.name, last: r.summary?.last_activity_at ?? null })).sort(byLast);
   const ask = ordered.slice(0, NEEDS_MONOREPOS_MAX);
-  const skipped = ordered.slice(NEEDS_MONOREPOS_MAX).map((x) => x.name);
+  const skipped = ordered.slice(NEEDS_MONOREPOS_MAX).map((x) => x.label);
   const lists = await pool(ask, 10, async (m) =>
-    ((await monorepoStub(env, m.name).needsYou(needs, limit)) as NeedRow[]).map((r) => ({ monorepo: m.name, ...r })),
+    ((await monorepoStub(env, m.name).needsYou(needs, limit)) as NeedRow[]).map((r) => ({ monorepo: m.label, monorepo_id: m.name, ...r })),
   );
   const all = lists.flat().sort((a, b) => ((a.updated_at ?? "") < (b.updated_at ?? "") ? 1 : -1));
   return { branches: all.slice(0, limit), truncated: all.length > limit, skipped };
@@ -183,8 +190,8 @@ async function needsPage(env: Env, login: string, url: URL) {
 //   POST {deliver: [FeedMessage...]}  run queue messages now, one at a time, in this order
 //   POST {trim: {login, days}}        trim a feed's window to `days`
 //   GET  ?login=<l>                    a feed's index and pointer counts
-//   GET  ?monorepo=<m>                 a monorepo's member list, summary line and feed outbox
-//   POST {outbox: {monorepo, crash, fail}}  its next drain dies ("before" or "after" its call), or the next `fail` drains fail
+//   GET  ?monorepo=<id>                a monorepo's member list, summary line and feed outbox
+//   POST {outbox: {monorepo: <id>, crash, fail}}  its next drain dies ("before" or "after" its call), or the next `fail` drains fail
 
 async function testRoute(request: Request, env: Env): Promise<Response> {
   if (env.FEED_TEST !== "1") throw new HttpError(404, "not_found", "no such route");

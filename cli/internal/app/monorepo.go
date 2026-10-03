@@ -25,27 +25,31 @@ func Monorepo(e *Env, args []string) error {
 	}
 	switch args[0] {
 	case "list", "ls":
-		ms, err := srv.ListMonorepos(e.Ctx)
+		ms, err := srv.ListMonorepos(e.Ctx, "")
 		if err != nil {
 			return err
 		}
 		tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(tw, "MONOREPO\tKIND\tYOU ARE\tCREATED")
 		for _, m := range ms {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", m.Name, m.Kind, dash(m.Role), dash(m.CreatedAt))
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", m.Full(), m.Kind, dash(m.Role), dash(m.CreatedAt))
 		}
 		return tw.Flush()
 	case "delete":
 		if len(pos) != 1 {
 			return usage
 		}
-		name := pos[0]
+		m, err := resolveMonorepo(e, srv, pos[0])
+		if err != nil {
+			return err
+		}
+		name := m.Full()
 		if !*yes {
 			if !e.isTerminal() {
 				return errors.New("deleting needs the name typed at a terminal, or --yes")
 			}
 			e.printf("This deletes %s on %s: every repo in it, their history, and its meta layer. There is no undo.\n", name, serverURL)
-			e.printf("Type the monorepo's name to delete it: ")
+			e.printf("Type its full name (%s) to delete it: ", name)
 			typed, err := e.readLine()
 			if err != nil {
 				return err

@@ -27,6 +27,7 @@ const READ_TOKEN_REUSE_MS = 25 * 60_000;
 const readTokens = new Map<string, { token: string; expiresAt: string; at: number }>();
 
 export interface DeliveryMessage {
+  /** The monorepo's id (for one made before namespaces, its old name). */
   monorepo: string;
   delivery_id: string;
 }
@@ -49,7 +50,7 @@ async function readToken(env: Env, artifactsName: string): Promise<{ token: stri
 export async function handleDeliveries(batch: MessageBatch<DeliveryMessage>, env: Env): Promise<void> {
   const delays = retryDelays(env);
   await pool([...batch.messages], 6, (msg) =>
-    timed("queue", { route: "hooks.delivery", monorepo: msg.body.monorepo, delivery: msg.body.delivery_id, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () => deliverOne(env, msg, delays)),
+    timed("queue", { route: "hooks.delivery", monorepo_id: msg.body.monorepo, delivery: msg.body.delivery_id, attempt: msg.attempts, queue_delay_ms: Math.max(0, Date.now() - msg.timestamp.getTime()) }, () => deliverOne(env, msg, delays)),
   );
 }
 
@@ -114,7 +115,12 @@ export interface HookRow {
 /** The stored payload: the round 3 body minus the token, which is added per attempt. `seq` is the stream's. */
 export interface StoredPayload extends RepoEvent {
   occurred_at: string;
+  /** owner/name when the delivery was made (rows from before namespaces: the old name). */
   monorepo: string;
+  /** The permanent id: a stable key for receivers across renames. */
+  monorepo_id?: string;
+  /** A plain repo: its git URL is /owner/name.git. */
+  plain?: boolean;
   origin: string;
 }
 
@@ -135,7 +141,7 @@ export function hookView(h: HookRow) {
 function urls(p: StoredPayload) {
   const repoBase = `${p.origin}/v1/monorepos/${p.monorepo}/repos/${p.repo}`;
   return {
-    clone_url: `${p.origin}/${p.monorepo}/${p.repo}.git`,
+    clone_url: p.plain ? `${p.origin}/${p.monorepo}.git` : `${p.origin}/${p.monorepo}/${p.repo}.git`,
     diff_url: `${repoBase}/branches/${encodeURIComponent(p.branch)}/diff?format=patch`,
     status_url: `${repoBase}/statuses/${p.head}`,
   };
@@ -160,7 +166,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
     const read = await token();
     const u = urls(p);
     if (hook.type === "web") {
-      const { origin: _origin, ...rest } = p;
+      const { origin: _origin, plain: _plain, ...rest } = p;
       const body = JSON.stringify({
         ...rest,
         delivery_id: deliveryId,

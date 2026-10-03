@@ -31,9 +31,12 @@ function countBytes(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array
 import type { Identity, RepoEvent, RepoRecord } from "./types";
 import { cachedRepo, monorepoStub } from "./session";
 import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
-import { authenticate, identityOf } from "../accounts/auth";
+import { accounts, authenticate, identityOf } from "../accounts/auth";
+import type { MonorepoInfo } from "../accounts/store";
+import { monorepoRef } from "./names";
 
-const DOOR_RE = /^\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/;
+// /owner/monorepo/repo.git/... (a monorepo's repo, meta included) or /owner/name.git/... (a plain repo).
+const DOOR_RE = /^\/([^/]+)\/([^/]+)(?:\/([^/]+))?\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/;
 
 export function isDoorPath(pathname: string): boolean {
   return DOOR_RE.test(pathname);
@@ -74,10 +77,10 @@ function relayFrom(res: Response, op: string, repo: string | null, since: number
 export async function handleDoor(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const m = new URL(req.url).pathname.match(DOOR_RE);
   const t = startTiming("door", {
-    route: m ? m[3] : "door",
+    route: m ? m[4] : "door",
     method: req.method,
-    monorepo: m?.[1] ?? null,
-    repo: m?.[2] ?? null,
+    monorepo: m ? `${m[1]}/${m[2]}`.toLowerCase() : null,
+    repo: m ? (m[3] ?? m[2]).toLowerCase() : null,
     service: new URL(req.url).searchParams.get("service") ?? undefined,
     protocol: /version=2/.test(req.headers.get("git-protocol") ?? "") ? "v2" : "v0",
     colo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
@@ -97,7 +100,12 @@ export async function handleDoor(req: Request, env: Env, ctx: ExecutionContext):
 
 async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
-  const [, monorepo, repoName, action] = url.pathname.match(DOOR_RE)!;
+  const [, o, mono, repoSeg, action] = url.pathname.match(DOOR_RE)!;
+  const ref = monorepoRef(o, mono);
+  if (!ref) return errorJson(404, "not_found", `no monorepo ${o}/${mono}`);
+  const shown = `${ref.owner}/${ref.name}`;
+  // null: the plain repo (/owner/name.git); else a monorepo's repo by name.
+  const repoName = repoSeg === undefined ? null : repoSeg.toLowerCase();
   const service = action === "info/refs" ? url.searchParams.get("service") : action;
   if (service !== "git-upload-pack" && service !== "git-receive-pack") {
     return errorJson(403, "smart_http_only", "Pando serves git's smart HTTP protocol only");
@@ -106,13 +114,15 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
 
   const secret = credential(req);
   if (!secret) return unauthorized();
-  const stub = monorepoStub(env, monorepo);
 
   // A hook delivery's read token: clone and fetch only, checked by Artifacts.
   if (/^art_v\d+_/.test(secret)) {
     if (service !== "git-upload-pack") return unauthorized();
-    const repo = await cachedRepo(env, monorepo, repoName);
-    if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
+    const info = await accounts(env).resolve(ref);
+    const shape = info && shapeProblem(info, repoName);
+    if (!info || shape) return errorJson(404, "not_found", shape ?? `no monorepo ${shown}`);
+    const repo = await cachedRepo(env, info.id, repoName);
+    if (!repo) return errorJson(404, "not_found", `no repo ${info.full_name}/${repoName}`);
     const s0 = Date.now();
     const res = await timeArtifacts(`http ${req.method} ${action}`, repo.artifacts_name, () =>
       toArtifacts(req, repo, action, url.search, { authorization: req.headers.get("authorization")! }),
@@ -121,14 +131,19 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
     return relayFrom(res, `http ${req.method} ${action}`, repo.artifacts_name, s0);
   }
 
-  const auth = await authenticate(env, secret, monorepo);
+  const auth = await authenticate(env, secret, ref);
   // A browser session never works at the git door (it only travels as the /v1 cookie).
   if (!auth || auth.credential.kind === "browser") return unauthorized();
-  if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${monorepo}`);
-  if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${monorepo}`);
+  if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${shown}`);
+  if (!auth.role) return errorJson(403, "not_a_member", `${auth.user.login} is not a member of ${auth.monorepo.full_name}`);
+  const shape = shapeProblem(auth.monorepo, repoName);
+  if (shape) return errorJson(404, "not_found", shape);
+  const id = auth.monorepo.id;
+  note({ monorepo: auth.monorepo.full_name, monorepo_id: id });
+  const stub = monorepoStub(env, id);
   const identity = { ...identityOf(auth), agent: agentHeader(req) };
-  const repo = await cachedRepo(env, monorepo, repoName);
-  if (!repo) return errorJson(404, "not_found", `no repo ${monorepo}/${repoName}`);
+  const repo = await cachedRepo(env, id, repoName);
+  if (!repo) return errorJson(404, "not_found", `no repo ${auth.monorepo.full_name}/${repoName}`);
 
   const v2 = /version=2/.test(req.headers.get("git-protocol") ?? "");
   if (v2 && service === "git-upload-pack" && action === "info/refs") {
@@ -161,7 +176,14 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
     return relayFrom(res, `http ${req.method} ${action}`, repo.artifacts_name, s0);
   }
 
-  return receivePack(req, env, ctx, monorepo, repo, identity, url.origin);
+  return receivePack(req, env, ctx, id, repo, identity, url.origin);
+}
+
+/** A plain repo's git URL is /owner/name.git; a monorepo's repos are /owner/monorepo/repo.git. Why this one doesn't fit, or null. */
+function shapeProblem(m: MonorepoInfo, repoName: string | null): string | null {
+  if (m.kind === "repo" && repoName !== null) return `${m.full_name} is a plain git repo: its URL is /${m.full_name}.git`;
+  if (m.kind === "monorepo" && repoName === null) return `${m.full_name} is a monorepo: clone one of its repos, /${m.full_name}/<repo>.git`;
+  return null;
 }
 
 async function toArtifacts(req: Request, repo: RepoRecord, action: string, search: string, auth: Record<string, string>): Promise<Response> {

@@ -38,7 +38,10 @@ const RECONCILE_MS = 60_000;
 const TRIM_EVERY_MS = 3_600_000;
 
 export interface IndexRow {
+  /** The monorepo's id (namespaces). */
   name: string;
+  /** Its owner/name, refreshed from the accounts on reconcile and join. */
+  label: string | null;
   kind: string | null;
   joined_at: string;
   /** The join's backfill has not landed yet: nothing is covered, pages read its log. */
@@ -50,6 +53,8 @@ export interface IndexRow {
 
 export interface JoinData {
   kind: string;
+  /** owner/name. */
+  full_name?: string;
   large: boolean;
   /** The latest activity events, newest first. */
   events: FeedEvent[];
@@ -61,9 +66,9 @@ export interface JoinData {
 export interface WindowPage {
   events: FeedEvent[];
   /** Large monorepos (read from their logs on every page), with their last activity. */
-  large: { name: string; last: string | null }[];
+  large: { name: string; label: string | null; last: string | null }[];
   /** Small monorepos the window may not fully cover for this page; `after` is where coverage starts. */
-  uncovered: { name: string; after: string; last: string | null }[];
+  uncovered: { name: string; label: string | null; after: string; last: string | null }[];
   /** Only for `only`: false when it is not in the index. */
   known: boolean;
   /** The index is old or never made: re-read the person's monorepos from the accounts and reconcile. */
@@ -77,6 +82,9 @@ export class FeedObject extends DurableObject<Env> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+    // Namespaces: rows key on the monorepo's id; its owner/name is kept beside it for display.
+    const cols = this.rows<{ name: string }>("PRAGMA table_info(monorepos)").map((c) => c.name);
+    if (!cols.includes("label")) this.sql.exec("ALTER TABLE monorepos ADD COLUMN label TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
@@ -99,6 +107,7 @@ export class FeedObject extends DurableObject<Env> {
   private indexRow(r: Record<string, unknown>): IndexRow {
     return {
       name: r.name as string,
+      label: (r.label as string | null) ?? null,
       kind: (r.kind as string | null) ?? null,
       joined_at: r.joined_at as string,
       pending: r.pending === 1,
@@ -119,15 +128,19 @@ export class FeedObject extends DurableObject<Env> {
    * New ones get a pending row (the caller queues their joins); gone ones
    * leave. Returns the rows.
    */
-  reconcile(list: { name: string; kind: string }[]): { added: string[]; removed: string[]; rows: IndexRow[] } {
+  reconcile(list: { name: string; kind: string; label?: string }[]): { added: string[]; removed: string[]; rows: IndexRow[] } {
     const have = new Set(this.rows<{ name: string }>("SELECT name FROM monorepos").map((r) => r.name));
     const want = new Set(list.map((m) => m.name));
     const added: string[] = [];
     for (const m of list) {
-      if (have.has(m.name)) continue;
+      if (have.has(m.name)) {
+        // A rename or transfer: only the label changes.
+        if (m.label) this.sql.exec("UPDATE monorepos SET label = ? WHERE name = ? AND label IS NOT ?", m.label, m.name, m.label);
+        continue;
+      }
       this.sql.exec(
-        "INSERT INTO monorepos (name, kind, joined_at, pending, covered_after) VALUES (?, ?, ?, 1, ?) ON CONFLICT (name) DO NOTHING",
-        m.name, m.kind, now(), PENDING,
+        "INSERT INTO monorepos (name, kind, label, joined_at, pending, covered_after) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT (name) DO NOTHING",
+        m.name, m.kind, m.label ?? null, now(), PENDING,
       );
       added.push(m.name);
     }
@@ -149,24 +162,36 @@ export class FeedObject extends DurableObject<Env> {
     }
     if (prev?.summary && prev.summary.at > j.summary.at) j.summary = prev.summary;
     this.sql.exec(
-      `INSERT INTO monorepos (name, kind, joined_at, pending, covered_after, large, summary, summary_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)
-       ON CONFLICT (name) DO UPDATE SET kind = excluded.kind, pending = 0, covered_after = excluded.covered_after,
+      `INSERT INTO monorepos (name, kind, label, joined_at, pending, covered_after, large, summary, summary_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
+       ON CONFLICT (name) DO UPDATE SET kind = excluded.kind, label = COALESCE(excluded.label, label), pending = 0, covered_after = excluded.covered_after,
          large = excluded.large, summary = excluded.summary, summary_at = excluded.summary_at`,
-      monorepo, j.kind, now(), after, j.large ? 1 : 0, JSON.stringify(j.summary), j.summary.at,
+      monorepo, j.kind, j.full_name ?? null, now(), after, j.large ? 1 : 0, JSON.stringify(j.summary), j.summary.at,
     );
     if (j.large) this.sql.exec("DELETE FROM pointers WHERE monorepo = ?", monorepo);
     else this.store(monorepo, j.events, false);
-    this.broadcast({ type: "joined", monorepo, large: j.large });
-    this.broadcast({ type: "summary", monorepo, summary: j.summary });
+    const label = this.labelOf(monorepo);
+    this.broadcast({ type: "joined", monorepo: label, monorepo_id: monorepo, large: j.large });
+    this.broadcast({ type: "summary", monorepo: label, monorepo_id: monorepo, summary: j.summary });
     this.ensureAlarm();
   }
 
   /** The person left the monorepo, or it was deleted: the index row first, then its pointers. */
   leave(monorepo: string): boolean {
+    const label = this.labelOf(monorepo);
     const had = this.sql.exec("DELETE FROM monorepos WHERE name = ?", monorepo).rowsWritten > 0;
     this.sql.exec("DELETE FROM pointers WHERE monorepo = ?", monorepo);
-    if (had) this.broadcast({ type: "left", monorepo });
+    if (had) this.broadcast({ type: "left", monorepo: label, monorepo_id: monorepo });
     return had;
+  }
+
+  /** A monorepo's owner/name as the index last heard it (its id when unknown). */
+  private labelOf(monorepo: string): string {
+    return this.row<{ label: string | null }>("SELECT label FROM monorepos WHERE name = ?", monorepo)?.label ?? monorepo;
+  }
+
+  /** Labels for many lines at once. */
+  private labels(): Map<string, string> {
+    return new Map(this.rows<{ name: string; label: string | null }>("SELECT name, label FROM monorepos").map((r) => [r.name, r.label ?? r.name]));
   }
 
   // ── Writes from the queue ────────────────────────────────────────────────
@@ -187,8 +212,10 @@ export class FeedObject extends DurableObject<Env> {
   private store(monorepo: string, events: FeedEvent[], live: boolean): number {
     let landed = Number(this.get("landed") ?? 0);
     let n = 0;
+    const label = live ? this.labelOf(monorepo) : "";
     for (const e of events) {
-      const { monorepo: _m, seq, at, ...rest } = e;
+      // The label is not stored: a rename changes the index row only.
+      const { monorepo_id: _i, monorepo: _m, seq, at, ...rest } = e;
       const body = JSON.stringify(rest satisfies StoredPointer);
       const next = landed + 1;
       const wrote = this.sql.exec(
@@ -205,7 +232,7 @@ export class FeedObject extends DurableObject<Env> {
         if (old.body === body) continue;
         this.sql.exec("UPDATE pointers SET body = ? WHERE monorepo = ? AND seq = ?", body, monorepo, seq);
       }
-      if (live) this.broadcast({ type: "event", landed: mine, event: { monorepo, seq, at, ...rest } });
+      if (live) this.broadcast({ type: "event", landed: mine, event: { monorepo_id: monorepo, monorepo: label, seq, at, ...rest } });
     }
     this.set("landed", String(landed));
     return n;
@@ -220,8 +247,9 @@ export class FeedObject extends DurableObject<Env> {
     this.sql.exec("UPDATE monorepos SET summary = ?, summary_at = ?, large = ? WHERE name = ?", JSON.stringify(s), s.at, s.large ? 1 : 0, monorepo);
     if (!r.large && s.large) this.sql.exec("DELETE FROM pointers WHERE monorepo = ?", monorepo); // read from its log from now on
     if (r.large && !s.large && !r.pending) this.sql.exec("UPDATE monorepos SET covered_after = ? WHERE name = ?", s.at, monorepo); // copied from now on
-    this.broadcast({ type: "summary", monorepo, summary: s });
-    if (needsChanged.length || needsMore) this.broadcast({ type: "needs", monorepo, changed: needsChanged, more: needsMore });
+    const label = r.label ?? monorepo;
+    this.broadcast({ type: "summary", monorepo: label, monorepo_id: monorepo, summary: s });
+    if (needsChanged.length || needsMore) this.broadcast({ type: "needs", monorepo: label, monorepo_id: monorepo, changed: needsChanged, more: needsMore });
     return true;
   }
 
@@ -245,7 +273,7 @@ export class FeedObject extends DurableObject<Env> {
         ? this.rows<P>(
             `SELECT monorepo, seq, at, body FROM pointers WHERE monorepo = ?1 AND (at < ?2 OR (at = ?2 AND seq < ?3))
              ORDER BY at DESC, seq DESC LIMIT ?4`,
-            only, cursor.at, only < cursor.monorepo ? Number.MAX_SAFE_INTEGER : only > cursor.monorepo ? 0 : cursor.seq, limit,
+            only, cursor.at, only < cursor.monorepo_id ? Number.MAX_SAFE_INTEGER : only > cursor.monorepo_id ? 0 : cursor.seq, limit,
           )
         : this.rows<P>("SELECT monorepo, seq, at, body FROM pointers WHERE monorepo = ? ORDER BY at DESC, seq DESC LIMIT ?", only, limit);
       if (idx[0].large) rows = [];
@@ -255,11 +283,12 @@ export class FeedObject extends DurableObject<Env> {
         ? this.rows<P>(
             `SELECT p.monorepo, p.seq, p.at, p.body ${join} WHERE (p.at, p.monorepo, p.seq) < (?, ?, ?)
              ORDER BY p.at DESC, p.monorepo DESC, p.seq DESC LIMIT ?`,
-            cursor.at, cursor.monorepo, cursor.seq, limit,
+            cursor.at, cursor.monorepo_id, cursor.seq, limit,
           )
         : this.rows<P>(`SELECT p.monorepo, p.seq, p.at, p.body ${join} ORDER BY p.at DESC, p.monorepo DESC, p.seq DESC LIMIT ?`, limit);
     }
-    const events = rows.map((r) => ({ monorepo: r.monorepo, seq: r.seq, at: r.at, ...(JSON.parse(r.body) as StoredPointer) }));
+    const labels = this.labels();
+    const events = rows.map((r) => ({ monorepo_id: r.monorepo, monorepo: labels.get(r.monorepo) ?? r.monorepo, seq: r.seq, at: r.at, ...(JSON.parse(r.body) as StoredPointer) }));
     const boundary = events.length === limit ? events[limit - 1].at : null;
     const floor = this.get("floor");
     const last = (r: IndexRow) => r.summary?.last_activity_at ?? null;
@@ -267,9 +296,9 @@ export class FeedObject extends DurableObject<Env> {
     for (const r of idx) {
       if (r.large) continue;
       const after = r.pending ? PENDING : effectiveAfter(r.covered_after, floor);
-      if (after !== null && uncovered(after, boundary)) unc.push({ name: r.name, after, last: last(r) });
+      if (after !== null && uncovered(after, boundary)) unc.push({ name: r.name, label: r.label, after, last: last(r) });
     }
-    return { events, large: idx.filter((r) => r.large).map((r) => ({ name: r.name, last: last(r) })), uncovered: unc, known: true, need_list };
+    return { events, large: idx.filter((r) => r.large).map((r) => ({ name: r.name, label: r.label, last: last(r) })), uncovered: unc, known: true, need_list };
   }
 
   /** The index (for the home's list and needs-you). */
@@ -369,7 +398,10 @@ export class FeedObject extends DurableObject<Env> {
           "SELECT monorepo, seq, at, landed, body FROM pointers WHERE landed > ? ORDER BY landed LIMIT ?", since, REPLAY_MAX + 1,
         );
         if (rows.length > REPLAY_MAX) this.send(ws, { type: "resync", landed: head });
-        else for (const r of rows) this.send(ws, { type: "event", landed: r.landed, event: { monorepo: r.monorepo, seq: r.seq, at: r.at, ...JSON.parse(r.body) } });
+        else {
+          const labels = this.labels();
+          for (const r of rows) this.send(ws, { type: "event", landed: r.landed, event: { monorepo_id: r.monorepo, monorepo: labels.get(r.monorepo) ?? r.monorepo, seq: r.seq, at: r.at, ...JSON.parse(r.body) } });
+        }
       }
     }
     this.send(ws, { type: "caught_up", landed: head });

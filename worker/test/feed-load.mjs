@@ -14,6 +14,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8811").replace(/\/$/, "");
 const WS_ = URL_.replace(/^http/, "ws");
@@ -66,11 +69,12 @@ const say = (s) => {
   out.push(s);
   console.log(s);
 };
+let me = null; // the owner of everything made here (namespaces: owner/name)
 try {
   S = HOME_CRED
     ? readFileSync(join(homedir(), ".pando/credentials", new URL(URL_).host), "utf8").trim()
     : (await call("POST", "/v1/users", BOOT, { login: `feedload-${id}`, credential_name: "feedload-mbp" })).json?.credential?.secret;
-  const me = (await call("GET", "/v1/user", S)).json?.login;
+  me = (await call("GET", "/v1/user", S)).json?.login;
   const names = Array.from({ length: N }, (_, i) => `hl${i}-${id}`);
   const clone = {};
   let t0 = performance.now();
@@ -84,8 +88,8 @@ try {
   say(`made ${made.length} monorepos in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   // Activity: 3 worktree reports and a status in each.
   await pool(made, 10, async (m) => {
-    for (let k = 0; k < 3; k++) await call("PUT", `/v1/monorepos/${m}/worktrees/wt${k}`, S, { repo: ".", branch: `b${k}`, path: `worktrees/b${k}`, machine: "hl-mbp", kind: "sparse" });
-    await call("POST", `/v1/monorepos/${m}/repos/${m}/statuses/${"a".repeat(40)}`, S, { state: "success", context: "ci" });
+    for (let k = 0; k < 3; k++) await call("PUT", `/v1/monorepos/${me}/${m}/worktrees/wt${k}`, S, { repo: ".", branch: `b${k}`, path: `worktrees/b${k}`, machine: "hl-mbp", kind: "sparse" });
+    await call("POST", `/v1/monorepos/${me}/${m}/repos/${m}/statuses/${"a".repeat(40)}`, S, { state: "success", context: "ci" });
   });
   // Needs: a real branch in NEEDS monorepos (ready); the first one failing.
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: S, GIT_AUTHOR_NAME: "x", GIT_AUTHOR_EMAIL: "x@pando.invalid", GIT_COMMITTER_NAME: "x", GIT_COMMITTER_EMAIL: "x@pando.invalid" };
@@ -105,7 +109,7 @@ try {
     git(["push", "-q", clone[m], "feat"], src);
     if (m === made[0]) {
       const head = git(["rev-parse", "HEAD"], src).stdout.trim();
-      await call("POST", `/v1/monorepos/${m}/repos/${m}/statuses/${head}`, S, { state: "failure", context: "ci" });
+      await call("POST", `/v1/monorepos/${me}/${m}/repos/${m}/statuses/${head}`, S, { state: "failure", context: "ci" });
     }
   }
   // Settle: every monorepo joined, needs counted.
@@ -154,7 +158,8 @@ try {
   const seen = (f, now, lines, pushes) => {
     const e = f.event;
     if (e?.kind === "worktree.reported") lines.set(e.summary.worktree, now);
-    if (e?.kind === "branch.opened") pushes.set(`${e.monorepo}/${e.branch}`, now);
+    // `monorepo` is the owner/name label; pushes are keyed by the name.
+    if (e?.kind === "branch.opened") pushes.set(`${(e.monorepo ?? "").split("/").pop()}/${e.branch}`, now);
   };
   ws.onmessage = (e) => {
     try {
@@ -166,7 +171,7 @@ try {
   ws.send(JSON.stringify({ type: "hello" }));
   const monoSockets = [];
   for (const m of made.slice(0, Math.min(made.length, Math.max(LIVE, 1)))) {
-    const ms = new WebSocket(`${WS_}/v1/monorepos/${m}/events?topics=feed`, { headers: { authorization: `Bearer ${S}` } });
+    const ms = new WebSocket(`${WS_}/v1/monorepos/${me}/${m}/events?topics=feed`, { headers: { authorization: `Bearer ${S}` } });
     ms.onmessage = (e) => {
       try {
         const f = JSON.parse(e.data);
@@ -181,13 +186,13 @@ try {
     const m = made[k % made.length];
     const wid = `live${k}`;
     const t = performance.now();
-    await call("PUT", `/v1/monorepos/${m}/worktrees/${wid}`, S, { repo: ".", branch: `l${k}`, path: `worktrees/l${k}`, machine: "hl-mbp", kind: "sparse" });
+    await call("PUT", `/v1/monorepos/${me}/${m}/worktrees/${wid}`, S, { repo: ".", branch: `l${k}`, path: `worktrees/l${k}`, machine: "hl-mbp", kind: "sparse" });
     sent.set(wid, t);
     await sleep(300);
   }
   await sleep(10_000);
   const d = [...sent].filter(([w]) => arrivals.has(w)).map(([w, t]) => arrivals.get(w) - t);
-  say(`  worktree report to the person's socket (pando-feed; sent to frame, ${d.length}/${LIVE})  ${d.length ? fmt(d) : "none"}`);
+  say(`  worktree report to the person's socket (outbox drain; sent to frame, ${d.length}/${LIVE})  ${d.length ? fmt(d) : "none"}`);
   const dd = [...sent].filter(([w]) => direct.has(w)).map(([w, t]) => direct.get(w) - t);
   say(`  worktree report to its monorepo's socket (topics=feed, no queue; ${dd.length}/${LIVE})  ${dd.length ? fmt(dd) : "none"}`);
   // A push goes through the branch-facts job first (commit count, head title), then the feed.
@@ -226,22 +231,22 @@ try {
     say(`  past the window (every line from logs): ${JSON.stringify(info)}  ${fmt(past)}`);
   }
 } catch (err) {
-  console.log("exception:", String(err?.stack ?? err) + " cause: " + String(err?.cause?.stack ?? err?.cause).replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
+  console.log("exception:", describeError(err));
 } finally {
   const t0 = performance.now();
   await pool(made, 5, async (m) => {
-    const r = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, S);
+    const r = await call("DELETE", `/v1/monorepos/${me}/${m}?confirm=${me}/${m}`, S);
     if (r.status !== 204) console.log(`delete ${m}: ${r.status}`);
   });
   console.log(`deleted ${made.length} monorepos in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   // Deleting a monorepo clears it from the person's home and log (leave messages).
   if (made.length && S) {
-    const gone = new Set(made);
+    const gone = new Set(made.map((m) => `${me}/${m}`));
     let left = null;
     for (let i = 0; i < 30; i++) {
       const ev = (await call("GET", "/v1/events?limit=200", S)).json?.events ?? [];
       const ms = (await call("GET", "/v1/monorepos?summary=1", S)).json?.monorepos ?? [];
-      left = { lines: ev.filter((e) => gone.has(e.monorepo)).length, monorepos: ms.filter((m) => gone.has(m.name)).length };
+      left = { lines: ev.filter((e) => gone.has(e.monorepo)).length, monorepos: ms.filter((m) => gone.has(m.full_name)).length };
       if (!left.lines && !left.monorepos) break;
       await sleep(1000);
     }

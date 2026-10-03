@@ -38,6 +38,7 @@ import (
 	"github.com/coder/websocket"
 
 	"pando/internal/config"
+	srvapi "pando/internal/server"
 )
 
 type testEnv struct {
@@ -56,13 +57,30 @@ var remote struct {
 	created []string // deleted when the run ends (TestMain)
 }
 
+// withAccounts: the server checks credentials and has monorepos to make and
+// delete: a deployed Worker (https), or a full Worker under wrangler dev
+// (PANDO_META_TEST_ACCOUNTS=1). Otherwise it is the cut-down test Worker
+// (worker/test/live), which keys its object on the name alone.
+func withAccounts(server string) bool {
+	return strings.HasPrefix(server, "https://") || os.Getenv("PANDO_META_TEST_ACCOUNTS") != ""
+}
+
+// Test monorepos are named owner/name. On the test Worker the owner is e2e.
+func nameOf(full string) string { return full[strings.LastIndexByte(full, '/')+1:] }
+
+// rootJSON is a machine's .pando/local/root.json (version 2: owner/name).
+func rootJSON(full, server string) string {
+	owner, name, _ := strings.Cut(full, "/")
+	return fmt.Sprintf(`{"version":2,"kind":"monorepo","owner":%q,"name":%q,"server":%q,"repos":[]}`, owner, name, server)
+}
+
 // TestMain deletes the monorepos a run made on a deployed Worker
-// (DELETE /v1/monorepos/{m}?confirm={m}, owner only).
+// (DELETE /v1/monorepos/{owner}/{name}?confirm={owner}/{name}, owner only).
 func TestMain(m *testing.M) {
 	code := m.Run()
 	remote.Lock()
 	for _, name := range remote.created {
-		u := remote.server + "/v1/monorepos/" + url.PathEscape(name) + "?confirm=" + url.QueryEscape(name)
+		u := remote.server + srvapi.MonorepoPath(name) + "?confirm=" + url.QueryEscape(name)
 		req, _ := http.NewRequest(http.MethodDelete, u, nil)
 		req.Header.Set("Authorization", "Bearer "+remote.token)
 		resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
@@ -89,10 +107,11 @@ func remoteToken(t *testing.T, server string) string {
 	return remote.token
 }
 
-// deleteMonorepo deletes a monorepo on a deployed Worker (owner only).
+// deleteMonorepo deletes a monorepo (owner/name) on a Worker with accounts
+// (owner only).
 func deleteMonorepo(t *testing.T, server, token, name string) {
 	t.Helper()
-	u := server + "/v1/monorepos/" + url.PathEscape(name) + "?confirm=" + url.QueryEscape(name)
+	u := server + srvapi.MonorepoPath(name) + "?confirm=" + url.QueryEscape(name)
 	req, _ := http.NewRequest(http.MethodDelete, u, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
@@ -107,8 +126,9 @@ func deleteMonorepo(t *testing.T, server, token, name string) {
 	t.Logf("deleted monorepo %s: %d", name, resp.StatusCode)
 }
 
-// createMonorepo makes a monorepo on a deployed Worker (the caller owns it).
-func createMonorepo(t *testing.T, server, token, name string) {
+// createMonorepo makes a monorepo on a Worker with accounts (the caller owns
+// it) and returns its full name, owner/name.
+func createMonorepo(t *testing.T, server, token, name string) string {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"name": name, "kind": "monorepo"})
 	req, _ := http.NewRequest(http.MethodPost, server+"/v1/monorepos", bytes.NewReader(body))
@@ -123,11 +143,21 @@ func createMonorepo(t *testing.T, server, token, name string) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("creating monorepo %s: %d %s", name, resp.StatusCode, out)
 	}
-	remote.server = server
-	if !slices.Contains(remote.created, name) {
-		remote.created = append(remote.created, name)
+	var made struct {
+		Monorepo struct {
+			FullName string `json:"full_name"`
+		} `json:"monorepo"`
 	}
-	t.Logf("made monorepo %s on %s", name, server)
+	if json.Unmarshal(out, &made) != nil || made.Monorepo.FullName == "" {
+		t.Fatalf("creating monorepo %s: no full_name in %s", name, out)
+	}
+	full := made.Monorepo.FullName
+	remote.server = server
+	if !slices.Contains(remote.created, full) {
+		remote.created = append(remote.created, full)
+	}
+	t.Logf("made monorepo %s on %s", full, server)
+	return full
 }
 
 func newEnv(t *testing.T) *testEnv {
@@ -136,7 +166,7 @@ func newEnv(t *testing.T) *testEnv {
 		t.Skip("set PANDO_META_TEST_URL, or run worker/test/live/run-e2e.sh")
 	}
 	env := &testEnv{server: u}
-	deployed := strings.HasPrefix(u, "https://")
+	deployed := withAccounts(u)
 	if deployed || os.Getenv("PANDO_META_TEST_SHARED") != "" {
 		token := ""
 		if deployed {
@@ -146,9 +176,9 @@ func newEnv(t *testing.T) *testEnv {
 			remote.Lock()
 			defer remote.Unlock() // createMonorepo may t.Fatal
 			if remote.mono == "" {
-				remote.mono = fmt.Sprintf("e2e-live-%d", time.Now().Unix())
+				remote.mono = fmt.Sprintf("e2e/e2e-live-%d", time.Now().Unix())
 				if deployed {
-					createMonorepo(t, u, token, remote.mono)
+					remote.mono = createMonorepo(t, u, token, nameOf(remote.mono))
 				}
 			}
 			env.mono, env.shared = remote.mono, true
@@ -158,7 +188,7 @@ func newEnv(t *testing.T) *testEnv {
 	} else {
 		b := make([]byte, 4)
 		rand.Read(b)
-		env.mono = "e2e-" + strings.ToLower(t.Name()[7:min(len(t.Name()), 27)]) + "-" + hex.EncodeToString(b)
+		env.mono = "e2e/e2e-" + strings.ToLower(t.Name()[7:min(len(t.Name()), 27)]) + "-" + hex.EncodeToString(b)
 	}
 	// Never this machine's own ~/.pando (its server, its credential).
 	t.Setenv("PANDO_HOME", t.TempDir())
@@ -172,8 +202,8 @@ func (env *testEnv) own(t *testing.T, suffix string) {
 		remote.Lock()
 		defer remote.Unlock()
 		env.mono = remote.mono + "-" + suffix
-		if strings.HasPrefix(env.server, "https://") {
-			createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), env.mono)
+		if withAccounts(env.server) {
+			env.mono = createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), nameOf(env.mono))
 		}
 		env.prefix, env.shared = "", false
 	}
@@ -193,7 +223,7 @@ func (env *testEnv) machine(t *testing.T, name string) *machine {
 func (env *testEnv) machineAt(t *testing.T, name, url string) *machine {
 	m := env.bare(t, name)
 	m.server = url
-	m.writeRoot(".pando/local/root.json", fmt.Sprintf(`{"version": 1, "kind": "monorepo", "name": %q, "server": %q, "repos": []}`, env.mono, url))
+	m.writeRoot(".pando/local/root.json", rootJSON(env.mono, url))
 	m.start()
 	return m
 }
@@ -680,7 +710,7 @@ func TestE2ECloneDownload(t *testing.T) {
 
 	// pando clone on a new machine: root.json, then Clone.
 	carl := env.bare(t, "carl")
-	carl.writeRoot(".pando/local/root.json", fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, env.mono, env.server))
+	carl.writeRoot(".pando/local/root.json", rootJSON(env.mono, env.server))
 	t.Setenv("PANDO_MACHINE", "carl")
 	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
 	if err := Clone(context.Background(), carl.root, CloneOptions{}); err != nil {
@@ -700,7 +730,7 @@ func TestE2ECloneDownload(t *testing.T) {
 func rawSocket(t *testing.T, server, mono string) (send func(any), next func(string) serverMsg) {
 	t.Helper()
 	ctx := context.Background()
-	u := strings.Replace(server, "http", "ws", 1) + "/v1/monorepos/" + url.PathEscape(mono) + "/meta/socket"
+	u := strings.Replace(server, "http", "ws", 1) + srvapi.MonorepoPath(mono) + "/meta/socket"
 	opts := &websocket.DialOptions{HTTPHeader: http.Header{}}
 	if tok := os.Getenv("PANDO_TOKEN"); tok != "" {
 		opts.HTTPHeader.Set("Authorization", "Bearer "+tok)
@@ -745,7 +775,7 @@ func TestE2EInitFirstUpload(t *testing.T) {
 	t.Setenv("PANDO_AUTHOR", "Ana <ana@example.com>")
 	root := t.TempDir()
 	files := map[string]string{
-		".pando/local/root.json":                    fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server),
+		".pando/local/root.json":                    rootJSON(mono, server),
 		".pando/pando.toml":                         "local_only = [\"scratch/\"]\n",
 		".pando/references/research/infra/lib.toml": "url = \"https://example.com/lib.git\"\n",
 		"AGENTS.md":                                 "agents\n",
@@ -950,13 +980,13 @@ func artifactsEnv(t *testing.T, prefix string) *testEnv {
 	env := newEnv(t)
 	b := make([]byte, 4)
 	rand.Read(b)
-	env.mono = prefix + hex.EncodeToString(b)
+	env.mono = "e2e/" + prefix + hex.EncodeToString(b)
 	return env
 }
 
 func metaRepo(t *testing.T, server, mono, action string, extra map[string]string) []byte {
 	t.Helper()
-	body := map[string]string{"monorepo": mono, "action": action}
+	body := map[string]string{"monorepo": nameOf(mono), "action": action}
 	for k, v := range extra {
 		body[k] = v
 	}
@@ -1079,7 +1109,7 @@ func TestE2EInitCommits(t *testing.T) {
 	t.Setenv("PANDO_AUTHOR", "Ana <ana@example.com>")
 	root := t.TempDir()
 	for p, body := range map[string]string{
-		".pando/local/root.json": fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, mono, server),
+		".pando/local/root.json": rootJSON(mono, server),
 		".pando/pando.toml":      "local_only = []\n",
 		"AGENTS.md":              "agents\n",
 		"decisions/RULINGS.md":   "rulings\n",
@@ -1163,7 +1193,7 @@ func TestE2ELargeFiles(t *testing.T) {
 
 	// A text-only clone keeps pointers until pando fetch.
 	carl := env.bare(t, "carl")
-	carl.writeRoot(".pando/local/root.json", fmt.Sprintf(`{"version":1,"kind":"monorepo","name":%q,"server":%q,"repos":[]}`, env.mono, env.server))
+	carl.writeRoot(".pando/local/root.json", rootJSON(env.mono, env.server))
 	t.Setenv("PANDO_MACHINE", "carl")
 	t.Setenv("PANDO_AUTHOR", "Carl <carl@example.com>")
 	if err := Clone(ctx, carl.root, CloneOptions{TextOnly: true}); err != nil {
@@ -1242,8 +1272,8 @@ func TestE2EPointerNeedsItsBytes(t *testing.T) {
 // On a deployed Worker: saves become commits on <monorepo>--meta after quiet.
 func TestE2ECommitsOnDeployed(t *testing.T) {
 	env := newEnv(t)
-	if !strings.HasPrefix(env.server, "https://") {
-		t.Skip("for a deployed Worker (commits on real Artifacts locally: run-e2e.sh --artifacts)")
+	if !withAccounts(env.server) {
+		t.Skip("for a Worker with accounts and Artifacts (commits on real Artifacts locally: run-e2e.sh --artifacts)")
 	}
 	a := env.machine(t, "ana")
 	a.write("committed.md", "a commit after quiet\n")
@@ -1255,7 +1285,7 @@ func TestE2ECommitsOnDeployed(t *testing.T) {
 			commit := h.Versions[0].Commit
 			t.Logf("committed as %s after %s", commit[:10], time.Since(start).Round(time.Second))
 			// Read it back from git: the meta layer's repo is "meta" (<m>--meta).
-			u := env.server + "/v1/monorepos/" + url.PathEscape(env.mono) + "/repos/meta/files/" + env.p("committed.md") + "?ref=" + commit
+			u := env.server + srvapi.MonorepoPath(env.mono) + "/repos/meta/files/" + env.p("committed.md") + "?ref=" + commit
 			req, _ := http.NewRequest(http.MethodGet, u, nil)
 			req.Header.Set("Authorization", "Bearer "+os.Getenv("PANDO_TOKEN"))
 			resp, err := http.DefaultClient.Do(req)
@@ -1276,11 +1306,11 @@ func TestE2ECommitsOnDeployed(t *testing.T) {
 	t.Fatalf("no commit after 60 s; status %v", st)
 }
 
-// DELETE /v1/monorepos/{m} calls the object's destroy(): sockets close with
+// DELETE /v1/monorepos/{owner}/{name} calls the object's destroy(): sockets close with
 // 4404 and engines stop, and a monorepo made again with the same name is empty.
 func TestE2EDestroy(t *testing.T) {
 	env := newEnv(t)
-	deployed := strings.HasPrefix(env.server, "https://")
+	deployed := withAccounts(env.server)
 	env.own(t, "destroy")
 	a := env.machine(t, "ana")
 	b := env.machine(t, "ben")
@@ -1291,10 +1321,10 @@ func TestE2EDestroy(t *testing.T) {
 	waitContent(t, b, "doomed.bin", big)
 
 	if deployed {
-		// The real thing: DELETE /v1/monorepos/{m}?confirm={m}, then make it again.
+		// The real thing: DELETE ...?confirm=<owner/name>, then make it again.
 		deleteMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), env.mono)
 	} else {
-		body, _ := json.Marshal(map[string]string{"monorepo": env.mono})
+		body, _ := json.Marshal(map[string]string{"monorepo": nameOf(env.mono)})
 		resp, err := http.Post(env.server+"/test/destroy", "application/json", bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
@@ -1329,7 +1359,7 @@ func TestE2EDestroy(t *testing.T) {
 		func() {
 			remote.Lock()
 			defer remote.Unlock() // createMonorepo may t.Fatal
-			createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), env.mono)
+			createMonorepo(t, env.server, os.Getenv("PANDO_TOKEN"), nameOf(env.mono))
 		}()
 	}
 	st, err := env.client().Status(context.Background())
@@ -1392,7 +1422,7 @@ func TestE2EReferenceCredentialsRefused(t *testing.T) {
 
 func getJSON(t *testing.T, env *testEnv, route string, out any) int {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, env.server+"/v1/monorepos/"+url.PathEscape(env.mono)+"/meta/"+route, nil)
+	req, _ := http.NewRequest(http.MethodGet, env.server+srvapi.MonorepoPath(env.mono)+"/meta/"+route, nil)
 	if tok := os.Getenv("PANDO_TOKEN"); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
@@ -1511,12 +1541,12 @@ func TestE2ETree(t *testing.T) {
 // machine; GET references shows pointer urls without a user or password.
 func TestE2EApplyFromMainAndReferences(t *testing.T) {
 	env := newEnv(t)
-	if env.shared || strings.HasPrefix(env.server, "https://") {
+	if env.shared || withAccounts(env.server) {
 		t.Skip("uses the local test Worker's /test/apply-from-main")
 	}
 	a := env.machine(t, "ana")
 	body, _ := json.Marshal(map[string]any{
-		"monorepo": env.mono, "commit": strings.Repeat("ab", 20),
+		"monorepo": nameOf(env.mono), "commit": strings.Repeat("ab", 20), // the test Worker keys on the name
 		"changes": []map[string]any{
 			{"path": ".pando/pando.toml", "text": "local_only = [\"scratch/\"]\n"},
 			{"path": ".pando/references/research/lib.toml", "text": "url = \"https://user:not-a-real-token@example.com/lib.git\"\nref = \"refs/heads/main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n"},

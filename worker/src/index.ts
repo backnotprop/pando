@@ -2,15 +2,15 @@
 // docs/contracts/README.md); this file only wires them together.
 //   /healthz                       up check
 //   /v1/openapi.yaml               the contract (docs/contracts/api-v1.yaml)
-//   /<monorepo>/<repo>.git/...     the git door (server-git)
+//   /<owner>/<monorepo>/<repo>.git, /<owner>/<repo>.git   the git door (server-git)
 //   /v1/users, /v1/login/...       sign-in (accounts/signin.ts)
-//   /v1/monorepos/{m}/meta/...     the meta layer (live; wired at M3)
+//   /v1/monorepos/{o}/{m}/meta/... the meta layer (live; wired at M3)
 //   /v1/...                        the API (server-git)
 import contract from "../../docs/contracts/api-v1.yaml";
 import type { Env } from "./env";
 import { errorJson, HttpError, toErrorResponse } from "./http";
 import { authenticateRequest } from "./accounts/auth";
-import { finishTiming, runTimed, startTiming } from "./timing";
+import { finishTiming, note, runTimed, startTiming } from "./timing";
 import { metaRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath } from "./monorepo/door";
@@ -28,12 +28,13 @@ export { FeedObject } from "./feed/object";
 export { FeedDrain } from "./feed/consumer";
 export type { Env };
 
-const META_RE = /^\/v1\/monorepos\/[^/]+\/meta(\/|$)/;
+const META_RE = /^\/v1\/monorepos\/[^/]+\/[^/]+\/meta(\/|$)/;
 
 /** The meta layer (live lane): members only, `init` for owners; the object gets the user as the author. */
 async function meta(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;
-  const t = startTiming("api", { method: request.method, path, monorepo: path.split("/")[3] ?? null, repo: "meta" });
+  const seg = path.split("/");
+  const t = startTiming("api", { method: request.method, path, monorepo: `${seg[3]}/${seg[4]}`.toLowerCase(), repo: "meta" });
   const res = await runTimed(t, () => metaInner(request, env));
   finishTiming(t, { status: res.status });
   return res;
@@ -45,14 +46,16 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
     if (!m) return errorJson(404, "not_found", "no such meta layer route");
     const auth = await authenticateRequest(env, request, m);
     if (!auth) throw new HttpError(401, "unauthorized", "unknown or revoked credential");
-    if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m}`);
-    if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${m}`);
-    if (auth.monorepo.kind !== "monorepo") throw new HttpError(404, "no_meta_layer", `${m} is a plain git repo; it has no meta layer`);
+    if (!auth.monorepo) throw new HttpError(404, "not_found", `no monorepo ${m.owner}/${m.name}`);
+    const full = auth.monorepo.full_name;
+    note({ monorepo: full, monorepo_id: auth.monorepo.id });
+    if (!auth.role) throw new HttpError(403, "not_a_member", `${auth.user.login} is not a member of ${full}`);
+    if (auth.monorepo.kind !== "monorepo") throw new HttpError(404, "no_meta_layer", `${full} is a plain git repo; it has no meta layer`);
     if (new URL(request.url).pathname.endsWith("/meta/init") && auth.role !== "owner") {
       throw new HttpError(403, "owner_only", "only an owner can make the meta layer's first upload");
     }
     const user = auth.user;
-    return (await routeMeta(request, env, { name: user.name ?? user.login, email: user.email ?? undefined }))!;
+    return (await routeMeta(request, env, auth.monorepo.id, { name: user.name ?? user.login, email: user.email ?? undefined }))!;
   } catch (err) {
     return toErrorResponse(err);
   }

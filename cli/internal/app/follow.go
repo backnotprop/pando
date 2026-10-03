@@ -58,7 +58,7 @@ func followMains(e *Env, root *config.Root) int64 {
 		e.warnf("follow: %v", err)
 		return 0
 	}
-	hs, err := srv.Heads(e.Ctx, root.Name)
+	hs, err := srv.Heads(e.Ctx, root.FullName())
 	if err == nil {
 		for _, h := range hs.Heads {
 			if path, ok := here[h.Repo]; ok {
@@ -75,7 +75,7 @@ func followMains(e *Env, root *config.Root) int64 {
 		return 0
 	}
 	for name, path := range here {
-		bl, err := srv.ListBranches(e.Ctx, root.Name, name, "open")
+		bl, err := srv.ListBranches(e.Ctx, root.FullName(), name, "open")
 		if err != nil {
 			e.warnf("follow %s: %v", path, err)
 			continue
@@ -159,7 +159,7 @@ func eventsURL(root *config.Root, names []string, since int64) string {
 	if since > 0 {
 		q.Set("since", fmt.Sprint(since))
 	}
-	u := strings.TrimRight(root.Server, "/") + "/v1/monorepos/" + url.PathEscape(root.Name) + "/events?" + q.Encode()
+	u := strings.TrimRight(root.Server, "/") + server.MonorepoPath(root.FullName()) + "/events?" + q.Encode()
 	if strings.HasPrefix(u, "https://") {
 		return "wss://" + strings.TrimPrefix(u, "https://")
 	}
@@ -336,7 +336,7 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 		case err := <-readErr:
 			f.debugf("read error: %v", err)
 			if websocket.CloseStatus(err) == 4404 {
-				return time.Since(started), errStop{"the monorepo " + f.root.Name + " was deleted on the server; stopped following"}
+				return time.Since(started), errStop{"the monorepo " + f.root.FullName() + " was deleted on the server; stopped following"}
 			}
 			return time.Since(started), err
 		case data := <-frames:

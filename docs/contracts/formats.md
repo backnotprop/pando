@@ -1,7 +1,9 @@
 # Formats: layout, `.pando/pando.toml`, reference pointers, large-file pointers
 
 Owner: the cli lane. Other lanes read this file and ask pando-ops for changes.
-Version 2, 2026-10-03 (version 1 had per-monorepo tokens; identity is now per user, RULINGS.md).
+Version 3, 2026-10-03: monorepos are named `owner/name` (root.json version 2,
+section 3). Version 2 moved identity to users; version 1 had per-monorepo
+tokens.
 
 This file fixes the shapes on disk that more than one lane reads: where repos
 and worktrees sit, the one config file, the pointer a reference leaves in the
@@ -113,19 +115,36 @@ two files.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "kind": "monorepo",
+  "owner": "ramos",
   "name": "workspaces",
+  "id": "m_3f2a9c1d7b6e4a50",
   "server": "https://pando-dev.example.workers.dev",
   "repos": [
-    { "path": "projects/workspaces", "name": "projects-workspaces", "clone_url": "https://pando-dev.example.workers.dev/workspaces/projects-workspaces.git" }
+    { "path": "projects/workspaces", "name": "projects-workspaces", "clone_url": "https://pando-dev.example.workers.dev/ramos/workspaces/projects-workspaces.git" }
   ]
 }
 ```
 
-`kind` is `monorepo` or `repo`. `server` is the Pando server this root belongs
-to. `repos` is a cache of the server's list (the server is the truth); `name`
+`kind` is `monorepo` or `repo`. A monorepo is named `owner/name`, like a
+GitHub repo: `owner` is a login (an organization later), lower case and
+matched without regard to case, and `name` is its name within the owner.
+`id` is permanent: a rename or a transfer changes `owner` or `name`, never
+`id`. The cli prints every monorepo as `owner/name`; the folder `pando clone`
+makes is the name alone. `server` is the Pando server this root belongs to.
+`repos` is a cache of the server's list (the server is the truth); `name`
 and `clone_url` are the API's (`api-v1.yaml`), never built by the client.
+
+**Version 1** (before owner/name) has no `owner` and no `id`, and its
+`clone_url`s are `<server>/<name>/<repo>.git`, which the server no longer
+answers. The first `pando` command in such a folder upgrades it: it asks
+`GET /v1/monorepos?name=<name>` (the person's own namespace first), points
+every git remote here at the server's `clone_url` (each worktree's `origin`,
+in its own git folder, mounts included, and the `pando` remote `pando init`
+added to the checkouts it pushed from), then saves version 2. A run cut
+short leaves version 1 and is done again; repeating any step changes
+nothing.
 
 `.pando/local/worktrees.json`: the worktrees this machine has made under this
 root.

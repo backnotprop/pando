@@ -22,17 +22,17 @@ func Status(e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	e.printf("Pando %s %s at %s\n", root.Kind, root.Name, root.Dir)
+	e.printf("Pando %s %s at %s\n", root.Kind, root.FullName(), root.Dir)
 	acct, _ := e.Home.Account(root.Server)
 	srv, err := e.open(root)
 	switch {
 	case err != nil:
 		e.printf("server: %s (%v)\n", root.Server, err)
 	default:
-		if m, err := srv.GetMonorepo(e.Ctx, root.Name); err != nil {
+		if m, err := srv.GetMonorepo(e.Ctx, root.FullName()); err != nil {
 			e.printf("server: %s, not answering for you (%v)\n", root.Server, err)
 		} else if me, err := srv.Me(e.Ctx); err == nil {
-			e.printf("server: %s, you are %s (%s of %s)\n", root.Server, me.Login, dash(m.Role), root.Name)
+			e.printf("server: %s, you are %s (%s of %s)\n", root.Server, me.Login, dash(m.Role), root.FullName())
 		}
 	}
 	if acct.Name != "" {

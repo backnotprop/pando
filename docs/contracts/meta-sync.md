@@ -55,7 +55,7 @@ machine that made it.
 
 ## The WebSocket
 
-`GET /v1/monorepos/{monorepo}/meta/socket` with `Upgrade: websocket`.
+`GET /v1/monorepos/{owner}/{monorepo}/meta/socket` with `Upgrade: websocket`.
 Every message is one JSON text frame. The text frame `ping` gets the text
 frame `pong` without waking the object (send one every 30 s).
 
@@ -219,7 +219,7 @@ layer to the new, empty monorepo. The first commit of a meta layer is not a
 live edit, so it may carry `.pando/pando.toml` and the rest of `.pando/`
 (never `.pando/local/`).
 
-1. `POST /v1/monorepos/{monorepo}/meta/init` with `{"action": "start"}`
+1. `POST /v1/monorepos/{owner}/{monorepo}/meta/init` with `{"action": "start"}`
    opens the window. Only on an empty meta layer: otherwise 409
    `not_empty` ("use pando clone").
 2. The client sends every file as ordinary `save` messages (base version 0).
@@ -232,7 +232,9 @@ A window left open closes by itself after 30 minutes.
 
 ## History and restore (HTTP)
 
-All under `/v1/monorepos/{monorepo}/meta/`.
+All under `/v1/monorepos/{owner}/{monorepo}/meta/`. `{owner}/{monorepo}` is
+the monorepo's name (api-v1.yaml, namespaces); its storage (the meta layer
+object, R2 keys, the Artifacts repo) keys on its permanent id, `<id>` below.
 
 **`GET history?path=<path>&limit=50&before=<version>`**: every version of a
 path, newest first. Without `path`, `GET history?since=<version>` lists every
@@ -311,7 +313,7 @@ pando resolve decisions/HISTORY.md                # unfreeze after a conflict
 ## Commits after quiet
 
 When a path has had no change for 10 seconds, the object commits it to the
-meta layer's `main` (the Artifacts repo `<monorepo>--meta`) through
+meta layer's `main` (the Artifacts repo `<id>--meta`) through
 gitwrite's `commitChanges` (see `gitwrite.md`), one commit at a time
 through the repo's write gate. Which paths share a commit is one Worker
 setting, `META_COMMIT_SHAPE`:
@@ -361,7 +363,7 @@ wins), and is broadcast. This is the only way `.pando/**` changes.
 
 ## Deleting a monorepo
 
-`DELETE /v1/monorepos/{monorepo}` (owner only, server-git) calls the meta
+`DELETE /v1/monorepos/{owner}/{monorepo}` (owner only, server-git) calls the meta
 layer object (a Durable Object RPC):
 
 ```ts
@@ -371,7 +373,7 @@ await env.META.get(env.META.idFromName(monorepo)).destroy();  // {closed: <socke
 It closes every socket with code `4404` ("this monorepo was deleted"),
 drops the alarm and all of the object's storage, and leaves it empty, so a
 new monorepo with the same name starts with nothing. The caller deletes the
-R2 objects under `meta/<monorepo>/` and the Artifacts repo. A client that
+R2 objects under `meta/<id>/` and the Artifacts repo. A client that
 gets `4404` stops syncing and keeps its files.
 
 ## Identity
@@ -389,7 +391,7 @@ Errors on the HTTP routes have the `/v1` shape:
 ## Large files and binaries through R2
 
 A binary, or a file over 1.5 MiB, has its bytes in R2 (bucket
-`pando-dev-blobs`, key `meta/<monorepo>/<sha256>`) and a Git LFS pointer in
+`pando-dev-blobs`, key `meta/<id>/<sha256>`) and a Git LFS pointer in
 the meta layer (`formats.md`, section 5). The pointer is what is saved,
 broadcast, kept in history and committed to git:
 
@@ -403,9 +405,9 @@ The bytes move through the Worker. No machine holds R2 keys.
 
 | Route | What |
 | --- | --- |
-| `HEAD /v1/monorepos/{monorepo}/meta/blobs/{sha256}` | 200 when the bytes are there |
-| `PUT  /v1/monorepos/{monorepo}/meta/blobs/{sha256}` | upload, `Content-Length` required, at most 100 MB (413 above, the largest request a Worker takes); R2 checks the SHA-256 (400 `bad_sha`); 200 if already there |
-| `GET  /v1/monorepos/{monorepo}/meta/blobs/{sha256}` | download |
+| `HEAD /v1/monorepos/{owner}/{monorepo}/meta/blobs/{sha256}` | 200 when the bytes are there |
+| `PUT  /v1/monorepos/{owner}/{monorepo}/meta/blobs/{sha256}` | upload, `Content-Length` required, at most 100 MB (413 above, the largest request a Worker takes); R2 checks the SHA-256 (400 `bad_sha`); 200 if already there |
+| `GET  /v1/monorepos/{owner}/{monorepo}/meta/blobs/{sha256}` | download |
 
 - **Saving.** The client hashes the file (SHA-256), uploads it if `HEAD`
   says it is missing, then sends a `save` whose bytes are the pointer. The

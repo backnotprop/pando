@@ -294,3 +294,13 @@ func emptyOrMissing(dir string) (bool, error) {
 	}
 	return len(entries) == 0, nil
 }
+
+// GitDir is a worktree's git folder: the sparse clone's .git, or the
+// ArtifactFS git folder of a fuse or fskit mount (readable with the mount
+// down).
+func GitDir(kind, pandoHome string, s Spec) string {
+	if kind == "sparse" || kind == "" {
+		return filepath.Join(s.Abs(), ".git")
+	}
+	return (&Fuse{Home: pandoHome}).gitDir(s)
+}

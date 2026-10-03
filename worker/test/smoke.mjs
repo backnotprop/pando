@@ -12,6 +12,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "https://pando-dev.plannotator.workers.dev").replace(/\/$/, "");
 const file = process.env.PANDO_CREDENTIAL_FILE ?? join(process.env.PANDO_HOME ?? join(homedir(), ".pando"), "credentials", new URL(URL_).host);
@@ -59,17 +62,19 @@ const git = (args, cwd) => {
 };
 
 const M = `smoke-${Date.now().toString(36)}`;
+let O = null; // the owner (namespaces: owner/name), from the create answer
 let made = false;
 try {
   let r = await call("GET", "/v1/user");
   check("the credential works", r.status === 200, `${r.status} as ${r.json?.login}`);
   // Ask about the name before it exists, from many requests (many isolates).
-  for (let i = 0; i < 8; i++) await call("GET", `/v1/monorepos/${M}`);
-  git(["ls-remote", `${URL_}/${M}/${M}.git`], work);
+  for (let i = 0; i < 8; i++) await call("GET", `/v1/monorepos/${O}/${M}`);
+  git(["ls-remote", `${URL_}/${O}/${M}.git`], work);
   r = await call("POST", "/v1/monorepos", { name: M, kind: "repo" });
   made = r.status === 201;
+  O = r.json?.monorepo?.owner ?? null;
   let stale = 0;
-  for (let i = 0; i < 8; i++) if ((await call("GET", `/v1/monorepos/${M}`)).status !== 200) stale++;
+  for (let i = 0; i < 8; i++) if ((await call("GET", `/v1/monorepos/${O}/${M}`)).status !== 200) stale++;
   check("right after creating it, no request sees a cached 404", stale === 0, `${stale} of 8 stale`);
   check("create a plain repo", made, `${r.status}`);
   const url = r.json?.repos?.[0]?.clone_url;
@@ -101,39 +106,39 @@ try {
   let b = null;
   const t0 = Date.now();
   while (Date.now() - t0 < 30_000) {
-    r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches`);
+    r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches`);
     b = r.json?.branches?.[0];
     if (b && !b.stale) break;
     await new Promise((res) => setTimeout(res, 300));
   }
   check("branch list, facts fresh", b?.name === "smoke/branch" && b?.ahead === 1 && b?.mergeable === "clean" && b?.stale === false, `${JSON.stringify({ ahead: b?.ahead, mergeable: b?.mergeable })} after ${Date.now() - t0} ms`);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/smoke%2Fbranch/diff?format=patch`);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/smoke%2Fbranch/diff?format=patch`);
   writeFileSync(join(work, "p.patch"), r.text);
   git(["checkout", "-q", r.headers.get("x-pando-merge-base") ?? "main"], clone);
   g = git(["apply", "--check", join(work, "p.patch")], clone);
   check("the patch applies on the merge base", r.status === 200 && g.ok, g.out.slice(-200));
-  await call("POST", `/v1/monorepos/${M}/repos/${repo}/statuses/${b?.head}`, { state: "pending", context: "ci" });
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/smoke%2Fbranch/merge`);
+  await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/statuses/${b?.head}`, { state: "pending", context: "ci" });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/smoke%2Fbranch/merge`);
   check("merge waits for checks (412)", r.status === 412);
-  await call("POST", `/v1/monorepos/${M}/repos/${repo}/statuses/${b?.head}`, { state: "success", context: "ci" });
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repo}/branches/smoke%2Fbranch/merge`);
+  await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/statuses/${b?.head}`, { state: "success", context: "ci" });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/smoke%2Fbranch/merge`);
   check("merge with green checks", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
   git(["fetch", "-q", "origin"], clone);
   const parents = git(["rev-list", "--parents", "-n1", "origin/main"], clone).out.trim().split(" ");
   check("main is a two-parent merge commit", parents.length === 3 && parents[0] === r.json?.sha);
   const me = (await call("GET", "/v1/user")).json;
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches?state=merged`);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches?state=merged`);
   const mb = r.json?.branches?.[0];
   check("merge facts on the branch (merged_by, merged_machine, forced)", mb?.merged_by === me?.login && mb?.merged_machine === me?.credential?.name && mb?.forced === false && !!mb?.merged_at, JSON.stringify({ by: mb?.merged_by, forced: mb?.forced }));
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repo}/branches/smoke%2Fbranch/commits`);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/smoke%2Fbranch/commits`);
   check("the branch's commits with trailers", r.status === 200 && r.json?.commits?.[0]?.trailers?.agent === "smoke-agent" && r.json.commits[0].trailers.machine === "smoke-box", `${r.status}`);
-  r = await call("GET", `/v1/monorepos/${M}/members`);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/members`);
   check("members carry names", r.status === 200 && r.json?.members?.[0]?.login === me?.login && "name" in (r.json?.members?.[0] ?? {}));
 } catch (err) {
-  check("no exception", false, String(err?.stack ?? err));
+  check("no exception", false, describeError(err));
 } finally {
   if (made) {
-    const r = await call("DELETE", `/v1/monorepos/${M}?confirm=${M}`);
+    const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`);
     check("delete the test monorepo", r.status === 204, `${r.status}`);
   }
   rmSync(work, { recursive: true, force: true });

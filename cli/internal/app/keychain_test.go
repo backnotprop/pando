@@ -16,9 +16,11 @@ import (
 // hands the Pando credential to a credential helper from the system or the
 // person's git config (on a Mac, Apple's osxkeychain, which pops "A keychain
 // cannot be found to store ..." when there is no keychain). A recorder helper
-// stands in for those, in a fake system config and a fake global config;
-// the git server needs the credential on every request, so credentials do
-// flow. The recorder must never run.
+// stands in for those, in a fake global config; the system level stays off
+// (GIT_CONFIG_NOSYSTEM=1, as everywhere Pando runs git), since Apple git's
+// osxkeychain is there and only that setting keeps it from running. The git
+// server needs the credential on every request, so credentials do flow. The
+// recorder must never run.
 func TestNoInheritedCredentialHelperRuns(t *testing.T) {
 	h := newHarness(t)
 	srvBase := strings.TrimPrefix(h.server, "file://")
@@ -27,13 +29,10 @@ func TestNoInheritedCredentialHelperRuns(t *testing.T) {
 	calls := filepath.Join(h.base, "inherited-helper-calls")
 	recorder := filepath.Join(h.base, "recorder.sh")
 	os.WriteFile(recorder, []byte("#!/bin/sh\necho \"$@\" >> '"+calls+"'\ncat >/dev/null\n"), 0o755)
-	for _, f := range []string{"system.gitconfig", "global.gitconfig"} {
-		os.WriteFile(filepath.Join(h.base, f), []byte("[credential]\n\thelper = !'"+recorder+"'\n[user]\n\tname = Pat\n\temail = pat@example.com\n"), 0o644)
-	}
-	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(h.base, "system.gitconfig"))
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(h.base, "global.gitconfig"))
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "")
-	os.Unsetenv("GIT_CONFIG_NOSYSTEM") // the harness sets it; this test must not
+	global := filepath.Join(h.base, "global.gitconfig")
+	os.WriteFile(global, []byte("[credential]\n\thelper = !'"+recorder+"'\n[user]\n\tname = Pat\n\temail = pat@example.com\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 	// Pando's helper: answers get with the credential, as pando credential does.
 	const secret = "pando_test_secret"

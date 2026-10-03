@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -423,5 +424,56 @@ func TestMergeWord(t *testing.T) {
 	zero := 0
 	if count(server.Branch{Stale: true}, &zero) != "?" || count(server.Branch{}, &zero) != "0" || count(server.Branch{}, nil) != "-" {
 		t.Error("count: stale shows ?, known shows the number, unknown shows -")
+	}
+}
+
+// pando clone mounts many repos' mains at once: all land, each once, in
+// worktrees.json, with whole progress lines.
+func TestCloneMountsMainsInParallel(t *testing.T) {
+	h := newHarness(t)
+	ws := filepath.Join(h.base, "ws")
+	const n = 8
+	for i := 0; i < n; i++ {
+		d := filepath.Join(ws, "projects", fmt.Sprintf("p%d", i), "worktrees", "main")
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "README.md"), []byte(fmt.Sprintf("p%d\n", i)), 0o644)
+		h.git(d, "init", "-q", "-b", "main")
+		h.git(d, "add", "-A")
+		h.git(d, "commit", "-q", "-m", "first")
+	}
+	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	h.ok(ws, "init", "--yes")
+	clone := filepath.Join(h.base, "clone")
+	out := h.ok(h.base, "clone", "ws", clone, "--server", h.server)
+	if !strings.Contains(out, fmt.Sprintf("Mounting %d repos' main, 6 at a time", n)) || !strings.Contains(out, fmt.Sprintf("%d of %d mains ready", n, n)) {
+		t.Fatalf("clone:\n%s", out)
+	}
+	ready := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "(main, read-only), sparse worktree, ready in") {
+			if !strings.HasPrefix(line, "projects/p") {
+				t.Fatalf("a progress line was broken up: %q", line)
+			}
+			ready++
+		}
+	}
+	if ready != n {
+		t.Fatalf("%d ready lines, want %d:\n%s", ready, n, out)
+	}
+	root, _ := config.LoadRoot(clone)
+	wts, _ := root.LoadWorktrees()
+	seen := map[string]bool{}
+	for _, w := range wts {
+		seen[w.Path] = true
+	}
+	if len(wts) != n || len(seen) != n {
+		t.Fatalf("worktrees.json has %d entries (%d distinct), want %d", len(wts), len(seen), n)
+	}
+	for i := 0; i < n; i++ {
+		if _, err := os.Stat(filepath.Join(clone, "projects", fmt.Sprintf("p%d", i), "worktrees", "main", "README.md")); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

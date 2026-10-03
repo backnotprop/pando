@@ -68,6 +68,34 @@ wt=/work/acme/worktrees/feat-x
 mountpoint -q "$wt" && ok "worktrees/feat-x is a FUSE mount ($(findmnt -no FSTYPE "$wt"))" || fail "feat-x is not mounted"
 echo "  pando worktree add took $(( (end - start) / 1000000 )) ms"
 
+step "the daemon fetches on its own only for main (every 10 min), never for a branch"
+gitdir_of() { ls -d "$PANDO_HOME"/afs/*/repos/"$1"/git | head -1; }
+state_of() { dirname "$(dirname "$(dirname "$(gitdir_of "$1")")")"; }
+afs_status() { ARTIFACT_FS_ROOT="$(state_of "$1")" artifact-fs status --name "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+[ "$(afs_status feat-x remote_refresh)" = disabled ] && ok "feat-x: the daemon's remote refresh is off (--refresh never)" || fail "feat-x remote_refresh=$(afs_status feat-x remote_refresh)"
+[ "$(afs_status main remote_refresh)" = enabled ] && ok "main: the daemon's remote refresh is on, as a safety net (--refresh 10m)" || fail "main remote_refresh=$(afs_status main remote_refresh)"
+# A control mount with a 20 s refresh, to show the count sees fetches.
+PANDO_AGENT=ctl pando worktree add . ctl >/dev/null
+ARTIFACT_FS_ROOT="$(state_of ctl)" artifact-fs set-refresh --name ctl --interval 20s >/dev/null
+fetch_count() { # distinct FETCH_HEAD times per mount, sampled every 2 s for $1 s
+  local secs="$1"; shift; declare -A last cnt
+  for n in "$@"; do last[$n]=$(stat -c %Y "$(gitdir_of "$n")/FETCH_HEAD" 2>/dev/null || echo none); cnt[$n]=0; done
+  for _ in $(seq 1 $((secs / 2))); do
+    sleep 2
+    for n in "$@"; do
+      t=$(stat -c %Y "$(gitdir_of "$n")/FETCH_HEAD" 2>/dev/null || echo none)
+      [ "$t" != "${last[$n]}" ] && cnt[$n]=$((cnt[$n] + 1)) && last[$n]=$t
+    done
+  done
+  for n in "$@"; do echo "$n=${cnt[$n]}"; done
+}
+counts=$(fetch_count 70 feat-x main ctl | tr '\n' ' ')
+echo "  fetches in 70 s with no pushes: $counts"
+echo "$counts" | grep -q "feat-x=0 " && ok "feat-x (a branch): 0 fetches in 70 s" || fail "branch fetches: $counts"
+echo "$counts" | grep -q "main=0 " && ok "main: 0 fetches in 70 s (next one within 10 min)" || fail "main fetches: $counts"
+echo "$counts" | grep -Eq "ctl=[2-9]" && ok "control at a 20 s refresh: the count does see fetches" || fail "control: $counts"
+pando worktree remove worktrees/ctl --force >/dev/null
+
 step "every file listed at once, nothing downloaded"
 listed=$(cd "$wt" && find . -path ./.git -prune -o -type f -print | wc -l)
 [ "$listed" -eq "$total" ] && ok "find lists $listed of $total files" || fail "find lists $listed, git has $total"

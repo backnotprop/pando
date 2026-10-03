@@ -61,6 +61,18 @@ info:
     token. A user's login comes from their email (`ana@x.com` is `ana`, or
     `ana-2` if taken). Invites by email wait until that email first signs in.
 
+    In a browser: `GET /v1/login/browser?return_to=<path>` sends the person to
+    AuthKit's page; WorkOS sends them back to `/v1/login/callback`, which sets
+    the session cookie `__Host-pando_session` (HttpOnly, Secure,
+    SameSite=Lax, host-only) and returns them to `return_to` (a path on this
+    host, else `/`). The session is a credential of kind `browser` for the
+    same Pando user, so it sees the same monorepos. It works on `/v1` only:
+    never as a Bearer token and never at the git door. With the cookie, a
+    write (any method but GET and HEAD) or a WebSocket upgrade must carry
+    `Origin` equal to Pando's own origin, else 403 `bad_origin`. A session
+    ends after 30 days without use, on sign-out (`POST /v1/logout`, which also
+    ends the WorkOS session), or when revoked.
+
     Self-hosted, one person: the Worker secret `PANDO_BOOTSTRAP` makes users
     with `POST /v1/users` (it works there only). Either way, a user then makes
     more credentials (`POST /v1/user/credentials`) and monorepos
@@ -84,6 +96,7 @@ servers:
         default: example
 security:
   - credential: []
+  - session: []
 tags:
   - name: git
     description: |
@@ -245,6 +258,59 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/login/browser:
+    get:
+      operationId: loginBrowser
+      summary: Sign in a browser (redirects to AuthKit)
+      tags: [users]
+      security: []
+      parameters:
+        - name: return_to
+          in: query
+          description: A path on this host to come back to. Anything else becomes `/`.
+          schema: { type: string, default: / }
+      responses:
+        "302": { description: "To AuthKit's sign-in page, with a 10-minute `__Host-pando_login` cookie holding state and the PKCE verifier." }
+  /v1/login/callback:
+    get:
+      operationId: loginCallback
+      summary: Where AuthKit sends the browser back (sets the session cookie)
+      tags: [users]
+      security: []
+      responses:
+        "302": { description: "To `return_to`, with `__Host-pando_session` set." }
+        "400":
+          description: "`bad_state` (no matching sign-in, or older than 10 minutes) or `sign_in_failed`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/logout:
+    get:
+      operationId: logoutPage
+      summary: A one-button page that posts to /v1/logout
+      tags: [users]
+      security: []
+      responses:
+        "200": { description: HTML }
+    post:
+      operationId: logout
+      summary: Sign out this browser (and end its WorkOS session)
+      description: Revokes the session in the cookie, clears the cookie, and sends the browser to WorkOS's logout URL, which returns to `/`. Needs `Origin` equal to Pando's own.
+      tags: [users]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: "With `Accept: application/json`."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed_out: { type: boolean }
+                  logout_url: { type: string, description: Open this to end the WorkOS session too. }
+        "303": { description: To WorkOS's logout URL (a form post). }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/user:
     get:
       operationId: me
@@ -1279,6 +1345,11 @@ components:
       type: http
       scheme: bearer
       description: "A user's credential (`pando_` and 40 hex characters). Git sends it as the Basic password."
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-pando_session
+      description: A browser session (kind browser), set by /v1/login/callback. /v1 only; writes need Pando's own Origin.
     bootstrap:
       type: http
       scheme: bearer
@@ -1355,9 +1426,10 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [machine, sandbox, bootstrap] }
+        kind: { type: string, enum: [machine, sandbox, bootstrap, browser] }
         created_at: { type: string, format: date-time }
         last_used_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time, description: "Browser sessions only: the end unless used before then (each use pushes it to 30 days)." }
     NewCredential:
       allOf:
         - $ref: "#/components/schemas/Credential"

@@ -189,6 +189,9 @@ try {
   check("sign-out revokes the session, clears the cookie, and gives WorkOS's logout URL for its session", r.status === 200 && out.signed_out && cleared && /\/user_management\/sessions\/logout\?session_id=session_\d+/.test(out.logout_url) && out.logout_url.includes(encodeURIComponent(`${ORIGIN}/`)), out.logout_url?.replace(/^http:\/\/127\.0\.0\.1:\d+/, "<workos>"));
   r = await api("GET", "/v1/user", { session });
   check("the signed-out session no longer works", r.status === 401);
+  r = await api("GET", "/v1/logout");
+  const page = await r.text();
+  check("GET /v1/logout is a one-button page that posts to /v1/logout", r.status === 200 && /<form method="post" action="\/v1\/logout">/.test(page) && /frame-ancestors 'none'/.test(r.headers.get("content-security-policy") ?? ""));
   r = await api("POST", "/v1/logout", { session: s2.session, origin: ORIGIN });
   check("a form sign-out is sent on with 303", r.status === 303 && /sessions\/logout/.test(r.headers.get("location") ?? ""));
   for (const s of [s3.session, s4.session]) await api("POST", "/v1/logout", { session: s, origin: ORIGIN, accept: "application/json" });

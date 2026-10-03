@@ -1695,11 +1695,19 @@ components:
         created_at: { type: string, format: date-time }
     User:
       type: object
-      required: [login, created_at]
+      required: [login, picture_url, created_at]
       properties:
         login: { type: string }
         name: { type: [string, "null"] }
         email: { type: [string, "null"] }
+        picture_url:
+          type: [string, "null"]
+          description: >-
+            Their WorkOS profile picture (an https URL of at most 2,048
+            characters), stored at each sign-in, browser or `pando login`, and
+            refreshed every time (a removed picture becomes null). Null when
+            there is none or it is not https: the web draws one. Pando never
+            fetches, proxies or caches it.
         created_at: { type: string, format: date-time }
     Credential:
       type: object
@@ -1750,7 +1758,7 @@ components:
       required: [monorepo, seq, at, kind, repo, repo_path, branch, actor, machine, summary]
       properties:
         monorepo: { type: string }
-        seq: { type: integer, description: The monorepo's event seq. `(monorepo, seq)` is the line's identity. }
+        seq: { type: integer, description: "The monorepo's event seq. `(monorepo, seq)` is the line's identity." }
         at: { type: string, format: date-time }
         kind: { type: string, enum: [push, branch.opened, branch.deleted, merged, review, status, worktree.reported, worktree.removed, meta.saved] }
         repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
@@ -1869,13 +1877,20 @@ components:
               email: { type: [string, "null"] }
     Member:
       type: object
-      required: [login, name, role, added_at]
+      required: [login, name, picture_url, role, added_at, last_active_at]
       properties:
         login: { type: string }
         name: { type: [string, "null"], description: "The user's display name, if known." }
+        picture_url: { type: [string, "null"], description: "As on User: their profile picture, or null (the web draws one)." }
         role: { $ref: "#/components/schemas/MemberRole" }
         added_at: { type: string, format: date-time }
         added_by: { type: [string, "null"] }
+        last_active_at:
+          type: [string, "null"]
+          format: date-time
+          description: >-
+            The newest last use of any of their credentials (written at most
+            once a minute per credential); null if none was ever used.
     Repo:
       type: object
       required: [monorepo, name, path, default_branch, clone_url, created_at]

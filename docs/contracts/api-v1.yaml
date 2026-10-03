@@ -2631,7 +2631,7 @@ components:
         repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
         repo_path: { type: [string, "null"], description: "`projects/web`; `.` for the meta layer and a plain repo." }
         branch: { type: [string, "null"] }
-        actor: { type: [string, "null"], description: "The person (a login). For meta.saved, the author's name." }
+        actor: { type: [string, "null"], description: "The person (a login). A meta.saved line from before versions kept the login has the author's name." }
         machine: { type: [string, "null"], description: The credential's name (the machine or sandbox). }
         summary:
           type: [object, "null"]
@@ -2709,6 +2709,10 @@ components:
           properties:
             state: { type: string }
             failing: { type: array, items: { type: string }, description: Contexts that failed or errored. }
+            failing_apps:
+              type: object
+              description: "For each failing context, the CI service that reported it (`app`, for its mark), or null when a member posted it."
+              additionalProperties: { type: [string, "null"] }
         updated_at: { type: [string, "null"], format: date-time, description: The last push. }
     Commit:
       type: object

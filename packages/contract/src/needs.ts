@@ -27,6 +27,8 @@ export const NeedRow = Schema.Struct({
     state: Schema.String,
     /** Contexts that failed or errored. */
     failing: Schema.Array(Schema.String),
+    /** For each failing context, the CI service that reported it (its mark); null when a member posted it. */
+    failing_apps: Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
   }),
   /** The last push. */
   updated_at: Schema.NullOr(Timestamp),

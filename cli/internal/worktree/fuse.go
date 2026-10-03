@@ -24,23 +24,15 @@ import (
 // <repo>/worktrees/<name>. Each worktree has its own blobless git folder,
 // blob cache and edit layer in that state root.
 //
-// worktrees/main is mounted out of sight and bind-mounted read-only into
-// place, which needs root (as in the test bed's container). Without root it
-// is mounted writable in place, with a warning; a read-only flag in the fork
-// is the lasting fix.
+// worktrees/main and references mount read-only (add-repo --read-only, from
+// the fork): writes fail with EROFS, no root needed. They move only through
+// their git folder (Refresh), never through the mount.
 type Fuse struct {
 	Bin  string // the artifact-fs binary
 	Home string // ~/.pando
-	Warn func(string)
 }
 
 func (f *Fuse) Kind() string { return "fuse" }
-
-func (f *Fuse) warn(msg string) {
-	if f.Warn != nil {
-		f.Warn(msg)
-	}
-}
 
 // stateDir is ~/.pando/afs/<repo folder>-<hash>: ARTIFACT_FS_ROOT for one repo.
 func (f *Fuse) stateDir(s Spec) string {
@@ -52,18 +44,8 @@ func (f *Fuse) stateDir(s Spec) string {
 
 func (f *Fuse) name(s Spec) string { return filepath.Base(s.Abs()) }
 
-// hidden reports whether this worktree mounts out of sight and is bound
-// read-only into place.
-func (f *Fuse) hidden(s Spec) bool { return (s.ReadOnly || s.Reference) && os.Geteuid() == 0 }
-
-// mountPath is where ArtifactFS mounts it: the worktree folder itself, or a
-// hidden folder for a read-only main.
-func (f *Fuse) mountPath(s Spec) string {
-	if f.hidden(s) {
-		return filepath.Join(f.stateDir(s), "ro", f.name(s))
-	}
-	return s.Abs()
-}
+// mountPath is where ArtifactFS mounts it: the worktree folder itself.
+func (f *Fuse) mountPath(s Spec) string { return s.Abs() }
 
 func (f *Fuse) gitDir(s Spec) string {
 	return filepath.Join(f.stateDir(s), "repos", f.name(s), "git")
@@ -96,9 +78,6 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	if !ok {
 		return fmt.Errorf("%s already exists and is not empty", dst)
 	}
-	if (s.ReadOnly || s.Reference) && !f.hidden(s) {
-		f.warn(s.Path + " is mounted writable: a read-only mount needs root here (or a --read-only flag in the ArtifactFS fork)")
-	}
 	state := f.stateDir(s)
 	mp := f.mountPath(s)
 	for _, d := range []string{state, filepath.Dir(mp), mp} {
@@ -110,12 +89,19 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	// registry entry or state behind.
 	_, _ = f.run(ctx, s, "remove-repo", "--name", f.name(s))
 	f.cleanState(s)
-	if _, err := f.run(ctx, s, "add-repo",
+	args := []string{"add-repo",
 		"--name", f.name(s),
 		"--remote", s.CloneURL,
-		"--ref", "refs/heads/"+s.Branch,
+		"--ref", "refs/heads/" + s.Branch,
 		"--mount-root", filepath.Dir(mp),
-	); err != nil {
+	}
+	if s.ReadOnly || s.Reference {
+		args = append(args, "--read-only")
+	}
+	if _, err := f.run(ctx, s, args...); err != nil {
+		if strings.Contains(err.Error(), "flag provided but not defined: -read-only") {
+			return errors.New("this artifact-fs has no --read-only; build it from the fork's main (projects/artifact-fs)")
+		}
 		return err
 	}
 	gd := f.gitDir(s)
@@ -147,17 +133,6 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 			return err
 		}
 	}
-	if f.hidden(s) {
-		if err := os.MkdirAll(dst, 0o755); err != nil {
-			return err
-		}
-		if out, err := exec.CommandContext(ctx, "mount", "--bind", mp, dst).CombinedOutput(); err != nil {
-			return fmt.Errorf("bind mount %s: %s", dst, strings.TrimSpace(string(out)))
-		}
-		if out, err := exec.CommandContext(ctx, "mount", "-o", "remount,bind,ro", dst).CombinedOutput(); err != nil {
-			return fmt.Errorf("read-only remount %s: %s", dst, strings.TrimSpace(string(out)))
-		}
-	}
 	return nil
 }
 
@@ -166,7 +141,7 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 // the worktree's git folder, moves the ref, updates the index with a
 // two-tree read-tree (cached stat data stays for unchanged files, so
 // git status downloads nothing new), and waits for ArtifactFS to publish
-// the new tree. It works the same once the mount itself is read-only.
+// the new tree. So it works on a read-only mount.
 func (f *Fuse) Refresh(ctx context.Context, s Spec) error {
 	gd := f.gitDir(s)
 	g := gitx.Cmd{Env: append([]string{"GIT_DIR=" + gd}, f.envGit(s)...)}
@@ -227,13 +202,7 @@ func (f *Fuse) envGit(s Spec) []string {
 }
 
 func (f *Fuse) Remove(ctx context.Context, s Spec) error {
-	dst := s.Abs()
 	mp := f.mountPath(s)
-	if f.hidden(s) && isMounted(dst) {
-		if out, err := exec.CommandContext(ctx, "umount", dst).CombinedOutput(); err != nil {
-			return fmt.Errorf("umount %s: %s", dst, strings.TrimSpace(string(out)))
-		}
-	}
 	if _, err := f.run(ctx, s, "remove-repo", "--name", f.name(s)); err != nil &&
 		!strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "no rows") {
 		return err
@@ -251,7 +220,6 @@ func (f *Fuse) Remove(ctx context.Context, s Spec) error {
 	}
 	f.cleanState(s)
 	_ = os.Remove(mp)
-	_ = os.Remove(dst)
 	return nil
 }
 

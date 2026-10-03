@@ -57,6 +57,8 @@ cd /work
 pando clone "$name" /work/acme | sed 's/^/  /'
 cd /work/acme
 mountpoint -q worktrees/main && ok "worktrees/main is a mount" || fail "worktrees/main is not mounted"
+findmnt -no OPTIONS worktrees/main | tr ',' '\n' | grep -qx ro && ok "worktrees/main is mounted ro by ArtifactFS itself (no bind)" || fail "main mount options: $(findmnt -no OPTIONS worktrees/main)"
+[ "$(findmnt -no FSTYPE worktrees/main)" = "fuse.artifact-fs" ] && ok "and it is the fuse.artifact-fs mount" || fail "main fstype: $(findmnt -no FSTYPE worktrees/main)"
 
 step "a branch worktree through ArtifactFS"
 start=$(date +%s%N)
@@ -110,9 +112,8 @@ pando merge feat-x | sed 's/^/  /'
 grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main shows the merged change" || fail "main did not follow the merge"
 [ -f worktrees/main/notes.txt ] && ok "worktrees/main has the merged notes.txt" || fail "notes.txt missing in main"
 [ -z "$(git -C worktrees/main status --porcelain)" ] && ok "git status in worktrees/main is clean after the merge" || fail "main status: $(git -C worktrees/main status --porcelain | head -3)"
-# Known (fork): the first git status in any fresh ArtifactFS mount reads
-# every file, because its index has no stat data. Reported, not failed.
-echo "  note worktrees/main has downloaded $(hydrated main) of $total files after git status"
+hm=$(hydrated main)
+[ "$hm" -lt 20 ] && ok "git status in worktrees/main downloaded $hm of $total files (index-stat)" || fail "worktrees/main hydrated $hm blobs after git status"
 
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
@@ -150,6 +151,30 @@ pando reference update "$ref" | sed 's/^/  /'
 [ "$(git -C "$ref" rev-parse HEAD)" = "$newest" ] && ok "reference update moved it to ${newest:0:7}" || fail "still at $(git -C "$ref" rev-parse --short HEAD)"
 grep -q "commit = \"$newest\"" ".pando/references/$ref.toml" && ok "and rewrote the pointer" || fail "pointer not rewritten"
 [ -z "$(git -C "$ref" status --porcelain)" ] && ok "git status in the reference is clean after the move" || fail "reference status: $(git -C "$ref" status --porcelain | head -3)"
+
+step "as a person without root: read-only main by ArtifactFS --read-only"
+useradd -m dev >/dev/null 2>&1 || true
+chmod 666 /dev/fuse
+out=$(su dev -c '
+set -e
+unset PANDO_SERVER PANDO_TOKEN
+export HOME=/home/dev PANDO_HOME=/home/dev/.pando PANDO_MACHINE=linux-dev
+export GIT_AUTHOR_NAME=D GIT_AUTHOR_EMAIL=d@d GIT_COMMITTER_NAME=D GIT_COMMITTER_EMAIL=d@d
+cd ~ && git init -q -b main src && cd src && echo hi > a.txt && git add -A && git commit -qm one
+echo x | pando login --bootstrap --server file:///home/dev/srv --login dev >/dev/null
+pando init --yes --name acme --server file:///home/dev/srv >/dev/null && pando clone acme ~/acme --server file:///home/dev/srv >/dev/null && cd ~/acme
+echo "uid=$(id -u) main=$(findmnt -no OPTIONS worktrees/main | cut -d, -f1)"
+(echo y > worktrees/main/a.txt) 2>/dev/null && echo "main=writable" || echo "main=refused"
+pando worktree add . feat >/dev/null && echo "feat=$(findmnt -no OPTIONS worktrees/feat | cut -d, -f1)"
+cd worktrees/feat && echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
+echo "main-content=$(tr "\n" " " < worktrees/main/a.txt)"
+pando worktree remove worktrees/feat >/dev/null && echo "removed=yes"
+' 2>&1)
+echo "$out" | grep -q "uid=1000 main=ro" && ok "uid 1000: worktrees/main mounts ro with no root" || fail "non-root: $out"
+echo "$out" | grep -q "main=refused" && ok "uid 1000: writing into main is refused" || fail "non-root: $out"
+echo "$out" | grep -q "feat=rw" && ok "uid 1000: a branch worktree mounts rw" || fail "non-root: $out"
+echo "$out" | grep -q "main-content=hi two" && ok "uid 1000: main follows the merge" || fail "non-root: $out"
+echo "$out" | grep -q "removed=yes" && ok "uid 1000: worktree remove unmounts" || fail "non-root: $out"
 
 echo
 echo "PASS: $pass checks"

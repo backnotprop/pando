@@ -242,9 +242,16 @@ try {
   }
 
   // ── Branch list ──
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches`, B);
-  const br = r.json?.branches?.find((b) => b.name === B1);
-  check("the branch list shows the branch", r.status === 200 && !!br, `${r.status}`);
+  // The list answers at once; ahead, behind and mergeable land when the queue computes them.
+  let br = null;
+  const factsBy = Date.now() + 30_000;
+  while (Date.now() < factsBy) {
+    r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches`, B);
+    br = r.json?.branches?.find((b) => b.name === B1);
+    if (br && !br.stale) break;
+    await new Promise((res) => setTimeout(res, 300));
+  }
+  check("the branch list shows the branch, its facts fresh", r.status === 200 && !!br && br.stale === false, `${r.status} stale=${br?.stale}`);
   check("its author is bo, ahead 1, behind 0", br?.author === `bo-${id}` && br?.ahead === 1 && br?.behind === 0, JSON.stringify({ a: br?.author, ahead: br?.ahead, behind: br?.behind }));
   check("mergeable is clean (gitwrite dry run)", br?.mergeable === "clean", br?.mergeable);
   check("checks pass with no statuses and no required checks", br?.checks?.state === "success", br?.checks?.state);
@@ -327,8 +334,16 @@ try {
   check("force=1 merges with no statuses needed", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
   r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/agent-2%2Fconflict/merge`, A);
   check("a conflicting branch answers 409 conflict with the paths", r.status === 409 && r.json?.error?.code === "conflict" && r.json?.error?.paths?.includes("README.md"), `${r.status} ${r.json?.error?.code}`);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches`, B);
-  check("the list says conflicts", r.json?.branches?.find((b) => b.name === "agent-2/conflict")?.mergeable === "conflicts");
+  // Branch facts are computed on change (a queue): the list says "pending" until they land.
+  let listed = null;
+  const until = Date.now() + 30_000;
+  while (Date.now() < until) {
+    r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches`, B);
+    listed = r.json?.branches?.find((b) => b.name === "agent-2/conflict");
+    if (listed && !listed.stale) break;
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  check("the list says conflicts once the facts land", listed?.mergeable === "conflicts" && listed?.stale === false, `${listed?.mergeable} stale=${listed?.stale}`);
 
   // ── Worktrees ──
   const wt = `wt_${id}`;

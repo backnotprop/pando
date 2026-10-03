@@ -29,6 +29,21 @@
     // For the live lane's large files (M7).
     { "binding": "BLOBS", "bucket_name": "pando-dev-blobs" }
   ],
+  // Branch facts (ahead, behind, mergeable) computed on change: a sweep per new
+  // main head, a job per pushed branch. The consumer is this Worker's queue().
+  "queues": {
+    "producers": [{ "binding": "BRANCH_FACTS", "queue": "pando-branch-facts" }],
+    "consumers": [
+      {
+        "queue": "pando-branch-facts",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "max_concurrency": 5,
+        "dead_letter_queue": "pando-branch-facts-dlq"
+      }
+    ]
+  },
   "durable_objects": {
     "bindings": [
       { "name": "MONOREPO", "class_name": "MonorepoObject" },

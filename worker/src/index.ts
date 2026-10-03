@@ -14,6 +14,7 @@ import { metaRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath } from "./monorepo/door";
 import { signin } from "./accounts/signin";
+import { handleFactsBatch, type FactsMessage } from "./monorepo/facts";
 
 export { MonorepoObject } from "./monorepo/object";
 export { AccountsObject } from "./accounts/object";
@@ -43,6 +44,11 @@ async function meta(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
+  /** Branch facts computed on change (monorepo/facts.ts). */
+  async queue(batch: MessageBatch<FactsMessage>, env: Env): Promise<void> {
+    await handleFactsBatch(batch, env);
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/healthz") return new Response("ok\n");
@@ -52,4 +58,4 @@ export default {
     if (META_RE.test(url.pathname)) return meta(request, env);
     return api.fetch(request, env, ctx);
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, FactsMessage>;

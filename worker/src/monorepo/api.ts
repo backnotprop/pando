@@ -8,6 +8,8 @@ import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
+import type { BranchList } from "./views";
+import { computeFacts, INLINE_MAX, SWEEP_PARALLEL } from "./facts";
 import { EVENT_STREAM, parseTopics } from "./stream";
 import {
   artifactsRepoName,
@@ -388,24 +390,56 @@ api.get("/v1/monorepos/:m/repos/:r", async (c) => {
 
 // ── Branches ──────────────────────────────────────────────────────────────
 
-/** The branch rows for one repo, read through this request's monorepo object. */
-function branchViews(c: C, r: RepoRecord, names: string[] | null, state: string) {
+/**
+ * The branch rows for one repo: stored facts from the monorepo object, at
+ * once. Rows stale past the grace period are computed here, at most `inline`
+ * of them (facts.ts), and read again.
+ */
+async function branchViews(
+  c: C,
+  r: RepoRecord,
+  names: string[] | null,
+  state: string,
+  o: { limit?: number; cursor?: string | null; inline?: number; graceMs?: number } = {},
+): Promise<BranchList> {
   const stub = c.get("stub");
-  return views.branchViews(
-    c.env,
-    c.get("info"),
-    { records: (repo) => stub.branchRecords(repo), statuses: (repo, sha) => stub.statuses(repo, sha) },
-    r,
-    names,
-    state as "open" | "merged" | "all",
-  );
+  let main = await stub.currentMain(r.name);
+  if (main === null) {
+    // A repo made before Pando kept heads: read main once and keep it.
+    main = branchesOf(await listRefs(c.env, r).catch(() => new Map<string, string>())).get(r.default_branch) ?? null;
+    if (main) await stub.rememberHead(r.name, main);
+  }
+  const required = await requiredChecks(c.env, c.get("info"), r);
+  const ask = { names: names ?? undefined, state: state as "open" | "merged" | "all", limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
+  let list = (await stub.branchRows(r.name, ask)) as BranchList;
+  const due = list.due.slice(0, o.inline ?? INLINE_MAX);
+  if (due.length && main) {
+    const heads = new Map(list.branches.map((b) => [b.name, b.head]));
+    const m = main;
+    await withRepo(c.env, r.artifacts_name, async (repo) => {
+      const read = commitReader(repo);
+      await views.pool(due, SWEEP_PARALLEL, async (name) => {
+        try {
+          const f = await computeFacts(c.env, r, m, heads.get(name)!, read);
+          await stub.writeFacts(r.name, name, f, required);
+        } catch (err) {
+          if (!(err instanceof views.MainMoved)) throw err; // main moved: the row stays pending
+        }
+      });
+    });
+    list = (await stub.branchRows(r.name, ask)) as BranchList;
+  }
+  return list;
 }
 
 api.get("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   const r = await repoOf(c);
   const state = c.req.query("state") ?? "open";
   if (!["open", "merged", "all"].includes(state)) bad("state is open, merged or all");
-  return c.json(await branchViews(c, r, null, state));
+  const limit = Number(c.req.query("limit") ?? "100");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) bad("limit is 1 to 500");
+  const { due: _due, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
+  return c.json(list);
 });
 
 api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
@@ -431,7 +465,7 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   const stub = c.get("stub");
   const events = await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
   c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
-  const view = (await branchViews(c, r, [b.name], "all")).branches[0];
+  const view = (await branchViews(c, r, [b.name], "all", { inline: 1, graceMs: 0 })).branches[0];
   return c.json(view, 201);
 });
 
@@ -463,7 +497,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
   const r = await repoOf(c);
   const method = c.req.method;
   if (rest === "" && method === "GET") {
-    const v = (await branchViews(c, r, [branch], "all")).branches[0];
+    const v = (await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0];
     if (!v) throw new HttpError(404, "not_found", `no branch ${branch}`);
     return c.json(v);
   }
@@ -476,7 +510,7 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
     unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head, c.get("identity")));
-    return c.json((await branchViews(c, r, [branch], "all")).branches[0]);
+    return c.json((await branchViews(c, r, [branch], "all", { inline: 1, graceMs: 0 })).branches[0]);
   }
   if (rest === "" && method === "DELETE") return deleteBranch(c, r, branch);
   if (rest === "diff" && method === "GET") return diff(c, r, branch);

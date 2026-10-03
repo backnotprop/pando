@@ -116,6 +116,13 @@ tags:
 
       Only members of the monorepo get through.
 
+      Writes per repo: an Artifacts repo takes about two writes at once, so
+      every write (a push, a branch create or delete, a merge, a meta layer
+      commit) waits for one of the repo's two write slots, first come first
+      served. git just waits. A push that waits 120 s gets
+      `remote error: Pando: <repo> is busy with other writes; try the push again`.
+      The ceiling is about 5 to 10 small pushes a second per repo.
+
       Push rule (receive-pack). The door reads the command list before the
       pack. If any command updates or deletes the repo's default branch
       (`refs/heads/main`), it refuses the whole push with git's usual
@@ -396,31 +403,46 @@ paths:
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: events
-      summary: The monorepo's event stream (ON HOLD; answers 501 for now)
+      summary: The monorepo's event stream (JSON pages, or a WebSocket)
       description: |
-        ON HOLD until the architecture review decides where events live. Today
-        it answers 501 `event_stream_on_hold`. The shape below is built and
-        tested behind a switch.
+        Every change a screen shows is an event, written in the same step as
+        the change itself: a `seq`, a `kind`, and the changed `row` in its REST
+        shape, with the client-side `collection`, `key` and `op` (`upsert` or
+        `delete`) it applies to, so a client store (TanStack DB) can apply it
+        directly. Every event is kept; the one limit is the monorepo object's
+        storage (10 GB per Durable Object; an event is 0.3 to 1.3 KB).
 
-        Every change a screen shows is an event: a `seq`, a `kind`, and the
-        changed `row` in the shape its REST route returns, with the
-        client-side `collection`, `key` and `op` (`upsert` or `delete`) it
-        applies to, so a client store (TanStack DB) can apply it directly.
-        Kinds and collections:
-        `push` and `branch.opened`, `branch.updated`, `branch.deleted`,
-        `merged` (branches, Branch row with `repo`); `push` of main and
-        `default_head.updated` (default_heads); `status` (statuses);
-        `review` (reviews); `worktree.reported`, `worktree.removed`
-        (worktrees); `meta.saved` (meta_files, a meta history entry, no
-        bytes); `machine.connected`, `machine.disconnected` (connections);
-        `branches.stale` (no row: refetch the repo's branch list).
-        Every event is kept.
+        Kinds, by collection:
+        - branches: `branch.opened`, `push`, `branch.updated`, `merged`
+          (upsert), `branch.deleted` (delete). The row has the branch's stored
+          fields only (name, head, author, title, description, state and the
+          merge facts) and the event says `partial: true`: `ahead`, `behind`,
+          `base`, `mergeable` and `checks` are computed per request, so
+          refetch getBranch for them.
+        - default_heads: `push` (the first push of main) and
+          `default_head.updated` (a merge). Row `{repo, default_branch,
+          default_head}`. When main moves, every open branch's ahead, behind
+          and mergeable change: refetch the branch list.
+        - statuses: `status` (Status row).
+        - reviews: `review` (Review row).
+        - worktrees: `worktree.reported` (upsert), `worktree.removed` (delete).
+        - meta_files: `meta.saved` (a meta history entry, no bytes; not sent
+          during pando init's first upload).
+        - presence: `machine.connected`, `machine.disconnected`. Row
+          `{connections: [...]}`, the whole list of who is connected now (as in
+          meta/status), plus `connection`, the one that changed.
+
+        Topics (`?topics=`, comma-separated, at most 10): `all` (default),
+        `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
+        `meta` (meta_files and presence), `kind:<kind>`. `pando worktree
+        follow` needs only `main:<repo>`.
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
         latest `limit` with no `since`. With `Upgrade: websocket`: events after
         `?since=` (at most 500, else one `resync` frame), then
         `{"type": "caught_up", "head"}`, then live `{"type": "event", ...}`
-        frames. The text `ping` gets `pong`.
+        frames. The text `ping` gets `pong`. Set `EVENT_STREAM` false in
+        worker/src/monorepo/stream.ts and it answers 501 `event_stream_on_hold`.
       tags: [monorepos]
       parameters:
         - name: since
@@ -429,6 +451,9 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: topics
+          in: query
+          schema: { type: string, default: all }
       responses:
         "200":
           description: A page of events
@@ -698,6 +723,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
         "409": { $ref: "#/components/responses/Error" }
+        "503":
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}:
     parameters:
       - $ref: "#/components/parameters/monorepo"
@@ -714,6 +744,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
         "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteBranch
+      summary: Delete a branch (not the default one)
+      tags: [branches]
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503":
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     patch:
       operationId: updateBranch
       summary: Set the branch's title and description
@@ -924,6 +967,11 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "412":
           description: "`checks_not_green`, with `checks`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1342,6 +1390,7 @@ components:
         machine: { type: [string, "null"], description: The credential's name. }
         agent: { type: [string, "null"] }
         row: { description: "The changed row in its REST shape; on a delete, the last row (or its key fields)." }
+        partial: { type: boolean, description: "True on branch events: the row has the branch's stored fields only." }
     Commit:
       type: object
       required: [sha, parents, title, message, author, committer, trailers]

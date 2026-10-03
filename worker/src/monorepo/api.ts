@@ -8,7 +8,7 @@ import { combine, requiredChecks } from "./checks";
 import { toPatch, treeDiff } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
-import { EVENT_STREAM } from "./stream";
+import { EVENT_STREAM, parseTopics } from "./stream";
 import {
   artifactsRepoName,
   DEFAULT_BRANCH,
@@ -276,7 +276,9 @@ api.get("/v1/monorepos/:m/events", async (c) => {
   if (since !== null && (!Number.isSafeInteger(since) || since < 0)) bad("since must be a whole number");
   const limit = Number(c.req.query("limit") ?? "100");
   if (!Number.isInteger(limit) || limit < 1) bad("limit must be a whole number from 1");
-  return c.json(await stub.events(since, limit));
+  const topics = parseTopics(c.req.query("topics") ?? null);
+  if (!topics) bad("topics: up to 10 of all, main, main:<repo>, repo:<repo>, meta, kind:<kind>, comma-separated");
+  return c.json(await stub.events(since, limit, topics));
 });
 
 // ── Members ───────────────────────────────────────────────────────────────
@@ -399,13 +401,13 @@ api.post("/v1/monorepos/:m/repos/:r/branches", async (c) => {
   }
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${from}`);
   const ref = `refs/heads/${b.name}`;
-  const result = await updateRefs(c.env, r, [{ old: ZERO, new: sha, ref }]);
-  const reason = result.get(ref);
+  // Through the repo's write gate: waits for a slot, and goes out with other waiting ref updates.
+  const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [{ old: ZERO, new: sha, ref }]));
+  const reason = result[ref];
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
   const events = await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description);
   c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
-  c.executionCtx.waitUntil(stub.publishRepoEvents(r.name, events, c.get("identity")));
   const view = (await branchViews(c, r, [b.name], "all")).branches[0];
   return c.json(view, 201);
 });
@@ -450,10 +452,10 @@ api.all("/v1/monorepos/:m/repos/:r/branches/*", async (c) => {
       title: str(b.title, "title", { optional: true, max: 300 }),
       description: str(b.description, "description", { optional: true, max: 20_000 }),
     };
-    unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head));
-    c.executionCtx.waitUntil(c.get("stub").publishBranches(r.name, [{ name: branch, kind: "branch.updated" }], c.get("identity")));
+    unwrap(await c.get("stub").updateBranch(r.name, branch, patch, head, c.get("identity")));
     return c.json((await branchViews(c, r, [branch], "all")).branches[0]);
   }
+  if (rest === "" && method === "DELETE") return deleteBranch(c, r, branch);
   if (rest === "diff" && method === "GET") return diff(c, r, branch);
   if (rest === "commits" && method === "GET") return commits(c, r, branch);
   if (rest === "reviews" && method === "GET") return c.json({ reviews: await c.get("stub").listReviews(r.name, branch) });
@@ -501,6 +503,20 @@ async function diff(c: C, r: RepoRecord, branch: string): Promise<Response> {
     stats: result.d.stats,
     files: result.d.files,
   });
+}
+
+/** Delete a branch (not the default one), through the repo's write gate. */
+async function deleteBranch(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  if (branch === r.default_branch) throw new HttpError(403, "protected", `${branch} is protected`);
+  const head = branchesOf(await listRefs(c.env, r)).get(branch);
+  if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
+  const ref = `refs/heads/${branch}`;
+  const cmd = { old: head, new: ZERO, ref };
+  const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [cmd]));
+  if (result[ref] !== null) throw new HttpError(409, "branch_not_deleted", `Artifacts refused: ${result[ref] ?? "no report"}`);
+  const events = await c.get("stub").recordPush(r.name, c.get("identity"), [cmd]);
+  c.executionCtx.waitUntil(enqueueWithBases(c, r, events));
+  return c.body(null, 204);
 }
 
 /** The branch's own commits (on it, not on the default branch), newest first, with Pando's trailers parsed. */

@@ -1,7 +1,7 @@
 // The Worker's environment: bindings from wrangler.jsonc plus the secrets the
 // owner sets with `wrangler secret put` (never in the repo). Secrets are
 // optional here: the Worker answers clearly when one is not set.
-type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS" | "FEED_FANOUT_MAX" | "FEED_TICK_MS" | "FEED_TEST" | "DOOR_TEST";
+type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS" | "FEED_FANOUT_MAX" | "FEED_TICK_MS" | "FEED_TEST" | "FEED_RETRY_MS" | "DOOR_TEST";
 
 export interface Env extends Omit<Cloudflare.Env, Secrets> {
   /** Accounts (C8): users, credentials, monorepos, members, invites. D1 with read replication. */
@@ -28,4 +28,6 @@ export interface Env extends Omit<Cloudflare.Env, Secrets> {
   FEED_TICK_MS?: string;
   /** Tests only (C25): "1" opens /v1/_feed/test to the bootstrap secret. Never set on a deployed Worker. */
   FEED_TEST?: string;
+  /** Tests only (C25): the outbox's retry delays in ms, comma-separated (default 1000,5000,30000,300000). */
+  FEED_RETRY_MS?: string;
 }

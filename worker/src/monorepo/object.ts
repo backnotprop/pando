@@ -1351,6 +1351,11 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.feed.summary();
   }
 
+  /** Tests only (the crash and failure switches act only with FEED_TEST=1): the feed outbox. */
+  feedTestOutbox(set: { crash?: "before" | "after"; fail?: number } = {}) {
+    return this.feed.testOutbox(set);
+  }
+
   // ── Worktrees ────────────────────────────────────────────────────────────
 
   putWorktree(id: string, w: { repo: string; branch: string; path: string; machine: string; agent: string | null; kind: string }, identity: Identity): Promise<Outcome<Record<string, unknown>>> {

@@ -9,8 +9,10 @@ import type { Identity } from "../monorepo/types";
 import { Accounts, confirmed, type Auth, type MonorepoRef } from "./store";
 
 const CACHE_MS = 15_000;
+
 /** An unknown credential is answered from cache this long (bad tokens stop reaching the database). */
 const UNKNOWN_MS = 5_000;
+
 const cache = new Map<string, { at: number; auth: AuthResult | null }>();
 
 export type AuthResult = Auth;
@@ -48,8 +50,10 @@ export async function authenticate(env: Env, secret: string, monorepo: MonorepoR
   const hash = await hashToken(secret);
   const key = `${hash}\n${monorepo ? `${monorepo.owner}/${monorepo.name}` : ""}`;
   const hit = cache.get(key);
+
   if (hit && Date.now() - hit.at < (hit.auth ? CACHE_MS : UNKNOWN_MS)) return hit.auth;
   const auth = await accounts(env).authenticate(hash, monorepo);
+
   if (cacheable(auth, monorepo) || auth === null) {
     // Successes for CACHE_MS; an unknown credential for UNKNOWN_MS (C3). Never a
     // missing monorepo or a non-member: another isolate may fix that any moment.
@@ -58,6 +62,7 @@ export async function authenticate(env: Env, secret: string, monorepo: MonorepoR
   } else {
     cache.delete(key);
   }
+
   return auth;
 }
 
@@ -70,7 +75,9 @@ export function forgetCachedAuth(): void {
 export function requireSecret(req: Request): string {
   // Bearer only (the git door, and callers that never take a browser session).
   const secret = credential(req);
+
   if (!secret) throw new HttpError(401, "unauthorized", "send Authorization: Bearer <credential>");
+
   return secret;
 }
 
@@ -93,12 +100,17 @@ export const SESSION_COOKIE = "__Host-pando_session";
 
 export function readCookie(req: Request, name: string): string | null {
   const header = req.headers.get("cookie");
+
   if (!header) return null;
+
   for (const part of header.split(";")) {
     const i = part.indexOf("=");
+
     if (i < 0) continue;
+
     if (part.slice(0, i).trim() === name) return part.slice(i + 1).trim() || null;
   }
+
   return null;
 }
 
@@ -116,14 +128,20 @@ export function sameOrigin(req: Request): boolean {
  */
 export async function authenticateRequest(env: Env, req: Request, monorepo: MonorepoRef | null): Promise<AuthResult | null> {
   const bearer = credential(req);
+
   if (bearer) {
     const auth = await authenticate(env, bearer, monorepo);
+
     return auth && auth.credential.kind !== "browser" ? auth : null;
   }
+
   const cookie = readCookie(req, SESSION_COOKIE);
+
   if (!cookie) throw new HttpError(401, "unauthorized", "send Authorization: Bearer <credential>, or sign in");
   const writes = !["GET", "HEAD"].includes(req.method) || req.headers.get("upgrade")?.toLowerCase() === "websocket";
+
   if (writes && !sameOrigin(req)) throw new HttpError(403, "bad_origin", "a signed-in browser may only write from Pando's own pages");
   const auth = await authenticate(env, cookie, monorepo);
+
   return auth && auth.credential.kind === "browser" ? auth : null;
 }

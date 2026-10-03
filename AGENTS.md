@@ -20,10 +20,19 @@ coordinator lands it as one commit. Do not disable or weaken a rule to pass.
 # The API contract
 
 `packages/contract` (`@pando/contract`, an npm workspace) holds Effect Schema
-for the /v1 API. `web` imports it as `@pando/contract`. When you change a
-response the contract covers, change its schema too, re-record
-(`packages/contract/scripts/record.mjs`, against a local wrangler dev) and run
-`npm run check -w @pando/contract` and `npm run typecheck -w @pando/contract`.
+for the /v1 API. `web` imports it as `@pando/contract`.
+
+- A lane that adds or changes a field in a response the contract covers
+  changes the contract in the same branch. Then it re-records
+  (`packages/contract/scripts/record.mjs`, against a local wrangler dev) and
+  runs `npm run check -w @pando/contract` and
+  `npm run typecheck -w @pando/contract`.
+- Clients decode with `decodeResponse` (or `decodeResponseEffect`), and socket
+  frames with `decodeActivityFrame`. Unknown fields are ignored, so an open tab
+  survives a newer server. `decodeStrict` refuses unknown fields and is for the
+  check only.
+- Import Effect by module (`effect/Schema`), never the `effect` barrel. The
+  lint refuses the barrel; it bundles about 3 times more.
 
 # Learning more about Effect
 

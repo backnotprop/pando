@@ -87,14 +87,19 @@ type Row = Record<string, SqlStorageValue>;
 
 /** Events replayed to a reconnecting socket or returned by one JSON page. */
 export const REPLAY_MAX = 500;
+
 /** Delivery records kept per hook (owner limit). */
 export const DELIVERIES_KEPT = 1_000;
+
 /** Attempts kept per delivery. */
 export const ATTEMPTS_KEPT = 10;
+
 /** Deliveries one replay re-sends. */
 export const REPLAY_DELIVERIES = 1_000;
+
 /** Rows read to filter one topic-filtered replay or page. */
 export const SCAN_MAX = 5_000;
+
 /** Ref commands sent in one receive-pack. */
 export const REF_BATCH_MAX = 200;
 
@@ -109,6 +114,7 @@ function who(by: Identity | null): { actor: string | null; machine: string | nul
 
 function randomId(prefix: string, bytes = 8): string {
   const b = crypto.getRandomValues(new Uint8Array(bytes));
+
   return prefix + [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
@@ -179,9 +185,11 @@ export class MonorepoObject extends DurableObject<Env> {
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
     const m = this.info();
+
     if (m && m.label === m.id && env.ACCOUNTS_DB) {
       void ctx.blockConcurrencyWhile(async () => {
         const r = await env.ACCOUNTS_DB.prepare("SELECT owner || '/' || name AS label FROM monorepos WHERE id = ?1").bind(m.id).first<{ label: string }>().catch(() => null);
+
         if (r?.label) this.setLabel(r.label);
       });
     }
@@ -191,24 +199,35 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
+
     if (!cols.includes("machine")) this.sql.exec("ALTER TABLE merges ADD COLUMN machine TEXT");
+
     if (!cols.includes("agent")) this.sql.exec("ALTER TABLE merges ADD COLUMN agent TEXT");
     const bcols = this.rows<{ name: string }>("PRAGMA table_info(branches)").map((c) => c.name);
+
     for (const [col, type] of [["ahead", "INTEGER"], ["behind", "INTEGER"], ["merge_base", "TEXT"], ["mergeable", "TEXT"], ["facts_main", "TEXT"], ["facts_head", "TEXT"], ["facts_at", "TEXT"]]) {
       if (!bcols.includes(col)) this.sql.exec(`ALTER TABLE branches ADD COLUMN ${col} ${type}`);
     }
+
     const rcols = this.rows<{ name: string }>("PRAGMA table_info(repos)").map((c) => c.name);
+
     if (!rcols.includes("default_head")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head TEXT");
+
     if (!rcols.includes("default_head_at")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head_at TEXT");
+
     if (!rcols.includes("required_checks")) this.sql.exec("ALTER TABLE repos ADD COLUMN required_checks TEXT");
     const dcols = this.rows<{ name: string }>("PRAGMA table_info(deliveries)").map((c) => c.name);
+
     if (!dcols.includes("seq")) this.sql.exec("ALTER TABLE deliveries ADD COLUMN seq INTEGER");
+
     if (!dcols.includes("sent_at")) this.sql.exec("ALTER TABLE deliveries ADD COLUMN sent_at TEXT");
     this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS deliveries_once ON deliveries (hook_id, event, seq)");
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
+
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
     // The CI service that reported a status (ci/statustoken.ts), stamped by Pando.
     const scols = this.rows<{ name: string }>("PRAGMA table_info(statuses)").map((c) => c.name);
+
     if (!scols.includes("app")) this.sql.exec("ALTER TABLE statuses ADD COLUMN app TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.feed.ensureSchema();
@@ -240,6 +259,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const prev = this.locks.get(key) ?? Promise.resolve();
     const next = prev.then(fn, fn);
     this.locks.set(key, next.catch(() => undefined));
+
     return next;
   }
 
@@ -248,7 +268,9 @@ export class MonorepoObject extends DurableObject<Env> {
   /** The meta row `name` holds the storage key: the id (a monorepo made before namespaces: its old name). */
   info(): ObjectInfo | null {
     const m = Object.fromEntries(this.rows<{ k: string; v: string }>("SELECT k, v FROM meta").map((r) => [r.k, r.v]));
+
     if (!m.name) return null;
+
     return { id: m.name, label: m.label ?? m.name, kind: m.kind as Kind, created_at: m.created_at };
   }
 
@@ -256,9 +278,12 @@ export class MonorepoObject extends DurableObject<Env> {
   init(id: string, label: string, kind: Kind): boolean {
     // After a delete (deleteAll), make sure the tables are back before the first read.
     this.ensureSchema();
+
     if (this.info()) return false;
     const at = now();
+
     for (const [k, v] of [["name", id], ["label", label], ["kind", kind], ["created_at", at]]) this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?)", k, v);
+
     return true;
   }
 
@@ -276,6 +301,7 @@ export class MonorepoObject extends DurableObject<Env> {
         // already closed
       }
     }
+
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // This instance may serve the next request (a new monorepo of the same name).
@@ -288,7 +314,9 @@ export class MonorepoObject extends DurableObject<Env> {
   artifactsRepos(): string[] {
     const m = this.info();
     const names = new Set(this.rows<{ artifacts_name: string }>("SELECT artifacts_name FROM repos").map((r) => r.artifacts_name));
+
     if (m?.kind === "monorepo") names.add(metaArtifactsName(m.id));
+
     return [...names];
   }
 
@@ -297,14 +325,19 @@ export class MonorepoObject extends DurableObject<Env> {
   addRepo(r: RepoRecord): Promise<Outcome<RepoRecord>> {
     return this.guard(() => {
       const m = this.info();
+
       if (!m) fail(404, "not_found", "no such monorepo");
+
       if (m.kind === "repo" && this.row("SELECT name FROM repos")) fail(409, "plain_repo", "a plain git repo has exactly one repo");
+
       if (this.row("SELECT name FROM repos WHERE name = ? OR path = ?", r.name, r.path))
         fail(409, "repo_exists", `a repo named ${r.name} or at ${r.path} exists`);
       this.sql.exec(
         "INSERT INTO repos (name, path, artifacts_name, remote, default_branch, description, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         r.name, r.path, r.artifacts_name, r.remote, r.default_branch, r.description, r.created_at, r.created_by,
       );
+      this.feed.scheduleSummary(); // the home's "N projects" changed, with no event to say so
+
       return r;
     });
   }
@@ -321,21 +354,26 @@ export class MonorepoObject extends DurableObject<Env> {
    */
   async getRepo(name: string): Promise<RepoRecord | null> {
     const r = this.repoRow(name);
+
     if (r || name !== "meta") return r;
     const m = this.info();
+
     if (m?.kind !== "monorepo") return null;
     const artifacts_name = metaArtifactsName(m.id);
     let remote: string;
+
     try {
       remote = await withRepo(this.env, artifacts_name, async (repo) => (await repo.info()).remote);
     } catch {
       return null;
     }
+
     this.sql.exec(
       `INSERT INTO repos (name, path, artifacts_name, remote, default_branch, description, created_at, created_by)
        VALUES ('meta', '.', ?, ?, ?, 'The meta layer', ?, 'pando') ON CONFLICT DO NOTHING`,
       artifacts_name, remote, DEFAULT_BRANCH, now(),
     );
+
     return this.repoRow(name);
   }
 
@@ -347,13 +385,16 @@ export class MonorepoObject extends DurableObject<Env> {
    */
   async artifactsToken(name: string, scope: "read" | "write", generation: string, fresh: boolean): Promise<{ token: string; expiresAt: number; mint_ms: number } | null> {
     const m = this.info()?.id;
+
     // Gone (deleted, while another isolate still had it cached for up to 15 s): the Worker answers 404.
     if (!m) return null;
+
     if (!name.startsWith(`${m}--`)) throw new HttpError(403, "forbidden", "not this monorepo's repo");
     const t0 = Date.now();
     const e = await repoTokenEntry(this.env, name, scope, generation, "local", fresh);
     // mint_ms: how long this took when it minted (0 when it was cached), for the caller's timing line.
     const ms = Date.now() - t0;
+
     return { ...e, mint_ms: ms > 2 ? ms : 0 };
   }
 
@@ -362,6 +403,7 @@ export class MonorepoObject extends DurableObject<Env> {
   /** The repo's required checks as last read, or null when unknown (read them, then setRequiredChecks). */
   storedRequired(repo: string): string[] | null {
     const v = this.row<{ v: string | null }>("SELECT required_checks AS v FROM repos WHERE name = ?", repo)?.v;
+
     return v ? (JSON.parse(v) as string[]) : null;
   }
 
@@ -377,7 +419,9 @@ export class MonorepoObject extends DurableObject<Env> {
   private forgetRequiredIfConfig(repo: string): void {
     const m = this.info();
     const r = this.repoRow(repo);
+
     if (!m || !r) return;
+
     if (m.kind === "repo") this.sql.exec("UPDATE repos SET required_checks = NULL WHERE name = ?", repo);
     else if (r.artifacts_name === metaArtifactsName(m.id)) this.sql.exec("UPDATE repos SET required_checks = NULL");
   }
@@ -430,6 +474,7 @@ export class MonorepoObject extends DurableObject<Env> {
   checkPush(repo: string, commands: RefCommand[]): PushVerdict[] {
     const r = this.repoRow(repo);
     const main = `refs/heads/${r?.default_branch ?? DEFAULT_BRANCH}`;
+
     return commands
       .filter((c) => c.ref === main && c.old !== ZERO)
       .map((c) => ({ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }));
@@ -447,32 +492,41 @@ export class MonorepoObject extends DurableObject<Env> {
     const main = r?.default_branch ?? DEFAULT_BRANCH;
     const at = now();
     const events: RepoEvent[] = [];
+
     for (const u of updates) {
       if (!u.ref.startsWith("refs/heads/")) continue;
       const name = u.ref.slice(11);
+
       const base: Omit<RepoEvent, "event"> = {
         repo, branch: name, ref: u.ref, before: u.old, head: u.new, base: null,
         author: null, pusher: identity.login, title: null, description: null,
       };
+
       if (name === main) {
         this.rememberHead(repo, u.new === ZERO ? null : u.new);
         this.forgetRequiredIfConfig(repo);
+
         const seq = this.publish({
           kind: "push", collection: "default_heads", key: repo, op: "upsert", repo, ...who(identity),
           row: { repo, default_branch: main, default_head: u.new === ZERO ? null : u.new }, before: u.old, head: u.new,
         });
+
         if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new, ...(seq ? { push: { seq, before: u.old } } : {}) });
         events.push({ ...base, event: "push", author: identity.login, seq: seq || null });
         continue;
       }
+
       let b = this.branchRecord(repo, name);
+
       if (u.new === ZERO) {
         if (b) this.sql.exec("UPDATE branches SET deleted_at = ?, head = NULL, updated_at = ? WHERE repo = ? AND name = ?", at, at, repo, name);
         const seq = this.publish({ kind: "branch.deleted", collection: "branches", key: `${repo}/${name}`, op: "delete", repo, ...who(identity), row: { repo, name }, before: u.old, head: u.new });
         events.push({ ...base, event: "push", author: b?.creator ?? null, title: b?.title ?? null, description: b?.description ?? null, seq: seq || null });
         continue;
       }
+
       const opened = !b;
+
       if (!b) {
         this.sql.exec(
           `INSERT INTO branches (repo, name, head, creator, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -484,16 +538,20 @@ export class MonorepoObject extends DurableObject<Env> {
       } else {
         this.sql.exec("UPDATE branches SET head = ?, updated_at = ? WHERE repo = ? AND name = ?", u.new, at, repo, name);
       }
+
       this.sql.exec("UPDATE branches SET pushed_machine = ? WHERE repo = ? AND name = ?", identity.credential_name, repo, name);
       b = this.branchRecord(repo, name)!;
       const seq = this.publishBranch(opened ? "branch.opened" : "push", repo, name, identity, { before: u.old, head: u.new });
       const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
+
       if (opened) events.push({ ...e, event: "branch.opened" });
       events.push({ ...e, event: "push" });
       this.queueFacts({ type: "branch", repo, branch: name, head: u.new, ...(seq ? { push: { seq, before: u.old } } : {}) });
     }
+
     // Hook deliveries, in the same step as the change (C9).
     this.queueDeliveries(events, origin);
+
     return events;
   }
 
@@ -505,6 +563,7 @@ export class MonorepoObject extends DurableObject<Env> {
   updateBranch(repo: string, name: string, patch: { title?: string; description?: string }, head: string, identity: Identity | null = null): Promise<Outcome<BranchRecord>> {
     return this.guard(() => {
       let b = this.branchRecord(repo, name);
+
       if (!b) {
         // A branch that exists in Artifacts but never came through the door.
         this.sql.exec(
@@ -514,9 +573,12 @@ export class MonorepoObject extends DurableObject<Env> {
         );
         b = this.branchRecord(repo, name)!;
       }
+
       if (patch.title !== undefined) this.sql.exec("UPDATE branches SET title = ? WHERE repo = ? AND name = ?", patch.title, repo, name);
+
       if (patch.description !== undefined) this.sql.exec("UPDATE branches SET description = ? WHERE repo = ? AND name = ?", patch.description, repo, name);
       this.publishBranch("branch.updated", repo, name, identity);
+
       return this.branchRecord(repo, name)!;
     });
   }
@@ -532,6 +594,7 @@ export class MonorepoObject extends DurableObject<Env> {
     );
     const review = { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
     this.publish({ kind: "review", collection: "reviews", key: `${repo}/${id}`, op: "upsert", repo, ...who(identity), row: review });
+
     return review;
   }
 
@@ -567,6 +630,7 @@ export class MonorepoObject extends DurableObject<Env> {
     const status: StatusRecord = { sha, ...s, creator, app, created_at: at };
     // Branches at this commit have new checks; clients holding them refetch (the event names the sha).
     this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(stamp ? null : identity), row: status });
+
     return status;
   }
 
@@ -586,10 +650,12 @@ export class MonorepoObject extends DurableObject<Env> {
    */
   private async checksFor(r: RepoRecord, sha: string): Promise<Checks> {
     let required = this.storedRequired(r.name);
+
     if (!required) {
       required = await requiredChecks(this.env, this.info()!, r);
       this.setRequiredChecks(r.name, required);
     }
+
     return combine(sha, required, this.statuses(r.name, sha));
   }
 
@@ -597,6 +663,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   merge(args: MergeArgs): Promise<Outcome<MergeResult>> {
     const m = this.info();
+
     return this.guard(() =>
       this.serial(`merge:${args.repo}`, () =>
         timed("object", { route: "merge", monorepo: m?.label ?? null, monorepo_id: m?.id ?? null, repo: args.repo, branch: args.branch }, () => this.mergeNow(args)),
@@ -617,13 +684,17 @@ export class MonorepoObject extends DurableObject<Env> {
     const storedMain = this.currentMain(a.repo);
     // The meta layer's main also moves by the live layer's commits, which this object does not record.
     const isMeta = r.artifacts_name === metaArtifactsName(this.info()!.id);
+
     if (!readRefs && !isMeta && a.expected_head && stored === a.expected_head && storedMain) {
       return { head: stored, base: storedMain, read: false };
     }
+
     const refs = branchesOf(await listRefs(this.env, r, "local"));
     const head = refs.get(a.branch) ?? fail(404, "not_found", `no branch ${a.branch}`);
     const base = refs.get(r.default_branch) ?? fail(409, "no_main", `${r.default_branch} does not exist yet`);
+
     if (a.expected_head && a.expected_head !== head) fail(409, "head_moved", `the branch is at ${head}, not ${a.expected_head}`);
+
     return { head, base, read: true };
   }
 
@@ -632,15 +703,18 @@ export class MonorepoObject extends DurableObject<Env> {
     let { head, base, read } = await this.mergeHeads(r, a, false);
     note({ heads_from: read ? "artifacts" : "records" });
     const checks = await this.checksFor(r, head);
+
     if (checks.state !== "success" && !a.force) {
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });
     }
+
     if (!gitwrite) fail(501, "merge_engine_unavailable", "the server-side merge engine (worker/src/gitwrite) is not wired in yet");
     const b = this.branchRecord(a.repo, a.branch);
     const message = a.message ?? mergeMessage(a.branch, b);
     const email = a.identity.email ?? `${a.identity.login}@users.pando.invalid`;
     let out;
     const engine = gitwrite;
+
     const attemptMerge = (h: string, baseSha: string) =>
       // One of the repo's two write slots, held for the merge's push; Artifacts' "busy" is retried.
       this.gatedTimed(r.artifacts_name, () =>
@@ -662,8 +736,10 @@ export class MonorepoObject extends DurableObject<Env> {
           (e) => isBusy(e instanceof Error ? e.message : String(e)),
         ),
       );
+
     try {
       out = await attemptMerge(head, base);
+
       if (out.status === "ref_moved" && !read) {
         // The recorded main was behind Artifacts: read the refs (which also re-checks the head) and try once more.
         ({ head, base, read } = await this.mergeHeads(r, a, true));
@@ -672,23 +748,33 @@ export class MonorepoObject extends DurableObject<Env> {
       }
     } catch (err) {
       if (err instanceof HttpError) throw err;
+
       if (err instanceof GateBusy) fail(503, "repo_busy", err.message);
       const code = gitWriteCode(err);
       const msg = redact(err instanceof Error ? err.message : String(err));
+
       if (isBusy(msg)) fail(503, "repo_busy", "Artifacts is busy with other writes to this repo; try again");
+
       if (code === "no_merge_base") fail(409, "no_merge_base", msg);
+
       if (code === "not_found") fail(404, "not_found", msg);
+
       if (code === "invalid_input") fail(400, "bad_request", msg);
+
       if (code === "too_large") fail(422, "too_large", msg);
       fail(502, code ?? "merge_failed", msg);
     }
+
     if (out.status === "conflict") {
       fail(409, "conflict", `${out.paths.length} file(s) changed differently on both sides; merge ${r.default_branch} into the branch, push, and merge again`, { paths: out.paths });
     }
+
     if (out.status === "ref_moved") fail(409, "ref_moved", `${r.default_branch} moved while merging; retry`);
+
     if (out.status === "up_to_date") {
       return { status: "up_to_date", branch: a.branch, head, sha: base, forced: false, merged_by: a.identity.login };
     }
+
     if (out.status !== "merged") fail(502, "merge_failed", `unexpected merge result ${out.status}`);
     const at = now();
     const forced = checks.state !== "success";
@@ -724,6 +810,7 @@ export class MonorepoObject extends DurableObject<Env> {
       }],
       a.origin,
     );
+
     if (r.artifacts_name === metaArtifactsName(this.info()!.id)) {
       // The merge has landed; machines get it on the live layer's next try if this fails.
       await this.applyToMetaLayer(out.old, out.sha, a.identity).catch((err) =>
@@ -732,26 +819,32 @@ export class MonorepoObject extends DurableObject<Env> {
     }
 
     const result: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
+
     return result;
   }
 
   /** A merge landed on the meta layer's main: hand the changed files to the live meta layer. */
   private async applyToMetaLayer(before: string, commit: string, who: Identity): Promise<void> {
     const m = this.info()!.id;
+
     const changes = await withRepo(this.env, metaArtifactsName(m), async (repo) => {
       const [a, b] = await Promise.all([repo.readCommit(before), repo.readCommit(commit)]);
+
       if (!a || !b) throw new HttpError(502, "artifacts", "the merge's commits could not be read");
       const files = await changedFiles(repo, a.treeHash, b.treeHash);
+
       return Promise.all(
         files.map(async (f) => {
           if (!f.sha) return { path: f.path, bytes: null };
           const blob = await repo.readBlob(f.sha);
+
           return { path: f.path, bytes: blob ? new Uint8Array(await blob.arrayBuffer()) : null };
         }),
       );
     });
+
     const author = `${who.name ?? who.login} <${who.email ?? `${who.login}@users.pando.invalid`}>`;
-    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, changes });
+    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, login: who.login, changes });
   }
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────
@@ -762,6 +855,7 @@ export class MonorepoObject extends DurableObject<Env> {
       "INSERT INTO hooks (id, repo, type, url, secret, events, config, active, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
       id, repo, h.type, h.url, h.secret, JSON.stringify(h.events), h.config ? JSON.stringify(h.config) : null, now(), identity.login,
     );
+
     return hookView(this.row<HookRow>("SELECT * FROM hooks WHERE id = ?", id)!);
   }
 
@@ -786,11 +880,14 @@ export class MonorepoObject extends DurableObject<Env> {
        FROM deliveries WHERE id = ?`,
       id,
     );
+
     if (!d) return null;
+
     const attempts = this.rows<Record<string, unknown>>(
       "SELECT n, at, response_code, error, ms FROM delivery_attempts WHERE delivery_id = ? ORDER BY n DESC LIMIT ?",
       id, ATTEMPTS_KEPT,
     );
+
     return { ...d, recent_attempts: attempts };
   }
 
@@ -799,23 +896,30 @@ export class MonorepoObject extends DurableObject<Env> {
       "SELECT id FROM deliveries WHERE repo = ? AND hook_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100",
       repo, hookId,
     );
+
     return ids.map((r) => this.deliveryView(r.id)!);
   }
 
   /** Write a delivery row per (hook, event) the events reach, and send their ids to the queue. */
   private queueDeliveries(events: RepoEvent[], origin: string | null): number {
     const m = this.info();
+
     if (!m || events.length === 0) return 0;
     const ids: string[] = [];
+
     for (const e of events) {
       const hooks = this.rows<HookRow>("SELECT * FROM hooks WHERE repo = ?", e.repo).filter((h) => wants(h, e));
+
       for (const h of hooks) {
         const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.label, monorepo_id: m.id, plain: m.kind === "repo", origin: origin ?? "" };
         const id = this.insertDelivery(h.id, e.repo, e.event, e.seq ?? null, JSON.stringify(payload));
+
         if (id) ids.push(id);
       }
     }
+
     if (ids.length) this.hooksOut.kick();
+
     return ids.length;
   }
 
@@ -823,32 +927,27 @@ export class MonorepoObject extends DurableObject<Env> {
   private insertDelivery(hookId: string, repo: string, event: string, seq: number | null, payload: string): string | null {
     const id = randomId("dlv_");
     const at = now();
+
     const written = this.sql.exec(
       `INSERT OR IGNORE INTO deliveries (id, hook_id, repo, event, seq, payload, status, attempts, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?)`,
       id, hookId, repo, event, seq, payload, at,
     ).rowsWritten;
+
     if (!written) return null;
+
     // Keep the latest DELIVERIES_KEPT per hook (and their attempts).
     const old = this.rows<{ id: string }>(
       "SELECT id FROM deliveries WHERE hook_id = ? ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?",
       hookId, DELIVERIES_KEPT,
     );
+
     for (const o of old) {
       this.sql.exec("DELETE FROM delivery_attempts WHERE delivery_id = ?", o.id);
       this.sql.exec("DELETE FROM deliveries WHERE id = ?", o.id);
     }
+
     return id;
-  }
-
-  /** Send the due deliveries now (the pando-hooks consumer, for messages sent before the outbox). */
-  sendDueDeliveries(): Promise<void> {
-    return this.hooksOut.sendDue();
-  }
-
-  /** The pando-hooks-dlq consumer, for messages sent before the outbox: the delivery gave up. */
-  markDead(id: string): void {
-    this.sql.exec("UPDATE deliveries SET status = 'dead', next_attempt_at = NULL WHERE id = ? AND status != 'delivered'", id);
   }
 
   /** Send one delivery again (same row, same seq; new attempts are added). */
@@ -856,6 +955,7 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(async () => {
       if (!this.row("SELECT id FROM deliveries WHERE repo = ? AND id = ?", repo, deliveryId)) fail(404, "not_found", `no delivery ${deliveryId}`);
       this.hooksOut.requeue([deliveryId]);
+
       return this.deliveryView(deliveryId)!;
     });
   }
@@ -864,11 +964,14 @@ export class MonorepoObject extends DurableObject<Env> {
   replayHook(repo: string, hookId: string, since: number): Promise<Outcome<{ queued: number; ids: string[] }>> {
     return this.guard(async () => {
       if (!this.row("SELECT id FROM hooks WHERE repo = ? AND id = ?", repo, hookId)) fail(404, "not_found", `no hook ${hookId}`);
+
       const ids = this.rows<{ id: string }>(
         "SELECT id FROM deliveries WHERE repo = ? AND hook_id = ? AND seq > ? ORDER BY seq LIMIT ?",
         repo, hookId, since, REPLAY_DELIVERIES,
       ).map((r) => r.id);
+
       this.hooksOut.requeue(ids);
+
       return { queued: ids.length, ids };
     });
   }
@@ -885,15 +988,19 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Known sizes of objects in a repo. Objects never change, so entries never expire. */
   objectSizes(repo: string, oids: string[]): Record<string, number> {
     const out: Record<string, number> = {};
+
     // Durable Object SQLite binds at most 100 variables: the repo plus 90 ids.
     for (let i = 0; i < oids.length; i += 90) {
       const chunk = oids.slice(i, i + 90);
+
       const rows = this.rows<{ oid: string; size: number }>(
         `SELECT oid, size FROM object_sizes WHERE repo = ? AND oid IN (${chunk.map(() => "?").join(",")})`,
         repo, ...chunk,
       );
+
       for (const r of rows) out[r.oid] = r.size;
     }
+
     return out;
   }
 
@@ -922,17 +1029,21 @@ export class MonorepoObject extends DurableObject<Env> {
     const { seq: _s, at: _a, via: _v, ...rest } = e;
     const body = JSON.stringify(rest);
     const tags = eventTags(e);
+
     const seq = this.sql.exec<{ seq: number }>(
       "INSERT INTO events (at, kind, body, tags) VALUES (?, ?, ?, ?) RETURNING seq", at, e.kind, body, ` ${tags.join(" ")} `,
     ).one().seq as number;
+
     const line = this.feed.onPublish(seq, at, e);
     const frame = JSON.stringify({ type: "event", seq, at, ...rest });
     // Each socket subscribed to topics (acceptWebSocket tags); send once to every socket on any of this event's.
     const sent = new Set<WebSocket>();
+
     for (const tag of tags) {
       for (const ws of this.ctx.getWebSockets(tag)) {
         if (sent.has(ws)) continue;
         sent.add(ws);
+
         try {
           ws.send(frame);
         } catch {
@@ -940,15 +1051,19 @@ export class MonorepoObject extends DurableObject<Env> {
         }
       }
     }
+
     // After this event's frames: its machine's latest activity (may publish machine.updated).
     this.machines.onEvent(seq, at, e, line);
+
     return seq;
   }
 
   /** Events from the meta layer object, in order (meta.saved, machine.connected, machine.disconnected). */
   publishMany(events: StreamEvent[]): number {
     let seq = 0;
+
     for (const e of events) seq = this.publish(e);
+
     return seq;
   }
 
@@ -956,11 +1071,13 @@ export class MonorepoObject extends DurableObject<Env> {
   private eventRows(since: number, limit: number, latest: boolean, topics: string[] = ["all"]): Record<string, unknown>[] {
     const all = topics.includes("all");
     const match = (tags: string | null) => all || topics.some((t) => (tags ?? " all ").includes(` ${t} `));
+
     const rows = latest
       ? this.rows<{ seq: number; at: string; body: string; tags: string | null }>("SELECT seq, at, body, tags FROM events ORDER BY seq DESC LIMIT ?", all ? limit : SCAN_MAX)
           .filter((r) => match(r.tags)).slice(0, limit).reverse()
       : this.rows<{ seq: number; at: string; body: string; tags: string | null }>("SELECT seq, at, body, tags FROM events WHERE seq > ? ORDER BY seq LIMIT ?", since, all ? limit : SCAN_MAX)
           .filter((r) => match(r.tags)).slice(0, limit);
+
     return rows.map((r) => ({ seq: r.seq, at: r.at, ...JSON.parse(r.body) }));
   }
 
@@ -971,6 +1088,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private eventBounds(): { head: number; oldest: number } {
     const b = this.row<{ head: number | null; oldest: number | null }>("SELECT MAX(seq) AS head, MIN(seq) AS oldest FROM events");
+
     return { head: b?.head ?? 0, oldest: b?.oldest ?? 0 };
   }
 
@@ -980,24 +1098,30 @@ export class MonorepoObject extends DurableObject<Env> {
     const { head, oldest } = this.eventBounds();
     const n = Math.min(Math.max(limit, 1), REPLAY_MAX);
     const bounds = { seq: head, oldest_seq: oldest };
+
     if (since === null) return { events: this.eventRows(0, n, true, topics), ...bounds, resync: false };
     const resync = since > head || (head > 0 && since < oldest - 1);
+
     return { events: resync ? [] : this.eventRows(since, n, false, topics), ...bounds, resync };
   }
 
   /** The event socket (GET /v1/monorepos/{m}/events with Upgrade), after the Worker checked membership. */
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
     if (!url.pathname.endsWith("/events") || request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
     }
+
     const topics = parseTopics(url.searchParams.get("topics"));
+
     if (!topics) {
       return Response.json(
         { error: { code: "bad_request", message: "topics: up to 10 of all, main, main:<repo>, repo:<repo>, meta, kind:<kind>, comma-separated" } },
         { status: 400 },
       );
     }
+
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server, topics);
@@ -1012,33 +1136,44 @@ export class MonorepoObject extends DurableObject<Env> {
     const sinceParam = url.searchParams.get("since");
     const since = sinceParam === null || sinceParam === "" ? null : Number(sinceParam);
     const { head, oldest } = this.eventBounds();
+
     if (since !== null) {
       const missed = Number.isSafeInteger(since) && since >= 0 ? head - since : Infinity;
       const all = topics.includes("all");
+
       if (!Number.isSafeInteger(since) || since < 0 || since > head || (head > 0 && since < oldest - 1) || missed > (all ? REPLAY_MAX : SCAN_MAX)) {
         server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest }));
       } else {
         const replay = this.eventRows(since, REPLAY_MAX + 1, false, topics);
+
         if (replay.length > REPLAY_MAX) server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest }));
         else for (const e of replay) server.send(JSON.stringify({ type: "event", ...e }));
       }
     }
-    server.send(JSON.stringify({ type: "caught_up", seq: head }));
+
+    // The `feed` topic: what was sent after feed_since, in the order it went out (C25).
+    if (topics.includes("feed")) this.feed.replay(server, url.searchParams.get("feed_since"));
+    server.send(JSON.stringify({ type: "caught_up", seq: head, ...(topics.includes("feed") ? { feed_n: this.feed.feedHead() } : {}) }));
+
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
     // The stream is one way, but for a follower's hello (presence, C25). Text "ping" is answered "pong" without waking the object.
     let reply: Record<string, unknown> = { type: "error", message: "this socket only sends; send the text ping to keep it open" };
+
     try {
       const m = typeof msg === "string" && msg.startsWith("{") ? (JSON.parse(msg) as Record<string, unknown>) : null;
+
       if (m?.type === "hello") {
         reply = this.feed.hello(ws, m);
+
         if (reply.type === "hello_ok") this.machines.hello(ws.deserializeAttachment() ?? {}, (m.worktrees as string[] | undefined) ?? []);
       }
     } catch {
       // not JSON
     }
+
     try {
       ws.send(JSON.stringify(reply));
     } catch {
@@ -1049,6 +1184,7 @@ export class MonorepoObject extends DurableObject<Env> {
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     this.feed.gone(ws);
     this.machines.gone(ws, this.feed.liveHelloSids());
+
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
     } catch {
@@ -1066,8 +1202,10 @@ export class MonorepoObject extends DurableObject<Env> {
    */
   private branchEventRow(repo: string, name: string): Record<string, unknown> | null {
     const b = this.branchRecords(repo).find((x) => x.name === name);
+
     if (!b || !b.head) return null;
     const merged = b.merged_head === b.head;
+
     return {
       repo, name, head: b.head, author: b.creator, title: b.title, description: b.description,
       state: merged ? "merged" : "open",
@@ -1081,6 +1219,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private publishBranch(kind: string, repo: string, name: string, by: Identity | null, extra: Record<string, unknown> = {}): number {
     const row = this.branchEventRow(repo, name);
+
     return this.publish({
       kind, collection: "branches", key: `${repo}/${name}`, op: row ? "upsert" : "delete", repo, ...who(by),
       row: row ?? { repo, name }, partial: true, ...extra,
@@ -1096,6 +1235,11 @@ export class MonorepoObject extends DurableObject<Env> {
     this.factsOut.add(m as Omit<FactsMessage, "monorepo">);
   }
 
+  /** Tests only (HOOKS_TEST=1): die after the next delivery's call answers, before recording it. */
+  testHooksOutbox(set: { crash?: boolean } = {}) {
+    return this.hooksOut.test(set);
+  }
+
   /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */
   testFactsOutbox(set: { fail?: number } = {}) {
     return this.factsOut.test(set);
@@ -1105,22 +1249,28 @@ export class MonorepoObject extends DurableObject<Env> {
   /** A branch's head from the stored rows (main from the repo's record), or null when unknown here (FILES.md). */
   refHead(repo: string, ref: string): string | null {
     const r = this.row<{ default_branch: string; default_head: string | null }>("SELECT default_branch, default_head FROM repos WHERE name = ?", repo);
+
     if (!r) return null;
+
     if (ref === r.default_branch) return r.default_head;
+
     return this.row<{ head: string | null }>("SELECT head FROM branches WHERE repo = ? AND name = ? AND deleted_at IS NULL", repo, ref)?.head ?? null;
   }
 
   /** For merge commits: the branch each merged and its title (the file pages' history). */
   mergedBranches(repo: string, shas: string[]): Record<string, { branch: string; title: string | null }> {
     const out: Record<string, { branch: string; title: string | null }> = {};
+
     for (let i = 0; i < shas.length; i += 100) {
       const chunk = shas.slice(i, i + 100);
+
       for (const r of this.rows<{ merge_commit: string; branch: string; title: string | null }>(
         `SELECT m.merge_commit, m.branch, b.title FROM merges m LEFT JOIN branches b ON b.repo = m.repo AND b.name = m.branch
          WHERE m.repo = ? AND m.merge_commit IN (${chunk.map(() => "?").join(",")})`,
         repo, ...chunk,
       )) out[r.merge_commit] = { branch: r.branch, title: r.title };
     }
+
     return out;
   }
 
@@ -1131,8 +1281,10 @@ export class MonorepoObject extends DurableObject<Env> {
   /** A sweep's branches: open, pushed within `days`, newest first, at most `max`, without facts for (main, head) yet. */
   factsCandidates(repo: string, main: string, days: number, max: number): { main: string | null; branches: { name: string; head: string }[] } {
     const current = this.currentMain(repo);
+
     if (current !== main) return { main: current, branches: [] };
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
+
     const branches = this.rows<{ name: string; head: string }>(
       `SELECT name, head FROM branches
        WHERE repo = ? AND deleted_at IS NULL AND head IS NOT NULL AND (merged_head IS NULL OR merged_head != head)
@@ -1140,6 +1292,7 @@ export class MonorepoObject extends DurableObject<Env> {
        ORDER BY updated_at DESC LIMIT ?`,
       repo, since, main, max,
     );
+
     return { main: current, branches };
   }
 
@@ -1151,6 +1304,7 @@ export class MonorepoObject extends DurableObject<Env> {
   writeFacts(repo: string, name: string, f: { main: string; head: string; ahead: number | null; behind: number | null; merge_base: string | null; mergeable: string }, required: string[]): boolean {
     if (this.currentMain(repo) !== f.main) return false;
     const b = this.branchRecord(repo, name);
+
     if (!b || b.head !== f.head) return false;
     this.sql.exec(
       "UPDATE branches SET ahead = ?, behind = ?, merge_base = ?, mergeable = ?, facts_main = ?, facts_head = ?, facts_at = ? WHERE repo = ? AND name = ?",
@@ -1158,7 +1312,9 @@ export class MonorepoObject extends DurableObject<Env> {
     );
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     const row = this.branchRows(repo, { names: [name], state: "all", required }).branches[0];
+
     if (row) this.publish({ kind: "branch.updated", collection: "branches", key: `${repo}/${name}`, op: "upsert", repo, actor: null, machine: null, agent: null, row: { repo, ...row }, partial: false });
+
     return true;
   }
 
@@ -1173,6 +1329,7 @@ export class MonorepoObject extends DurableObject<Env> {
     o: { names?: string[]; state: "open" | "merged" | "all"; limit?: number; cursor?: string | null; required?: string[] | null; graceMs?: number },
   ): BranchList {
     const r = this.repoRow(repo);
+
     if (!r) return { default_branch: DEFAULT_BRANCH, default_head: null, branches: [], next_cursor: null, due: [] };
     const main = this.currentMain(repo);
     const mainAt = Date.parse(this.row<{ t: string | null }>("SELECT default_head_at AS t FROM repos WHERE name = ?", repo)?.t ?? "") || 0;
@@ -1183,16 +1340,21 @@ export class MonorepoObject extends DurableObject<Env> {
     const rows: BranchView[] = [];
     const due: string[] = [];
     let next: string | null = null;
+
     for (const b of all) {
       if (o.cursor && b.name <= o.cursor) continue;
       const merged = b.merged_head === b.head;
       const state = merged ? "merged" : "open";
+
       if (o.state !== "all" && state !== o.state) continue;
+
       if (rows.length >= limit) {
         next = rows[rows.length - 1].name;
         break;
       }
+
       const fresh = merged || (b.facts_main === main && b.facts_head === b.head && main !== null);
+
       if (!fresh && main && t - Math.max(mainAt, Date.parse(b.updated_at ?? "") || 0) > (o.graceMs ?? STALE_GRACE_MS)) due.push(b.name);
       rows.push({
         name: b.name,
@@ -1220,6 +1382,7 @@ export class MonorepoObject extends DurableObject<Env> {
         facts_at: b.facts_at ?? null,
       });
     }
+
     return { default_branch: r.default_branch, default_head: main, branches: rows, next_cursor: next, due };
   }
 
@@ -1229,6 +1392,7 @@ export class MonorepoObject extends DurableObject<Env> {
   private async gatedTimed<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const lease = await timeGate(() => this.gate.acquire(key));
     const renew = setInterval(() => this.gate.renew(key, lease), Math.max(1000, Math.floor(LEASE_MS / 3)));
+
     try {
       return await fn();
     } finally {
@@ -1240,8 +1404,10 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Take one of the repo's write slots (waits in line, at most WAIT_MS). Key: the Artifacts repo name. */
   async acquireWrite(key: string): Promise<Outcome<{ lease: string; waited_ms: number }>> {
     const t = Date.now();
+
     try {
       const lease = await this.gate.acquire(key);
+
       return { ok: true, value: { lease, waited_ms: Date.now() - t } };
     } catch (err) {
       return { ok: false, status: 503, code: "repo_busy", message: err instanceof Error ? err.message : String(err) };
@@ -1272,9 +1438,11 @@ export class MonorepoObject extends DurableObject<Env> {
       const key = r.artifacts_name;
       const q = this.refQueues.get(key) ?? [];
       this.refQueues.set(key, q);
+
       const answers = commands.map(
         (cmd) => new Promise<string | null>((done, failed) => q.push({ cmd, done, fail: failed })),
       );
+
       if (!this.refRunners.has(key)) this.ctx.waitUntil(this.runRefQueue(r));
       const out: Record<string, string | null> = {};
       const settled = await Promise.allSettled(answers);
@@ -1282,11 +1450,14 @@ export class MonorepoObject extends DurableObject<Env> {
         if (s.status === "fulfilled") out[commands[i].ref] = s.value;
         else {
           const e = s.reason;
+
           if (e instanceof GateBusy || isBusy(e instanceof Error ? e.message : String(e))) fail(503, "repo_busy", e instanceof Error ? e.message : String(e));
+
           if (e instanceof HttpError) throw e;
           fail(502, "artifacts", redact(e instanceof Error ? e.message : String(e)));
         }
       });
+
       return out;
     });
   }
@@ -1294,43 +1465,56 @@ export class MonorepoObject extends DurableObject<Env> {
   private async runRefQueue(r: RepoRecord): Promise<void> {
     const key = r.artifacts_name;
     this.refRunners.add(key);
+
     try {
       for (;;) {
         const q = this.refQueues.get(key);
+
         if (!q || q.length === 0) return;
         // One timing line per batch (timing.ts): the gate wait, then Artifacts.
         const t = startTiming("object", { route: "ref-batch", monorepo: this.info()?.label ?? null, monorepo_id: this.info()?.id ?? null, repo: r.name });
         let lease: string;
+
         try {
           lease = await runTimed(t, () => timeGate(() => this.gate.acquire(key)));
         } catch (err) {
           finishTiming(t, { status: "busy" });
+
           for (const e of q.splice(0)) e.fail(err);
+
           return;
         }
+
         // Everything queued by now goes in one receive-pack (one command per ref; a repeat waits a round).
         const batch: typeof q = [];
         const refs = new Set<string>();
+
         for (let i = 0; i < q.length && batch.length < REF_BATCH_MAX; ) {
           if (refs.has(q[i].cmd.ref)) {
             i++;
             continue;
           }
+
           refs.add(q[i].cmd.ref);
           batch.push(...q.splice(i, 1));
         }
+
         try {
           t.fields.refs = batch.length;
+
           const result = await runTimed(t, () =>
             retryBusy(
               () => updateRefs(this.env, r, batch.map((e) => e.cmd), "local"),
               (e) => e instanceof HttpError && e.code === "repo_busy",
             ),
           );
+
           finishTiming(t, { status: "ok" });
+
           for (const e of batch) e.done(result.has(e.cmd.ref) ? result.get(e.cmd.ref)! : "no status in Artifacts' report");
         } catch (err) {
           finishTiming(t, { status: "error" });
+
           for (const e of batch) e.fail(err);
         } finally {
           this.gate.release(key, lease);
@@ -1355,18 +1539,23 @@ export class MonorepoObject extends DurableObject<Env> {
   /** A join: store the fresh member list, and for `login`, the latest `n` activity events and the summary. Null when the monorepo is gone. */
   feedJoin(members: string[], login: string | null, n: number): JoinData | null {
     const m = this.info();
+
     if (!m) return null;
     this.feed.setMembers(members);
+
     if (!login) return null;
     const large = this.feed.isLarge();
     const events = large ? [] : this.feed.before(null, n);
+
     return { kind: m.kind, full_name: m.label, large, events, complete: events.length < n, summary: this.feed.summary() };
   }
 
   /** The branch-facts job's commit count and head title for a push: the push goes out to feeds. */
   feedPush(seq: number, summary: Record<string, unknown>): boolean {
     const sent = this.feed.push(seq, summary);
+
     if (sent) this.machines.pushSummary(seq, summary);
+
     return sent;
   }
 
@@ -1414,6 +1603,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   ciIngestJob(build: string, job: unknown) {
     const j = this.ci.ingestJob(build, job);
+
     return j ? this.ci.jobView(j) : null;
   }
 
@@ -1464,6 +1654,7 @@ export class MonorepoObject extends DurableObject<Env> {
       );
       const row = this.worktree(id)!;
       this.publish({ kind: "worktree.reported", collection: "worktrees", key: id, op: "upsert", repo: null, ...who(identity), row });
+
       return row;
     });
   }
@@ -1491,6 +1682,7 @@ export class MonorepoObject extends DurableObject<Env> {
       const row = this.worktree(id) ?? fail(404, "not_found", `no worktree ${id}`);
       this.sql.exec("DELETE FROM worktrees WHERE id = ?", id);
       this.publish({ kind: "worktree.removed", collection: "worktrees", key: id, op: "delete", repo: null, ...who(identity), row });
+
       return true;
     });
   }
@@ -1498,6 +1690,8 @@ export class MonorepoObject extends DurableObject<Env> {
 
 export function mergeMessage(branch: string, b: BranchRecord | null): string {
   const tail = `Merge branch '${branch}'`;
+
   if (!b?.title) return tail + "\n";
+
   return [b.title, b.description, tail].filter(Boolean).join("\n\n") + "\n";
 }

@@ -2,7 +2,7 @@
 // `listActivity`) and the person's WebSocket on the same path. One line per
 // activity, discriminated by `kind`; its `summary` depends on the kind
 // (worker/src/feed/out.ts pointerOf, feed/push.ts).
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 import { Count, FullName, MonorepoId, RepoName, Sha, Timestamp } from "./ids.ts";
 import { FeedSummary } from "./monorepo.ts";
@@ -156,3 +156,24 @@ export const ActivityHello = Schema.Struct({
 });
 
 export interface ActivityHello extends Schema.Schema.Type<typeof ActivityHello> {}
+
+/**
+ * Frames of a monorepo's own socket opened with `?topics=feed` (`GET
+ * /v1/monorepos/{owner}/{monorepo}/events`, `Upgrade: websocket`): the home
+ * opens one for each large monorepo (more than 100 members), whose lines do
+ * not reach the person's socket. Lines are numbered `n` in the order they go
+ * out; reconnect with `feed_since=<the last n seen>`.
+ */
+export const MonorepoFeedFrame = Schema.Union([
+  /** One activity line; the same line can come again with a fuller summary: replace by `(monorepo_id, seq)`. */
+  Schema.Struct({ type: Schema.tag("feed"), n: Count, event: FeedEvent }),
+  /** The replay is done. `feed_n` is the last line number sent. */
+  Schema.Struct({ type: Schema.tag("caught_up"), seq: Count, feed_n: Schema.optionalKey(Count) }),
+  /** More than 500 lines were missed, or an unknown `feed_since`: refetch the log, then reconnect with this `feed_n`. */
+  Schema.Struct({ type: Schema.tag("feed_resync"), feed_n: Count }),
+  /** The event stream itself was missed past its replay: refetch, then resume from `seq`. */
+  Schema.Struct({ type: Schema.tag("resync"), seq: Count, oldest_seq: Count }),
+  Schema.Struct({ type: Schema.tag("error"), message: Schema.String }),
+]).pipe(Schema.toTaggedUnion("type"));
+
+export type MonorepoFeedFrame = typeof MonorepoFeedFrame.Type;

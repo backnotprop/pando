@@ -1,6 +1,6 @@
 // "Needs you": GET /v1/branches (operationId `listNeeds`), and the changes
 // the person's socket sends in its `needs` frame.
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 import { FullName, MonorepoId, RepoName, Sha, Timestamp } from "./ids.ts";
 

@@ -62,6 +62,7 @@ export class Machines {
   /** After an event is published: an activity line made through a credential updates its machine. */
   onEvent(seq: number, at: string, e: StreamEvent, line: StoredPointer | null): void {
     const via = e.via as Via | undefined;
+
     if (!line || !via?.credential_id || !e.actor) return;
     const name = (e.machine as string | null) ?? via.credential_id;
     const last = JSON.stringify({ seq, at, kind: line.kind, repo: line.repo, repo_path: line.repo_path, branch: line.branch, summary: line.summary });
@@ -72,6 +73,7 @@ export class Machines {
          last = excluded.last, last_at = excluded.last_at, updated_at = excluded.updated_at`,
       e.actor, via.credential_id, name, via.credential_kind, last, at, now(),
     );
+
     if (!old || old.name !== name || Date.now() - old.published_at >= ACTIVITY_REPUBLISH_MS) this.announce(e.actor as string, via.credential_id);
   }
 
@@ -95,22 +97,28 @@ export class Machines {
          worktrees = excluded.worktrees, updated_at = excluded.updated_at`,
       att.login, att.cid, att.machine || att.cid, att.kind ?? null, now(), ids, now(),
     );
+
     if (!old || !old.connected || old.worktrees !== ids) this.announce(att.login, att.cid);
   }
 
   /** A socket closed (after the feed dropped its presence): disconnected when it was the machine's last. */
   gone(ws: WebSocket, live: Set<string>): void {
     let att: { login?: string; cid?: string } | null;
+
     try {
       att = ws.deserializeAttachment() as { login?: string; cid?: string } | null;
     } catch {
       return;
     }
+
     const login = att?.login;
     const cid = att?.cid;
+
     if (!login || !cid) return;
+
     if (this.connectedSockets(login, cid, live, ws) > 0) return;
     const w = this.sql.exec("UPDATE machines SET connected = 0, connected_at = NULL, updated_at = ? WHERE login = ? AND credential_id = ? AND connected = 1", now(), login, cid).rowsWritten;
+
     if (w) this.announce(login, cid);
   }
 
@@ -122,20 +130,25 @@ export class Machines {
         this.sql.exec("UPDATE machines SET connected = 0, connected_at = NULL WHERE login = ? AND credential_id = ?", r.login, r.credential_id);
       }
     }
+
     return this.rows<Record<string, unknown>>("SELECT * FROM machines ORDER BY last_at IS NULL, last_at DESC, connected DESC, name").map((r) => this.view(r));
   }
 
   private connectedSockets(login: string, cid: string, live: Set<string>, except: WebSocket | null): number {
     let n = 0;
+
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === except || ws.readyState !== WebSocket.OPEN) continue;
+
       try {
         const a = ws.deserializeAttachment() as { login?: string; cid?: string; sid?: string } | null;
+
         if (a?.login === login && a.cid === cid && a.sid && live.has(a.sid)) n++;
       } catch {
         // no attachment
       }
     }
+
     return n;
   }
 
@@ -147,6 +160,7 @@ export class Machines {
 
   private view(r: Record<string, unknown>): MachineRow {
     const ids = JSON.parse((r.worktrees as string) || "[]") as string[];
+
     const known = new Map(
       (ids.length
         ? this.rows<{ id: string; repo: string; branch: string; path: string }>(
@@ -155,6 +169,7 @@ export class Machines {
         : []
       ).map((w) => [w.id, w]),
     );
+
     return {
       login: r.login as string,
       credential_id: r.credential_id as string,
@@ -172,6 +187,7 @@ export class Machines {
   private announce(login: string, cid: string): void {
     this.sql.exec("UPDATE machines SET published_at = ? WHERE login = ? AND credential_id = ?", Date.now(), login, cid);
     const r = this.rows<Record<string, unknown>>("SELECT * FROM machines WHERE login = ? AND credential_id = ?", login, cid)[0];
+
     if (!r) return;
     const row = this.view(r);
     this.publish({ kind: "machine.updated", collection: "machines", key: `${login}/${cid}`, op: "upsert", repo: null, actor: login, machine: row.name, agent: null, row });

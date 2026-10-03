@@ -51,17 +51,21 @@ export function currentTiming(): Timing | undefined {
 /** Add fields to the current request's line (repo, status, bytes...). */
 export function note(fields: Record<string, unknown>): void {
   const t = als.getStore();
+
   if (t) Object.assign(t.fields, fields);
 }
 
 function record(t: Timing | undefined, lane: Lane, start: number, end: number, op?: string, repo?: string | null): void {
   if (!t) return;
   t.spans[lane].push([start, end]);
+
   if (lane !== "artifacts" || !op) return;
   t.calls++;
   const ms = end - start;
   const entry = { op, repo: repo ?? null, ms };
+
   if (!t.slowest || ms > t.slowest.ms) t.slowest = entry;
+
   if (ms >= SLOW_MS && t.slow.length < 8) t.slow.push(entry);
 }
 
@@ -69,6 +73,7 @@ function record(t: Timing | undefined, lane: Lane, start: number, end: number, o
 export async function timeArtifacts<T>(op: string, repo: string | null, fn: () => Promise<T>): Promise<T> {
   const t = als.getStore();
   const s = Date.now();
+
   try {
     return await fn();
   } finally {
@@ -84,6 +89,7 @@ export function addArtifacts(op: string, repo: string | null, start: number, end
 export async function timeGate<T>(fn: () => Promise<T>): Promise<T> {
   const t = als.getStore();
   const s = Date.now();
+
   try {
     return await fn();
   } finally {
@@ -95,6 +101,7 @@ export async function timeGate<T>(fn: () => Promise<T>): Promise<T> {
 export async function timeD1<T>(fn: () => Promise<T>): Promise<T> {
   const t = als.getStore();
   const s = Date.now();
+
   try {
     return await fn();
   } finally {
@@ -106,6 +113,7 @@ export async function timeD1<T>(fn: () => Promise<T>): Promise<T> {
 export function addGate(ms: number): void {
   const t = als.getStore();
   const now = Date.now();
+
   if (t && ms > 0) record(t, "gate", now - ms, now);
 }
 
@@ -115,12 +123,14 @@ function wall(spans: [number, number][]): number {
   const s = [...spans].sort((a, b) => a[0] - b[0]);
   let total = 0;
   let [a, b] = s[0];
+
   for (const [x, y] of s.slice(1)) {
     if (x > b) {
       total += b - a;
       [a, b] = [x, y];
     } else if (y > b) b = y;
   }
+
   return total + (b - a);
 }
 
@@ -157,9 +167,11 @@ export function finishTiming(t: Timing, fields: Record<string, unknown> = {}): v
 /** Run fn in its own context and write its line when it ends (queue messages, writes inside objects). */
 export async function timed<T>(kind: string, fields: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
   const t = startTiming(kind, fields);
+
   try {
     const out = await runTimed(t, fn);
     finishTiming(t, { status: "ok" });
+
     return out;
   } catch (err) {
     const code = (err as { code?: unknown })?.code;
@@ -183,13 +195,17 @@ const DISPOSE = (Symbol as unknown as { dispose: symbol }).dispose;
 export function released<T>(v: T): T {
   if (!v || typeof v !== "object") return v;
   const d = (v as Record<symbol, unknown>)[DISPOSE];
+
   if (typeof d !== "function") return v;
+
   try {
     Reflect.apply(d as () => void, v, []);
   } catch {
     // already released
   }
+
   Reflect.deleteProperty(v as object, DISPOSE);
+
   return v;
 }
 
@@ -198,11 +214,14 @@ export function timedRepo(repo: ArtifactsRepo, name: string): ArtifactsRepo {
   return new Proxy(repo, {
     get(target, prop) {
       const v = Reflect.get(target, prop);
+
       // RPC stubs answer any property name with a remote method, so never call
       // .apply or .bind on one: Reflect.apply invokes it directly.
       if (typeof v !== "function") return v;
+
       // Symbol methods (Symbol.dispose) run on the real handle, untimed.
       if (typeof prop === "symbol") return (...args: unknown[]) => Reflect.apply(v as (...a: unknown[]) => unknown, target, args);
+
       return (...args: unknown[]) =>
         timeArtifacts(String(prop), name, async () => released(await Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args)));
     },
@@ -214,10 +233,13 @@ export function timedArtifacts(ns: Artifacts): Artifacts {
   return new Proxy(ns, {
     get(target, prop) {
       const v = Reflect.get(target, prop);
+
       if (typeof v !== "function" || typeof prop === "symbol") return v;
+
       if (prop === "get") {
         return async (name: string) => timedRepo(await timeArtifacts("get", name, () => target.get(name)), name);
       }
+
       return (...args: unknown[]) =>
         timeArtifacts(String(prop), typeof args[0] === "string" ? args[0] : null, async () =>
           released(await Reflect.apply(v as (...a: unknown[]) => Promise<unknown>, target, args)),
@@ -231,10 +253,13 @@ export function timedStub<S extends object>(stub: S): S {
   return new Proxy(stub, {
     get(target, prop) {
       const v = Reflect.get(target, prop);
+
       if (typeof v !== "function" || typeof prop === "symbol") return v;
+
       return async (...args: unknown[]) => {
         const t = als.getStore();
         const s = Date.now();
+
         try {
           return released(await Reflect.apply(v as (...a: unknown[]) => unknown, target, args));
         } finally {
@@ -260,19 +285,24 @@ export function relayTimed(res: Response, t: Timing, op: string, repo: string | 
   if (!res.body) {
     recordOn(t, "artifacts", since, Date.now(), op, repo);
     finishTiming(t, { status: res.status });
+
     return res;
   }
+
   const reader = res.body.getReader();
   let bytes = 0;
+
   const end = (outcome: string) => {
     if (t.done) return;
     recordOn(t, "artifacts", since, Date.now(), `${op} (body)`, repo);
     finishTiming(t, { status: res.status, bytes, stream: outcome });
   };
+
   const body = new ReadableStream<Uint8Array>({
     async pull(ctl) {
       try {
         const { done, value } = await reader.read();
+
         if (done) {
           ctl.close();
           end("sent");
@@ -287,8 +317,10 @@ export function relayTimed(res: Response, t: Timing, op: string, repo: string | 
     },
     cancel(reason) {
       end("client_went_away");
+
       return reader.cancel(reason);
     },
   });
+
   return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 }

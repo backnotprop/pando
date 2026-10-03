@@ -18,6 +18,7 @@ import type { Outcome } from "../monorepo/types";
 import { note, timeD1 } from "../timing";
 
 export type MemberRole = "owner" | "member";
+
 export type CredentialKind = "machine" | "sandbox" | "bootstrap" | "browser";
 
 /**
@@ -26,7 +27,9 @@ export type CredentialKind = "machine" | "sandbox" | "bootstrap" | "browser";
  * use pushes the end back, at most one write a day.
  */
 export const SESSION_IDLE_DAYS = 30;
+
 const DAY_MS = 86_400_000;
+
 /** last_used_at is written at most this often per credential. */
 const USED_EVERY_MS = 60_000;
 
@@ -129,7 +132,9 @@ export interface Auth {
  */
 export function confirmed(auth: Auth | null, monorepo: MonorepoRef | string | null): boolean {
   if (!auth) return false;
+
   if (monorepo === null) return true;
+
   return auth.monorepo !== null && auth.role !== null;
 }
 
@@ -182,6 +187,7 @@ function fail(status: number, code: string, message: string): never {
 
 function randomId(prefix: string): string {
   const b = crypto.getRandomValues(new Uint8Array(8));
+
   return prefix + [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
@@ -197,22 +203,27 @@ function trimHyphens(s: string): string {
  */
 export function* loginsFor(email: string, name: string | null): Generator<string> {
   const base = trimHyphens((email.split("@")[0] || name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32)) || "user";
+
   const all = function* () {
     yield base;
+
     for (let i = 2; i < 1000; i++) yield `${base}-${i}`;
     yield `${trimHyphens(base.slice(0, 20)) || "user"}-${randomId("").slice(0, 8)}`;
   };
+
   for (const login of all()) if (!RESERVED_NAMESPACES.has(login)) yield login;
 }
 
 function monorepoOf(r: AuthRow): MonorepoInfo | null {
   if (!r.m_id) return null;
+
   return { id: r.m_id, owner: r.m_owner!, name: r.m_name!, full_name: `${r.m_owner}/${r.m_name}`, kind: r.m_kind!, created_at: r.m_created_at! };
 }
 
 /** Run a write after the response is sent (Workers' waitUntil), or now where there is none. */
 async function later(p: Promise<unknown>): Promise<void> {
   const quiet = p.catch((err) => console.error({ msg: "pando.accounts", error: err instanceof Error ? err.message : String(err) }));
+
   try {
     const { waitUntil } = await import("cloudflare:workers");
     waitUntil(quiet);
@@ -236,6 +247,7 @@ export class Accounts {
 
   private async read<T>(on: Reader, query: string, ...args: unknown[]): Promise<D1Result<T>> {
     await this.ready();
+
     return timeD1(() => on.prepare(query).bind(...args.map((a) => (a === undefined ? null : a))).all<T>());
   }
 
@@ -251,12 +263,14 @@ export class Accounts {
   /** One write on the primary; the rows it changed. */
   private async run(query: string, ...args: unknown[]): Promise<number> {
     await this.ready();
+
     return (await timeD1(() => this.st(query, ...args).run())).meta.changes;
   }
 
   /** Statements in one transaction on the primary. */
   private async batch(stmts: D1PreparedStatement[]): Promise<D1Result[]> {
     await this.ready();
+
     return timeD1(() => this.db.batch(stmts));
   }
 
@@ -277,13 +291,16 @@ export class Accounts {
     const t = Date.now();
     let got = await this.readAuth(this.db.withSession("first-unconstrained"), hash, monorepo, t);
     const replica = got.served;
+
     if (!confirmed(got.auth, monorepo)) got = await this.readAuth(this.db.withSession("first-primary"), hash, monorepo, t);
     note({ d1_auth: replica === got.served ? replica : `${replica}, then ${got.served}` });
     const { auth, row } = got;
+
     if (!auth || !row) return null;
     // Bookkeeping on the primary, after the answer: last_used_at at most once a
     // minute, and a browser session's end pushed back at most once a day.
     const writes: D1PreparedStatement[] = [];
+
     if (!row.last_used_at || t - Date.parse(row.last_used_at) > USED_EVERY_MS) {
       writes.push(
         this.st(
@@ -292,12 +309,15 @@ export class Accounts {
         ),
       );
     }
+
     if (row.kind === "browser" && row.expires_at && Date.parse(row.expires_at) - t < (SESSION_IDLE_DAYS - 1) * DAY_MS) {
       const until = new Date(t + SESSION_IDLE_DAYS * DAY_MS).toISOString();
       auth.credential.expires_at = until;
       writes.push(this.st("UPDATE credentials SET expires_at = ?1 WHERE id = ?2 AND expires_at < ?1", until, row.id));
     }
+
     if (writes.length) void later(timeD1(() => this.db.batch(writes)));
+
     return auth;
   }
 
@@ -305,14 +325,17 @@ export class Accounts {
     const res = await this.read<AuthRow>(on, AUTH_SQL, hash, monorepo?.owner ?? null, monorepo?.name ?? null);
     const served = res.meta.served_by_primary === false ? `replica ${res.meta.served_by_region ?? "?"}` : "primary";
     const row = res.results[0] ?? null;
+
     // A browser session unused for too long has ended.
     if (!row || (row.expires_at && Date.parse(row.expires_at) <= t)) return { auth: null, row: null, served };
+
     const auth: Auth = {
       user: { login: row.login, name: row.user_name, email: row.user_email, picture_url: row.user_picture_url, created_at: row.user_created_at },
       credential: { id: row.id, name: row.name, kind: row.kind, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at },
       role: monorepo ? row.role : null,
       monorepo: monorepo ? monorepoOf(row) : null,
     };
+
     return { auth, row, served };
   }
 
@@ -324,6 +347,7 @@ export class Accounts {
   async resolve(ref: MonorepoRef): Promise<MonorepoInfo | null> {
     const q = `SELECT ${MONOREPO_COLS} FROM monorepos m WHERE m.id = ${RESOLVE.replaceAll("?2", "?1").replaceAll("?3", "?2")}`;
     const first = (await this.read<MonorepoInfo>(this.db.withSession("first-unconstrained"), q, ref.owner, ref.name)).results[0];
+
     return first ?? (await this.read<MonorepoInfo>(this.db.withSession("first-primary"), q, ref.owner, ref.name)).results[0] ?? null;
   }
 
@@ -332,7 +356,9 @@ export class Accounts {
   async createUser(u: { login: string; name: string | null; email: string | null }, cred: { hash: string; name: string; kind: CredentialKind }): Promise<Outcome<{ user: User; credential: Credential }>> {
     return this.guard(async () => {
       const at = now();
+
       if (!(await this.claimLogin(u.login, u.name, u.email, null, null, at))) fail(409, "namespace_taken", `${u.login} is taken (a user or an organization)`);
+
       return { user: { ...u, picture_url: null, created_at: at }, credential: await this.insertCredential(u.login, cred) };
     });
   }
@@ -349,6 +375,7 @@ export class Accounts {
       "INSERT INTO credentials (id, hash, login, name, kind, created_at, expires_at, workos_sid) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
       id, c.hash, login, c.name, c.kind, at, expires, c.workos_sid ?? null,
     );
+
     return { id, name: c.name, kind: c.kind, created_at: at, last_used_at: null, expires_at: expires };
   }
 
@@ -358,6 +385,7 @@ export class Accounts {
       "UPDATE credentials SET revoked_at = ?1 WHERE hash = ?2 AND kind = 'browser' AND revoked_at IS NULL RETURNING workos_sid",
       now(), hash,
     );
+
     return r ? { revoked: true, workos_sid: r.workos_sid } : { revoked: false, workos_sid: null };
   }
 
@@ -386,6 +414,7 @@ export class Accounts {
   async claimMonorepo(owner: string, name: string, kind: "monorepo" | "repo", login: string): Promise<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null } | null> {
     const id = newMonorepoId();
     const at = now();
+
     const [alias, made] = await this.batch([
       this.st(
         `SELECT a.monorepo_id, m.owner || '/' || m.name AS pointed_to FROM monorepo_aliases a
@@ -399,8 +428,10 @@ export class Accounts {
       this.st("INSERT INTO members (monorepo_id, login, role, added_at, added_by) SELECT ?1, ?2, 'owner', ?3, NULL WHERE EXISTS (SELECT 1 FROM monorepos WHERE id = ?1)", id, login, at),
       this.st("DELETE FROM monorepo_aliases WHERE owner = ?1 AND name = ?2 AND EXISTS (SELECT 1 FROM monorepos WHERE id = ?3)", owner, name, id),
     ]);
+
     if (made.meta.changes !== 1) return null;
     const was = (alias.results as { monorepo_id: string; pointed_to: string | null }[])[0];
+
     return {
       info: { id, owner, name, full_name: `${owner}/${name}`, kind, created_at: at },
       replaced_alias: was ? { full_name: `${owner}/${name}`, pointed_to: was.pointed_to } : null,
@@ -425,15 +456,21 @@ export class Accounts {
   async renameMonorepo(id: string, to: MonorepoRef): Promise<Outcome<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null }>> {
     return this.guard(async () => {
       const cur = await this.row<MonorepoInfo>(`SELECT ${MONOREPO_COLS} FROM monorepos m WHERE m.id = ?1`, id);
+
       if (!cur) fail(404, "not_found", "no such monorepo");
+
       if (cur.owner === to.owner && cur.name === to.name) fail(400, "bad_request", `${cur.full_name} already has that name`);
+
       if (to.owner !== cur.owner) {
         // A transfer, for now to a person who is already an owner of it (organizations come later).
         const role = (await this.row<{ role: MemberRole }>("SELECT role FROM members WHERE monorepo_id = ?1 AND login = ?2", id, to.owner))?.role;
+
         if (role !== "owner") fail(400, "bad_owner", `${to.owner} must be a person who is already an owner of ${cur.full_name} (organizations come later)`);
       }
+
       const at = now();
       const done = "EXISTS (SELECT 1 FROM monorepos WHERE id = ?1 AND owner = ?2 AND name = ?3)";
+
       const [alias, moved] = await this.batch([
         this.st(
           `SELECT a.monorepo_id, m.owner || '/' || m.name AS pointed_to FROM monorepo_aliases a
@@ -451,8 +488,10 @@ export class Accounts {
         ),
         this.st(`DELETE FROM monorepo_aliases WHERE owner = ?2 AND name = ?3 AND ${done}`, id, to.owner, to.name),
       ]);
+
       if (moved.meta.changes !== 1) fail(409, "monorepo_exists", `${to.owner}/${to.name} exists`);
       const was = (alias.results as { monorepo_id: string; pointed_to: string | null }[])[0];
+
       return {
         info: { ...cur, owner: to.owner, name: to.name, full_name: `${to.owner}/${to.name}` },
         // Its own old name coming back is no loss; another monorepo's is.
@@ -478,6 +517,7 @@ export class Accounts {
   async putMember(monorepoId: string, login: string, role: MemberRole, by: string): Promise<Outcome<Member>> {
     return this.guard(async () => {
       if (!(await this.getUser(login))) fail(404, "not_found", `no user ${login}`);
+
       // One statement, so two demotions at once cannot leave no owner.
       const changed = await this.run(
         `INSERT INTO members (monorepo_id, login, role, added_at, added_by) VALUES (?1, ?2, ?3, ?4, ?5)
@@ -486,7 +526,9 @@ export class Accounts {
                     AND (SELECT COUNT(*) FROM members WHERE monorepo_id = ?1 AND role = 'owner') = 1)`,
         monorepoId, login, role, now(), by,
       );
+
       if (!changed) fail(409, "last_owner", "a monorepo keeps at least one owner");
+
       return (await this.row<Member>(`${MEMBER_SQL} WHERE m.monorepo_id = ?1 AND m.login = ?2`, monorepoId, login))!;
     });
   }
@@ -498,7 +540,9 @@ export class Accounts {
            AND (role <> 'owner' OR (SELECT COUNT(*) FROM members WHERE monorepo_id = ?1 AND role = 'owner') > 1)`,
         monorepoId, login,
       );
+
       if (removed) return true;
+
       if (!(await this.row("SELECT 1 AS x FROM members WHERE monorepo_id = ?1 AND login = ?2", monorepoId, login))) fail(404, "not_found", `${login} is not a member`);
       fail(409, "last_owner", "a monorepo keeps at least one owner");
     });
@@ -513,24 +557,29 @@ export class Accounts {
   async signIn(who: SignedIn, cred: NewCredentialRow): Promise<{ user: User; credential: Credential; joined: { id: string; full_name: string }[] }> {
     const email = who.email.toLowerCase();
     let login = (await this.row<{ login: string }>("SELECT login FROM users WHERE workos_id = ?1", who.workos_id))?.login;
+
     if (!login && who.email_verified) {
       // A user made before (the bootstrap path) with this email: this is them. Link, do not duplicate.
       login = (await this.row<{ login: string }>(
         "SELECT login FROM users WHERE lower(email) = ?1 AND workos_id IS NULL ORDER BY created_at LIMIT 1",
         email,
       ))?.login;
+
       if (login) await this.run("UPDATE users SET workos_id = ?1 WHERE login = ?2 AND workos_id IS NULL", who.workos_id, login);
     }
+
     // The picture follows WorkOS on every sign-in, a removed one too.
     if (login) await this.run("UPDATE users SET email = ?1, name = COALESCE(?2, name), picture_url = ?3 WHERE login = ?4", email, who.name, who.picture_url, login);
     else login = await this.newUser(email, who);
     const joined: { id: string; full_name: string }[] = [];
+
     if (who.email_verified) {
       const invites = await this.rows<{ monorepo_id: string; full_name: string; role: MemberRole; invited_by: string }>(
         `SELECT i.monorepo_id, m.owner || '/' || m.name AS full_name, i.role, i.invited_by
          FROM invites i JOIN monorepos m ON m.id = i.monorepo_id WHERE i.email = ?1`,
         email,
       );
+
       if (invites.length) {
         const at = now();
         await this.batch([
@@ -545,6 +594,7 @@ export class Accounts {
         joined.push(...invites.map((inv) => ({ id: inv.monorepo_id, full_name: inv.full_name })));
       }
     }
+
     return { user: (await this.getUser(login))!, credential: await this.insertCredential(login, cred), joined };
   }
 
@@ -556,10 +606,12 @@ export class Accounts {
       } catch (err) {
         // The same WorkOS user signing in twice at once: the other one made the user.
         const other = await this.row<{ login: string }>("SELECT login FROM users WHERE workos_id = ?1", who.workos_id);
+
         if (other) return other.login;
         throw err;
       }
     }
+
     throw new HttpError(500, "internal", "no free login");
   }
 
@@ -577,6 +629,7 @@ export class Accounts {
         login, name, email, picture, at, workosId,
       ),
     ]);
+
     return made.meta.changes === 1;
   }
 
@@ -585,17 +638,22 @@ export class Accounts {
     return this.guard(async () => {
       const e = email.toLowerCase();
       const user = await this.row<{ login: string }>("SELECT login FROM users WHERE lower(email) = ?1 AND workos_id IS NOT NULL", e);
+
       if (user) {
         const out = await this.putMember(monorepoId, user.login, role, by);
+
         if (!out.ok) fail(out.status, out.code, out.message);
+
         return { status: "added" as const, member: out.value };
       }
+
       const invite = await this.row<Invite>(
         `INSERT INTO invites (monorepo_id, email, role, invited_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT (monorepo_id, email) DO UPDATE SET role = excluded.role, invited_by = excluded.invited_by
          RETURNING email, role, invited_by, created_at`,
         monorepoId, e, role, by, now(),
       );
+
       return { status: "invited" as const, invite: invite! };
     });
   }

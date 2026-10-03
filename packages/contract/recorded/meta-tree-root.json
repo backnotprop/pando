@@ -15,9 +15,10 @@
         "size": 42,
         "deleted": false,
         "author": "Ana Lima",
+        "login": "rec-musxh5dd",
         "machine": "ana-mbp",
         "agent": null,
-        "at": 1791062516250,
+        "at": 1791064375089,
         "source": "live",
         "from": null,
         "to": null,
@@ -30,7 +31,26 @@
     "folders": [
       {
         "name": "docs",
-        "files": 2
+        "files": 2,
+        "last": {
+          "large": null,
+          "version": 3,
+          "path": "docs/deep/notes.md",
+          "op": "save",
+          "sha": "0a331465a2f00ff17b8f47190578a589f24eac66",
+          "size": 7,
+          "deleted": false,
+          "author": "Ana Lima",
+          "login": "rec-musxh5dd",
+          "machine": "ana-mbp",
+          "agent": null,
+          "at": 1791064375092,
+          "source": "live",
+          "from": null,
+          "to": null,
+          "restored_from": null,
+          "commit": null
+        }
       }
     ]
   }

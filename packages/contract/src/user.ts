@@ -1,5 +1,5 @@
 // The signed-in person: GET /v1/user (operationId `me`).
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 import { Login, Timestamp } from "./ids.ts";
 

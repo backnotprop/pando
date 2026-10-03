@@ -18,30 +18,43 @@ import { describeError, retryResetFetch } from "./errors.mjs";
 retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const BOOT = process.env.PANDO_BOOTSTRAP ?? /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
+
 const results = [];
+
 const check = (name, ok, detail = "") => {
   results.push(!!ok);
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`.replace(/pando_[a-f0-9]{20,}/g, "<credential>"));
 };
+
 const call = async (method, path, secret, body) => {
   const res = await fetch(URL_ + path, { method, headers: { authorization: `Bearer ${secret}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+
   return { status: res.status, json: await res.json().catch(() => null) };
 };
+
 const work = mkdtempSync(join(tmpdir(), "pando-busy-"));
+
 let S = null;
+
 const git = (args, cwd, extra = []) => {
   const r = spawnSync("git", ["-c", "credential.helper=", "-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f', "-c", "init.defaultBranch=main", ...extra, ...args], {
     cwd, encoding: "utf8",
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work, GIT_TERMINAL_PROMPT: "0", PANDO_SECRET: S ?? "", GIT_AUTHOR_NAME: "x", GIT_AUTHOR_EMAIL: "x@pando.invalid", GIT_COMMITTER_NAME: "x", GIT_COMMITTER_EMAIL: "x@pando.invalid" },
   });
+
   return { ok: r.status === 0, out: `${r.stdout}${r.stderr}`.replace(/pando_[a-f0-9]+/g, "<credential>") };
 };
+
 const BUSY = ["-c", "http.extraHeader=X-Pando-Test-Busy: 1"];
 
 const id = Date.now().toString(36);
+
 const M = `busy-${id}`;
+
 let O = null;
+
 try {
   S = (await call("POST", "/v1/users", BOOT, { login: `busy-${id}` })).json?.credential?.secret;
   const r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
@@ -108,6 +121,7 @@ try {
     const r = await call("DELETE", `/v1/monorepos/${O}/${M}?confirm=${O}/${M}`, S);
     check(`delete ${O}/${M}`, r.status === 204, `${r.status}`);
   }
+
   rmSync(work, { recursive: true, force: true });
   console.log(`${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

@@ -11,6 +11,7 @@ import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./co
 export type MetaEnv = CommitEnv;
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
 const GROUP_MS = 2_000; // paths due within this of each other share a commit
 const RETRY_MIN_MS = 30_000;
 const RETRY_MAX_MS = 600_000;
@@ -116,6 +117,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   constructor(ctx: DurableObjectState, env: MetaEnv) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.createSchema();
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  private createSchema(): void {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS blobs (sha TEXT PRIMARY KEY, size INTEGER NOT NULL, bytes BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS versions (
@@ -140,7 +146,27 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
     `);
-    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  // ---- deleting the monorepo (Durable Object RPC, called by DELETE /v1/monorepos/{m}) ----
+
+  // destroy closes every socket (code 4404, so clients stop reconnecting),
+  // drops the alarm and all storage, and leaves an empty object behind: a new
+  // monorepo with the same name starts with nothing. R2 blobs and the Artifacts
+  // repo are the caller's to delete.
+  async destroy(): Promise<{ closed: number }> {
+    const sockets = this.ctx.getWebSockets();
+    for (const ws of sockets) {
+      try {
+        ws.close(META_DELETED, "this monorepo was deleted");
+      } catch {
+        // already closed
+      }
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.createSchema(); // this instance may serve the next request
+    return { closed: sockets.length };
   }
 
   // ---- HTTP ----

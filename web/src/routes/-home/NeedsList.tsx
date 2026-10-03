@@ -2,7 +2,6 @@
 // opens the branch's page; there is no Merge here (owner ruling).
 import type { NeedRow } from "@pando/contract";
 import { Link } from "@tanstack/react-router";
-import { CheckMark } from "../../ui/activity";
 import { Avatar } from "../../ui/Avatar";
 import { Chevron } from "../../ui/Icons";
 import { branchLink } from "../../ui/paths";
@@ -14,12 +13,8 @@ export function NeedState({ row }: { row: NeedRow }) {
 
   if (row.state === "conflicts") return <span className="text-[13px] font-semibold whitespace-nowrap text-rust">conflicts with main</span>;
 
-  return (
-    <span className="text-[13px] font-semibold whitespace-nowrap text-rust">
-      <CheckMark />
-      {row.checks.failing[0] ?? "ci"} failed
-    </span>
-  );
+  // No CI mark yet: a row names the failing check, not the service that reported it (asked of the feed lane).
+  return <span className="text-[13px] font-semibold whitespace-nowrap text-rust">{row.checks.failing[0] ?? "ci"} failed</span>;
 }
 
 export function NeedsList({ rows }: { rows: readonly NeedRow[] }) {

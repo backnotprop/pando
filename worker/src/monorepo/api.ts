@@ -220,12 +220,28 @@ api.delete("/v1/monorepos/:m", async (c) => {
   const m = c.get("m");
   if (c.req.query("confirm") !== m) bad(`add ?confirm=${m} to delete the monorepo, its repos and their history`);
   const stub = c.get("stub");
-  for (const name of await stub.artifactsRepos()) {
+  // Every Artifacts repo it owns: the recorded ones, and any other <m>--* in
+  // the namespace (names forbid "--", so the prefix is the monorepo's alone).
+  const names = new Set(await stub.artifactsRepos());
+  let cursor: string | undefined;
+  do {
+    const page = await c.env.ARTIFACTS.list({ limit: 200, cursor });
+    for (const r of page.repos) if (r.name.startsWith(`${m}--`)) names.add(r.name);
+    cursor = page.repos.length ? page.cursor : undefined;
+  } while (cursor);
+  for (const name of names) {
     try {
       await c.env.ARTIFACTS.delete(name);
     } catch (err) {
       if ((err as { code?: string })?.code !== "NOT_FOUND") throw artifactsError(err, `deleting ${name}`);
     }
+  }
+  // The meta layer's large files in R2.
+  let more = true;
+  while (more) {
+    const listed = await c.env.BLOBS.list({ prefix: `meta/${m}/`, limit: 1000 });
+    if (listed.objects.length) await c.env.BLOBS.delete(listed.objects.map((o) => o.key));
+    more = listed.truncated;
   }
   await stub.destroy();
   await accounts(c.env).releaseMonorepo(m);

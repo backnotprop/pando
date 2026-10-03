@@ -368,7 +368,7 @@ paths:
     delete:
       operationId: deleteMonorepo
       summary: Delete a monorepo, its repos and their history (owners)
-      description: Deletes every Artifacts repo of the monorepo (the meta layer's too), its records and its memberships. Needs `?confirm=<monorepo>`.
+      description: Deletes every Artifacts repo it owns (`<monorepo>--*`, the meta layer's too), the meta layer's large files in R2 (`meta/<monorepo>/`), its records, invites and memberships. No soft delete. Needs `?confirm=<monorepo>`.
       tags: [monorepos]
       parameters:
         - name: confirm

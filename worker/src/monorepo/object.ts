@@ -19,6 +19,7 @@ import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS, type FactsMessage } from "./facts";
 import { FactsOut } from "./facts-out";
+import { HooksOut } from "./hooks-out";
 import type { BranchList, BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
@@ -155,6 +156,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private machines: Machines;
   /** Branch facts jobs, drained by RPC (facts-out.ts). */
   private factsOut: FactsOut;
+  /** Hook deliveries, sent by RPC (hooks-out.ts). */
+  private hooksOut: HooksOut;
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
 
@@ -164,6 +167,10 @@ export class MonorepoObject extends DurableObject<Env> {
     this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
     this.machines = new Machines(ctx, this.sql, (e) => this.publish(e));
     this.factsOut = new FactsOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t));
+    this.hooksOut = new HooksOut(
+      ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t),
+      (name) => this.repoRow(name), (repo) => this.currentMain(repo), ATTEMPTS_KEPT,
+    );
     this.ci = new CiStore(ctx, env, this.sql, {
       info: () => this.info(),
       publish: (e) => this.publish(e),
@@ -207,6 +214,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.feed.ensureSchema();
     this.machines.ensureSchema();
     this.factsOut.ensureSchema();
+    this.hooksOut.ensureSchema();
     this.ci.ensureSchema();
   }
 
@@ -766,13 +774,12 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.sql.exec("DELETE FROM hooks WHERE repo = ? AND id = ?", repo, id).rowsWritten > 0;
   }
 
-  // ── Deliveries: rows here, the work on the pando-hooks queue (C9) ─────────
+  // ── Deliveries: rows here, sent by the HooksDrain entrypoint (hooks-out.ts) ──
   //
   // A delivery row is written in the same step as the change that caused it,
   // keyed by (hook, event, seq) so a retry or a replay never makes a second
-  // row, and its id goes to the queue. The consumer (hooks.ts) POSTs and
-  // reports each attempt here. The alarm only re-sends ids whose queue send
-  // failed.
+  // row. The rows are the outbox: due ones go at once to HooksDrain by RPC,
+  // which POSTs and answers each result; the alarm is only the retry timer.
 
   private deliveryView(id: string): Record<string, unknown> | null {
     const d = this.row<Record<string, unknown>>(
@@ -809,7 +816,7 @@ export class MonorepoObject extends DurableObject<Env> {
         if (id) ids.push(id);
       }
     }
-    if (ids.length) this.ctx.waitUntil(this.sendDeliveries(ids));
+    if (ids.length) this.hooksOut.kick();
     return ids.length;
   }
 
@@ -835,57 +842,12 @@ export class MonorepoObject extends DurableObject<Env> {
     return id;
   }
 
-  private async sendDeliveries(ids: string[]): Promise<void> {
-    const m = this.info()?.id;
-    if (!m || !this.env.HOOKS) return;
-    try {
-      for (let i = 0; i < ids.length; i += 100) {
-        const chunk = ids.slice(i, i + 100);
-        await this.env.HOOKS.sendBatch(chunk.map((id) => ({ body: { monorepo: m, delivery_id: id } })));
-        for (const id of chunk) this.sql.exec("UPDATE deliveries SET sent_at = ? WHERE id = ?", now(), id);
-      }
-    } catch (err) {
-      console.error("sending deliveries to the queue failed; the alarm retries:", err instanceof Error ? err.message : String(err));
-      await this.ctx.storage.setAlarm(Date.now() + 30_000);
-    }
+  /** Send the due deliveries now (the pando-hooks consumer, for messages sent before the outbox). */
+  sendDueDeliveries(): Promise<void> {
+    return this.hooksOut.sendDue();
   }
 
-  /** For the queue consumer: the hook and payload of a delivery (null when gone). */
-  deliveryToSend(id: string): { hook: HookRow; payload: StoredPayload; artifacts_name: string; status: string; repo: RepoRecord } | null {
-    const d = this.row<{ hook_id: string; repo: string; payload: string; status: string }>(
-      "SELECT hook_id, repo, payload, status FROM deliveries WHERE id = ?", id,
-    );
-    if (!d) return null;
-    const hook = this.row<HookRow>("SELECT * FROM hooks WHERE id = ?", d.hook_id);
-    const repo = this.repoRow(d.repo);
-    if (!hook || !repo) return null;
-    return { hook, payload: JSON.parse(d.payload) as StoredPayload, artifacts_name: repo.artifacts_name, status: d.status, repo };
-  }
-
-  /**
-   * One attempt's result. `retryInS` is when the queue tries again (null: no
-   * more retries; the message goes to the dead-letter queue).
-   */
-  recordAttempt(id: string, r: { ok: boolean; code: number | null; error: string | null; ms: number }, n: number, retryInS: number | null): void {
-    const at = now();
-    if (!this.row("SELECT id FROM deliveries WHERE id = ?", id)) return;
-    this.sql.exec(
-      "INSERT INTO delivery_attempts (delivery_id, n, at, response_code, error, ms) VALUES (?, ?, ?, ?, ?, ?)",
-      id, n, at, r.code, r.error, r.ms,
-    );
-    this.sql.exec(
-      `DELETE FROM delivery_attempts WHERE delivery_id = ? AND rowid NOT IN
-       (SELECT rowid FROM delivery_attempts WHERE delivery_id = ? ORDER BY rowid DESC LIMIT ?)`,
-      id, id, ATTEMPTS_KEPT,
-    );
-    const status = r.ok ? "delivered" : retryInS === null ? "failed" : "retrying";
-    this.sql.exec(
-      `UPDATE deliveries SET status = ?, attempts = attempts + 1, response_code = ?, error = ?, last_attempt_at = ?, next_attempt_at = ? WHERE id = ?`,
-      status, r.code, r.ok ? null : r.error, at, r.ok || retryInS === null ? null : new Date(Date.now() + retryInS * 1000).toISOString(), id,
-    );
-  }
-
-  /** The dead-letter queue's consumer: the delivery gave up. */
+  /** The pando-hooks-dlq consumer, for messages sent before the outbox: the delivery gave up. */
   markDead(id: string): void {
     this.sql.exec("UPDATE deliveries SET status = 'dead', next_attempt_at = NULL WHERE id = ? AND status != 'delivered'", id);
   }
@@ -894,8 +856,7 @@ export class MonorepoObject extends DurableObject<Env> {
   redeliver(repo: string, deliveryId: string): Promise<Outcome<Record<string, unknown>>> {
     return this.guard(async () => {
       if (!this.row("SELECT id FROM deliveries WHERE repo = ? AND id = ?", repo, deliveryId)) fail(404, "not_found", `no delivery ${deliveryId}`);
-      this.sql.exec("UPDATE deliveries SET status = 'queued', next_attempt_at = NULL, sent_at = NULL WHERE id = ?", deliveryId);
-      await this.sendDeliveries([deliveryId]);
+      this.hooksOut.requeue([deliveryId]);
       return this.deliveryView(deliveryId)!;
     });
   }
@@ -908,20 +869,16 @@ export class MonorepoObject extends DurableObject<Env> {
         "SELECT id FROM deliveries WHERE repo = ? AND hook_id = ? AND seq > ? ORDER BY seq LIMIT ?",
         repo, hookId, since, REPLAY_DELIVERIES,
       ).map((r) => r.id);
-      for (const id of ids) this.sql.exec("UPDATE deliveries SET status = 'queued', next_attempt_at = NULL, sent_at = NULL WHERE id = ?", id);
-      await this.sendDeliveries(ids);
+      this.hooksOut.requeue(ids);
       return { queued: ids.length, ids };
     });
   }
 
-  /** Re-send ids whose queue send failed. */
+  /** The one alarm: the feed's outbox and tick, then the facts' and the hooks' retries. */
   async alarm(): Promise<void> {
-    const unsent = this.rows<{ id: string }>(
-      "SELECT id FROM deliveries WHERE status = 'queued' AND sent_at IS NULL ORDER BY created_at LIMIT 500",
-    ).map((r) => r.id);
-    if (unsent.length) await this.sendDeliveries(unsent);
     await this.feed.alarm();
     await this.factsOut.alarm();
+    await this.hooksOut.alarm();
   }
 
   // ── Object sizes (git protocol v2 object-info) ───────────────────────────
@@ -1133,13 +1090,12 @@ export class MonorepoObject extends DurableObject<Env> {
     });
   }
 
-  // ── Branch facts (facts.ts): stored, computed on change by the queue ─────
+  // ── Branch facts (facts.ts): stored, computed on change by FactsDrain ────
 
   private queueFacts(
     m: ({ type: "sweep"; repo: string; main: string } | { type: "branch"; repo: string; branch: string; head: string }) & { push?: { seq: number; before: string } },
   ): void {
-    // The outbox (facts-out.ts), drained at once by RPC; pando-branch-facts keeps
-    // its consumer for messages sent before this, until the outbox is measured.
+    // The outbox (facts-out.ts), drained at once by RPC.
     this.factsOut.add(m as Omit<FactsMessage, "monorepo">);
   }
 

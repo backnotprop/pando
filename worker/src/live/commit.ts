@@ -12,6 +12,12 @@ export interface GitWriter {
 export interface CommitEnv {
   ARTIFACTS?: Artifacts;
   BLOBS?: R2Bucket;
+  // How meta layer saves become commits (meta-sync.md, "Commits after quiet"):
+  // "author" (default): what is due together and shares an author, machine
+  //   and agent is one commit;
+  // "window": everything due is one commit; the last saver is its author and
+  //   the others are Co-authored-by trailers (ARCHITECTURE C7, owner question 8).
+  META_COMMIT_SHAPE?: string;
 }
 
 // gitWriter is null when the Worker has no Artifacts binding (a local test

@@ -1010,10 +1010,12 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       .toArray() as { path: string; version: number }[];
     if (!due.length) return this.scheduleCommit();
 
-    // Paths due together with the same author, machine and agent share a
-    // commit, up to COMMIT_FILES files and about COMMIT_BYTES bytes.
+    // Paths due together share a commit, up to COMMIT_FILES files and about
+    // COMMIT_BYTES bytes: all of them ("window"), or those with the first
+    // one's author, machine and agent ("author", the default).
     const first = this.row(due[0].version);
-    const key = (r: VersionRow) => JSON.stringify([r.author, r.machine, r.agent]);
+    const window = this.env.META_COMMIT_SHAPE === "window";
+    const key = (r: VersionRow) => (window ? "" : JSON.stringify([r.author, r.machine, r.agent]));
     const rows: VersionRow[] = [];
     let bytes = 0;
     for (const p of due) {
@@ -1098,10 +1100,22 @@ export function commitMessage(rows: VersionRow[], first = false): string {
     if (rows.length > 50) listed.push(`and ${rows.length - 50} more`);
     body = listed.join("\n") + "\n\n";
   }
+  // The last saver is the author (commitRows). Everyone else in the commit is
+  // a Co-authored-by line; every agent and machine gets its own line, in the
+  // order they first saved. With one author, machine and agent this is the
+  // shape formats.md section 6 gives.
   const last = rows[rows.length - 1];
+  const distinct = (pick: (r: VersionRow) => string | null) =>
+    [...new Set(rows.map(pick).filter((v): v is string => !!v))];
+  const lastPerson = parsePerson(last.author);
+  const coAuthors = distinct((r) => {
+    const p = parsePerson(r.author);
+    return p.email === lastPerson.email && p.name === lastPerson.name ? null : `${p.name} <${p.email}>`;
+  });
   const trailers = [
-    ...(last.agent ? [`Pando-Agent: ${last.agent}`] : []),
-    `Pando-Machine: ${last.machine}`,
+    ...coAuthors.map((a) => `Co-authored-by: ${a}`),
+    ...distinct((r) => r.agent).map((a) => `Pando-Agent: ${a}`),
+    ...distinct((r) => r.machine).map((m) => `Pando-Machine: ${m}`),
     `Pando-Version: ${Math.max(...rows.map((r) => r.version))}`,
   ];
   return `${title}\n\n${body}${trailers.join("\n")}\n`;

@@ -69,7 +69,7 @@ export interface FeedEvent {
   /** The person (a login), and the machine (the credential's name). */
   actor: string | null;
   machine: string | null;
-  /** Per kind: push {commits, head_title, head}; status {context, state, duration_s}; worktree.* {path}; and so on. */
+  /** Per kind: push {commits, head_title, head}; status {context, state, duration_s, app}; worktree.* {path}; and so on. */
   summary: Record<string, unknown> | null;
 }
 

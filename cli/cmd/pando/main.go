@@ -87,7 +87,7 @@ var commands = []app.Command{
 	{Name: "review", Usage: "review [<branch>] [-m <comment>]                          review in Plannotator, or comment", Run: app.Review},
 	{Name: "merge", Usage: "merge [<branch>] [--force]                                land a branch on main with a merge commit", Run: app.Merge},
 	{Name: "reference", Usage: "reference update <path> | sync                            move a reference to its newest commit", Run: app.Reference},
-	{Name: "status", Usage: "status                                                    this folder, its worktrees and references", Run: app.Status},
+	{Name: "status", Usage: "status                                                    this folder, its worktrees and references\n  pando status <pending|success|failure|error> [--context ci] [--target-url u] [--description d]\n                                                                  in a CI build: a check on its commit (PANDO_STATUS_TOKEN)", Run: app.Status},
 	{Name: "monorepo", Usage: "monorepo list | delete <owner/name> [--yes]               your monorepos; delete one (owners)", Run: app.Monorepo},
 	{Name: "members", Usage: "members list | invite <email> [--owner] | remove <who>      who belongs to a monorepo", Run: app.Members},
 	{Name: "mac", Usage: "mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)", Run: app.Mac},

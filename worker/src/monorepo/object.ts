@@ -25,6 +25,7 @@ import type { RefCommand } from "./pktline";
 import { FeedOut } from "../feed/out";
 import type { FeedEvent, Key, NeedRow, NeedState, Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
+import { CiStore, type CiRef, type IngestResult } from "../ci/store";
 import type {
   BranchRecord,
   Checks,
@@ -144,11 +145,18 @@ export class MonorepoObject extends DurableObject<Env> {
   private refRunners = new Set<string>();
   /** The home's activity feed (feed/out.ts, C25): activity marking, fan-out, presence, summary ticks. */
   private feed: FeedOut;
+  /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
+  private ci: CiStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
+    this.ci = new CiStore(ctx, env, this.sql, {
+      info: () => this.info(),
+      publish: (e) => this.publish(e),
+      addStatus: (repo, sha, st, identity, stamp) => this.addStatus(repo, sha, st, identity, stamp),
+    });
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
     const m = this.info();
@@ -180,8 +188,12 @@ export class MonorepoObject extends DurableObject<Env> {
     this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS deliveries_once ON deliveries (hook_id, event, seq)");
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
+    // The CI service that reported a status (ci/statustoken.ts), stamped by Pando.
+    const scols = this.rows<{ name: string }>("PRAGMA table_info(statuses)").map((c) => c.name);
+    if (!scols.includes("app")) this.sql.exec("ALTER TABLE statuses ADD COLUMN app TEXT");
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.feed.ensureSchema();
+    this.ci.ensureSchema();
   }
 
   private rows<T>(query: string, ...args: unknown[]): T[] {
@@ -506,22 +518,35 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Statuses and the gate ────────────────────────────────────────────────
 
-  addStatus(repo: string, sha: string, s: { state: StatusRecord["state"]; context: string; target_url: string | null; description: string | null }, identity: Identity): StatusRecord {
+  /**
+   * A status. A member's shows them as creator, with no app. `stamp` is set
+   * only by Pando: a verified status token (ci/statustoken.ts) or a CI
+   * integration (ci/store.ts); the event then has no actor, since no person
+   * posted it.
+   */
+  addStatus(
+    repo: string,
+    sha: string,
+    s: { state: StatusRecord["state"]; context: string; target_url: string | null; description: string | null },
+    identity: Identity | null,
+    stamp: { app: string | null; creator: string } | null = null,
+  ): StatusRecord {
     const at = now();
-    const creator = identity.login;
+    const creator = stamp?.creator ?? identity?.login ?? "pando";
+    const app = stamp?.app ?? null;
     this.sql.exec(
-      "INSERT INTO statuses (repo, sha, context, state, target_url, description, creator, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      repo, sha, s.context, s.state, s.target_url, s.description, creator, at,
+      "INSERT INTO statuses (repo, sha, context, state, target_url, description, creator, app, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      repo, sha, s.context, s.state, s.target_url, s.description, creator, app, at,
     );
-    const status = { sha, ...s, creator, created_at: at };
+    const status: StatusRecord = { sha, ...s, creator, app, created_at: at };
     // Branches at this commit have new checks; clients holding them refetch (the event names the sha).
-    this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(identity), row: status });
+    this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(stamp ? null : identity), row: status });
     return status;
   }
 
   statuses(repo: string, sha: string): StatusRecord[] {
     return this.rows<StatusRecord>(
-      "SELECT sha, context, state, target_url, description, creator, created_at FROM statuses WHERE repo = ? AND sha = ? ORDER BY id",
+      "SELECT sha, context, state, target_url, description, creator, app, created_at FROM statuses WHERE repo = ? AND sha = ? ORDER BY id",
       repo, sha,
     );
   }
@@ -1354,6 +1379,61 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Tests only (the crash and failure switches act only with FEED_TEST=1): the feed outbox. */
   feedTestOutbox(set: { crash?: "before" | "after"; fail?: number } = {}) {
     return this.feed.testOutbox(set);
+  }
+
+  // ── CI (ci/store.ts; routes in ci/routes.ts) ─────────────────────────────
+
+  ciConnect(c: { service: "buildkite"; organization: string; api_base: string | null; webhook_token: string | null }, by: Identity) {
+    return this.guard(() => this.ci.connect(c, by));
+  }
+
+  ciDisconnect(id: string, by: Identity): boolean {
+    return this.ci.disconnect(id, by);
+  }
+
+  ciWebhook(id: string, h: { event: string | null; token: string | null; signature: string | null }, body: string, nowMs: number): Promise<Outcome<IngestResult>> {
+    return this.guard(() => this.ci.webhook(id, h, body, nowMs));
+  }
+
+  ciIngestBuild(connection: string, build: unknown): Promise<Outcome<IngestResult>> {
+    return this.guard(() => this.ci.ingestBuild(connection, build));
+  }
+
+  ciIngestJob(build: string, job: unknown) {
+    const j = this.ci.ingestJob(build, job);
+    return j ? this.ci.jobView(j) : null;
+  }
+
+  ciOverview() {
+    return this.ci.overview();
+  }
+
+  ciBuilds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }) {
+    return this.guard(() => this.ci.builds(q));
+  }
+
+  ciBuild(id: string) {
+    return this.ci.build(id);
+  }
+
+  ciRef(build: string, job: string | null): CiRef | null {
+    return this.ci.ref(build, job);
+  }
+
+  ciPipeline(slug: string, connection: string | null) {
+    return this.guard(() => this.ci.pipeline(slug, connection));
+  }
+
+  ciSavePipeline(connection: string, slug: string, repo: string | null, p: { configuration: string | null; name: string | null; web_url: string | null; default_branch: string | null }): void {
+    this.ci.savePipeline(connection, slug, repo, p);
+  }
+
+  ciPermit(connection: string) {
+    return this.ci.permit(connection);
+  }
+
+  ciRateWait(connection: string, ms: number): void {
+    this.ci.rateWait(connection, ms);
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

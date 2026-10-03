@@ -70,8 +70,9 @@ export async function repoToken(env: Env, name: string, scope: "read" | "write",
 }
 
 /** A fresh read token for a hook delivery (30 minutes). Not cached. */
-export async function deliveryReadToken(env: Env, name: string): Promise<{ token: string; expiresAt: string }> {
-  const t = await withRepo(env, name, (repo) => repo.createToken("read", 1800));
+/** A read token for a hook delivery: 30 minutes for web hooks; CI deliveries pass a longer ttl (ci/statustoken.ts, CI_READ_TTL_S). */
+export async function deliveryReadToken(env: Env, name: string, ttlS = 1800): Promise<{ token: string; expiresAt: string }> {
+  const t = await withRepo(env, name, (repo) => repo.createToken("read", ttlS));
   return { token: t.plaintext, expiresAt: t.expiresAt };
 }
 

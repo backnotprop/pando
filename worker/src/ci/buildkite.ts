@@ -18,6 +18,7 @@
 //   retry).
 
 import type { StatusRecord } from "../monorepo/types";
+import { isInteger, isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 
 /**
  * A CI build's read token lives this long (pando-ops ruling, 2026-10-03):
@@ -94,6 +95,16 @@ export function pandoBuildEnv(v: BuildFacts): BuildEnv {
 export type CiState = "queued" | "running" | "blocked" | "passed" | "failed" | "canceled" | "skipped";
 
 export const TERMINAL: ReadonlySet<CiState> = new Set(["passed", "failed", "canceled", "skipped"]);
+
+/** Every state, in the order the API lists them. */
+export const CI_STATES: readonly CiState[] = ["queued", "running", "blocked", "passed", "failed", "canceled", "skipped"];
+
+const STATE_NAMES: ReadonlySet<string> = new Set(CI_STATES);
+
+/** A state named in a query (?state=). */
+export function isCiState(v: string): v is CiState {
+  return STATE_NAMES.has(v);
+}
 
 /** Later states rank higher: an older event never moves a row back. */
 export function rank(s: CiState): number {
@@ -197,17 +208,25 @@ export interface NormPipeline {
   org: string | null;
 }
 
-type J = Record<string, unknown>;
+// Buildkite's JSON is decoded here, once, at the boundary: webhooks
+// (ci/store.ts) and REST answers (ci/routes.ts) arrive as Json and leave as
+// the types above.
 
-const str = (v: unknown, max = 2000): string | null => (typeof v === "string" && v ? v.slice(0, max) : null);
+/** A non-empty string, cut to `max` characters; null for anything else. */
+const str = (v: Json | undefined, max = 2000): string | null => (isText(v) && v ? v.slice(0, max) : null);
 
-const time = (v: unknown): string | null => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
+/** A string or null, as it is. */
+const textOrNull = (v: Json | undefined): string | null => (isText(v) ? v : null);
 
-const obj = (v: unknown): J | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as J) : null);
+/** A time Date can read, as ISO 8601. */
+const time = (v: Json | undefined): string | null => (isText(v) && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
+
+/** An object, or null. */
+const obj = (v: Json | undefined): JsonObject | null => (isRecord(v) ? v : null);
 
 /** The organization's slug from an API URL (`/v2/organizations/<org>/...`) or a web URL (`buildkite.com/<org>/...`). */
-export function orgFromUrl(url: unknown): string | null {
-  if (typeof url !== "string") return null;
+export function orgFromUrl(url: string | null): string | null {
+  if (url === null) return null;
   const api = /\/organizations\/([^/?#]+)/.exec(url);
 
   if (api) return decodeURIComponent(api[1]).toLowerCase();
@@ -216,7 +235,7 @@ export function orgFromUrl(url: unknown): string | null {
   return web ? decodeURIComponent(web[1]).toLowerCase() : null;
 }
 
-export function normalizePipeline(p: unknown): NormPipeline | null {
+export function normalizePipeline(p: Json | undefined): NormPipeline | null {
   const o = obj(p);
   const slug = str(o?.slug, 200);
 
@@ -227,18 +246,19 @@ export function normalizePipeline(p: unknown): NormPipeline | null {
     name: str(o.name, 200),
     web_url: str(o.web_url),
     default_branch: str(o.default_branch, 300),
-    org: orgFromUrl(o.url) ?? orgFromUrl(o.web_url),
+    org: orgFromUrl(textOrNull(o.url)) ?? orgFromUrl(textOrNull(o.web_url)),
   };
 }
 
-export function normalizeBuild(b: unknown, pipeline: NormPipeline | null): NormBuild | null {
+export function normalizeBuild(b: Json | undefined, pipeline: NormPipeline | null): NormBuild | null {
   const o = obj(b);
   const id = str(o?.id, 100);
   const number = o?.number;
+  const url = textOrNull(o?.url);
   // A build's pipeline: the payload's, else the one in its own URL.
-  const pipe = pipeline?.slug ?? (typeof o?.url === "string" ? /\/pipelines\/([^/]+)\/builds\//.exec(o.url)?.[1] ?? null : null);
+  const pipe = pipeline?.slug ?? (url === null ? null : (/\/pipelines\/([^/]+)\/builds\//.exec(url)?.[1] ?? null));
 
-  if (!o || !id || typeof number !== "number" || !Number.isSafeInteger(number) || !pipe) return null;
+  if (!o || !id || !isInteger(number) || !pipe) return null;
   const md: Record<string, string> = {};
   const raw = obj(o.meta_data);
 
@@ -265,17 +285,17 @@ export function normalizeBuild(b: unknown, pipeline: NormPipeline | null): NormB
     finished_at: time(o.finished_at),
     meta_data: md,
     rebuilt_from: str(obj(o.rebuilt_from)?.id, 100),
-    org: orgFromUrl(o.url) ?? orgFromUrl(o.web_url) ?? pipeline?.org ?? null,
+    org: orgFromUrl(url) ?? orgFromUrl(textOrNull(o.web_url)) ?? pipeline?.org ?? null,
     pipeline: pipe,
   };
 }
 
-export function normalizeJob(j: unknown): NormJob | null {
+export function normalizeJob(j: Json | undefined): NormJob | null {
   const o = obj(j);
   const id = str(o?.id, 100);
 
   if (!o || !id) return null;
-  const exit = typeof o.exit_status === "number" ? o.exit_status : null;
+  const exit = isInteger(o.exit_status) ? o.exit_status : null;
   const service_state = str(o.state, 40) ?? "pending";
 
   return {
@@ -293,6 +313,65 @@ export function normalizeJob(j: unknown): NormJob | null {
     started_at: time(o.started_at),
     finished_at: time(o.finished_at),
   };
+}
+
+/** A build's annotation (REST: list annotations). `body_html` is the pipeline's HTML: sanitise it before showing it. */
+export interface Annotation {
+  id: string | null;
+  context: string | null;
+  style: string | null;
+  body_html: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** A build's artifact (REST: list artifacts). */
+export interface Artifact {
+  id: string | null;
+  job: string | null;
+  path: string | null;
+  filename: string | null;
+  dirname: string | null;
+  mime_type: string | null;
+  size: number | null;
+  sha1sum: string | null;
+  state: string | null;
+}
+
+/** A pipeline's details (REST: get a pipeline). `configuration` is its YAML. */
+export interface PipelineDetails {
+  configuration: string | null;
+  name: string | null;
+  web_url: string | null;
+  default_branch: string | null;
+}
+
+/** The objects of a JSON list; nothing when it is not a list. */
+const objects = (v: Json | null): JsonObject[] => (Array.isArray(v) ? v.filter(isRecord) : []);
+
+export function decodeAnnotations(v: Json | null): Annotation[] {
+  return objects(v).map((a) => ({
+    id: textOrNull(a.id), context: textOrNull(a.context), style: textOrNull(a.style), body_html: textOrNull(a.body_html) ?? "",
+    created_at: textOrNull(a.created_at), updated_at: textOrNull(a.updated_at),
+  }));
+}
+
+export function decodeArtifacts(v: Json | null): Artifact[] {
+  return objects(v).map((a) => ({
+    id: textOrNull(a.id), job: textOrNull(a.job_id), path: textOrNull(a.path), filename: textOrNull(a.filename), dirname: textOrNull(a.dirname),
+    mime_type: textOrNull(a.mime_type), size: isWholeNumber(a.file_size) ? a.file_size : null, sha1sum: textOrNull(a.sha1sum), state: textOrNull(a.state),
+  }));
+}
+
+export function decodePipelineDetails(v: Json | null): PipelineDetails {
+  const o = obj(v ?? undefined);
+
+  return { configuration: textOrNull(o?.configuration), name: textOrNull(o?.name), web_url: textOrNull(o?.web_url), default_branch: textOrNull(o?.default_branch) };
+}
+
+/** The `message` of an error answer, else null. */
+export function errorMessage(v: Json | null): string | null {
+  return textOrNull(obj(v ?? undefined)?.message);
 }
 
 // ── A job's check (a job keyed `ci` is the check `ci`) ──────────────────────

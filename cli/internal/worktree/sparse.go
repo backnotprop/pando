@@ -39,6 +39,13 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 		return err
 	}
 	g := gitx.In(dst)
+	gitDir := filepath.Join(dst, ".git")
+	// The credential first: checkout and sparse-checkout fetch blobs.
+	if !s.Reference {
+		if err := WriteCredentialConfig(ctx, gitDir, s.CloneURL); err != nil {
+			return err
+		}
+	}
 	if s.Commit != "" {
 		if _, err := g.Run(ctx, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", s.Commit); err != nil {
 			return err
@@ -51,7 +58,6 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 	} else if _, err := g.Run(ctx, "sparse-checkout", "disable"); err != nil {
 		return err
 	}
-	gitDir := filepath.Join(dst, ".git")
 	if s.Reference {
 		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", "sparse"}} {
 			if _, err := g.Run(ctx, "config", kv[0], kv[1]); err != nil {
@@ -59,9 +65,6 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 			}
 		}
 		return setWritable(dst, false)
-	}
-	if err := WriteCredentialConfig(ctx, gitDir, s.CloneURL); err != nil {
-		return err
 	}
 	if err := InstallHook(ctx, gitDir, s.Identity); err != nil {
 		return err

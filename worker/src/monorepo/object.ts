@@ -802,15 +802,11 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Events after `since` (oldest first), or the latest `limit` with no `since`. */
-  /**
-   * `seq` is the newest event's seq, `oldest_seq` the oldest kept. (`head` and
-   * `oldest` are the same numbers under their old names, kept for one deploy;
-   * an event's own `head` is a commit sha.)
-   */
-  events(since: number | null, limit: number, topics: string[] = ["all"]): { events: Record<string, unknown>[]; seq: number; oldest_seq: number; resync: boolean; head: number; oldest: number } {
+  /** `seq` is the newest event's seq, `oldest_seq` the oldest kept. (An event's own `head` is a commit sha.) */
+  events(since: number | null, limit: number, topics: string[] = ["all"]): { events: Record<string, unknown>[]; seq: number; oldest_seq: number; resync: boolean } {
     const { head, oldest } = this.eventBounds();
     const n = Math.min(Math.max(limit, 1), REPLAY_MAX);
-    const bounds = { seq: head, oldest_seq: oldest, head, oldest };
+    const bounds = { seq: head, oldest_seq: oldest };
     if (since === null) return { events: this.eventRows(0, n, true, topics), ...bounds, resync: false };
     const resync = since > head || (head > 0 && since < oldest - 1);
     return { events: resync ? [] : this.eventRows(since, n, false, topics), ...bounds, resync };
@@ -841,15 +837,14 @@ export class MonorepoObject extends DurableObject<Env> {
       const missed = Number.isSafeInteger(since) && since >= 0 ? head - since : Infinity;
       const all = topics.includes("all");
       if (!Number.isSafeInteger(since) || since < 0 || since > head || (head > 0 && since < oldest - 1) || missed > (all ? REPLAY_MAX : SCAN_MAX)) {
-        server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest, head, oldest }));
+        server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest }));
       } else {
         const replay = this.eventRows(since, REPLAY_MAX + 1, false, topics);
-        if (replay.length > REPLAY_MAX) server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest, head, oldest }));
+        if (replay.length > REPLAY_MAX) server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest }));
         else for (const e of replay) server.send(JSON.stringify({ type: "event", ...e }));
       }
     }
-    // `head` here is the old name of `seq`, kept for one deploy.
-    server.send(JSON.stringify({ type: "caught_up", seq: head, head }));
+    server.send(JSON.stringify({ type: "caught_up", seq: head }));
     return new Response(null, { status: 101, webSocket: client });
   }
 

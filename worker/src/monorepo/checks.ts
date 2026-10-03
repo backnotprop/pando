@@ -7,22 +7,17 @@ import { withRepo } from "./artifacts";
 import { metaArtifactsName } from "./names";
 import type { Checks, Kind, RepoRecord, StatusRecord } from "./types";
 
-const CACHE_MS = 15_000;
-const configCache = new Map<string, { at: number; toml: Record<string, unknown> | null }>();
-
+// Read on every check, uncached: a merge into main can change it, and the
+// gate must see the change at once.
 async function readConfig(env: Env, artifactsName: string): Promise<Record<string, unknown> | null> {
-  const hit = configCache.get(artifactsName);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.toml;
-  let toml: Record<string, unknown> | null = null;
   try {
     const blob = await withRepo(env, artifactsName, (repo) => repo.readFile({ ref: "main", path: ".pando/pando.toml" }));
-    if (blob) toml = parseToml(await blob.text()) as Record<string, unknown>;
+    return blob ? (parseToml(await blob.text()) as Record<string, unknown>) : null;
   } catch (err) {
     // An empty repo, a missing file or a bad file all mean "no required checks".
     console.warn(`pando.toml in ${artifactsName}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
   }
-  configCache.set(artifactsName, { at: Date.now(), toml });
-  return toml;
 }
 
 /** `repos."<repo path>".required_checks` from the right pando.toml (formats.md, section 2). */

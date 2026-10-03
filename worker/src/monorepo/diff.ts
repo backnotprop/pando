@@ -268,6 +268,19 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
   return { files, truncated, stats };
 }
 
+/** Every file that differs between two trees: its path and new blob (null when deleted). */
+export async function changedFiles(repo: ArtifactsRepo, fromTree: string, toTree: string): Promise<{ path: string; sha: string | null; mode: string | null }[]> {
+  const removed: Entry[] = [];
+  const added: Entry[] = [];
+  const changed: [Entry, Entry][] = [];
+  await walk(repo, fromTree, toTree, "", [], removed, added, changed);
+  const out = new Map<string, { path: string; sha: string | null; mode: string | null }>();
+  for (const e of removed) out.set(e.path, { path: e.path, sha: null, mode: null });
+  for (const e of added) out.set(e.path, { path: e.path, sha: e.sha, mode: e.mode });
+  for (const [, b] of changed) out.set(b.path, { path: b.path, sha: b.sha, mode: b.mode });
+  return [...out.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
+}
+
 /** A unified diff with git's headers, for `git apply` and Plannotator. */
 export function toPatch(result: DiffResult, hunksOf: (f: DiffFile) => Hunk[] | undefined): { text: string; omitted: number } {
   const out: string[] = [];

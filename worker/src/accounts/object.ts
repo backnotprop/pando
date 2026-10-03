@@ -249,6 +249,14 @@ export class AccountsObject extends DurableObject<Env> {
   signIn(who: SignedIn, cred: { hash: string; name: string; kind: CredentialKind }): { user: User; credential: Credential; joined: string[] } {
     const email = who.email.toLowerCase();
     let login = this.row<{ login: string }>("SELECT login FROM users WHERE workos_id = ?", who.workos_id)?.login;
+    if (!login && who.email_verified) {
+      // A user made before (the bootstrap path) with this email: this is them. Link, do not duplicate.
+      login = this.row<{ login: string }>(
+        "SELECT login FROM users WHERE lower(email) = ? AND workos_id IS NULL ORDER BY created_at LIMIT 1",
+        email,
+      )?.login;
+      if (login) this.sql.exec("UPDATE users SET workos_id = ? WHERE login = ?", who.workos_id, login);
+    }
     if (login) {
       this.sql.exec("UPDATE users SET email = ?, name = COALESCE(?, name) WHERE login = ?", email, who.name, login);
     } else {
@@ -285,7 +293,7 @@ export class AccountsObject extends DurableObject<Env> {
   invite(monorepo: string, email: string, role: MemberRole, by: string): Outcome<{ status: "added"; member: Member } | { status: "invited"; invite: Invite }> {
     return this.guard(() => {
       const e = email.toLowerCase();
-      const user = this.row<{ login: string }>("SELECT login FROM users WHERE email = ? AND workos_id IS NOT NULL", e);
+      const user = this.row<{ login: string }>("SELECT login FROM users WHERE lower(email) = ? AND workos_id IS NOT NULL", e);
       if (user) {
         const out = this.putMember(monorepo, user.login, role, by);
         if (!out.ok) fail(out.status, out.code, out.message);

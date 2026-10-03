@@ -10,11 +10,12 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
-import { branchesOf, listRefs } from "./artifacts";
+import { branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredChecks } from "./checks";
 import { attempt, hookView, RETRY_DELAYS_MS, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
-import { DEFAULT_BRANCH, ZERO } from "./names";
+import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
+import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
 import type {
   BranchRecord,
@@ -174,12 +175,39 @@ export class MonorepoObject extends DurableObject<Env> {
     });
   }
 
-  getRepo(name: string): RepoRecord | null {
+  private repoRow(name: string): RepoRecord | null {
     return this.row<RepoRecord>("SELECT * FROM repos WHERE name = ?", name);
   }
 
+  /**
+   * A repo by its URL name. In a monorepo, `meta` is the meta layer's own
+   * repo (<monorepo>--meta, path "."): it takes branches, reviews and merges
+   * like any repo, which is how .pando/** changes. Its record is made on
+   * first use.
+   */
+  async getRepo(name: string): Promise<RepoRecord | null> {
+    const r = this.repoRow(name);
+    if (r || name !== "meta") return r;
+    const m = this.info();
+    if (m?.kind !== "monorepo") return null;
+    const artifacts_name = metaArtifactsName(m.name);
+    let remote: string;
+    try {
+      remote = await withRepo(this.env, artifacts_name, async (repo) => (await repo.info()).remote);
+    } catch {
+      return null;
+    }
+    this.sql.exec(
+      `INSERT INTO repos (name, path, artifacts_name, remote, default_branch, description, created_at, created_by)
+       VALUES ('meta', '.', ?, ?, ?, 'The meta layer', ?, 'pando') ON CONFLICT DO NOTHING`,
+      artifacts_name, remote, DEFAULT_BRANCH, now(),
+    );
+    return this.repoRow(name);
+  }
+
+  /** The code repos (the meta layer's repo is not listed). */
   listRepos(): RepoRecord[] {
-    return this.rows<RepoRecord>("SELECT * FROM repos ORDER BY path");
+    return this.rows<RepoRecord>("SELECT * FROM repos WHERE NOT (name = 'meta' AND artifacts_name LIKE '%--meta') ORDER BY path");
   }
 
   // ── Branches and pushes ──────────────────────────────────────────────────
@@ -194,7 +222,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** The door's one rule: main moves only by a merge (creating it is allowed). */
   checkPush(repo: string, commands: RefCommand[]): PushVerdict[] {
-    const r = this.getRepo(repo);
+    const r = this.repoRow(repo);
     const main = `refs/heads/${r?.default_branch ?? DEFAULT_BRANCH}`;
     return commands
       .filter((c) => c.ref === main && c.old !== ZERO)
@@ -203,7 +231,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** Record branch heads after Artifacts accepted a push. Returns the events to deliver. */
   recordPush(repo: string, identity: Identity, updates: RefCommand[]): RepoEvent[] {
-    const r = this.getRepo(repo);
+    const r = this.repoRow(repo);
     const main = r?.default_branch ?? DEFAULT_BRANCH;
     const at = now();
     const events: RepoEvent[] = [];
@@ -321,7 +349,7 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   private async mergeNow(a: MergeArgs): Promise<MergeResult> {
-    const r = this.getRepo(a.repo) ?? fail(404, "not_found", `no repo ${a.repo}`);
+    const r = (await this.getRepo(a.repo)) ?? fail(404, "not_found", `no repo ${a.repo}`);
     const refs = branchesOf(await listRefs(this.env, r));
     const head = refs.get(a.branch) ?? fail(404, "not_found", `no branch ${a.branch}`);
     const base = refs.get(r.default_branch) ?? fail(409, "no_main", `${r.default_branch} does not exist yet`);
@@ -377,6 +405,12 @@ export class MonorepoObject extends DurableObject<Env> {
       "UPDATE branches SET merge_commit = ?, merged_head = ?, merged_at = ?, merged_by = ? WHERE repo = ? AND name = ?",
       out.sha, head, at, a.identity.login, a.repo, a.branch,
     );
+    if (r.artifacts_name === metaArtifactsName(this.info()!.name)) {
+      // The merge has landed; machines get it on the live layer's next try if this fails.
+      await this.applyToMetaLayer(out.old, out.sha, a.identity).catch((err) =>
+        console.error("applyFromMain failed:", redact(err instanceof Error ? err.message : String(err))),
+      );
+    }
     await this.enqueue(
       [{
         event: "merged", repo: a.repo, branch: a.branch, ref: `refs/heads/${a.branch}`, before: out.old, head,
@@ -386,6 +420,25 @@ export class MonorepoObject extends DurableObject<Env> {
       a.origin,
     );
     return { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
+  }
+
+  /** A merge landed on the meta layer's main: hand the changed files to the live meta layer. */
+  private async applyToMetaLayer(before: string, commit: string, who: Identity): Promise<void> {
+    const m = this.info()!.name;
+    const changes = await withRepo(this.env, metaArtifactsName(m), async (repo) => {
+      const [a, b] = await Promise.all([repo.readCommit(before), repo.readCommit(commit)]);
+      if (!a || !b) throw new HttpError(502, "artifacts", "the merge's commits could not be read");
+      const files = await changedFiles(repo, a.treeHash, b.treeHash);
+      return Promise.all(
+        files.map(async (f) => {
+          if (!f.sha) return { path: f.path, bytes: null };
+          const blob = await repo.readBlob(f.sha);
+          return { path: f.path, bytes: blob ? new Uint8Array(await blob.arrayBuffer()) : null };
+        }),
+      );
+    });
+    const author = `${who.name ?? who.login} <${who.email ?? `${who.login}@users.pando.invalid`}>`;
+    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, changes });
   }
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────
@@ -469,7 +522,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private async deliver(d: { id: string; hook_id: string; repo: string; payload: string; attempts: number }) {
     const hook = this.row<HookRow>("SELECT * FROM hooks WHERE id = ?", d.hook_id);
-    const repo = this.getRepo(d.repo);
+    const repo = this.repoRow(d.repo);
     const at = now();
     if (!hook || !repo) {
       this.sql.exec("UPDATE deliveries SET status = 'failed', error = ?, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?", "the hook or repo was removed", at, d.id);

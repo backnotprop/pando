@@ -370,6 +370,38 @@ try {
   made.push(`${MM}--projects-web`);
   g = git(["ls-remote", r.json?.clone_url], work, B);
   check("bo is not a member of the second monorepo", !g.ok);
+
+  // ── The meta layer: live routes, and .pando/** through a reviewed merge ──
+  r = await call("GET", `/v1/monorepos/${MM}/meta/status`, A);
+  check("the owner reaches the meta layer (live lane)", r.status === 200, `${r.status} ${scrub(r.text).slice(0, 120)}`);
+  r = await call("GET", `/v1/monorepos/${MM}/meta/status`, B);
+  check("a non-member does not", r.status === 403);
+  r = await call("GET", `/v1/monorepos/${M}/meta/status`, A);
+  check("a plain repo has no meta layer", r.status === 404);
+  r = await call("GET", `/v1/monorepos/${MM}/repos/meta`, A);
+  const metaUrl = r.json?.clone_url;
+  check("the meta layer is the repo named meta (path .)", r.status === 200 && r.json?.path === "." && metaUrl?.endsWith(`/${MM}/meta.git`), `${r.status}`);
+  r = await call("GET", `/v1/monorepos/${MM}/repos`, A);
+  check("and it is not in the repo list", r.json?.repos?.every((x) => x.name !== "meta"));
+  const metaDir = join(work, "meta");
+  mkdirSync(metaDir);
+  git(["init", "-q"], metaDir);
+  write(metaDir, "AGENTS.md", "# meta\n");
+  git(["add", "-A"], metaDir);
+  git(["commit", "-qm", "meta root"], metaDir);
+  g = git(["push", "-q", metaUrl, "main"], metaDir, A);
+  check("the meta layer's main is created by its first push", g.ok, g.ok ? "" : g.out.slice(-200));
+  git(["checkout", "-qb", "require-ci"], metaDir);
+  write(metaDir, ".pando/pando.toml", '[repos."projects/web"]\nrequired_checks = ["ci"]\n');
+  git(["add", "-A"], metaDir);
+  git(["commit", "-qm", "Require ci on projects/web"], metaDir);
+  g = git(["push", "-q", metaUrl, "require-ci"], metaDir, A);
+  r = await call("POST", `/v1/monorepos/${MM}/repos/meta/branches/require-ci/merge`, A);
+  check("a reviewed branch merges into the meta layer", r.status === 200 && r.json?.status === "merged", `${r.status} ${scrub(r.text).slice(0, 200)}`);
+  r = await call("GET", `/v1/monorepos/${MM}/repos/projects-web`, A);
+  check("projects/web now requires ci (read from .pando/pando.toml on main)", JSON.stringify(r.json?.required_checks) === '["ci"]', JSON.stringify(r.json?.required_checks));
+  r = await call("GET", `/v1/monorepos/${MM}/meta/history?path=.pando/pando.toml`, A);
+  check("the merge reached the live meta layer (applyFromMain)", r.json?.versions?.some((v) => v.source === "main"), `${r.status} ${scrub(r.text).slice(0, 200)}`);
 } catch (err) {
   check("no exception", false, scrub(err?.stack ?? err));
 } finally {

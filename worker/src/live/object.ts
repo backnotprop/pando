@@ -978,11 +978,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const slot = await stub.acquireWrite(key);
     addGate(slot.ok ? slot.value.waited_ms : Date.now() - g0);
 
-    if (!slot.ok) {
-      // SAFETY: acquireWrite returns an Outcome, whose failure side carries `message`; the RPC stub's
-      // types drop that side (Outcome.extra is not serializable), so it is read through this cast.
-      throw new Error((slot as { message?: string }).message ?? "the repo is busy");
-    }
+    if (!slot.ok) throw new Error(slot.message || "the repo is busy");
 
     const lease = slot.value.lease;
 

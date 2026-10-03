@@ -53,7 +53,7 @@ type Identity struct {
 	Worktree string // worktree path from the root
 	Machine  string
 	Agent    string // optional
-	Kind     string // fuse, sparse
+	Kind     string // fuse, fskit, sparse
 
 	// The signed-in person (pando login): commits are authored as them.
 	UserName  string

@@ -1,7 +1,8 @@
 // PandoVolume.swift: the volume. Each FSKit operation becomes one wire v3
 // request to the mount's daemon (see Wire.swift and the contract,
 // docs/pando-fskit-wire-v3.md in the ArtifactFS fork). The volume keeps no
-// file system state beyond the FSItem objects FSKit holds.
+// file system state beyond the FSItem objects FSKit holds and the items'
+// extended attributes, which live in memory only.
 //
 // FSKit delivers operations on one serial queue (Apple DTS, 2026-10-01), so
 // no method here blocks: each sends its request and returns, and the reply
@@ -38,6 +39,14 @@ final class PandoVolume: FSVolume, @unchecked Sendable {
 
     /// Entries asked for per readdir page.
     private static let pageEntries: UInt32 = 256
+
+    /// Extended attributes, by item number, held in this process only. With
+    /// no xattr support macOS writes every xattr (com.apple.provenance on
+    /// each new file, Finder's info, quarantine) as an AppleDouble "._" file
+    /// through the mount, and git, npm and agents then see those files. They
+    /// are lost when the volume unmounts; nothing in a repo needs them.
+    private var xattrs: [UInt64: [Data: Data]] = [:]
+    private static let maxXattrSize = 1 << 20
 
     init(client: WireClient, hello: WireReply, volumeName: String, fileSystem: PandoFileSystem) {
         self.client = client
@@ -376,7 +385,10 @@ extension PandoVolume: FSVolume.Operations {
             : .unlink(parent: dir.ino, name: nameStr)
         client.call(op, timeout: WireDeadline.metadata) { [self] result in
             switch result {
-            case .success: replyHandler(nil)
+            case .success:
+                // The daemon may give the number to a new file later.
+                lock.withLock { xattrs[it.ino] = nil }
+                replyHandler(nil)
             case let .failure(f): replyHandler(error(f))
             }
         }
@@ -402,6 +414,9 @@ extension PandoVolume: FSVolume.Operations {
             switch result {
             case .success:
                 (item as? PandoItem)?.name = destinationName
+                if let over = overItem as? PandoItem {
+                    lock.withLock { xattrs[over.ino] = nil }
+                }
                 replyHandler(destinationName, nil)
             case let .failure(f):
                 replyHandler(nil, error(f))
@@ -478,6 +493,7 @@ extension PandoVolume: FSVolume.ReadWriteOperations {
     ) {
         guard let it = item as? PandoItem else { replyHandler(0, posix(EINVAL)); return }
         let want = min(length, buffer.length)
+        log.debug("read ino \(it.ino) at \(offset) length \(length)")
         readChunk(it.ino, offset: Int64(offset), filled: 0, want: want, buffer: buffer, replyHandler: replyHandler)
     }
 
@@ -518,6 +534,7 @@ extension PandoVolume: FSVolume.ReadWriteOperations {
         replyHandler: @escaping (Int, Error?) -> Void
     ) {
         guard let it = item as? PandoItem else { replyHandler(0, posix(EINVAL)); return }
+        log.debug("write ino \(it.ino) at \(offset) length \(data.count)")
         writeChunk(it.ino, data: data, offset: Int64(offset), done: 0, replyHandler: replyHandler)
     }
 
@@ -555,4 +572,54 @@ extension PandoVolume: FSVolume.PathConfOperations {
     /// Long names fail with ENAMETOOLONG rather than being cut.
     var truncatesLongNames: Bool { false }
     var maximumFileSize: UInt64 { UInt64(Int64.max) }
+    var maximumXattrSize: Int { Self.maxXattrSize }
+}
+
+// MARK: - FSVolume.XattrOperations
+
+/// Full xattr support, from memory (see `xattrs`): FSKit sends every name
+/// here, so the kernel never falls back to "._" files on the volume.
+extension PandoVolume: FSVolume.XattrOperations {
+    func getXattr(named name: FSFileName, of item: FSItem,
+                  replyHandler: @escaping (Data?, Error?) -> Void) {
+        guard let it = item as? PandoItem else { replyHandler(nil, posix(EINVAL)); return }
+        if let value = lock.withLock({ xattrs[it.ino]?[name.data] }) {
+            replyHandler(value, nil)
+        } else {
+            replyHandler(nil, posix(ENOATTR))
+        }
+    }
+
+    func setXattr(named name: FSFileName, to value: Data?, on item: FSItem,
+                  policy: FSVolume.SetXattrPolicy, replyHandler: @escaping (Error?) -> Void) {
+        guard let it = item as? PandoItem else { replyHandler(posix(EINVAL)); return }
+        if policy != .delete, (value?.count ?? 0) > Self.maxXattrSize {
+            replyHandler(posix(E2BIG)); return
+        }
+        let code: Int32 = lock.withLock {
+            let exists = xattrs[it.ino]?[name.data] != nil
+            switch policy {
+            case .delete:
+                guard exists else { return ENOATTR }
+                xattrs[it.ino]?[name.data] = nil
+                if xattrs[it.ino]?.isEmpty == true { xattrs[it.ino] = nil }
+                return 0
+            case .mustCreate where exists:
+                return EEXIST
+            case .mustReplace where !exists:
+                return ENOATTR
+            default:
+                guard let value else { return EINVAL }
+                xattrs[it.ino, default: [:]][name.data] = value
+                return 0
+            }
+        }
+        replyHandler(code == 0 ? nil : posix(code))
+    }
+
+    func listXattrs(of item: FSItem, replyHandler: @escaping ([FSFileName]?, Error?) -> Void) {
+        guard let it = item as? PandoItem else { replyHandler(nil, posix(EINVAL)); return }
+        let names = lock.withLock { xattrs[it.ino].map { Array($0.keys) } ?? [] }
+        replyHandler(names.map { FSFileName(data: $0) }, nil)
+    }
 }

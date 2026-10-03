@@ -10,6 +10,7 @@
 // Derived from Oak's OakMounterApp.swift (Apache 2.0, see ../NOTICE). The
 // copy, colours and mark are Pando's.
 
+import FSKit
 import SwiftUI
 
 @main
@@ -77,8 +78,12 @@ enum ExtensionStatus: Equatable {
     }
 }
 
-/// Asks `pluginkit` about registered FSKit modules. The host app is not
-/// sandboxed, so it can run it; any failure reads as `.unknown`.
+/// Asks macOS whether the extension is registered and on. FSKit's own answer
+/// comes first: FSClient lists the modules of this app's team with
+/// `isEnabled`, which is what `/sbin/mount` checks. pluginkit's "+" is not
+/// enough: on macOS 26.3 a switch that failed in System Settings leaves "+"
+/// while FSKit still says the module is disabled. When FSClient does not
+/// list it, FSKit's settings file decides, then pluginkit.
 enum ExtensionProbe {
     /// The bundle id of the extension this app carries, read from the
     /// embedded .appex so it follows the prefix set in project.yml.
@@ -92,30 +97,55 @@ enum ExtensionProbe {
             .first
     }
 
+    /// Runs off the main thread (it waits on FSKit and pluginkit).
     static func current() -> ExtensionStatus {
         guard let bundleID = extensionBundleID else { return .unknown }
+        if let on = fskitEnabled(bundleID) { return on ? .enabled : .installedNotEnabled }
+        let registered = pluginkitFlag(bundleID)
+        guard let flag = registered else { return .notInstalled }
+        if let on = enabledListHas(bundleID) { return on ? .enabled : .installedNotEnabled }
+        return flag == "+" ? .enabled : .installedNotEnabled
+    }
+
+    /// FSKit's answer, or nil when it does not list the module.
+    private static func fskitEnabled(_ bundleID: String) -> Bool? {
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var answer: Bool?
+        FSClient.shared.fetchInstalledExtensions { modules, _ in
+            answer = modules?.first(where: { $0.bundleIdentifier == bundleID })?.isEnabled
+            done.signal()
+        }
+        return done.wait(timeout: .now() + 5) == .success ? answer : nil
+    }
+
+    /// The file behind the switch in System Settings (an implementation
+    /// detail of macOS 26; nil when it cannot be read).
+    private static func enabledListHas(_ bundleID: String) -> Bool? {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            "Library/Group Containers/group.com.apple.fskit.settings/enabledModules.plist")
+        guard let data = try? Data(contentsOf: url),
+              let list = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String]
+        else { return nil }
+        return list.contains(bundleID)
+    }
+
+    /// pluginkit's flag for the module ("+", "-", or " " for no choice), or
+    /// nil when it is not registered.
+    private static func pluginkitFlag(_ bundleID: String) -> Character? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/pluginkit")
         proc.arguments = ["-m", "-v", "-p", "com.apple.fskit.fsmodule"]
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()
-        do {
-            try proc.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            guard let out = String(data: data, encoding: .utf8) else { return .unknown }
-            for raw in out.split(separator: "\n") {
-                let line = raw.trimmingCharacters(in: .whitespaces)
-                // Match the id as a whole word: "<id>(<version>)".
-                guard line.contains(bundleID + "(") else { continue }
-                // pluginkit puts a status flag first: "+" enabled, "-" disabled.
-                return line.hasPrefix("+") ? .enabled : .installedNotEnabled
-            }
-            return .notInstalled
-        } catch {
-            return .unknown
+        guard (try? proc.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        let out = String(data: data, encoding: .utf8) ?? ""
+        for line in out.split(separator: "\n") where line.contains(bundleID + "(") {
+            return line.first
         }
+        return nil
     }
 }
 
@@ -195,8 +225,8 @@ struct ContentView: View {
                 .kerning(1.2)
 
             Step(number: 1, text: "Keep **Pando** in your Applications folder.")
-            Step(number: 2, text: "Open **Login Items & Extensions**, then **File System Extensions**.")
-            Step(number: 3, text: "Turn on **Pando**.")
+            Step(number: 2, text: "Open **Login Items & Extensions** and show the extensions **By Category**.")
+            Step(number: 3, text: "Click the info button next to **File System Extensions**, turn on **Pando**, then **Done**.")
 
             Text("That is the only switch. No restart, and no security setting is lowered.")
                 .font(Theme.text(12))

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -183,6 +184,34 @@ func (r *Root) LoadWorktrees() ([]Worktree, error) {
 	return f.Worktrees, nil
 }
 
+// UpdateWorktrees reads worktrees.json, lets fn change the list, and writes
+// it back, holding a lock the whole time: several pando commands at once (five
+// agents adding worktrees) otherwise each save their own copy and the last
+// one wins.
+func (r *Root) UpdateWorktrees(fn func([]Worktree) ([]Worktree, error)) error {
+	dir := LocalDir(r.Dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	lk, err := os.OpenFile(filepath.Join(dir, "worktrees.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer lk.Close()
+	if err := syscall.Flock(int(lk.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lk.Fd()), syscall.LOCK_UN)
+	ws, err := r.LoadWorktrees()
+	if err != nil {
+		return err
+	}
+	if ws, err = fn(ws); err != nil {
+		return err
+	}
+	return r.SaveWorktrees(ws)
+}
+
 // SaveWorktrees writes .pando/local/worktrees.json.
 func (r *Root) SaveWorktrees(ws []Worktree) error {
 	sort.Slice(ws, func(i, j int) bool { return ws[i].Path < ws[j].Path })
@@ -197,11 +226,26 @@ func writeJSON(p string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+	// A temp file of its own, so two writers never share one.
+	f, err := os.CreateTemp(filepath.Dir(p), filepath.Base(p)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	return os.Rename(f.Name(), p)
 }
 
 // Settings is .pando/pando.toml. Every key is optional.

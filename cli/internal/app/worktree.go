@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 // Worktree is `pando worktree add | list | remove`.
 func Worktree(e *Env, args []string) error {
 	if len(args) == 0 {
-		return UsageError{"pando worktree add | list | remove | follow"}
+		return UsageError{"pando worktree add | list | remove | follow | mount"}
 	}
 	switch args[0] {
 	case "add":
@@ -31,14 +32,75 @@ func Worktree(e *Env, args []string) error {
 		return worktreeRemove(e, args[1:])
 	case "follow":
 		return Follow(e, args[1:])
+	case "mount":
+		return worktreeMount(e, args[1:])
 	}
 	return UsageError{"unknown worktree command " + args[0]}
+}
+
+// worktreeMount is `pando worktree mount`: mount again this machine's
+// worktrees whose daemon stopped (after a reboot, say). Sparse worktrees are
+// plain folders and need nothing.
+func worktreeMount(e *Env, args []string) error {
+	if _, err := parse(flags("worktree mount"), args); err != nil {
+		return err
+	}
+	root, err := e.root()
+	if err != nil {
+		return err
+	}
+	ws, err := root.LoadWorktrees()
+	if err != nil {
+		return err
+	}
+	// First every stale mount, so a daemon started for one worktree can
+	// mount its repo's others too.
+	for _, w := range ws {
+		if w.Kind == "fuse" || w.Kind == "fskit" {
+			worktree.ClearStale(e.Ctx, root.Abs(w.Path))
+		}
+	}
+	failed, mounted := 0, 0
+	for _, w := range ws {
+		drv, err := worktree.Pick(w.Kind, e.Home.Dir)
+		if err != nil {
+			e.warnf("%s: %v", w.Path, err)
+			failed++
+			continue
+		}
+		up, ok := drv.(interface {
+			Up(context.Context, worktree.Spec) (bool, error)
+		})
+		if !ok {
+			continue
+		}
+		entry, _ := root.Repo(w.Repo)
+		spec := worktree.Spec{Root: root.Dir, Repo: w.Repo, Branch: w.Branch, Path: w.Path, CloneURL: entry.CloneURL, ReadOnly: w.ReadOnly}
+		start := time.Now()
+		did, err := up.Up(e.Ctx, spec)
+		if err != nil {
+			e.warnf("%s: %v", w.Path, err)
+			failed++
+			continue
+		}
+		if did {
+			mounted++
+			e.printf("%s: mounted (%s) in %.1fs\n", w.Path, w.Kind, time.Since(start).Seconds())
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d worktree(s) did not mount", failed)
+	}
+	if mounted == 0 {
+		e.printf("Every worktree here is mounted.\n")
+	}
+	return nil
 }
 
 func worktreeAdd(e *Env, args []string) error {
 	fs := flags("worktree add")
 	agent := fs.String("agent", "", "the agent working in it (default: PANDO_AGENT); written as the Pando-Agent trailer")
-	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse or sparse (default: fuse on Linux with artifact-fs, else sparse)")
+	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse (default: fuse on Linux with artifact-fs, fskit on a Mac with Pando.app on, else sparse)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -103,7 +165,7 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 		}
 	}
 
-	drv, err := worktree.Pick(kind, e.Home.Dir)
+	drv, err := e.pickNew(kind)
 	if err != nil {
 		return nil, err
 	}
@@ -120,8 +182,9 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	}
 	w := config.Worktree{ID: newWorktreeID(), Repo: repo, Branch: branch, Path: wpath, Kind: drv.Kind(),
 		Agent: agent, ReadOnly: readOnly, CreatedAt: time.Now().UTC()}
-	ws = append(ws, w)
-	if err := root.SaveWorktrees(ws); err != nil {
+	if err := root.UpdateWorktrees(func(ws []config.Worktree) ([]config.Worktree, error) {
+		return append(ws, w), nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -314,8 +377,15 @@ func worktreeRemove(e *Env, args []string) error {
 	if err := drv.Remove(e.Ctx, spec); err != nil {
 		return err
 	}
-	ws = append(ws[:idx], ws[idx+1:]...)
-	if err := root.SaveWorktrees(ws); err != nil {
+	if err := root.UpdateWorktrees(func(ws []config.Worktree) ([]config.Worktree, error) {
+		out := ws[:0]
+		for _, x := range ws {
+			if x.Path != w.Path {
+				out = append(out, x)
+			}
+		}
+		return out, nil
+	}); err != nil {
 		return err
 	}
 	if srv, err := e.open(root); err == nil {

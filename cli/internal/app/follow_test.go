@@ -36,6 +36,9 @@ type fakeStream struct {
 	send     chan string // frames for the open socket
 	hangUp   chan struct{}
 	deleted  chan struct{}
+	hellos   []string // hello frames received, in order
+	closes   atomic.Int32
+	live     atomic.Int32 // socket handlers running
 }
 
 func (f *fakeStream) head() string {
@@ -74,6 +77,8 @@ func (f *fakeStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		f.live.Add(1)
+		defer f.live.Add(-1)
 		defer c.CloseNow()
 		ctx := r.Context()
 		c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"caught_up","seq":%d}`, f.seq.Load())))
@@ -87,6 +92,13 @@ func (f *fakeStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				if string(data) == "ping" {
 					c.Write(ctx, websocket.MessageText, []byte("pong"))
+					continue
+				}
+				if strings.Contains(string(data), `"type":"hello"`) {
+					f.mu.Lock()
+					f.hellos = append(f.hellos, string(data))
+					f.mu.Unlock()
+					c.Write(ctx, websocket.MessageText, []byte(`{"type":"hello_ok","machines_active":1}`))
 				}
 			}
 		}()
@@ -101,6 +113,7 @@ func (f *fakeStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				c.Close(4404, "monorepo deleted")
 				return
 			case <-gone:
+				f.closes.Add(1)
 				return
 			case <-ctx.Done():
 				return
@@ -212,7 +225,9 @@ func TestFollowerMovesMainOnAnEvent(t *testing.T) {
 		t.Fatalf("heads reads %d, query %q: want one more read, then since=40", fs.headsN.Load(), query(2))
 	}
 
-	// The monorepo is deleted (close 4404): the follower stops.
+	// The monorepo is deleted (close 4404): the follower stops. Sent once
+	// only the newest socket's handler is left to take it.
+	waitFor("the old sockets' handlers to end", func() bool { return fs.live.Load() == 1 })
 	fs.deleted <- struct{}{}
 	select {
 	case <-stopped:
@@ -281,5 +296,127 @@ func TestCaughtUpSeqAndOldName(t *testing.T) {
 	var ev frame
 	if err := json.Unmarshal([]byte(`{"type":"event","seq":21,"head":"3beea1b0aa","before":"0000","collection":"default_heads","row":{"repo":"x","default_head":"3beea1b0aa"}}`), &ev); err != nil || ev.Seq != 21 {
 		t.Fatalf("event frame: %v %+v", err, ev)
+	}
+}
+
+func (f *fakeStream) helloList() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.hellos...)
+}
+
+// newFollowRoot makes a Pando folder on a fake stream server with the given
+// worktrees recorded (no real mounts: the hello reads worktrees.json).
+func newFollowRoot(t *testing.T, h *harness, fs *fakeStream, srvURL string, ws []config.Worktree) *config.Root {
+	t.Helper()
+	root := &config.Root{Dir: filepath.Join(h.base, "acme"), Kind: "repo", Name: "acme", Server: srvURL,
+		Repos: []config.RepoEntry{{Path: ".", Name: "acme", CloneURL: "file://" + fs.bare}}}
+	if err := root.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.SaveWorktrees(ws); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func startFollower(t *testing.T, root *config.Root) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	e, _ := NewEnv(ctx, strings.NewReader(""), io.Discard, io.Discard)
+	e.Cwd = root.Dir
+	go (&follower{e: e, root: root}).run(ctx, time.Hour)
+	return cancel
+}
+
+// C25: the follower says hello with its branch worktrees, again when they
+// change and after a reconnect, and lets go of the socket when none is left.
+func TestFollowerHello(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("PANDO_TOKEN", "tok")
+	t.Setenv("PANDO_MACHINE", "box-1")
+	bare := filepath.Join(h.base, "acme.git")
+	h.git(h.base, "init", "-q", "--bare", "-b", "main", bare)
+	fs := &fakeStream{t: t, bare: bare, hasHeads: true, send: make(chan string, 4), hangUp: make(chan struct{}, 1), deleted: make(chan struct{}, 1)}
+	srv := httptest.NewServer(fs)
+	defer srv.Close()
+	root := newFollowRoot(t, h, fs, srv.URL, []config.Worktree{
+		{ID: "wt_main", Repo: ".", Branch: "main", Path: "worktrees/main", Kind: "sparse", ReadOnly: true},
+		{ID: "wt_a", Repo: ".", Branch: "feat-a", Path: "worktrees/feat-a", Kind: "sparse"},
+	})
+	defer startFollower(t, root)()
+
+	waitUntil(t, "the first hello", func() bool { return len(fs.helloList()) == 1 })
+	var hl struct {
+		Type      string   `json:"type"`
+		Machine   string   `json:"machine"`
+		Worktrees []string `json:"worktrees"`
+	}
+	json.Unmarshal([]byte(fs.helloList()[0]), &hl)
+	if hl.Type != "hello" || hl.Machine != "box-1" || strings.Join(hl.Worktrees, ",") != "wt_a" {
+		t.Fatalf("hello %s: want machine box-1 and only the branch worktree wt_a", fs.helloList()[0])
+	}
+
+	// A worktree added on this machine: a new hello on the same socket.
+	ws, _ := root.LoadWorktrees()
+	root.SaveWorktrees(append(ws, config.Worktree{ID: "wt_b", Repo: ".", Branch: "feat-b", Path: "worktrees/feat-b", Kind: "sparse"}))
+	waitUntil(t, "a hello after the worktree was added", func() bool { return len(fs.helloList()) == 2 })
+	json.Unmarshal([]byte(fs.helloList()[1]), &hl)
+	if strings.Join(hl.Worktrees, ",") != "wt_a,wt_b" {
+		t.Fatalf("second hello: %s", fs.helloList()[1])
+	}
+	fs.mu.Lock()
+	if len(fs.queries) != 1 {
+		t.Fatalf("a worktree change should not reconnect: %d sockets", len(fs.queries))
+	}
+	fs.mu.Unlock()
+
+	// A reconnect: presence lives with the socket, so hello again.
+	fs.hangUp <- struct{}{}
+	waitUntil(t, "a hello after the reconnect", func() bool { return len(fs.helloList()) == 3 })
+
+	// The last branch worktree removed: the socket closes, and stays closed.
+	root.SaveWorktrees([]config.Worktree{{ID: "wt_main", Repo: ".", Branch: "main", Path: "worktrees/main", Kind: "sparse", ReadOnly: true}})
+	waitUntil(t, "the socket to close", func() bool { return fs.closes.Load() >= 1 })
+	fs.mu.Lock()
+	n := len(fs.queries)
+	fs.mu.Unlock()
+	time.Sleep(5 * time.Second)
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.queries) != n {
+		t.Fatalf("with no branch worktree the follower opened another socket")
+	}
+}
+
+// A machine with only branch worktrees (no read-only main here) holds the
+// socket on topics=main and says hello; one with only mains holds none.
+func TestFollowerBranchOnlyAndMainsOnly(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("PANDO_TOKEN", "tok")
+	bare := filepath.Join(h.base, "acme.git")
+	h.git(h.base, "init", "-q", "--bare", "-b", "main", bare)
+	fs := &fakeStream{t: t, bare: bare, hasHeads: true, send: make(chan string, 4), hangUp: make(chan struct{}, 1), deleted: make(chan struct{}, 1)}
+	srv := httptest.NewServer(fs)
+	defer srv.Close()
+
+	root := newFollowRoot(t, h, fs, srv.URL, []config.Worktree{
+		{ID: "wt_main", Repo: ".", Branch: "main", Path: "worktrees/main", Kind: "sparse", ReadOnly: true},
+	})
+	stop := startFollower(t, root)
+	time.Sleep(4 * time.Second)
+	fs.mu.Lock()
+	if len(fs.queries) != 0 || len(fs.hellos) != 0 {
+		t.Fatalf("mains only: %d sockets, %d hellos; want none", len(fs.queries), len(fs.hellos))
+	}
+	fs.mu.Unlock()
+	stop()
+
+	root.SaveWorktrees([]config.Worktree{{ID: "wt_x", Repo: ".", Branch: "x", Path: "worktrees/x", Kind: "sparse"}})
+	defer startFollower(t, root)()
+	waitUntil(t, "a hello from a branch-only machine", func() bool { return len(fs.helloList()) == 1 })
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if !strings.Contains(fs.queries[0], "topics=main") || strings.Contains(fs.queries[0], "main%3A") {
+		t.Fatalf("branch-only query %q: want topics=main", fs.queries[0])
 	}
 }

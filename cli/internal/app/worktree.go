@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 // Worktree is `pando worktree add | list | remove`.
 func Worktree(e *Env, args []string) error {
 	if len(args) == 0 {
-		return UsageError{"pando worktree add | list | remove | follow"}
+		return UsageError{"pando worktree add | list | remove | follow | mount"}
 	}
 	switch args[0] {
 	case "add":
@@ -31,8 +32,69 @@ func Worktree(e *Env, args []string) error {
 		return worktreeRemove(e, args[1:])
 	case "follow":
 		return Follow(e, args[1:])
+	case "mount":
+		return worktreeMount(e, args[1:])
 	}
 	return UsageError{"unknown worktree command " + args[0]}
+}
+
+// worktreeMount is `pando worktree mount`: mount again this machine's
+// worktrees whose daemon stopped (after a reboot, say). Sparse worktrees are
+// plain folders and need nothing.
+func worktreeMount(e *Env, args []string) error {
+	if _, err := parse(flags("worktree mount"), args); err != nil {
+		return err
+	}
+	root, err := e.root()
+	if err != nil {
+		return err
+	}
+	ws, err := root.LoadWorktrees()
+	if err != nil {
+		return err
+	}
+	// First every stale mount, so a daemon started for one worktree can
+	// mount its repo's others too.
+	for _, w := range ws {
+		if w.Kind == "fuse" || w.Kind == "fskit" {
+			worktree.ClearStale(e.Ctx, root.Abs(w.Path))
+		}
+	}
+	failed, mounted := 0, 0
+	for _, w := range ws {
+		drv, err := worktree.Pick(w.Kind, e.Home.Dir)
+		if err != nil {
+			e.warnf("%s: %v", w.Path, err)
+			failed++
+			continue
+		}
+		up, ok := drv.(interface {
+			Up(context.Context, worktree.Spec) (bool, error)
+		})
+		if !ok {
+			continue
+		}
+		entry, _ := root.Repo(w.Repo)
+		spec := worktree.Spec{Root: root.Dir, Repo: w.Repo, Branch: w.Branch, Path: w.Path, CloneURL: entry.CloneURL, ReadOnly: w.ReadOnly}
+		start := time.Now()
+		did, err := up.Up(e.Ctx, spec)
+		if err != nil {
+			e.warnf("%s: %v", w.Path, err)
+			failed++
+			continue
+		}
+		if did {
+			mounted++
+			e.printf("%s: mounted (%s) in %.1fs\n", w.Path, w.Kind, time.Since(start).Seconds())
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d worktree(s) did not mount", failed)
+	}
+	if mounted == 0 {
+		e.printf("Every worktree here is mounted.\n")
+	}
+	return nil
 }
 
 func worktreeAdd(e *Env, args []string) error {

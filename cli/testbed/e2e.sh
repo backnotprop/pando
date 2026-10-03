@@ -139,6 +139,14 @@ grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main s
 hm=$(hydrated main)
 [ "$hm" -lt 20 ] && ok "git status in worktrees/main downloaded $hm of $total files (index-stat)" || fail "worktrees/main hydrated $hm blobs after git status"
 
+step "the daemon stops (as at a reboot); pando worktree mount brings the mounts back"
+pkill -9 -f "artifact-fs daemon" || true
+sleep 1
+pando worktree mount | sed 's/^/  /'
+grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main reads again after pando worktree mount" || fail "worktrees/main did not come back"
+[ -z "$(git -C "$wt" status --porcelain)" ] && ok "git status in feat-x works again" || fail "feat-x after mount: $(git -C "$wt" status --porcelain 2>&1 | head -3)"
+out=$(pando worktree mount) && echo "$out" | grep -qx "Every worktree here is mounted." && ok "a second pando worktree mount has nothing to do" || fail "second mount: $out"
+
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
 pando worktree remove worktrees/feat-x | sed 's/^/  /'

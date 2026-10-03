@@ -165,6 +165,77 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	return nil
 }
 
+// Up mounts an existing worktree again when its daemon stopped (a reboot, a
+// killed process). The repo's daemon mounts every worktree registered with
+// it, so one call brings back the repo's other worktrees too.
+func (f *Fuse) Up(ctx context.Context, s Spec) (bool, error) {
+	mp := f.mountPath(s)
+	// A FUSE mount outlives its daemon (stale, "transport endpoint is not
+	// connected"), and so does an FSKit volume (EIO), so a mount alone is
+	// not proof.
+	if f.daemonAlive(s) && mountWorks(mp) {
+		return false, nil
+	}
+	ClearStale(ctx, mp)
+	if f.FSKit {
+		if err := macbroker.Ensure(ctx, macbroker.AppPath(ctx), false, io.Discard); err != nil {
+			return false, fmt.Errorf("Pando.app's broker: %w", err)
+		}
+	}
+	logPath := filepath.Join(f.stateDir(s), "daemon.log")
+	var logStart int64
+	if st, err := os.Stat(logPath); err == nil {
+		logStart = st.Size()
+	}
+	if err := f.ensureDaemon(s); err != nil {
+		return false, err
+	}
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		if mountWorks(mp) {
+			return true, nil
+		}
+		if why := mountFailure(logPath, logStart, f.name(s)); why != "" {
+			return false, fmt.Errorf("%s did not mount: %s (daemon log: %s)", mp, why, logPath)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return false, fmt.Errorf("the mount did not come back at %s (daemon log: %s)", mp, logPath)
+}
+
+// mountWorks reports whether p is mounted and answers: listing it works.
+// (Listings are never cached, unlike attributes.)
+func mountWorks(p string) bool {
+	if !isMounted(p) {
+		return false
+	}
+	d, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer d.Close()
+	_, err = d.Readdirnames(1)
+	return err == nil || errors.Is(err, io.EOF)
+}
+
+// ClearStale unmounts p when it is mounted but nobody serves it, so a daemon
+// started again can mount there.
+func ClearStale(ctx context.Context, p string) {
+	if isMounted(p) && !mountWorks(p) {
+		forceUnmount(ctx, p)
+	}
+}
+
+// daemonAlive reports whether the repo's daemon is running.
+func (f *Fuse) daemonAlive(s Spec) bool {
+	b, err := os.ReadFile(filepath.Join(f.stateDir(s), "daemon.pid"))
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	return err == nil && alive(pid)
+}
+
 // Refresh moves a read-only main to the server's main, or a reference to
 // its pointer's commit, without writing through the mount: it fetches into
 // the worktree's git folder, moves the ref, updates the index with a

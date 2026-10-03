@@ -82,7 +82,25 @@ try {
   b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches/large`, S);
   check("and its branch is recorded", b.status === 200, `${b.status}`);
 
-  // Without DOOR_TEST the header does nothing (checked when the server runs without it).
+  // A failed Artifacts call (X-Pando-Test-Fail: the first attempt throws, unsent): never a bare 500.
+  const FAIL = ["-c", "http.extraHeader=X-Pando-Test-Fail: 1"];
+  git(["checkout", "-qb", "small-fail", "main"], src);
+  writeFileSync(join(src, "f.txt"), "after a failed call\n");
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "small-fail"], src);
+  g = git(["push", "-q", url, "small-fail"], src, FAIL);
+  b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches/small-fail`, S);
+  check("a small push whose first Artifacts call fails goes through on the retry", g.ok && b.status === 200, g.ok ? `${b.status}` : g.out.slice(-200));
+  git(["checkout", "-qb", "large-fail", "main"], src);
+  writeFileSync(join(src, "big2.bin"), randomBytes(1_600_000));
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "large-fail"], src);
+  g = git(["push", "-q", url, "large-fail"], src, FAIL);
+  check("a push over 1 MiB whose Artifacts call fails gets a plain message, not a 500", !g.ok && /couldn't take this push right now; push again/.test(g.out) && !/HTTP 500|RPC failed/.test(g.out), g.out.split("\n").filter(Boolean).slice(0, 2).join(" | "));
+  b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches/large-fail`, S);
+  check("and nothing was pushed", b.status === 404, `${b.status}`);
+
+  // Without DOOR_TEST the headers do nothing (checked when the server runs without it).
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

@@ -20,7 +20,7 @@ import { handleHistoryBatch, type HistoryMessage } from "./monorepo/files";
 import { objectsClient } from "./objects";
 import { monorepoStub } from "./monorepo/session";
 import { signin } from "./accounts/signin";
-import { handleFactsBatch, type FactsMessage } from "./monorepo/facts";
+import { factsTestRoute, handleFactsBatch, type FactsMessage } from "./monorepo/facts";
 import { handleDeadDeliveries, handleDeliveries, type DeliveryMessage } from "./monorepo/hooks";
 import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
@@ -33,6 +33,7 @@ export { AccountsObject } from "./accounts/object";
 export { MetaLayerObject } from "./live/object";
 export { FeedObject } from "./feed/object";
 export { FeedDrain } from "./feed/consumer";
+export { FactsDrain } from "./monorepo/facts";
 export type { Env };
 
 const META_RE = /^\/v1\/monorepos\/[^/]+\/[^/]+\/meta(\/|$)/;
@@ -96,6 +97,7 @@ export default {
     if (url.pathname === "/v1/users" || url.pathname === "/v1/logout" || url.pathname.startsWith("/v1/login/")) return signin.fetch(request, env, ctx);
     if (META_RE.test(url.pathname)) return meta(request, env);
     if (isFeedPath(url.pathname)) return handleFeed(request, env);
+    if (url.pathname === "/v1/_facts/test") return factsTestRoute(request, env);
     if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
     return api.fetch(request, env, ctx);
   },

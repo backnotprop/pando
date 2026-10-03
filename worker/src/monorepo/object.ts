@@ -17,7 +17,8 @@ import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
-import { STALE_GRACE_MS } from "./facts";
+import { STALE_GRACE_MS, type FactsMessage } from "./facts";
+import { FactsOut } from "./facts-out";
 import type { BranchList, BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
@@ -152,6 +153,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private feed: FeedOut;
   /** The Machines tab (machines.ts): one row per (login, credential). */
   private machines: Machines;
+  /** Branch facts jobs, drained by RPC (facts-out.ts). */
+  private factsOut: FactsOut;
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
 
@@ -160,6 +163,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.sql = ctx.storage.sql;
     this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
     this.machines = new Machines(ctx, this.sql, (e) => this.publish(e));
+    this.factsOut = new FactsOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t));
     this.ci = new CiStore(ctx, env, this.sql, {
       info: () => this.info(),
       publish: (e) => this.publish(e),
@@ -202,6 +206,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.feed.ensureSchema();
     this.machines.ensureSchema();
+    this.factsOut.ensureSchema();
     this.ci.ensureSchema();
   }
 
@@ -915,6 +920,7 @@ export class MonorepoObject extends DurableObject<Env> {
     ).map((r) => r.id);
     if (unsent.length) await this.sendDeliveries(unsent);
     await this.feed.alarm();
+    await this.factsOut.alarm();
   }
 
   // ── Object sizes (git protocol v2 object-info) ───────────────────────────
@@ -1129,13 +1135,14 @@ export class MonorepoObject extends DurableObject<Env> {
   private queueFacts(
     m: ({ type: "sweep"; repo: string; main: string } | { type: "branch"; repo: string; branch: string; head: string }) & { push?: { seq: number; before: string } },
   ): void {
-    const monorepo = this.info()?.id;
-    if (!monorepo || !this.env.BRANCH_FACTS) return;
-    this.ctx.waitUntil(
-      this.env.BRANCH_FACTS.send({ ...m, monorepo }).catch((err) =>
-        console.error("queueing branch facts failed:", err instanceof Error ? err.message : String(err)),
-      ),
-    );
+    // The outbox (facts-out.ts), drained at once by RPC; pando-branch-facts keeps
+    // its consumer for messages sent before this, until the outbox is measured.
+    this.factsOut.add(m as Omit<FactsMessage, "monorepo">);
+  }
+
+  /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */
+  testFactsOutbox(set: { fail?: number } = {}) {
+    return this.factsOut.test(set);
   }
 
   /** Main's head as recorded (null when unknown or the repo is empty). */

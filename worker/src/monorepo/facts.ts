@@ -11,7 +11,9 @@
 //   list call, once they have been stale for STALE_GRACE_MS.
 // The object never calls Artifacts for this; the consumer and the list route do.
 
+import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
+import type { FactsJob } from "./facts-out";
 import { HttpError } from "../http";
 import { currentTiming, note, timed, timedStub } from "../timing";
 import { withRepo } from "./artifacts";
@@ -105,6 +107,43 @@ export async function handleFactsBatch(batch: MessageBatch<FactsMessage>, env: E
   for (const m of batch.messages.filter((x) => x.body.type === "sweep")) await run(m);
 }
 
+/**
+ * The facts drain (C25-LIVE-HOME.md step 2): the monorepo object's outbox
+ * calls this by RPC with its due jobs. One-branch jobs run SWEEP_PARALLEL at
+ * a time, sweeps one after another, as the queue consumer did. Answers, per
+ * job, whether it is done: main having moved on, or the repo being gone,
+ * counts as done; anything else is retried by the object.
+ */
+export class FactsDrain extends WorkerEntrypoint<Env> {
+  async run(jobs: FactsJob[]): Promise<{ ok: boolean[]; error: string | null }> {
+    const ok = jobs.map(() => false);
+    let error: string | null = null;
+    const one = async (i: number) => {
+      const b = jobs[i];
+      try {
+        await timed("drain", { route: `facts.${b.type}`, monorepo_id: b.monorepo, repo: b.repo, facts_age_ms: Math.max(0, Date.now() - b.created) }, () =>
+          runFacts(this.env, b).finally(() => {
+            const t = currentTiming();
+            if (t) t.fields.facts_job_ms = Date.now() - t.start - Number(t.fields.push_summary_ms ?? 0);
+          }),
+        );
+        ok[i] = true;
+      } catch (err) {
+        if (err instanceof MainMoved || (err instanceof HttpError && err.status === 404)) {
+          ok[i] = true; // main moved on (its own sweep recomputes), or the repo is gone
+          return;
+        }
+        error ??= err instanceof Error ? err.message : String(err);
+        console.error(`branch facts (${b.type} ${b.repo}) failed:`, err instanceof Error ? err.message : String(err));
+      }
+    };
+    const idx = jobs.map((_, i) => i);
+    await pool(idx.filter((i) => jobs[i].type === "branch"), SWEEP_PARALLEL, one);
+    for (const i of idx.filter((i) => jobs[i].type === "sweep")) await one(i);
+    return { ok, error };
+  }
+}
+
 export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: number; abandoned: boolean }> {
   const stub = stubOf(env, m.monorepo);
   const [r, info] = await Promise.all([stub.getRepo(m.repo), stub.info()]);
@@ -145,4 +184,21 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
     });
   });
   return { computed, abandoned };
+}
+
+/**
+ * Tests only (FACTS_TEST=1 and the bootstrap secret): GET
+ * /v1/_facts/test?monorepo=<id> shows a monorepo's facts outbox; POST
+ * {monorepo, fail} makes its next `fail` drains fail.
+ */
+export async function factsTestRoute(request: Request, env: Env): Promise<Response> {
+  if (env.FACTS_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+  const { credential } = await import("../http");
+  const { isBootstrap } = await import("./session");
+  if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
+  const url = new URL(request.url);
+  const b = request.method === "POST" ? ((await request.json().catch(() => ({}))) as { monorepo?: string; fail?: number }) : {};
+  const id = b.monorepo ?? url.searchParams.get("monorepo");
+  if (!id) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+  return Response.json(await stubOf(env, id).testFactsOutbox(b.fail === undefined ? {} : { fail: b.fail }));
 }

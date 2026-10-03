@@ -627,7 +627,7 @@ export class FeedOut {
    * running in the background. The object's other alarm user (hook
    * re-sends, 30 s) may move it; alarm() then re-arms whatever is still due.
    */
-  private armAt(t: number): void {
+  armAt(t: number): void {
     const cur = Number(this.get("alarm_at") ?? 0);
     if (cur > Date.now() && cur <= t) return;
     this.set("alarm_at", String(t));

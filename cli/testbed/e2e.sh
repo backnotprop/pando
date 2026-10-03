@@ -104,6 +104,30 @@ git push -q 2>&1 | sed 's/^/  /'
 [ "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/feat-x | cut -f1)" ] && ok "git push: the server's feat-x is HEAD" || fail "push did not land"
 if git push origin HEAD:main 2>/dev/null; then fail "a push to main went through"; else ok "a push to main is refused"; fi
 
+step "git settings for the Pando host, and pushes Pando cannot take"
+url=$(git -C /work/acme/worktrees/main remote get-url origin)
+case "$url" in
+  http*)
+    for w in /work/acme/worktrees/main "$wt"; do
+      v=$(git -C "$w" config --get-urlmatch http.version "$url")
+      b=$(git -C "$w" config --get-urlmatch http.postbuffer "$url")
+      [ "$v" = "HTTP/1.1" ] && [ "$b" = "104857600" ] && ok "$(basename "$w"): http.version HTTP/1.1, http.postBuffer 104857600 for the Pando host" || fail "$(basename "$w"): version=$v postBuffer=$b"
+    done
+    [ -z "$(git -C "$wt" config --get-urlmatch http.version https://github.com/x/y.git)" ] && ok "other hosts keep git's defaults" || fail "settings leaked to other hosts"
+    ;;
+  *) echo "  note the HTTP settings apply to http(s) servers; this run uses $url" ;;
+esac
+cd "$wt"
+head -c 33000000 /dev/urandom > huge.bin && git add huge.bin && git commit -q -m "a 33 MB file"
+if out=$(git push -q 2>&1); then fail "a 33 MB file was pushed"; else
+  echo "$out" | grep -q "huge.bin  33.0 MB" && ok "a 33 MB file is refused before sending, by name" || fail "33 MB: $out"; fi
+git reset -q --hard HEAD~1
+head -c 6000000 /dev/urandom > r.bin && git add r.bin && git commit -q -m "6 MB"
+if out=$(PANDO_PUSH_LIMIT=5000000 git push -q 2>&1); then fail "a push over the (lowered) limit went"; else
+  echo "$out" | grep -q "split it into several pushes" && ok "a push over the push limit is refused, with how to split (limit lowered to 5 MB)" || fail "push limit: $out"; fi
+git reset -q --hard HEAD~1
+cd /work/acme
+
 step "worktrees/main is read-only and follows a merge"
 cd /work/acme
 if (echo x > worktrees/main/README.md) 2>/dev/null; then fail "wrote into worktrees/main"; else ok "writing into worktrees/main fails ($(touch worktrees/main/x 2>&1 | sed 's/.*: //'))"; fi

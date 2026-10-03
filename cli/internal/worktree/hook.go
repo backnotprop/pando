@@ -60,7 +60,8 @@ type Identity struct {
 	UserEmail string
 }
 
-// InstallHook writes the hooks into gitDir/hooks, points core.hooksPath at
+// InstallHook writes the hooks into gitDir/hooks (the trailers, and the
+// pre-push size check in prepush.go), points core.hooksPath at
 // them (so a global hooks folder does not hide them), and sets the pando.*
 // config the hook reads.
 func InstallHook(ctx context.Context, gitDir string, id Identity) error {
@@ -72,6 +73,9 @@ func InstallHook(ctx context.Context, gitDir string, id Identity) error {
 		if err := os.WriteFile(filepath.Join(hooks, name), []byte(hookScript), 0o755); err != nil {
 			return err
 		}
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte(prePushScript), 0o755); err != nil {
+		return err
 	}
 	g := gitx.Cmd{Env: []string{"GIT_DIR=" + gitDir}}
 	set := [][2]string{

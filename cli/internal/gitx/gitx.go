@@ -79,6 +79,24 @@ func (c Cmd) Stream(ctx context.Context, stdout, stderr io.Writer, args ...strin
 	return nil
 }
 
+// RunShell runs a shell script with args ($1, $2, ...), in c.Dir with
+// c.Env and c.Stdin, the way git runs a hook. A failure is an *Error whose
+// Stderr is the script's.
+func (c Cmd) RunShell(ctx context.Context, script string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "sh", append([]string{"-c", script, "pando-hook"}, args...)...)
+	cmd.Dir = c.Dir
+	cmd.Env = append(os.Environ(), c.Env...)
+	if c.Stdin != nil {
+		cmd.Stdin = c.Stdin
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), &Error{Args: []string{"(hook)"}, Stderr: stderr.String(), Err: err}
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 // In is a shorthand for Cmd{Dir: dir}.
 func In(dir string) Cmd { return Cmd{Dir: dir} }
 

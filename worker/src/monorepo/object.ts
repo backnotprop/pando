@@ -1066,7 +1066,9 @@ export class MonorepoObject extends DurableObject<Env> {
         else for (const e of replay) server.send(JSON.stringify({ type: "event", ...e }));
       }
     }
-    server.send(JSON.stringify({ type: "caught_up", seq: head }));
+    // The `feed` topic: what was sent after feed_since, in the order it went out (C25).
+    if (topics.includes("feed")) this.feed.replay(server, url.searchParams.get("feed_since"));
+    server.send(JSON.stringify({ type: "caught_up", seq: head, ...(topics.includes("feed") ? { feed_n: this.feed.feedHead() } : {}) }));
     return new Response(null, { status: 101, webSocket: client });
   }
 

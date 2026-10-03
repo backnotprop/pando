@@ -841,9 +841,17 @@ paths:
         `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
         `meta` (meta_files and presence), `kind:<kind>`, `feed` (the
         activity lines as the person's feed shows them, as
-        `{"type": "feed", "event": FeedEvent}` frames: the home uses it for a
-        monorepo of more than 100 members). `pando worktree follow` needs
-        only `main:<repo>`.
+        `{"type": "feed", "n", "event": FeedEvent}` frames: the home uses it
+        for a monorepo of more than 100 members, and a monorepo's pages may).
+        `pando worktree follow` needs only `main:<repo>`.
+
+        The `feed` topic's lines are numbered `n` in the order they go out
+        (a push's line goes out when its commit count is known, so `n` is not
+        `seq` order). `caught_up` then carries `feed_n`, the last number
+        sent. A socket that drops reconnects with `feed_since=<the last n it
+        saw>` and first gets every line sent after it (at most 500, else one
+        `{"type": "feed_resync", "feed_n"}`: refetch, then reconnect with that
+        `feed_n`).
 
         Presence (the home's `machines_active` and `worktrees_active`): a
         follower sends, after the socket opens and whenever a worktree is
@@ -881,6 +889,10 @@ paths:
         - name: topics
           in: query
           schema: { type: string, default: all }
+        - name: feed_since
+          in: query
+          description: "With `topics` including `feed`, on a WebSocket: replay the `feed` lines numbered after this."
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: A page of events

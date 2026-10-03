@@ -169,18 +169,33 @@ try {
   };
   await new Promise((r) => (ws.onopen = r));
   ws.send(JSON.stringify({ type: "hello" }));
+  // Each monorepo's own socket, as the web's monorepo page holds it: when it drops, it reconnects with
+  // feed_since=<the last line number it saw> and the server replays what it missed.
   const monoSockets = [];
-  for (const m of made.slice(0, Math.min(made.length, Math.max(LIVE, 1)))) {
-    const ms = new WebSocket(`${WS_}/v1/monorepos/${me}/${m}/events?topics=feed`, { headers: { authorization: `Bearer ${S}` } });
+  const drops = [];
+  let stopping = false;
+  const watch = async (m, since = null) => {
+    const ms = new WebSocket(`${WS_}/v1/monorepos/${me}/${m}/events?topics=feed${since !== null ? `&feed_since=${since}` : ""}`, { headers: { authorization: `Bearer ${S}` } });
+    let last = since ?? 0;
     ms.onmessage = (e) => {
       try {
         const f = JSON.parse(e.data);
-        if (f.type === "feed") seen(f, performance.now(), direct, pushDirect);
+        if (f.type === "caught_up" && since === null) last = f.feed_n ?? 0;
+        if (f.type === "feed") {
+          last = Math.max(last, f.n ?? 0);
+          seen(f, performance.now(), direct, pushDirect);
+        }
       } catch {}
+    };
+    ms.onclose = (e) => {
+      if (stopping) return;
+      drops.push({ m, code: e.code, at: new Date().toISOString() });
+      watch(m, last);
     };
     await new Promise((r) => (ms.onopen = r));
     monoSockets.push(ms);
-  }
+  };
+  for (const m of made.slice(0, Math.min(made.length, Math.max(LIVE, 1)))) await watch(m);
   const sent = new Map();
   for (let k = 0; k < LIVE; k++) {
     const m = made[k % made.length];
@@ -216,7 +231,20 @@ try {
   const pdd = [...pushSent].filter(([k]) => pushDirect.has(k)).map(([k, v]) => pushDirect.get(k) - v.t - v.git);
   say(`  a push to its monorepo's socket (topics=feed, after the facts job; ${pdd.length}/${pushSent.size})  ${pdd.length ? fmt(pdd) : "none"}`);
   ws.close();
+  stopping = true;
   for (const ms of monoSockets) ms.close();
+  say(`  monorepo sockets that dropped and reconnected with feed_since: ${drops.length}${drops.length ? " " + JSON.stringify(drops) : ""}`);
+  // The Machines tab: the pushing machine's row shows its last push, with the facts job's numbers.
+  {
+    const lastK = Math.min(PUSHES, NEEDS * 50) - 1;
+    const m = made[lastK % NEEDS];
+    let row = null;
+    for (let i = 0; i < 50 && !(row?.last_activity?.branch === `p${lastK}` && typeof row.last_activity.summary?.commits === "number"); i++) {
+      row = ((await call("GET", `/v1/monorepos/${me}/${m}/machines`, S)).json?.machines ?? []).find((x) => x.login === me) ?? null;
+      if (!(row?.last_activity?.branch === `p${lastK}` && typeof row?.last_activity?.summary?.commits === "number")) await sleep(200);
+    }
+    say(`  machines: the pusher's row after the last push: ${JSON.stringify({ name: row?.name, kind: row?.last_activity?.kind, branch: row?.last_activity?.branch, commits: row?.last_activity?.summary?.commits })}`);
+  }
 
   // ── Past the window: trim the feed to nothing; pages read the monorepos' logs ──
   if (TEST_ROUTE) {

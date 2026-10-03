@@ -1767,7 +1767,7 @@ components:
     Login:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"
-      description: "A user's login, which is their namespace (organizations share the same space, later): 1 to 39 lower-case letters, digits and single hyphens, no hyphen at either end (input in any case is lowered). Reserved, because a namespace is the first URL segment: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, orgs, users. A login made at sign-in comes from the email's local part, skipping reserved and taken names (`base`, `base-2`, ... `base-999`, then a random tail)."
+      description: "A user's login, which is their namespace (organizations share the same space, later): 1 to 39 lower-case letters, digits and single hyphens, no hyphen at either end (input in any case is lowered). Reserved, because a namespace is the first URL segment: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, orgs, users, docs. A login made at sign-in comes from the email's local part, skipping reserved and taken names (`base`, `base-2`, ... `base-999`, then a random tail)."
     MemberRole:
       type: string
       enum: [owner, member]

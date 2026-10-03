@@ -429,6 +429,7 @@ describe("namespaces", () => {
     expect(namespaceProblem("ana.lima")).toBe("invalid");
     expect(namespaceProblem("v1")).toBe("reserved");
     expect(namespaceProblem("settings")).toBe("reserved");
+    expect(namespaceProblem("docs")).toBe("reserved"); // the app's /docs goes to the docs site
   });
   it("owner/name from a path, matched without case", async () => {
     const { monorepoRef } = await import("../src/monorepo/names");

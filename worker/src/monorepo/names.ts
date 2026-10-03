@@ -14,7 +14,7 @@ const SLUG_RE = /^[a-z0-9](?:[a-z0-9._]|-(?!-))*$/;
 const NAMESPACE_RE = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/;
 /** A namespace takes the first URL segment: never one of the Worker's own paths or the web app's top-level pages. */
 export const RESERVED_NAMESPACES = new Set([
-  "v1", "healthz", "login", "logout", "settings", "assets", "fonts", "new", "api", "app", "static", "orgs", "users",
+  "v1", "healthz", "login", "logout", "settings", "assets", "fonts", "new", "api", "app", "static", "orgs", "users", "docs",
 ]);
 const SHA_RE = /^[0-9a-f]{40}$/;
 

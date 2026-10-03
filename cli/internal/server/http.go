@@ -253,10 +253,25 @@ func (h *HTTP) GetBranch(ctx context.Context, m, repo, b string) (*Branch, error
 	return out, err
 }
 
+// CreateBranch makes branch b off main. Making it is idempotent (an existing
+// branch is not an error), so a server error is tried again, twice: with
+// five agents adding worktrees at once, pando-dev answered 2 of 5 with
+// "Artifacts could not unpack" (HTTP 502), 2026-10-03.
 func (h *HTTP) CreateBranch(ctx context.Context, m, repo, b string) (bool, error) {
-	_, _, err := h.do(ctx, request{method: "POST", path: repoPath(m, repo) + "/branches", body: map[string]string{"name": b}}, nil)
-	if Code(err) == "branch_exists" || (StatusOf(err) == http.StatusConflict && Code(err) == "") {
-		return false, nil
+	var err error
+	for attempt := 1; ; attempt++ {
+		_, _, err = h.do(ctx, request{method: "POST", path: repoPath(m, repo) + "/branches", body: map[string]string{"name": b}}, nil)
+		if Code(err) == "branch_exists" || (StatusOf(err) == http.StatusConflict && Code(err) == "") {
+			return false, nil
+		}
+		if err == nil || StatusOf(err) < 500 || attempt == 3 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return false, err
+		case <-time.After(time.Duration(attempt) * 700 * time.Millisecond):
+		}
 	}
 	return err == nil, err
 }

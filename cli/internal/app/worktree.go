@@ -120,8 +120,9 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	}
 	w := config.Worktree{ID: newWorktreeID(), Repo: repo, Branch: branch, Path: wpath, Kind: drv.Kind(),
 		Agent: agent, ReadOnly: readOnly, CreatedAt: time.Now().UTC()}
-	ws = append(ws, w)
-	if err := root.SaveWorktrees(ws); err != nil {
+	if err := root.UpdateWorktrees(func(ws []config.Worktree) ([]config.Worktree, error) {
+		return append(ws, w), nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -314,8 +315,15 @@ func worktreeRemove(e *Env, args []string) error {
 	if err := drv.Remove(e.Ctx, spec); err != nil {
 		return err
 	}
-	ws = append(ws[:idx], ws[idx+1:]...)
-	if err := root.SaveWorktrees(ws); err != nil {
+	if err := root.UpdateWorktrees(func(ws []config.Worktree) ([]config.Worktree, error) {
+		out := ws[:0]
+		for _, x := range ws {
+			if x.Path != w.Path {
+				out = append(out, x)
+			}
+		}
+		return out, nil
+	}); err != nil {
 		return err
 	}
 	if srv, err := e.open(root); err == nil {

@@ -268,6 +268,17 @@ func (f *Fuse) cleanState(s Spec) {
 // ensureDaemon starts the repo's artifact-fs daemon unless it is running.
 func (f *Fuse) ensureDaemon(s Spec) error {
 	state := f.stateDir(s)
+	// Several worktree adds at once (agents) must start one daemon, not one
+	// each: two daemons on one state root fight over the same mounts.
+	lk, err := os.OpenFile(filepath.Join(state, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lk.Close()
+	if err := syscall.Flock(int(lk.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lk.Fd()), syscall.LOCK_UN)
 	pidFile := filepath.Join(state, "daemon.pid")
 	if b, err := os.ReadFile(pidFile); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && alive(pid) {

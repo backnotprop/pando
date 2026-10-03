@@ -253,15 +253,32 @@ or `{"unchanged": true, "version"}` when the file already holds those bytes.
 `hello`, `{"id", "author", "machine", "agent", "client", "connected_at"}`
 (`client` is hello's optional `client` field).
 
-**`GET tree?prefix=<path prefix>`**: every current path in one call, sorted,
-each as a history entry (above): `{"head", "prefix", "files": [...]}`.
-Deleted paths are left out. `prefix` is a plain string match on the path.
+**`GET tree`**: the current paths, sorted, a page at a time, each as a
+history entry (above). Deleted paths are left out.
+
+- `prefix=<string>`: paths that start with it (a plain string match).
+- `dir=<folder>`: one folder (`""` is the root): the files directly in it,
+  and on the first page its subfolders with how many files each holds.
+- `limit=`: 1 to 5,000, default 1,000. `after=<path>`: continue after that
+  path; pass the previous page's `next`.
+- Not both `prefix` and `dir` (400).
+
+```json
+{"head": 431, "prefix": "docs/", "dir": "docs", "files": [...],
+ "folders": [{"name": "deep", "files": 12}], "next": "docs/two.md"}
+```
+
+`next` is `null` on the last page. `dir` and `folders` are there only with
+`dir=`. Both filters are a range on the path index, so a page costs its own
+size, not the tree's: on 60,000 files a page of 1,000 is 310 KB in 5 ms, and
+a folder listing 2 to 30 ms.
 
 **`GET references`**: the reference pointers under `.pando/references/`
 (formats.md, section 4), parsed:
 `{"head", "references": [{"path", "url", "ref", "commit", "version", "error"}]}`.
 `path` is the reference's folder (`research/infra/oak`); `error` says why
-a pointer did not parse.
+a pointer did not parse. `url` never shows a user or password: they are
+removed (a live save of such a pointer is refused, see `credentials`).
 
 Added by the web-api lane (2026-10-03) for the web screens; the live lane
 owns this contract.

@@ -17,6 +17,8 @@ import { EVENT_STREAM } from "../monorepo/stream";
 export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
+const TREE_LIMIT = 1000; // GET tree: files per page by default
+const TREE_MAX = 5000; // and at most
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
 const GROUP_MS = 2_000; // paths due within this of each other share a commit
 const RETRY_MIN_MS = 30_000;
@@ -91,6 +93,21 @@ export interface MainChange {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
+}
+
+// A reference url as shown to people: without a user or password. New
+// pointers with credentials are refused (rules.ts); older ones, or ones
+// merged on main, are shown without them.
+function withoutCredentials(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (!u.username && !u.password) return raw;
+    u.username = "";
+    u.password = "";
+    return u.toString();
+  } catch {
+    return raw; // git@host:path names a user, never a password
+  }
 }
 
 // A name from the client (author, machine, agent), kept short: it lives in
@@ -727,11 +744,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         at + QUIET_MS,
       );
     }
-    const entry = this.historyEntry(this.row(version));
-    this.emit({
-      kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
-      repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: entry,
-    });
+    if (EVENT_STREAM && this.env.MONOREPO) {
+      // Built only while the event stream is on (it is on hold): one row read per save.
+      this.emit({
+        kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
+        repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: this.historyEntry(this.row(version)),
+      });
+    }
     return version;
   }
 
@@ -788,18 +807,59 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- the tree and references (A10) ----
 
-  // Every current path, with its latest version, in one call. ?prefix= narrows it.
+  // Current paths, sorted, a page at a time (meta-sync.md, "GET tree").
+  //   ?prefix=  paths that start with it (a plain string match)
+  //   ?dir=     one folder: its files, and on the first page its subfolders with file counts
+  //   ?limit=   1 to 5000, default 1000;  ?after=<path> continues from `next`
+  // Both filters are a range on the path index; nothing reads the whole tree
+  // into memory, and the object keeps serving saves between pages.
   private tree(url: URL): Response {
-    const prefix = url.searchParams.get("prefix") ?? "";
+    const q = url.searchParams;
+    const dir = q.get("dir");
+    if (dir !== null && q.get("prefix") !== null) return fail(400, "invalid_input", "send prefix or dir, not both");
+    const folder = dir === null ? null : dir.replace(/^\/+|\/+$/g, "");
+    const prefix = folder === null ? (q.get("prefix") ?? "") : folder === "" ? "" : `${folder}/`;
+    const limit = Math.min(Math.max(int(q.get("limit"), TREE_LIMIT), 1), TREE_MAX);
+    const after = q.get("after") ?? "";
+    // Every path that starts with `prefix` sorts in [prefix, prefix + U+10FFFF):
+    // SQLite compares UTF-8 bytes, and U+10FFFF is the largest character.
+    const upper = prefix + "\u{10FFFF}";
+    const onlyHere = folder === null ? "" : "AND instr(substr(f.path, length(?1) + 1), '/') = 0";
     const rows = this.sql
       .exec<any>(
         `SELECT v.* FROM files f JOIN versions v ON v.version = f.version
-         WHERE f.deleted = 0 AND substr(f.path, 1, ?) = ? ORDER BY f.path`,
-        prefix.length,
+         WHERE f.deleted = 0 AND f.path >= ?1 AND f.path < ?2 AND f.path > ?3 ${onlyHere}
+         ORDER BY f.path LIMIT ?4`,
         prefix,
+        upper,
+        after,
+        limit + 1,
       )
       .toArray() as VersionRow[];
-    return json({ head: this.head(), prefix, files: rows.map((r) => this.historyEntry(r)) });
+    const more = rows.length > limit;
+    if (more) rows.pop();
+    const body: Record<string, unknown> = {
+      head: this.head(),
+      prefix,
+      files: rows.map((r) => this.historyEntry(r)),
+      next: more ? rows[rows.length - 1].path : null,
+    };
+    if (folder !== null) {
+      body.dir = folder;
+      if (!after) {
+        body.folders = this.sql
+          .exec<any>(
+            `SELECT substr(rest, 1, instr(rest, '/') - 1) AS name, COUNT(*) AS files FROM (
+               SELECT substr(path, length(?1) + 1) AS rest FROM files
+               WHERE deleted = 0 AND path >= ?1 AND path < ?2
+             ) WHERE instr(rest, '/') > 0 GROUP BY name ORDER BY name`,
+            prefix,
+            upper,
+          )
+          .toArray();
+      }
+    }
+    return json(body);
   }
 
   // References (formats.md, section 4): each pointer under .pando/references/, parsed.
@@ -819,7 +879,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         const t = parseToml(new TextDecoder().decode(this.blob(r.sha))) as Record<string, unknown>;
         return {
           path,
-          url: typeof t.url === "string" ? t.url : null,
+          url: typeof t.url === "string" ? withoutCredentials(t.url) : null,
           ref: typeof t.ref === "string" ? t.ref : null,
           commit: typeof t.commit === "string" ? t.commit : null,
           version: r.version,

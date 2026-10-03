@@ -15,7 +15,7 @@
 import type { Env } from "../env";
 import { accounts } from "../accounts/auth";
 import { monorepoStub } from "../monorepo/session";
-import { timed, timedStub } from "../timing";
+import { note, timed, timedStub } from "../timing";
 import { pool } from "../monorepo/views";
 import type { FeedObject } from "./object";
 import { BACKFILL, type FeedEvent, type FeedMessage } from "./shape";
@@ -28,7 +28,21 @@ export function feedStub(env: Env, login: string): DurableObjectStub<FeedObject>
 const PARALLEL = 20;
 
 export async function handleFeedBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<void> {
-  await timed("queue", { route: "feed", messages: batch.messages.length }, () => runBatch(batch, env));
+  // Per hop (timing.ts line): queue_delay_ms, the longest a message of this batch waited in pando-feed;
+  // event_age_ms, the oldest line's age since its monorepo recorded it (a push's includes the facts job).
+  const t = Date.now();
+  let age = 0;
+  for (const m of batch.messages) {
+    if (m.body.type !== "events") continue;
+    for (const e of m.body.events) age = Math.max(age, t - Date.parse(e.at));
+  }
+  const fields = {
+    route: "feed",
+    messages: batch.messages.length,
+    queue_delay_ms: Math.max(0, ...batch.messages.map((m) => t - m.timestamp.getTime())),
+    ...(age ? { event_age_ms: age } : {}),
+  };
+  await timed("queue", fields, () => runBatch(batch, env));
 }
 
 async function runBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<void> {
@@ -45,6 +59,7 @@ async function runBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<voi
       perLogin.set(login, p);
     }
   }
+  const w0 = Date.now();
   await pool([...perLogin], PARALLEL, async ([login, p]) => {
     try {
       await feedStub(env, login).addEvents([...p.groups].map(([monorepo, events]) => ({ monorepo, events })));
@@ -53,6 +68,7 @@ async function runBatch(batch: MessageBatch<FeedMessage>, env: Env): Promise<voi
       for (const m of p.msgs) failed.add(m);
     }
   });
+  if (perLogin.size) note({ feed_write_ms: Date.now() - w0, feeds: perLogin.size });
   // Summaries and memberships, one message at a time (each fans out or reads on its own).
   for (const msg of batch.messages) {
     const b = msg.body;

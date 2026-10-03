@@ -101,6 +101,10 @@ pando diff feat-x | sed 's/^/  /'
 pando merge feat-x | sed 's/^/  /'
 grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main shows the merged change" || fail "main did not follow the merge"
 [ -f worktrees/main/notes.txt ] && ok "worktrees/main has the merged notes.txt" || fail "notes.txt missing in main"
+[ -z "$(git -C worktrees/main status --porcelain)" ] && ok "git status in worktrees/main is clean after the merge" || fail "main status: $(git -C worktrees/main status --porcelain | head -3)"
+# Known (fork): the first git status in any fresh ArtifactFS mount reads
+# every file, because its index has no stat data. Reported, not failed.
+echo "  note worktrees/main has downloaded $(hydrated main) of $total files after git status"
 
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
@@ -136,6 +140,7 @@ if (echo x > "$ref/package.json") 2>/dev/null; then fail "wrote into a reference
 pando reference update "$ref" | sed 's/^/  /'
 [ "$(git -C "$ref" rev-parse HEAD)" = "$newest" ] && ok "reference update moved it to ${newest:0:7}" || fail "still at $(git -C "$ref" rev-parse --short HEAD)"
 grep -q "commit = \"$newest\"" ".pando/references/$ref.toml" && ok "and rewrote the pointer" || fail "pointer not rewritten"
+[ -z "$(git -C "$ref" status --porcelain)" ] && ok "git status in the reference is clean after the move" || fail "reference status: $(git -C "$ref" status --porcelain | head -3)"
 
 echo
 echo "PASS: $pass checks"

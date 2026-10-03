@@ -200,3 +200,36 @@ func ReadToken(r io.Reader) (string, error) {
 	}
 	return t, nil
 }
+
+// Credential is this machine's credential for a server: PANDO_TOKEN, else
+// ~/.pando/credentials/<host>. For packages that talk to the server outside
+// the commands (internal/meta). Never print or log it.
+func Credential(server string) (string, error) {
+	h, err := LoadHome()
+	if err != nil {
+		return "", err
+	}
+	return h.Token(server)
+}
+
+// Author is who this machine is signed in as on a server, as git writes an
+// author ("Name <email>"), and the machine name. Empty author when not
+// signed in.
+func Author(server string) (author, machine string) {
+	h, err := LoadHome()
+	if err != nil {
+		return "", ""
+	}
+	a, ok := h.Account(server)
+	if !ok {
+		return "", h.Machine
+	}
+	name := a.Name
+	if name == "" {
+		name = a.Login
+	}
+	if a.Email != "" {
+		return name + " <" + a.Email + ">", h.Machine
+	}
+	return name, h.Machine
+}

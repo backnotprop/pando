@@ -28,6 +28,8 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+
+	"pando/internal/config"
 )
 
 // CloneOptions are pando clone's choices for the meta layer.
@@ -116,7 +118,11 @@ func rootFor(flagRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return FindRoot(wd)
+	r, err := config.FindRoot(wd)
+	if err != nil {
+		return "", err
+	}
+	return r.Dir, nil
 }
 
 // metaPath turns a path the user typed (relative to where they are) into a

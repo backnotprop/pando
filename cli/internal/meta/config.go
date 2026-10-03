@@ -1,19 +1,16 @@
 package meta
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"io/fs"
 	"log"
-	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"pando/internal/config"
 )
 
 // Config is what the engine needs to sync one meta layer.
@@ -75,83 +72,52 @@ func (c *Config) check() error {
 	return nil
 }
 
-// FindRoot walks up from dir to the folder holding .pando/.
-func FindRoot(dir string) (string, error) {
-	dir, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	for d := dir; ; d = filepath.Dir(d) {
-		if info, err := os.Stat(filepath.Join(d, ".pando")); err == nil && info.IsDir() {
-			return d, nil
-		}
-		if filepath.Dir(d) == d {
-			return "", fmt.Errorf("%s is not inside a Pando monorepo (no .pando/ above it)", dir)
-		}
-	}
-}
-
-// LoadConfig reads .pando/local/root.json (formats.md, section 3), then
-// ~/.pando/config.toml and the credential in ~/.pando/credentials/<host>
-// (section 7), then the PANDO_* environment, which wins.
+// LoadConfig reads the cli lane's files through pando/internal/config:
+// .pando/local/root.json (the monorepo and its server), ~/.pando/config.toml
+// (server, machine; PANDO_SERVER and PANDO_MACHINE win), the credential
+// pando login stored (PANDO_TOKEN wins) and the signed-in account as the
+// author. PANDO_MONOREPO and PANDO_AUTHOR are overrides for tests.
 func LoadConfig(root string) (Config, error) {
 	c := Config{Root: root}
-	var rj struct {
-		Kind   string `json:"kind"`
-		Name   string `json:"name"`
-		Server string `json:"server"`
-	}
-	if b, err := os.ReadFile(filepath.Join(root, ".pando", "local", "root.json")); err == nil {
-		if err := json.Unmarshal(b, &rj); err != nil {
-			return c, fmt.Errorf(".pando/local/root.json: %w", err)
-		}
-		if rj.Kind == "repo" {
+	if r, err := config.LoadRoot(root); err == nil {
+		if r.Kind == config.KindRepo {
 			return c, errors.New("a plain git repo has no meta layer")
 		}
-		c.Monorepo, c.Server = rj.Name, rj.Server
+		c.Monorepo, c.Server = r.Name, r.Server
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return c, err
 	}
-	home := os.Getenv("PANDO_HOME")
-	if home == "" {
-		if h, err := os.UserHomeDir(); err == nil {
-			home = filepath.Join(h, ".pando")
-		}
+	home, err := config.LoadHome()
+	if err != nil {
+		return c, err
 	}
-	if home != "" {
-		var mc struct {
-			Server  string `toml:"server"`
-			Machine string `toml:"machine"`
+	if os.Getenv("PANDO_SERVER") != "" || c.Server == "" {
+		c.Server = home.Server
+	}
+	c.Server = strings.TrimRight(c.Server, "/")
+	c.Machine = home.Machine
+	if c.Server != "" {
+		if tok, err := home.Token(c.Server); err == nil {
+			c.Token = tok // never printed or logged
 		}
-		if _, err := toml.DecodeFile(filepath.Join(home, "config.toml"), &mc); err == nil {
-			if c.Server == "" {
-				c.Server = mc.Server
+		if acct, ok := home.Account(c.Server); ok {
+			name := acct.Name
+			if name == "" {
+				name = acct.Login
 			}
-			c.Machine = mc.Machine
-		}
-	}
-	if v := os.Getenv("PANDO_SERVER"); v != "" {
-		c.Server = v
-	}
-	// The credential pando login stored for this server (the cli lane's
-	// ~/.pando/credentials/<host>, mode 600). Never printed or logged.
-	if u, err := url.Parse(c.Server); err == nil && u.Host != "" && home != "" {
-		if b, err := os.ReadFile(filepath.Join(home, "credentials", u.Host)); err == nil {
-			c.Token = strings.TrimSpace(string(b))
+			c.Author = name
+			if acct.Email != "" {
+				c.Author = name + " <" + acct.Email + ">"
+			}
 		}
 	}
 	if v := os.Getenv("PANDO_MONOREPO"); v != "" {
 		c.Monorepo = v
 	}
-	if v := os.Getenv("PANDO_TOKEN"); v != "" {
-		c.Token = v
-	}
-	if v := os.Getenv("PANDO_MACHINE"); v != "" {
-		c.Machine = v
-	}
 	if v := os.Getenv("PANDO_AUTHOR"); v != "" {
-		c.Author = v // "Name <email>"; once the Worker checks tokens, the token decides
+		c.Author = v // "Name <email>"; once the Worker checks credentials, the account decides
 	}
 	c.Agent = os.Getenv("PANDO_AGENT")
-	c.Server = strings.TrimRight(c.Server, "/")
 	c.defaults()
 	return c, nil
 }

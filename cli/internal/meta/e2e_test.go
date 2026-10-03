@@ -36,6 +36,9 @@ func testServer(t *testing.T) string {
 	if u == "" {
 		t.Skip("set PANDO_META_TEST_URL, or run worker/test/live/run-e2e.sh")
 	}
+	// Never this machine's own ~/.pando (its server, its credential).
+	t.Setenv("PANDO_HOME", t.TempDir())
+	t.Setenv("PANDO_SERVER", "")
 	return strings.TrimRight(u, "/")
 }
 

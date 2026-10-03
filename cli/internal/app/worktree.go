@@ -272,7 +272,7 @@ func worktreeList(e *Env, args []string) error {
 		return nil
 	}
 	// Ahead and behind come from each repo's branch list.
-	type ab struct{ ahead, behind *int }
+	type ab struct{ ahead, behind string }
 	counts := map[string]ab{}
 	if srv != nil {
 		repos := map[string]bool{}
@@ -282,7 +282,7 @@ func worktreeList(e *Env, args []string) error {
 		for r := range repos {
 			if bl, err := srv.ListBranches(e.Ctx, root.Name, repoName(root, r), "all"); err == nil {
 				for _, b := range bl.Branches {
-					counts[r+"\x00"+b.Name] = ab{b.Ahead, b.Behind}
+					counts[r+"\x00"+b.Name] = ab{count(b, b.Ahead), count(b, b.Behind)}
 				}
 			}
 		}
@@ -290,13 +290,16 @@ func worktreeList(e *Env, args []string) error {
 	tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "PATH\tBRANCH\tMACHINE\tAGENT\tKIND\tAHEAD\tBEHIND\tSEEN")
 	for _, w := range all {
-		c := counts[w.Repo+"\x00"+w.Branch]
+		c, ok := counts[w.Repo+"\x00"+w.Branch]
+		if !ok {
+			c = ab{"-", "-"}
+		}
 		machine := w.Machine
 		if machine == e.Home.Machine {
 			machine += " (here)"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", w.Path, w.Branch, machine, dash(w.Agent), w.Kind,
-			num(c.ahead), num(c.behind), ago(w.LastSeenAt))
+			c.ahead, c.behind, ago(w.LastSeenAt))
 	}
 	return tw.Flush()
 }

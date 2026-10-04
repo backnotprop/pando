@@ -284,6 +284,16 @@ listings are not cached. So the daemon writes every server change through
 the mount (the fork's write-through); from a HEAD move to FSEvents took about
 0.4 s.
 
+**Sizes.** The kernel trusts the size a listing or `stat` reports and cuts
+every read at it: a daemon that reported 0 for sizes it did not know made
+`cat` print nothing and `cmp` stop at EOF, and the size stayed 0 (measured
+2026-10-04). So the daemon never guesses a size. It asks the server
+(object-info) for every size when a snapshot is made, keeps asking 1,000 at
+a time in the background, and asks for a listed folder's page at once; it
+downloads files to learn their sizes only when the server cannot answer.
+Numbers: `research/operational/mac-mount-downloads-2026-10-04.md` in the
+meta layer.
+
 ## Icon
 
 `node Icon/render.mjs` renders `HostApp/Assets.xcassets` (the app icon at

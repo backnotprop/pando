@@ -137,7 +137,52 @@ try {
   const bigWarm = await post(bigRequest);
   check(`${many.length} oids again (warm, from the size index) match`, bigWarm.status === 200 && bigWarm.bytes.equals(bigRef), `${bigWarm.status}`);
 
-  // 3. Everything else still goes to Artifacts: a blobless clone and its lazy fetches.
+  // 2c. A cold repository at scale: files the size index has never seen, more
+  // than one fetch takes (FETCH_WANTS, 1,000), as similar files so the pack
+  // holds deltas. The door learns the sizes from fetched packs; the answer
+  // must be whole and well inside the daemon's per-request deadline (30 s).
+  const COLD = Number(process.env.OI_COLD_FILES ?? 2500);
+  mkdirSync(join(src, "cold"));
+
+  for (let i = 0; i < COLD + 50; i++) writeFileSync(join(src, "cold", `c${i}.txt`), `cold ${id} ${i}\n`.repeat((i % 40) + 1));
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "cold files"], src);
+  const pushed = git(["push", "-q", url, "HEAD:refs/heads/cold"], src);
+  check("push the cold files", pushed.ok, pushed.err.slice(-300));
+  const coldOids = git(["ls-tree", "-r", "HEAD", "cold"], src).out.toString().trim().split("\n").map((l) => l.split(/\s+/)[2]);
+  const ask = (oids) => Buffer.concat([pkt("command=object-info\n"), pkt("object-format=sha1\n"), Buffer.from("0001"), pkt("size\n"), ...oids.map((o) => pkt(`oid ${o}\n`)), Buffer.from("0000")]);
+
+  const sizesOf = (bytes) => {
+    const out = new Map();
+
+    for (let i = 0; i < bytes.length;) {
+      const n = parseInt(bytes.subarray(i, i + 4).toString(), 16);
+
+      if (n <= 2) {
+        i += 4;
+        continue;
+      }
+
+      const [oid, size] = bytes.subarray(i + 4, i + n).toString().trim().split(" ");
+
+      if (size !== undefined) out.set(oid, size);
+      i += n;
+    }
+
+    return out;
+  };
+
+  const gitSizes = sizesOf(spawnSync("git", ["-c", "transfer.advertiseObjectInfo=true", "upload-pack", "--stateless-rpc", src], {
+    input: ask(coldOids), env: { ...process.env, GIT_PROTOCOL: "version=2", GIT_CONFIG_NOSYSTEM: "1", HOME: work },
+  }).stdout);
+
+  const first = coldOids.slice(0, COLD);
+  const tc = Date.now();
+  const coldReply = sizesOf((await post(ask(first))).bytes);
+  const coldMs = Date.now() - tc;
+  const right = first.filter((o) => coldReply.get(o) === gitSizes.get(o)).length;
+  check(`${COLD} cold files in one request: every size answered, as git answers`, right === COLD, `${right} right, ${coldMs} ms, ${Math.round(COLD / (coldMs / 1000))} files/s`);
+  check(`${COLD} cold files within the daemon's 30 s per request`, coldMs < 30_000, `${coldMs} ms`);
   const clone = join(work, "clone");
   const c = git(["-c", "protocol.version=2", "clone", "-q", "--filter=blob:none", "--no-checkout", url, clone], work);
   check("a blobless clone through the door (v2 fetch, peeked and forwarded)", c.ok, c.err.slice(-300));

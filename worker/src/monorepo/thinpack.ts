@@ -98,6 +98,83 @@ async function rewrite(pack: Uint8Array, readTree: ReadTree): Promise<{ pack: Ui
   return { pack: concat([body, await sha1(body)]), trees: whole.size };
 }
 
+const BLOB = 3;
+
+const TYPE_NAMES = ["", "commit", "tree", "blob", "tag"];
+
+// Whole objects kept for the deltas that build on them; past this they are
+// inflated again when needed.
+const BASES_MAX = 32 << 20;
+
+/** An object made whole: its type and bytes. */
+interface WholeObject {
+  type: number;
+  data: Uint8Array;
+}
+
+/**
+ * Each blob's id and size in a fetched pack (git's own fetch, not thin): every
+ * object is made whole (deltas applied) and hashed. An entry whose base is not
+ * in the pack is left out. Null when the pack cannot be read.
+ */
+export async function packBlobSizes(pack: Uint8Array): Promise<Map<string, number> | null> {
+  try {
+    return await blobSizes(pack);
+  } catch (err) {
+    if (err instanceof PackError) return null;
+    throw err;
+  }
+}
+
+async function blobSizes(pack: Uint8Array): Promise<Map<string, number>> {
+  const entries = readEntries(pack);
+  const byAt = new Map(entries.map((e) => [e.at, e]));
+  const isBase = new Set(entries.flatMap((e) => (e.ofsBase === undefined ? [] : [e.ofsBase])));
+  const atOf = new Map<string, number>();
+  const kept = new Map<number, WholeObject>();
+  let keptBytes = 0;
+
+  const whole = (e: Entry): WholeObject | null => {
+    const hit = kept.get(e.at);
+
+    if (hit) return hit;
+    let out: WholeObject;
+
+    if (e.type === OFS_DELTA || e.type === REF_DELTA) {
+      const baseAt = e.type === OFS_DELTA ? e.ofsBase : atOf.get(e.refBase!);
+      const baseEntry = baseAt === undefined ? undefined : byAt.get(baseAt);
+      const base = baseEntry ? whole(baseEntry) : null;
+
+      if (!base) return null;
+      out = { type: base.type, data: applyDelta(base.data, inflate(pack.subarray(e.dataAt, e.end))) };
+    } else {
+      out = { type: e.type, data: inflate(pack.subarray(e.dataAt, e.end)) };
+    }
+
+    if (isBase.has(e.at) && keptBytes + out.data.length <= BASES_MAX) {
+      kept.set(e.at, out);
+      keptBytes += out.data.length;
+    }
+
+    return out;
+  };
+
+  const sizes = new Map<string, number>();
+
+  for (const e of entries) {
+    const o = whole(e);
+
+    if (!o) continue;
+    const head = new TextEncoder().encode(`${TYPE_NAMES[o.type]} ${o.data.length}\0`);
+    const oid = toHex(await sha1(concat([head, o.data])));
+    atOf.set(oid, e.at);
+
+    if (o.type === BLOB) sizes.set(oid, o.data.length);
+  }
+
+  return sizes;
+}
+
 /** The entries of a PACK v2 or v3. Each zlib stream is inflated once to find where it ends. */
 function readEntries(pack: Uint8Array): Entry[] {
   const view = new DataView(pack.buffer, pack.byteOffset, pack.byteLength);

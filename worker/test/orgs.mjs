@@ -4,6 +4,9 @@
 //
 //   npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to <dir>
 //   npx wrangler dev --port 8821 --persist-to <dir> --var FEED_TEST:1 --var FEED_TICK_MS:500
+//
+// FEED_TEST:1 is required: the home feed's checks read /v1/_feed/test, and
+// without it they fail, saying so.
 //   PANDO_URL=http://localhost:8821 PANDO_WORKOS_STANDIN_PORT=8822 node test/orgs.mjs
 //
 // worker/.dev.vars points WORKOS_API_BASE at http://127.0.0.1:<the stand-in's port>.
@@ -87,10 +90,27 @@ function openSocket(path, secret) {
   return s;
 }
 
-const debugFeed = async (login) => (await call("GET", `/v1/_feed/test?login=${login}`, BOOT)).json;
+const NO_FEED_ROUTE = "no /v1/_feed/test: start the server with --var FEED_TEST:1";
 
-/** Whether the person's feed has the monorepo (joined, not pending), within the wait. */
-const feedHas = (login, monorepoId, want = true) => waitFor(async () => ((await debugFeed(login))?.index?.some((r) => r.name === monorepoId && !r.pending) ?? false) === want);
+/** A person's feed as the test route shows it; throws when the route is not there, so no feed check passes untested. */
+async function debugFeed(login) {
+  const r = await call("GET", `/v1/_feed/test?login=${login}`, BOOT);
+
+  if (r.status !== 200) throw new Error(`${NO_FEED_ROUTE} (${r.status})`);
+
+  return r.json;
+}
+
+/** Whether the person's feed has the monorepo (joined, not pending) or not, as wanted, within the wait. A missing test route is a failure with its reason. */
+async function feedHas(login, monorepoId, want = true) {
+  try {
+    const ok = await waitFor(async () => ((await debugFeed(login)).index?.some((r) => r.name === monorepoId && !r.pending) ?? false) === want);
+
+    return [!!ok, ok ? "" : `the feed ${want ? "never joined" : "never left"} within 20 s`];
+  } catch (err) {
+    return [false, err instanceof Error ? err.message : String(err)];
+  }
+}
 
 // ── The stand-in WorkOS: the device flow, as browser.mjs's stand-in plays it ──
 let nextUser = null;
@@ -232,7 +252,7 @@ try {
   check("ben, not in the org, is refused on the API", r.status === 403 || r.status === 404, `${r.status} ${r.json?.error?.code}`);
   g = git(["ls-remote", wsUrl], work, S.ben);
   check("and at the git door", !g.ok, g.out.slice(-120));
-  check("ana's home feed joined it (a member message per org monorepo)", await feedHas(L.ana, ws?.id));
+  check("ana's home feed joined it (a member message per org monorepo)", ...(await feedHas(L.ana, ws?.id)));
 
   // ── 3. Outside members: lee is added to one org monorepo only ──
   r = await call("PUT", `/v1/monorepos/${ORG}/ws/members/${L.lee}`, S.ramos, { role: "member" });
@@ -336,7 +356,7 @@ try {
   check("and her push", !g.ok, g.out.slice(-120));
   r = await call("GET", `/v1/monorepos/${ORG}/new-thing2`, S.ana);
   check("she keeps org/new-thing2 by her own row", r.status === 200 && r.json?.role === "owner", `${r.status}`);
-  check("her home's feed left org/ws", await feedHas(L.ana, ws?.id, false));
+  check("her home's feed left org/ws", ...(await feedHas(L.ana, ws?.id, false)));
   check("her socket got a left frame", !!(await waitFor(() => anaLive.frames.some((f) => f.type === "left" && f.monorepo_id === ws?.id), 10_000)), JSON.stringify(anaLive.frames.map((f) => f.type)));
 
   r = await call("PUT", `/v1/orgs/${ORG}/members/${L.ana}`, S.ramos, { role: "member" });
@@ -413,7 +433,7 @@ try {
 
   if (r.status === 200) made.set(brand.id, [r.json.full_name, S.ramos]);
   check("back to ramos (he owns it): ramos/brand", r.status === 200 && r.json?.full_name === `${L.ramos}/brand` && r.json?.owner_type === "user", `${r.status}`);
-  check("ana's home feed leaves it", await feedHas(L.ana, brand?.id, false));
+  check("ana's home feed leaves it", ...(await feedHas(L.ana, brand?.id, false)));
   r = await call("GET", `/v1/monorepos/${L.ramos}/brand`, S.ana);
   check("and ana can't open it any more", r.status === 403 || r.status === 404, `${r.status}`);
   r = await call("PATCH", `/v1/monorepos/${L.ramos}/brand`, S.ramos, { owner: ORG });

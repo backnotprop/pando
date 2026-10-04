@@ -66,8 +66,10 @@ type state struct {
 	Files    map[string]*FileState `json:"files"`
 	Outbox   map[string]*Op        `json:"outbox"`  // by Path
 	Refused  map[string]string     `json:"refused"` // path -> sha the server refused
-	NextSeq  int64                 `json:"next_seq"`
-	TextOnly bool                  `json:"text_only,omitempty"` // pando clone --text-only: large files stay pointers
+	// path -> why the server refused it, for pando sync --once's report
+	RefusedWhy map[string]string `json:"refused_why,omitempty"`
+	NextSeq    int64             `json:"next_seq"`
+	TextOnly   bool              `json:"text_only,omitempty"` // pando clone --text-only: large files stay pointers
 }
 
 func loadState(root, monorepo string) (*state, error) {
@@ -93,6 +95,9 @@ func loadState(root, monorepo string) (*state, error) {
 	}
 	if st.Refused == nil {
 		st.Refused = map[string]string{}
+	}
+	if st.RefusedWhy == nil {
+		st.RefusedWhy = map[string]string{}
 	}
 	return st, nil
 }

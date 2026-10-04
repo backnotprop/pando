@@ -1059,6 +1059,80 @@ func TestE2ESyncCommand(t *testing.T) {
 	}
 }
 
+// pando sync --once exits 3, naming each path, when changes here did not
+// reach Pando: a path frozen after a conflict, or a change the server
+// refused. An agent that trusts exit 0 is not misled (CODE-VS-MODEL M8).
+func TestE2ESyncOnceReportsWhatStayed(t *testing.T) {
+	env := newEnv(t)
+	bin := filepath.Join(t.TempDir(), "pando")
+	if b, err := exec.Command("go", "build", "-o", bin, "pando/cmd/pando").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, b)
+	}
+	a := env.machine(t, "ana")
+	sb := env.bare(t, "sandbox")
+	sb.writeRoot(".pando/local/root.json", rootJSON(env.mono, env.server))
+	once := func(what string) (int, string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, "sync", "--once", "--root", sb.root)
+		cmd.Env = append(os.Environ(), "PANDO_MACHINE=sandbox", "PANDO_AUTHOR=Sandbox <sandbox@example.com>")
+		out, err := cmd.CombinedOutput()
+		code := 0
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("pando sync --once, %s: exit %d\n%s", what, code, out)
+		return code, string(out)
+	}
+	history := func(p string) int {
+		h, err := env.client().History(context.Background(), env.p(p), 10)
+		if err != nil {
+			return -1
+		}
+		return len(h.Versions)
+	}
+
+	a.write("plan.md", "v1\n")
+	waitFor(t, "ana's save on the server", func() bool { return history("plan.md") == 1 })
+	if code, _ := once("first"); code != 0 {
+		t.Errorf("the first sync exits %d, want 0", code)
+	}
+
+	// Ana saves while the sandbox edits the same file: the sandbox loses the race.
+	a.write("plan.md", "v2 from ana\n")
+	waitFor(t, "ana's second save on the server", func() bool { return history("plan.md") == 2 })
+	sb.write("plan.md", "the sandbox's edit\n")
+	if code, out := once("after a conflict"); code != 3 || !strings.Contains(out, env.p("plan.md")+": frozen") {
+		t.Errorf("after a conflict: exit %d, want 3 naming %s as frozen", code, env.p("plan.md"))
+	}
+	sb.write("plan.md", "the sandbox's fix\n")
+	if code, out := once("an edit of the frozen file"); code != 3 || !strings.Contains(out, "pando resolve "+env.p("plan.md")) {
+		t.Errorf("an edit of a frozen file: exit %d, want 3 and how to resolve it", code)
+	}
+
+	// A change the server refuses: a reference pointer whose url carries a password.
+	leaky := ".pando/references/" + env.p("leaky.toml")
+	sb.writeRoot(leaky, "url = \"https://user:not-a-real-token@example.com/x.git\"\n")
+	if code, out := once("a refused pointer"); code != 3 || !strings.Contains(out, leaky+": refused") || !strings.Contains(out, "(credentials)") {
+		t.Errorf("a refused change: exit %d, want 3 naming %s and the reason", code, leaky)
+	}
+
+	// Resolved, and the pointer gone: everything is in Pando again.
+	var out strings.Builder
+	if code := cmdResolve([]string{"--root", sb.root, sb.path("plan.md")}, &out, &out); code != 0 {
+		t.Fatalf("resolve: %s", out.String())
+	}
+	os.Remove(sb.rootPath(leaky))
+	if code, _ := once("resolved"); code != 0 {
+		t.Errorf("once resolved: exit %d, want 0", code)
+	}
+	waitContent(t, a, "plan.md", "the sandbox's fix\n")
+}
+
 // ---- a TCP proxy that can be cut ----
 
 // The proxy can also stop the server's bytes on their way to the client:

@@ -244,6 +244,33 @@ func (e *Engine) synced() bool {
 	return true
 }
 
+// notSent lists what pando sync --once leaves out of Pando: frozen paths,
+// whose edits wait for pando resolve, and changes the server refused, which
+// wait until the file changes again. One plain line each, sorted.
+func (e *Engine) notSent() []string {
+	var out []string
+	frozen, _ := ListFrozen(e.cfg.Root)
+	for _, f := range frozen {
+		line := f.Path + ": frozen after a conflict, so its edits are not sent."
+		if f.ConflictCopy != "" {
+			line += " Your version is in " + f.ConflictCopy + "."
+		}
+		out = append(out, line+" When the file is right: pando resolve "+f.Path)
+	}
+	for p := range e.st.Refused {
+		if _, err := os.Lstat(e.abs(p)); err != nil {
+			continue // gone since: nothing waits
+		}
+		why := e.st.RefusedWhy[p]
+		if why == "" {
+			why = "no reason kept"
+		}
+		out = append(out, p+": refused by the server: "+why+". It goes again when the file changes.")
+	}
+	sort.Strings(out)
+	return out
+}
+
 // CatchUp downloads every change since this machine last synced (all of the
 // meta layer on a new clone), writes it, and returns. It does not send.
 func (e *Engine) CatchUp(ctx context.Context) error {
@@ -1184,6 +1211,7 @@ func (e *Engine) accepted(m *serverMsg) {
 	case "save":
 		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.SentSHA, Oid: op.sentOid, Size: op.sentSize, Mtime: op.sentMt}
 		delete(e.st.Refused, op.Path)
+		delete(e.st.RefusedWhy, op.Path)
 		e.logf("sent %s (version %d)", op.Path, m.Version)
 	case "delete":
 		e.st.Files[op.Path] = &FileState{Version: m.Version}
@@ -1213,6 +1241,7 @@ func (e *Engine) refused(m *serverMsg) {
 		if op.sentOid != "" {
 			e.st.Refused[op.Path] = "sha256:" + op.sentOid
 		}
+		e.st.RefusedWhy[op.Path] = fmt.Sprintf("%s (%s)", m.Message, m.Reason)
 	}
 	e.removeOp(op)
 	e.cfg.Log.Printf("the server refused %s: %s (%s)", m.Path, m.Message, m.Reason)

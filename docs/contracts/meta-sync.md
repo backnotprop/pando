@@ -218,6 +218,11 @@ above:
   change makes a fresh conflict, never a silent overwrite).
 - **Refused.** A refused change is dropped and not retried until the file
   changes again.
+- **`pando sync --once`** sends and receives what is waiting, then exits.
+  It exits 0 only when every change here is in Pando. It exits 3 when some
+  are not, and names each path with why: frozen after a conflict (its edits
+  wait for `pando resolve`), or refused by the server (it goes again when
+  the file changes). An agent can trust exit 0.
 
 ## The first upload (`pando init`)
 

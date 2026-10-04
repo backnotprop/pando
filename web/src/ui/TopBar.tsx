@@ -7,7 +7,8 @@ import { signOut } from "../api/actions";
 import { monorepoRef } from "../api/names";
 import { meQuery, monoreposQuery, openBranchesQuery, reposQuery } from "../api/queries";
 import { Avatar } from "./Avatar";
-import { Chevron, Mark } from "./Icons";
+import { Caret } from "./dropdown";
+import { Mark } from "./Icons";
 import { type AppLink, monoLink, repoLink } from "./paths";
 import { MenuHeading, MenuLink, MenuPopup, MenuRule, menuItem } from "./menu";
 import { EXACT } from "./TabBar";
@@ -40,8 +41,7 @@ function Switcher({ current }: { current: string }) {
         aria-label="Switch monorepo"
         className="flex h-7 w-[22px] flex-none items-center justify-center rounded-md text-ash hover:bg-loam hover:text-bark data-popup-open:bg-loam data-popup-open:text-bark"
       >
-        {/* 10 by 14: the prototype's button kept the browser's 6px side padding, which narrows the chevron. */}
-        <Chevron className="block h-3.5 w-2.5" />
+        <Caret kind="switch" />
       </Menu.Trigger>
       <MenuPopup offset={10}>
         <MenuHeading>Switch monorepo</MenuHeading>
@@ -77,7 +77,7 @@ function ProjectSwitcher({ full, current }: { full: string; current: string }) {
         aria-label="Switch project"
         className="flex h-7 w-[22px] flex-none items-center justify-center rounded-md text-ash hover:bg-loam hover:text-bark data-popup-open:bg-loam data-popup-open:text-bark"
       >
-        <Chevron className="block h-3.5 w-2.5" />
+        <Caret kind="switch" />
       </Menu.Trigger>
       <MenuPopup offset={10}>
         <MenuHeading>Projects in {name}</MenuHeading>

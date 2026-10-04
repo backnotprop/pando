@@ -10,6 +10,7 @@ import { useState } from "react";
 import { addPipeline } from "../../../../api/actions";
 import { ciQuery } from "../../../../api/ci";
 import { button, field, Refusal } from "../../../../ui/controls";
+import { Select } from "../../../../ui/dropdown";
 import { useMonorepo } from "../-frame/heads";
 
 /** A Buildkite pipeline's slug, as in buildkite.com/<org>/<pipeline> (the CLI's rule). */
@@ -51,22 +52,22 @@ export function AddPipeline({ projects, project, connections }: { projects: read
             >
               <label>
                 <span className={label}>Project</span>
-                <select className={`${field} w-full pr-7 font-mono text-[12.5px]`} value={chosen} onChange={(e) => setRepo(e.target.value)}>
+                <Select label="Project" value={chosen} onChange={setRepo} mono wide>
                   {projects.map((p) => (
                     <option key={p.repo} value={p.repo}>
                       {p.path}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               {connections.length > 1 ? (
                 <label>
                   <span className={label}>Organization</span>
-                  <select className={`${field} w-full pr-7 font-mono text-[12.5px]`} value={org} onChange={(e) => setOrg(e.target.value)}>
+                  <Select label="Organization" value={org} onChange={setOrg} mono wide>
                     {connections.map((c) => (
                       <option key={c.id}>{c.organization}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               ) : null}
               <label>

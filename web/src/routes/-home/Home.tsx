@@ -10,7 +10,7 @@ import { activityQuery, monoreposQuery, needsQuery } from "../../api/queries";
 import { ActivityList } from "../../ui/activity";
 import { Avatar } from "../../ui/Avatar";
 import { Empty, SectionHead } from "../../ui/controls";
-import { Chevron } from "../../ui/Icons";
+import { Caret } from "../../ui/dropdown";
 import { MenuLink, MenuPopup } from "../../ui/menu";
 import { Page } from "../../ui/pages";
 import { monoLink } from "../../ui/paths";
@@ -81,7 +81,7 @@ function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current
         ) : (
           <span>All monorepos</span>
         )}
-        <Chevron className="block size-3.5" />
+        <Caret />
       </Menu.Trigger>
       <MenuPopup>
         <MenuLink link={{ to: "/" }} current={!current}>

@@ -10,6 +10,7 @@ import { invite, removeMember, revokeInvite } from "../../../api/actions";
 import { invitesQuery, meQuery, membersQuery } from "../../../api/queries";
 import { Avatar } from "../../../ui/Avatar";
 import { button, field, Refusal, row, SectionHead, thead } from "../../../ui/controls";
+import { Select } from "../../../ui/dropdown";
 import { ago, since, useNow } from "../../../ui/time";
 import { OwnHead, useMonorepo } from "./-frame/heads";
 
@@ -114,10 +115,10 @@ function InviteForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <select className={`${field} pr-7`} aria-label="Role" value={role} onChange={(e) => setRole(e.target.value === "owner" ? "owner" : "member")}>
+        <Select label="Role" value={role} onChange={(v) => setRole(v === "owner" ? "owner" : "member")}>
           <option>member</option>
           <option>owner</option>
-        </select>
+        </Select>
         <button type="submit" className={button("solid")} disabled={send.isPending}>
           Invite
         </button>

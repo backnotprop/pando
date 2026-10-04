@@ -9,7 +9,7 @@ import type { CommitLine, Repo } from "@pando/contract";
 import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Empty, lnk } from "../../../../ui/controls";
-import { branchesLink, branchLink, codeBlobLink, codeLink } from "../../../../ui/paths";
+import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
 import { Clone } from "../-code/Clone";
 import { ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
 import { RepoHead, useMonorepo } from "../-frame/heads";
@@ -83,11 +83,14 @@ export function Toolbar({ repo, gitRef, at, here }: { repo: Repo; gitRef: string
   );
 }
 
-function CodeReadme({ repo, commit, path }: { repo: Repo; commit: string; path: string }) {
+function CodeReadme({ repo, commit, path, gitRef }: { repo: Repo; commit: string; path: string; gitRef: string | null }) {
   const { monorepo } = useMonorepo();
   const text = useSuspenseQuery(codeFileQuery(monorepo, repo, commit, path)).data.text;
+  const full = monorepo.full;
 
-  return text === null ? null : <Readme name={path.slice(path.lastIndexOf("/") + 1)} text={text} />;
+  return text === null ? null : (
+    <Readme path={path} text={text} raw={codeRawHref(full, repo.path, path, commit)} fileLink={(p) => codeBlobLink(full, repo.path, p, gitRef)} />
+  );
 }
 
 export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gitRef: string | null }) {
@@ -141,7 +144,7 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
           bar={newest ? <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} at={Date.parse(newest.at)} history={history} /> : null}
           rows={rows}
         />
-        {readme ? <CodeReadme repo={repo} commit={tree.commit} path={join(dir, readme)} /> : null}
+        {readme ? <CodeReadme repo={repo} commit={tree.commit} path={join(dir, readme)} gitRef={gitRef} /> : null}
       </div>
     </>
   );

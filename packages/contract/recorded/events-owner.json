@@ -1,0 +1,103 @@
+{
+  "schema": "EventsPage",
+  "route": "GET /v1/events?owner=<org>&limit=5",
+  "status": 200,
+  "body": {
+    "events": [
+      {
+        "monorepo_id": "m_b03271178f23aa74",
+        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
+        "seq": 54,
+        "at": "2026-10-04T13:58:39.154Z",
+        "kind": "merged",
+        "summary": {
+          "merge_commit": "0d84f7e374537ace3b7ac8ff78104797b01ad16f",
+          "forced": false,
+          "title": null,
+          "head": "43fc5a17f2824863863d655d69861b09c34d06f9"
+        },
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": "break-config",
+        "actor": "rec-mutvywkn",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_b03271178f23aa74",
+        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
+        "seq": 53,
+        "at": "2026-10-04T13:58:37.846Z",
+        "kind": "branch.opened",
+        "summary": {
+          "head": "43fc5a17f2824863863d655d69861b09c34d06f9",
+          "before": null,
+          "commits": 2,
+          "head_title": "Break pando.toml"
+        },
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": "break-config",
+        "actor": "rec-mutvywkn",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_b03271178f23aa74",
+        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
+        "seq": 52,
+        "at": "2026-10-04T13:58:35.959Z",
+        "kind": "meta.saved",
+        "summary": {
+          "path": "README.md",
+          "version": 6,
+          "deleted": false
+        },
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "rec-mutvywkn",
+        "machine": "unknown"
+      },
+      {
+        "monorepo_id": "m_b03271178f23aa74",
+        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
+        "seq": 50,
+        "at": "2026-10-04T13:58:35.657Z",
+        "kind": "meta.saved",
+        "summary": {
+          "path": "README.md",
+          "version": 5,
+          "deleted": false
+        },
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "rec-mutvywkn",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_b03271178f23aa74",
+        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
+        "seq": 45,
+        "at": "2026-10-04T13:58:34.945Z",
+        "kind": "status",
+        "summary": {
+          "context": "lint",
+          "state": "pending",
+          "description": "#1 queued",
+          "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1-retry",
+          "sha": "8a0b12034040273ed0f600550d5791233e66f883",
+          "duration_s": null,
+          "app": "buildkite"
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/ready",
+        "actor": null,
+        "machine": null
+      }
+    ],
+    "next": "MjAyNi0xMC0wNFQxMzo1ODozNC45NDVafG1fYjAzMjcxMTc4ZjIzYWE3NHw0NQ",
+    "from_logs": false,
+    "skipped": []
+  }
+}

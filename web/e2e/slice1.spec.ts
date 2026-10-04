@@ -172,7 +172,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
 
       page.on("request", record);
       await page.goto("/");
-      await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) })).toBeVisible();
+      await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) }).first()).toBeVisible();
       await page.waitForLoadState("networkidle");
       page.off("request", record);
       expect(loaded.filter((url) => /PlannotatorDoc|bridge-script|katex|mermaid/.test(url))).toEqual([]);
@@ -210,6 +210,18 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(before);
       // A new person's log fits on one page: it ends, with no "Older" to load.
       await expect(page.getByText("No older activity.")).toBeVisible();
+    });
+
+    await test.step("an activity row's repository name opens the repository; the rest of the row opens what it is about", async () => {
+      const row = page.getByTestId("activity").getByRole("listitem").filter({ hasText: "feature-live" }).first();
+
+      await row.getByRole("link", { name: full, exact: true }).click();
+      await expect(page).toHaveURL(`${BASE}/${full}`);
+      await page.goBack();
+      // Its time, at the left, is not a link of its own: the row's link under it takes the click.
+      await row.click({ position: { x: 24, y: 12 } });
+      await expect(page).toHaveURL(`${BASE}/${full}/projects/web/branches/feature-live`);
+      await page.goto("/");
     });
 
     await test.step("open the monorepo: the root folder, Clone, the README", async () => {

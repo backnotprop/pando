@@ -7,6 +7,7 @@ import { notFound } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Repo } from "@pando/contract";
 import { branchesQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
+import { openBranchesQuery } from "../../../../api/queries";
 import { isDoc } from "../../../../ui/doc/Doc";
 import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref } from "../../../../ui/paths";
@@ -20,6 +21,8 @@ const split = (path: string) => ({ dir: path.includes("/") ? path.slice(0, path.
 
 export async function loadFile(qc: QueryClient, m: MonorepoRef, repo: Repo, path: string, ref: string | null) {
   const { dir, name } = split(path);
+  // The Branches tab's count, read alongside the tree (quicker than it), so the tab never draws without it.
+  const open = qc.prefetchQuery(openBranchesQuery(m, repo.name));
   const tree = await qc.ensureQueryData(codeTreeQuery(m, repo.name, ref, dir));
 
   if (!tree?.entries.some((e) => e.name === name && e.type !== "dir")) throw notFound();
@@ -27,7 +30,7 @@ export async function loadFile(qc: QueryClient, m: MonorepoRef, repo: Repo, path
   // The page waits for the bytes only; the last commit and the picker fill in as they arrive.
   void qc.prefetchQuery(lastCommitsQuery(m, repo.name, tree.commit, dir));
   void qc.prefetchInfiniteQuery(branchesQuery(m, repo.name, "open"));
-  await qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, path));
+  await Promise.all([qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, path)), open]);
 }
 
 export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: string; gitRef: string | null; plain: boolean }) {

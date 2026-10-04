@@ -383,7 +383,8 @@ export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
   const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.files_total;
-  const n = b.state === "merged" ? commits.total : (b.ahead ?? commits.total);
+  // One count for the line under the title and the Commits heading, from the commits read (a new head reads it again, live/rows.ts).
+  const n = commits.total;
 
   return (
     <>
@@ -399,16 +400,16 @@ export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string
         <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files} label="Overview" />
         <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
       </TabBar>
-      {files ? <FilesTab repo={repo} branch={branch} /> : <Overview repo={repo} b={b} commits={commits.commits} reviews={reviews} live={live} />}
+      {files ? <FilesTab repo={repo} branch={branch} /> : <Overview repo={repo} b={b} commits={commits.commits} total={n} reviews={reviews} live={live} />}
     </>
   );
 }
 
-function Overview({ repo, b, commits, reviews, live }: { repo: Repo; b: Branch; commits: readonly Commit[]; reviews: readonly Review[]; live: boolean }) {
+function Overview({ repo, b, commits, total, reviews, live }: { repo: Repo; b: Branch; commits: readonly Commit[]; total: number; reviews: readonly Review[]; live: boolean }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
       <section>
-        <SectionHead title="Commits" count={commits.length} />
+        <SectionHead title="Commits" count={total} />
         {commits.length ? <Commits commits={commits} /> : <Empty>No commits ahead of main.</Empty>}
         <div className="mt-10">
           <SectionHead title="Reviews" />

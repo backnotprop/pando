@@ -24,9 +24,11 @@ export const isBranch = (ref: string | null): ref is string => !!ref && !/^[0-9a
 const readmeIn = (names: readonly string[]) => names.find((n) => /^readme\.md$/i.test(n)) ?? null;
 
 export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir: string, ref: string | null) {
+  // The Branches tab's count and "N open branches", read alongside the tree (quicker than it), so neither draws late.
+  const open = qc.prefetchQuery(openBranchesQuery(m, repo.name));
   const tree = await qc.ensureQueryData(codeTreeQuery(m, repo.name, ref, dir));
 
-  if (!tree) return;
+  if (!tree) return open;
 
   const readme = readmeIn(tree.entries.map((e) => e.name));
 
@@ -36,7 +38,7 @@ export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir:
 
   if (isBranch(ref)) void qc.prefetchQuery(branchQuery(m, repo.name, ref));
 
-  if (readme) await qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme)));
+  await Promise.all([readme ? qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme))) : null, open]);
 }
 
 /** "web-api is 2 commits ahead of main." with its page a click away. */

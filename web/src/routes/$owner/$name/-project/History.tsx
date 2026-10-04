@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Repo } from "@pando/contract";
 import { codeHistoryQuery } from "../../../../api/projects";
+import { openBranchesQuery } from "../../../../api/queries";
 import { Avatar } from "../../../../ui/Avatar";
 import { lnk } from "../../../../ui/controls";
 import { CommitIcon } from "../../../../ui/Icons";
@@ -13,8 +14,9 @@ import { codeBlobLink } from "../../../../ui/paths";
 import { ago, day, useNow } from "../../../../ui/time";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 
+/** The history, and the Branches tab's count (so the tab never draws without it). */
 export const loadHistory = (qc: QueryClient, m: MonorepoRef, repo: Repo, path: string, ref: string | null) =>
-  qc.ensureInfiniteQueryData(codeHistoryQuery(m, repo.name, ref, path));
+  Promise.all([qc.ensureInfiniteQueryData(codeHistoryQuery(m, repo.name, ref, path)), qc.prefetchQuery(openBranchesQuery(m, repo.name))]);
 
 export function ProjectHistory({ repo, path, gitRef }: { repo: Repo; path: string; gitRef: string | null }) {
   const { monorepo } = useMonorepo();

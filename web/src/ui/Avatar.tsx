@@ -34,7 +34,7 @@ function letters(name: string): string {
   return (second ? `${first[0]}${second[0]}` : (first[0] ?? "?")).toUpperCase();
 }
 
-type Size = 16 | 18 | 20 | 22 | 28 | 36;
+type Size = 16 | 18 | 20 | 22 | 28 | 36 | 48 | 56;
 
 export function Avatar({ name, org = false, size }: { name: string; org?: boolean; size: Size }) {
   const text = letters(name);

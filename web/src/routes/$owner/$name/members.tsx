@@ -1,7 +1,10 @@
 // Members: the people in a monorepo (or a plain repo), their role and when
 // they were last active; an owner invites by email and removes people. A
 // person who already has an account joins at once; anyone else is invited
-// and listed until they sign up.
+// and listed until they sign up. In an org's monorepo (mock `members-org`),
+// the org's people come first, "From {org}", managed on the org's People;
+// then "Added here", the people this monorepo added itself (an org member
+// who was also added here is listed there, so they can be removed here).
 import type { Invite, Member } from "@pando/contract";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -9,8 +12,9 @@ import { useState } from "react";
 import { invite, removeMember, revokeInvite } from "../../../api/actions";
 import { invitesQuery, meQuery, membersQuery } from "../../../api/queries";
 import { Avatar } from "../../../ui/Avatar";
-import { button, field, Refusal, row, SectionHead, thead } from "../../../ui/controls";
+import { button, Empty, field, Lnk, Refusal, row, SectionHead, thead } from "../../../ui/controls";
 import { Select } from "../../../ui/dropdown";
+import { orgLink } from "../../../ui/paths";
 import { ago, since, useNow } from "../../../ui/time";
 import { OwnHead, useMonorepo } from "./-frame/heads";
 
@@ -19,8 +23,10 @@ export const Route = createFileRoute("/$owner/$name/members")({
   component: Members,
 });
 
-// On a phone: the person and their role (the prototype's rule).
+// On a phone: the person and their role (the prototype's rule). An org's monorepo needs room for "member, by plannotator".
 const cols = "grid-cols-[minmax(0,1fr)_120px_110px_80px] phone:grid-cols-[minmax(0,1fr)_80px]";
+
+const orgCols = "grid-cols-[minmax(0,1fr)_200px_110px_80px] phone:grid-cols-[minmax(0,1fr)_120px]";
 
 const lastSeen = (at: string | null, clock: number) => (at === null ? "never" : since(at, clock) === "now" ? "now" : ago(at, clock));
 
@@ -47,25 +53,28 @@ function Remove({ member }: { member: Member }) {
   );
 }
 
-function People({ owner }: { owner: boolean }) {
-  const { monorepo } = useMonorepo();
+/** Owners first, then by login. */
+const byRole = (a: Member, b: Member) => Number(b.role === "owner") - Number(a.role === "owner") || a.login.localeCompare(b.login);
+
+/** `org`: these came with the org that owns the monorepo, so they are managed there, not removed here. */
+function People({ people, owner, org = null, label = "Members", inOrg = false }: { people: readonly Member[]; owner: boolean; org?: string | null; label?: string; inOrg?: boolean }) {
   const clock = useNow();
+  const columns = inOrg ? orgCols : cols;
   const me = useSuspenseQuery(meQuery).data;
-  // Owners first, then by login.
-  const members = [...useSuspenseQuery(membersQuery(monorepo)).data].sort((a, b) => Number(b.role === "owner") - Number(a.role === "owner") || a.login.localeCompare(b.login));
+  const members = [...people].sort(byRole);
 
   return (
     <div>
-      <div className={`${thead} ${cols}`}>
+      <div className={`${thead} ${columns}`}>
         <span>Person</span>
         <span>Role</span>
         <span className="phone:hidden">Active</span>
         <span className="phone:hidden" />
       </div>
-      <ul aria-label="Members">
+      <ul aria-label={label}>
         {members.map((m) => (
           <li key={m.login} className="border-t border-rule-faint">
-            <div className={`${row} ${cols}`}>
+            <div className={`${row} ${columns}`}>
               <span className="flex min-w-0 items-center gap-3">
                 <Avatar name={m.login} size={28} />
                 <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
@@ -73,9 +82,18 @@ function People({ owner }: { owner: boolean }) {
                   <span className="text-[13px] text-ash">{m.login}</span>
                 </span>
               </span>
-              <span className="text-bark-dim">{m.role}</span>
+              <span className="text-bark-dim">
+                {m.role}
+                {/* On a phone, "by plannotator" goes under the role. */}
+                {org ? (
+                  <>
+                    <span className="phone:hidden">, </span>
+                    <span className="phone:block phone:text-[12.5px] phone:text-ash">by {org}</span>
+                  </>
+                ) : null}
+              </span>
               <span className="text-[12.5px] whitespace-nowrap text-ash phone:hidden">{lastSeen(m.last_active_at, clock)}</span>
-              <span className="text-right phone:hidden">{m.login === me.login ? <span className="text-ash">you</span> : owner ? <Remove member={m} /> : null}</span>
+              <span className="text-right phone:hidden">{m.login === me.login ? <span className="text-ash">you</span> : owner && !org ? <Remove member={m} /> : null}</span>
             </div>
           </li>
         ))}
@@ -165,8 +183,29 @@ function Invited({ invites, owner }: { invites: readonly Invite[]; owner: boolea
   );
 }
 
+/** An org's monorepo: its people from the org, then those added here. */
+function FromOrg({ members, owner }: { members: readonly Member[]; owner: boolean }) {
+  const { monorepo } = useMonorepo();
+  const me = useSuspenseQuery(meQuery).data;
+  const org = monorepo.owner;
+  const fromOrg = members.filter((m) => m.via === "org");
+  const here = members.filter((m) => m.via !== "org");
+  // Its People page is for the org's own people.
+  const inOrg = members.some((m) => m.login === me.login && m.via !== "direct");
+
+  return (
+    <>
+      <SectionHead title={`From ${org}`} count={fromOrg.length} right={inOrg ? <Lnk {...orgLink(org, "people")}>Manage in {org}</Lnk> : null} />
+      <People people={fromOrg} owner={owner} org={org} label={`From ${org}`} inOrg />
+      <SectionHead title="Added here" count={here.length} className="mt-11 mb-2.5" />
+      {here.length ? <People people={here} owner={owner} label="Added here" inOrg /> : <Empty>No one was added to this repository on its own.</Empty>}
+    </>
+  );
+}
+
 function Members() {
   const { monorepo, info } = useMonorepo();
+  const members = useSuspenseQuery(membersQuery(monorepo)).data;
   const invites = useSuspenseQuery(invitesQuery(monorepo)).data;
   const owner = info.role === "owner";
 
@@ -174,7 +213,7 @@ function Members() {
     <>
       <OwnHead tab="members" />
       <div className="max-w-[880px]">
-        <People owner={owner} />
+        {info.owner_type === "org" ? <FromOrg members={members} owner={owner} /> : <People people={members} owner={owner} />}
         {owner ? <InviteForm /> : null}
         {invites.length ? <Invited invites={invites} owner={owner} /> : null}
       </div>

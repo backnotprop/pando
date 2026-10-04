@@ -76,14 +76,15 @@ export function applyLine(qc: QueryClient, e: FeedEvent): void {
     markArrived(key);
   }
 
-  // The logs take a line again (a fuller summary replaces it); its arrival, machine and reads go once.
-  for (const scope of [null, e.monorepo]) {
+  const [owner, name] = e.monorepo.split("/");
+
+  // The logs it belongs in: all, its monorepo's, and its owner's (an org's page). They take a line again
+  // (a fuller summary replaces it); its arrival, machine and reads go once.
+  for (const scope of [null, e.monorepo, { owner }]) {
     qc.setQueryData<InfiniteData<EventsPage, string>>(["activity", scope], (data) => data && withLine(data, e));
   }
 
   if (!first) return;
-  const [owner, name] = e.monorepo.split("/");
-
   patchMachineActivity(qc, e);
 
   if (e.kind === "meta.saved") {

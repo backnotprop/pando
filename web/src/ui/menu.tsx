@@ -6,8 +6,8 @@ import type { ReactNode } from "react";
 import type { AppLink } from "./paths";
 import { EXACT } from "./TabBar";
 
-/** Where a menu row goes: a monorepo, the home (narrowed or not), or Your machines. */
-export type MenuTarget = AppLink | { to: "/"; search?: { in: string } } | { to: "/settings/machines" };
+/** Where a menu row goes: a monorepo or an owner, the home (narrowed or not), Your machines, or New organization. */
+export type MenuTarget = AppLink | { to: "/"; search?: { in: string } } | { to: "/settings/machines" } | { to: "/orgs/new" };
 
 export const menuItem =
   "flex h-8 w-full cursor-pointer items-center gap-3 rounded-md px-2.5 text-left text-[13.5px] text-bark-dim outline-none data-highlighted:bg-pop-hi data-highlighted:text-bark data-current:bg-pop-hi data-current:text-bark";

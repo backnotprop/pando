@@ -36,11 +36,11 @@ const URL_MAX = 2048;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function bad(message: string): never {
+export function bad(message: string): never {
   throw new HttpError(400, "bad_request", message);
 }
 
-async function jsonBody(c: C): Promise<JsonObject> {
+export async function jsonBody(c: C): Promise<JsonObject> {
   const b = await c.req.json<Json>().catch(() => null);
 
   if (!isRecord(b)) bad("the body must be a JSON object");
@@ -49,7 +49,7 @@ async function jsonBody(c: C): Promise<JsonObject> {
 }
 
 /** An optional text field: undefined when left out, null when null or empty. */
-function text(v: Json | undefined, field: string, max: number): string | null | undefined {
+export function text(v: Json | undefined, field: string, max: number): string | null | undefined {
   if (v === undefined) return undefined;
 
   if (v === null || v === "") return null;

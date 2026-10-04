@@ -7,6 +7,7 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { decodeFrame } from "../api/client";
 import { monorepoRef } from "../api/names";
+import { noteContributed } from "./contributed";
 import { applyLine, byActivity } from "./lines";
 import { startMonorepoFeed } from "./monorepo";
 
@@ -71,6 +72,11 @@ export function startFeed(qc: QueryClient): () => void {
           refetchAll();
           void qc.invalidateQueries({ queryKey: ["orgs"] });
           void qc.invalidateQueries({ queryKey: ["owner"] });
+          break;
+        case "contributed":
+          // Your own work counted: your profile's graph and timeline read again, and its day glows.
+          noteContributed(f.hour);
+          void qc.invalidateQueries({ queryKey: ["contrib"] });
           break;
         case "error":
           break;

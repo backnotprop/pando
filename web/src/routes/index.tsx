@@ -16,6 +16,6 @@ export const Route = createFileRoute("/")({
   component: function HomeRoute() {
     const { in: inMonorepo } = Route.useLoaderDeps();
 
-    return <Home inMonorepo={inMonorepo} owner={null} />;
+    return <Home inMonorepo={inMonorepo} />;
   },
 });

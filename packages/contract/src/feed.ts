@@ -168,6 +168,19 @@ export const ActivityFrame = Schema.Union([
   /** Refetch the first page and the list. */
   Schema.Struct({ type: Schema.tag("joined"), monorepo: FullName, monorepo_id: MonorepoId, large: Schema.Boolean }),
   Schema.Struct({ type: Schema.tag("left"), monorepo: FullName, monorepo_id: MonorepoId }),
+  /**
+   * Your own work was counted (a commit reached main, a branch opened, a
+   * review): `n` more of `kind` in the UTC hour `hour` (`2026-10-03T17`).
+   * Your profile's square for that day steps up; refetch its contributions.
+   */
+  Schema.Struct({
+    type: Schema.tag("contributed"),
+    monorepo: FullName,
+    monorepo_id: MonorepoId,
+    hour: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}$/)),
+    kind: Schema.Literals(["commit", "branch", "review"]),
+    n: Count,
+  }),
   /** The replay is done; keep the highest `landed` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), landed: Count }),
   /** More than 500 lines were missed: refetch the first page. */

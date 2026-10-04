@@ -89,10 +89,10 @@ function Facts({ m, words }: { m: MonorepoSummary; words: boolean }) {
 }
 
 /**
- * The home's column (and a person's page, `ownerPage`): each row's link is
- * stretched under it, so its facts can be links of their own above it.
+ * The home's column: each row's link is stretched under it, so its facts can
+ * be links of their own above it.
  */
-export function MonorepoList({ lines, ownerPage = false }: { lines: readonly MonorepoSummary[]; ownerPage?: boolean }) {
+export function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
   const clock = useNow();
 
   if (!lines.length) return <Empty>No repositories yet.</Empty>;
@@ -105,9 +105,9 @@ export function MonorepoList({ lines, ownerPage = false }: { lines: readonly Mon
             <Link {...monoLink(m.full_name)} aria-hidden="true" tabIndex={-1} className="absolute inset-0 rounded-[7px]" />
             <span className="flex min-w-0 flex-col gap-1">
               <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[14px] leading-[18px] text-ellipsis whitespace-nowrap">
-                {ownerPage ? null : <Avatar name={m.owner} org={m.owner_type === "org"} size={16} />}
+                <Avatar name={m.owner} org={m.owner_type === "org"} size={16} />
                 <Ref kind="name" link={monoLink(m.full_name)} above className="min-w-0 overflow-hidden text-ellipsis">
-                  {ownerPage ? null : <span className="font-normal">{m.owner}/</span>}
+                  <span className="font-normal">{m.owner}/</span>
                   {m.name}
                 </Ref>
               </span>

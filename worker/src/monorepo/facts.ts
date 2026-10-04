@@ -14,7 +14,7 @@
 
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
-import type { FactsJob } from "./facts-out";
+import type { FactsJob, FactsTestSet } from "./facts-out";
 import { HttpError } from "../http";
 import { isRecord, isText, isWholeNumber, type Json } from "../parse";
 import { currentTiming, note, timed, timedStub } from "../timing";
@@ -26,6 +26,7 @@ import type { RepoRecord } from "./types";
 import { sendPushSummary } from "../feed/push";
 import { runReconcile } from "./reconcile";
 import { closingsIn, commitClosings } from "../issues/commits";
+import { runCredit, type CreditMessage } from "./credit";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
 export const SWEEP_DAYS = 7;
@@ -63,6 +64,8 @@ export type FactsMessage = (
   | { type: "refs"; monorepo: string; repo: string }
   // A merge whose read of its commits ran out of time: the issues they name get a merge_referenced item.
   | { type: "merge_refs"; monorepo: string; repo: string; merge: number; base: string; head: string }
+  // Contributions (credit.ts): commits that reached main, a branch opened, a review.
+  | CreditMessage
 ) & {
   /** The push behind this job (C25): its event waits for the commit count and head title computed here. */
   push?: { seq: number; before: string };
@@ -150,6 +153,12 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
 
   if (m.type === "refs") return { computed: await runReconcile(env, stub, r, { all: true }), abandoned: false };
 
+  if (m.type === "credit" || m.type === "credit_one") {
+    await runCredit(env, r, info, m, (next) => stub.queueCredit(next));
+
+    return { computed: 0, abandoned: false };
+  }
+
   if (m.type === "merge_refs") {
     const refs = await withRepo(env, r.artifacts_name, (repo) => commitClosings(commitReader(repo), m.base, m.head, [info.label]));
     await stub.issueMergeReferenced(m.merge, refs.map((x) => x.number));
@@ -209,7 +218,8 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
 /**
  * Tests only (FACTS_TEST=1 and the bootstrap secret): GET
  * /v1/_facts/test?monorepo=<id> shows a monorepo's facts outbox; POST
- * {monorepo, fail} makes its next `fail` drains fail.
+ * {monorepo, fail, lose} makes its next `fail` drains fail before they run,
+ * and loses the answer of the next `lose` after they ran.
  */
 export async function factsTestRoute(request: Request, env: Env): Promise<Response> {
   if (env.FACTS_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
@@ -222,7 +232,11 @@ export async function factsTestRoute(request: Request, env: Env): Promise<Respon
   const id = (isRecord(b) && isText(b.monorepo) ? b.monorepo : null) ?? url.searchParams.get("monorepo");
 
   if (!id) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
-  const fail = isRecord(b) && isWholeNumber(b.fail) ? b.fail : undefined;
+  const set: FactsTestSet = {};
 
-  return Response.json(await stubOf(env, id).testFactsOutbox(fail === undefined ? {} : { fail }));
+  if (isRecord(b) && isWholeNumber(b.fail)) set.fail = b.fail;
+
+  if (isRecord(b) && isWholeNumber(b.lose)) set.lose = b.lose;
+
+  return Response.json(await stubOf(env, id).testFactsOutbox(set));
 }

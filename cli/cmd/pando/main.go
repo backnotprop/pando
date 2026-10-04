@@ -104,6 +104,7 @@ var commands = []app.Command{
 	{Name: "credential", Usage: "credential create --name <sandbox> | list | revoke <id>   credentials that act as you", Run: app.Credential},
 	{Name: "hook", Usage: "hook list | create <url> | delete <id>                    a repo's web hooks [--repo <path>] (owners write)\n  pando hook deliveries <id> | redeliver <delivery-id>            what a hook sent; send one again", Run: app.Hook},
 	{Name: "machine", Usage: "machine list                                              machines that acted in the monorepo, and which are connected", Run: app.Machine},
+	{Name: "profile", Usage: "profile [<login>] [--json]                                a person's profile: their graph for the last year, by month", Run: app.Profile},
 	{Name: "activity", Usage: "activity [--monorepo <owner/name> | --all] [--limit n]    what happened, newest first", Run: app.Activity},
 	{Name: "api", Usage: "api <path> [-X method] [-f k=v] [-F k=v] [--paginate]     any API call, signed as this machine (like gh api)", Run: app.API},
 }

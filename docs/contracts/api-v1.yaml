@@ -476,6 +476,37 @@ paths:
                     properties:
                       credential: { $ref: "#/components/schemas/Credential" }
         "401": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateProfile
+      summary: Change your profile's header (Edit profile)
+      description: >-
+        A field left out is kept; null or "" clears it. Once a name is saved
+        here, signing in no longer refreshes it from WorkOS. The picture is
+        always the sign-in's; the email is never shown on a profile.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: [string, "null"], maxLength: 100 }
+                bio: { type: [string, "null"], maxLength: 160 }
+                location: { type: [string, "null"], maxLength: 100 }
+                links:
+                  type: array
+                  maxItems: 4
+                  description: https URLs of at most 2,048 characters; empty ones are dropped.
+                  items: { type: string }
+      responses:
+        "200":
+          description: Your profile as anyone signed in sees its header.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
   /v1/user/credentials:
     post:
       operationId: createCredential
@@ -548,6 +579,55 @@ paths:
                   - $ref: "#/components/schemas/Profile"
                   - $ref: "#/components/schemas/Org"
                 discriminator: { propertyName: type }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/users/{login}/contributions:
+    parameters:
+      - name: login
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Login" }
+      - name: tz
+        in: query
+        description: >-
+          The viewer's time zone, in minutes east of UTC (-420 for California
+          in summer; the browser's -getTimezoneOffset()). Days are counted in
+          it, at its offset today for the whole year: up to an hour off across
+          a daylight-saving change, half-hour zones rounded to the hour.
+        schema: { type: integer, minimum: -720, maximum: 840, default: 0 }
+      - name: day
+        in: query
+        description: One day of the window (YYYY-MM-DD) for its timeline alone.
+        schema: { type: string, format: date }
+    get:
+      operationId: getContributions
+      summary: A person's contribution graph and timeline for the last year
+      description: >-
+        A contribution is a commit that reached a repository's main (credited
+        to its author and to every Co-authored-by person whose sign-in email
+        it names, if they can open that repository; merge commits never), a
+        branch opened (by the person whose sign-in pushed it), a review, or a
+        repository made. Pushes, merges as such, checks and saves of the
+        shared files themselves do not count. A repository's past commits
+        count when its main first arrives (pando init in an existing repo, a
+        first push of main), read in the background a page at a time.
+
+        A viewer sees only the work in repositories they can open now, on
+        their own profile too. Counts are kept per UTC hour in the person's
+        feed; a credit shows about half a second after a merge. With `day`,
+        the answer is that day's ContributionPeriod. 404 for an org or no
+        such person.
+      tags: [users]
+      responses:
+        "200":
+          description: OK (Contributions; with `day`, ContributionPeriod)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Contributions"
+                  - $ref: "#/components/schemas/ContributionPeriod"
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
   /v1/user/orgs:
@@ -900,6 +980,10 @@ paths:
           100 members (either way); its line is read again with the list.
         - `{"type": "joined", "monorepo", "monorepo_id", "large"}`, `{"type": "left", "monorepo", "monorepo_id"}`:
           refetch the first page and the list.
+        - `{"type": "contributed", "monorepo", "monorepo_id", "hour", "kind", "n"}`:
+          your own work was counted (`kind` commit, branch or review; `hour`
+          the UTC hour, `2026-10-03T17`), for work of the last two days;
+          refetch getContributions. Large monorepos send it here too.
         - `{"type": "error", "message"}`: the frame sent was not understood
           (anything but `hello` or the text `ping`). Nothing changed; the
           socket stays open.
@@ -3350,14 +3434,108 @@ components:
             owner_type: { type: string, enum: [user, org], description: "Whose namespace `owner` is: a person's or an organization's." }
     Profile:
       type: object
-      description: A person, as getOwner answers (the profile work adds more fields).
-      required: [type, login, name, picture_url, created_at]
+      description: A person's profile header, as getOwner and updateProfile answer. Never their email.
+      required: [type, login, name, bio, location, links, picture_url, created_at, orgs]
       properties:
         type: { type: string, enum: [user] }
         login: { $ref: "#/components/schemas/Login" }
         name: { type: [string, "null"] }
+        bio: { type: [string, "null"], maxLength: 160 }
+        location: { type: [string, "null"], maxLength: 100 }
+        links: { type: array, maxItems: 4, items: { type: string }, description: https URLs, in the person's order. }
         picture_url: { type: [string, "null"], description: As on User. }
         created_at: { type: string, format: date-time }
+        orgs:
+          type: array
+          description: The organizations the person is in that the viewer is in too (all of them on your own profile), by login.
+          items:
+            type: object
+            required: [login, name]
+            properties:
+              login: { $ref: "#/components/schemas/Login" }
+              name: { type: [string, "null"] }
+    ContributionPeriod:
+      type: object
+      description: A month of the timeline (`2026-10`), or one day (`2026-10-03`). Each list is most first.
+      required: [period, commit, branch, review, created, joined]
+      properties:
+        period: { type: string }
+        commit: { type: array, items: { $ref: "#/components/schemas/MonorepoCount" } }
+        branch: { type: array, items: { $ref: "#/components/schemas/MonorepoCount" } }
+        review: { type: array, items: { $ref: "#/components/schemas/MonorepoCount" } }
+        created:
+          type: array
+          description: Repositories the person made, oldest first.
+          items: { type: object, required: [full_name, at], properties: { full_name: { type: string }, at: { type: string, format: date-time } } }
+        joined:
+          type: array
+          description: Organizations the person made (`created`) or joined, shared with the viewer. Not counted on the graph.
+          items:
+            type: object
+            required: [org, name, at, created]
+            properties:
+              org: { $ref: "#/components/schemas/Login" }
+              name: { type: [string, "null"] }
+              at: { type: string, format: date-time }
+              created: { type: boolean }
+    MonorepoCount:
+      type: object
+      required: [full_name, n]
+      properties:
+        full_name: { type: string }
+        n: { type: integer, minimum: 0 }
+    Contributions:
+      type: object
+      required: [login, tz, from, to, total, levels, days, monorepos, kinds, months]
+      properties:
+        login: { $ref: "#/components/schemas/Login" }
+        tz: { type: integer, description: The tz asked for. }
+        from: { type: string, format: date, description: "The first square: the Sunday 52 weeks before this week's." }
+        to: { type: string, format: date, description: Today, in the viewer's time zone. }
+        total: { type: integer, minimum: 0 }
+        levels:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: integer, minimum: 0 }
+          description: The lowest count of shades 1 to 4, the quartiles of the person's non-empty days.
+        days:
+          type: array
+          description: Non-empty days only, oldest first.
+          items:
+            type: object
+            required: [date, n, commit, branch, review, created]
+            properties:
+              date: { type: string, format: date }
+              n: { type: integer }
+              commit: { type: integer }
+              branch: { type: integer }
+              review: { type: integer }
+              created: { type: integer }
+        monorepos:
+          type: array
+          description: Repositories shared with the viewer or with the person's work in them, most first.
+          items:
+            type: object
+            required: [full_name, owner_type, kind, n, months]
+            properties:
+              full_name: { type: string }
+              owner_type: { type: string, enum: [user, org] }
+              kind: { type: string, enum: [monorepo, repo] }
+              n: { type: integer }
+              months: { type: array, items: { type: integer }, description: "By calendar month, oldest first, one per month the window touches." }
+        kinds:
+          type: object
+          required: [commit, branch, review, created]
+          properties:
+            commit: { type: integer }
+            branch: { type: integer }
+            review: { type: integer }
+            created: { type: integer }
+        months:
+          type: array
+          description: Months with any activity, newest first.
+          items: { $ref: "#/components/schemas/ContributionPeriod" }
     Org:
       type: object
       required: [type, login, name, description, website, created_at, role, members]

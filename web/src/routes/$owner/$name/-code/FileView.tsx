@@ -88,7 +88,7 @@ export function FileShown({ path, text, raw, views, fileLink }: { path: string; 
 
   if (text !== null && isDoc(path) && !views.plain) {
     return (
-      <div className="px-[26px] pt-[22px] pb-2.5 phone:px-4">
+      <div className="px-[26px] pt-[22px] pb-2.5">
         <Doc path={path} text={text} raw={raw} openFile={(to) => void navigate(fileLink(to))} />
       </div>
     );

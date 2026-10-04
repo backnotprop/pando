@@ -91,7 +91,7 @@ export function Readme({ path, text, raw, fileLink }: { path: string; text: stri
           {path.slice(path.lastIndexOf("/") + 1)}
         </Link>
       </h3>
-      <div className="px-[26px] pt-[22px] pb-2.5 phone:px-4">
+      <div className="px-[26px] pt-[22px] pb-2.5">
         <Doc path={path} text={text} raw={raw} openFile={(to) => void navigate(fileLink(to))} />
       </div>
     </section>

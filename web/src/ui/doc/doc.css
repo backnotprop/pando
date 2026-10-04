@@ -68,8 +68,9 @@
   --text-5xl--line-height: 1.1;
 }
 
-/* Pando's roles under Plannotator's names (its palette mapped to Pando's in
-   web/src/theme.css: soil is the ground, air the card, loam muted, fox primary). */
+/* Pando's roles under Plannotator's names: soil is the ground, bark the text,
+   loam muted, rootline the rules. Links, bullets and done tasks take bark and
+   its quieter tones, never Foxfire (arrival only) or Rust (trouble). */
 :root {
   --background: var(--soil);
   --foreground: var(--bark);
@@ -77,7 +78,7 @@
   --card-foreground: var(--bark);
   --popover: var(--pop);
   --popover-foreground: var(--bark);
-  --primary: var(--fox);
+  --primary: var(--bark);
   --primary-foreground: var(--soil);
   --secondary: var(--clay);
   --secondary-foreground: var(--soil);
@@ -87,7 +88,7 @@
   --accent-foreground: var(--soil);
   --destructive: var(--rust);
   --destructive-foreground: var(--bark-hi);
-  --success: var(--fox);
+  --success: var(--bark-dim);
   --success-foreground: var(--soil);
   --warning: var(--clay);
   --warning-foreground: var(--soil);
@@ -95,7 +96,7 @@
   --input: var(--loam);
   --ring: var(--bark);
   --code-bg: var(--air);
-  --focus-highlight: var(--fox);
+  --focus-highlight: var(--bark);
   --radius: 8px;
   --surface-0: var(--air);
   --surface-1: var(--loam);
@@ -110,13 +111,26 @@
   }
 
   /* In Pando the file's own tools (Copy among them) sit above the document,
-     and its padding is the file box's: the viewer's Copy and its card padding
-     are not shown. */
+     and its padding is the file box's: the viewer's Copy, its card padding and
+     the space above its first block are not shown, so the text starts where
+     Pando's frame puts it. */
   [data-sticky-actions] {
     display: none;
   }
   article[data-print-region="article"] {
     padding-block: 0;
+  }
+  article[data-print-region="article"] > [data-sticky-actions] + .mt-4:empty {
+    display: none;
+  }
+  article[data-print-region="article"] > [data-sticky-actions] + *,
+  article[data-print-region="article"] > [data-sticky-actions] + .mt-4:empty + * {
+    margin-top: 0;
+  }
+
+  /* Links as Pando draws them in a document: the text's own colour, a quiet underline. */
+  a {
+    text-decoration-color: var(--ash);
   }
 
   /* Fenced code (packages/editor/index.css): Shiki colours the tokens inline. */

@@ -14,6 +14,7 @@ import { useHeld } from "../../../ui/held";
 import { RepoIcon } from "../../../ui/Icons";
 import { blobLink, branchLink, repoLink, tabLink, treeLink } from "../../../ui/paths";
 import { NeedState } from "../../-home/NeedsList";
+import { refClass } from "../../../ui/Ref";
 import { Clone } from "./-code/Clone";
 import { FileList, Readme, versionBar } from "./-code/FileList";
 import { folderRows, readmeOf } from "./-code/rows";
@@ -96,10 +97,10 @@ function MiniNeeds({ rows }: { rows: readonly NeedRow[] }) {
         <li key={`${n.repo}:${n.branch}`} className="border-t border-rule-faint first:border-t-0">
           <Link
             {...branchLink(n.monorepo, n.repo_path, n.branch)}
-            className="-mx-2.5 grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2.5 py-[5px] hover:bg-air focus-visible:bg-air"
+            className="group -mx-2.5 grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2.5 py-[5px] hover:bg-air focus-visible:bg-air"
           >
             <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden text-[13px] whitespace-nowrap">
-              <span className="font-mono text-[12.5px] leading-[15px] text-bark">{n.branch}</span>
+              <span className={`${refClass("name", { mono: true })} leading-[15px]`}>{n.branch}</span>
               <NeedState row={n} />
             </span>
             <span className="text-[12.5px] whitespace-nowrap text-ash">{n.repo_path.split("/").pop()}</span>

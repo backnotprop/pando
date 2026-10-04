@@ -6,7 +6,6 @@
 import { ApiError, type Issue, type IssueComment, type ReactionGroup, type TimelineItem } from "@pando/contract";
 import { Menu } from "@base-ui/react/menu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { deleteComment, editComment, editIssue, issueKey, issueQuery, readComment, readGap, type TimelineRead, timelineQuery } from "../../../../api/issues";
 import { takeArrived } from "../../../../live/arrivals";
@@ -16,7 +15,8 @@ import { button, Refusal, useCopy } from "../../../../ui/controls";
 import { BranchIcon } from "../../../../ui/Icons";
 import { DoneIcon, DotsIcon, NotPlannedIcon, PenIcon, PersonIcon, ReopenIcon, TagIcon } from "../../../../ui/IssueIcons";
 import { MenuPopup, menuItem } from "../../../../ui/menu";
-import { absolute, branchLink } from "../../../../ui/paths";
+import { absolute, branchLink, ownerLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { Editor } from "./Editor";
@@ -118,7 +118,9 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
     <section id={anchor} aria-label={isBody ? "Description" : `Comment by ${said.author}`} className={`relative mb-[18px] rounded-[10px] border border-rootline bg-soil ${fresh ? "arrived" : ""}`}>
       <header className="flex min-h-[42px] items-center gap-2.5 rounded-t-[10px] border-b border-rule-faint bg-loam px-3.5 py-2 text-[13.5px] text-ash">
         <Avatar name={said.author} size={20} />
-        <span className="fox-cool font-semibold text-bark">{said.author}</span>
+        <Ref kind="person" link={ownerLink(said.author)} className="fox-cool">
+          {said.author}
+        </Ref>
         {said.machine ? <span>{said.machine}</span> : null}
         <a href={`#${anchor}`} className="whitespace-nowrap hover:text-bark">
           {ago(said.at, clock)}
@@ -205,23 +207,26 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
   );
 }
 
-const code = "font-mono text-[13px] text-bark";
-
 const sha = (s: string) => <code className="text-[12.5px] text-ash">{s.slice(0, 7)}</code>;
 
 function BranchName({ repoPath, branch }: { repoPath: string; branch: string }) {
   const { monorepo } = useMonorepo();
 
   return (
-    <Link {...branchLink(monorepo.full, repoPath, branch)} className={`${code} hover:underline hover:decoration-ash hover:underline-offset-3`}>
+    <Ref kind="object" link={branchLink(monorepo.full, repoPath, branch)} text mono>
       {branch}
-    </Link>
+    </Ref>
   );
 }
 
 /** An event's glyph and its words. Null for a kind with no line (a comment is a box). A link Pando made from a commit or a title has no person: it is told without one. */
 function eventOf(x: TimelineItem): { glyph: ReactNode; words: ReactNode; big?: boolean } | null {
-  const who = x.actor ? <span className="fox-cool text-bark">{x.actor}</span> : null;
+  const who = x.actor ? (
+    <Ref kind="person" link={ownerLink(x.actor)} className="fox-cool">
+      {x.actor}
+    </Ref>
+  ) : null;
+
   const tag = <TagIcon className="size-3.5" />;
 
   switch (x.kind) {
@@ -248,7 +253,10 @@ function eventOf(x: TimelineItem): { glyph: ReactNode; words: ReactNode; big?: b
             </>
           ) : (
             <>
-              {who} {x.kind === "assigned" ? "assigned" : "unassigned"} <span className="text-bark">{x.assignee}</span>
+              {who} {x.kind === "assigned" ? "assigned" : "unassigned"}{" "}
+              <Ref kind="person" link={ownerLink(x.assignee)}>
+                {x.assignee}
+              </Ref>
             </>
           ),
       };

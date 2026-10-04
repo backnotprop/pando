@@ -3,15 +3,15 @@
   "route": "GET .../repos/{repo} (pando.toml broken: required_checks null, checks_unknown)",
   "status": 200,
   "body": {
-    "monorepo": "rec-mutxvkul/rec-mutxvkul",
+    "monorepo": "rec-muu2mhw1/rec-muu2mhw1",
     "name": "projects-web",
     "path": "projects/web",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8797/rec-mutxvkul/rec-mutxvkul/projects-web.git",
+    "clone_url": "http://localhost:8825/rec-muu2mhw1/rec-muu2mhw1/projects-web.git",
     "required_checks": null,
     "checks_unknown": "pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force",
-    "created_at": "2026-10-04T14:51:44.092Z",
-    "created_by": "rec-mutxvkul"
+    "created_at": "2026-10-04T17:04:39.620Z",
+    "created_by": "rec-muu2mhw1"
   }
 }

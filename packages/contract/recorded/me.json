@@ -3,16 +3,16 @@
   "route": "GET /v1/user",
   "status": 200,
   "body": {
-    "login": "rec-mutxvkul",
+    "login": "rec-muu2mhw1",
     "name": "Ana Lima",
     "email": null,
     "picture_url": null,
-    "created_at": "2026-10-04T14:51:39.992Z",
+    "created_at": "2026-10-04T17:04:34.335Z",
     "credential": {
-      "id": "cred_a4ae5e05fdf5359a",
+      "id": "cred_5c94f0b3f52b7fb6",
       "name": "ana-mbp",
       "kind": "bootstrap",
-      "created_at": "2026-10-04T14:51:39.993Z",
+      "created_at": "2026-10-04T17:04:34.346Z",
       "last_used_at": null,
       "expires_at": null
     }

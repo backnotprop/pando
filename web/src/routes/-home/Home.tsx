@@ -4,7 +4,6 @@
 import { Menu } from "@base-ui/react/menu";
 import type { FullName } from "@pando/contract";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import type { MonorepoSummary } from "@pando/contract";
 import { activityQuery, assignedQuery, meQuery, monoreposQuery, needsQuery } from "../../api/queries";
 import { LARGE_REFETCH_MS, useLargeFeeds } from "../../live/feed";
@@ -14,58 +13,9 @@ import { Empty, SectionHead } from "../../ui/controls";
 import { Caret } from "../../ui/dropdown";
 import { MenuLink, MenuPopup } from "../../ui/menu";
 import { Page } from "../../ui/pages";
-import { monoLink } from "../../ui/paths";
-import { since, useNow } from "../../ui/time";
 import { HomeFoot } from "./HomeFoot";
+import { MonorepoList } from "./RepoRows";
 import { type AssignedRow, NeedsList } from "./NeedsList";
-
-/** "2 projects, 5 open branches": shown once the summary carries both counts. */
-function Line({ m }: { m: MonorepoSummary }) {
-  const open = m.open_branches;
-
-  if (open == null || m.repos == null) return null;
-  const projects = m.kind === "repo" ? "" : `${m.repos} project${m.repos === 1 ? "" : "s"}, `;
-
-  return open ? (
-    <span>
-      {projects}
-      {open} open branch{open === 1 ? "" : "es"}
-    </span>
-  ) : (
-    <span className="text-ash">{projects}no open branches</span>
-  );
-}
-
-export function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
-  const clock = useNow();
-
-  if (!lines.length) return <Empty>No repositories yet.</Empty>;
-
-  return (
-    <ul>
-      {lines.map((m) => (
-        <li key={m.id} className="border-t border-rule-faint first:border-t-0">
-          <Link
-            {...monoLink(m.full_name)}
-            className="-mx-2.5 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3.5 rounded-[7px] px-2.5 py-2 hover:bg-air focus-visible:bg-air"
-          >
-            <Avatar name={m.name} org size={28} />
-            <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
-              <span className="text-[14px] leading-[17px] text-bark">
-                <span className="text-ash">{m.owner}/</span>
-                {m.name}
-              </span>
-              <span className="text-[13px] text-bark-dim">
-                <Line m={m} />
-              </span>
-            </span>
-            <span className="text-[12.5px] whitespace-nowrap text-ash">{m.last_activity_at ? since(m.last_activity_at, clock) : ""}</span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 /** The log's picker: all monorepos, or one (owner ruling: nothing finer). */
 function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current: FullName | null }) {
@@ -151,7 +101,7 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
               </h1>
             ) : null}
             <SectionHead title="Repositories" count={mine.length} />
-            <MonorepoList lines={mine} />
+            <MonorepoList lines={mine} ownerPage={!!owner} />
           </div>
           <HomeFoot />
         </aside>
@@ -162,7 +112,7 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
             <h2 className="text-[14px] leading-5 font-semibold">Activity</h2>
             <Filter lines={mine} current={inMonorepo} />
           </div>
-          {events.length ? <ActivityList events={events} withMonorepo={!inMonorepo} older={older} /> : <Empty>Nothing yet.</Empty>}
+          {events.length ? <ActivityList events={events} withMonorepo={!inMonorepo} owner={owner} older={older} /> : <Empty>Nothing yet.</Empty>}
         </section>
       </div>
     </Page>

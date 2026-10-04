@@ -201,6 +201,7 @@ export async function monoreposSummary(env: Env, login: string) {
       repos: s?.repos ?? null,
       open_branches: s?.open_branches ?? null,
       assigned: s?.assigned ?? null,
+      open_issues: s?.open_issues ?? null,
     };
   });
 

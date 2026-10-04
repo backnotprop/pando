@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"strings"
 	"text/tabwriter"
@@ -11,16 +12,17 @@ import (
 	"pando/internal/server"
 )
 
-// Monorepo is `pando monorepo list | view | rename | delete`.
+// Monorepo is `pando monorepo list | view | rename | edit | transfer | delete`.
 func Monorepo(e *Env, args []string) error {
-	usage := UsageError{"pando monorepo list | view [<owner/name>] | rename <new-name> | transfer <owner/name> <new-owner> [--yes] | delete <owner/name> [--yes]"}
+	usage := UsageError{"pando monorepo list | view [<owner/name>] | rename <new-name> | edit --description <text> | transfer <owner/name> <new-owner> [--yes] | delete <owner/name> [--yes]"}
 	if len(args) == 0 {
 		return usage
 	}
 	fs := flags("monorepo")
 	yes := fs.Bool("yes", false, "delete or transfer without typing the name (scripts)")
-	asJSON := fs.Bool("json", false, "view, rename, transfer: print the API's JSON")
-	mono := fs.String("monorepo", "", "rename: the monorepo (default: the one this folder is in)")
+	asJSON := fs.Bool("json", false, "view, rename, edit, transfer: print the API's JSON")
+	mono := fs.String("monorepo", "", "rename, edit: the monorepo (default: the one this folder is in)")
+	description := fs.String("description", "", "edit: its one-line description, at most 160 characters (\"\" clears it)")
 	srvFlag := fs.String("server", "", "the server (default: the configured one)")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
@@ -45,6 +47,13 @@ func Monorepo(e *Env, args []string) error {
 			return UsageError{"pando monorepo rename <new-name> [--monorepo <owner/name>]"}
 		}
 		return monorepoRename(e, *srvFlag, *mono, pos[0], *asJSON)
+	case "edit":
+		given := false
+		fs.Visit(func(f *flag.Flag) { given = given || f.Name == "description" })
+		if len(pos) != 0 || !given {
+			return UsageError{"pando monorepo edit --description <text> [--monorepo <owner/name>]"}
+		}
+		return monorepoDescribe(e, *srvFlag, *mono, strings.TrimSpace(*description), *asJSON)
 	case "transfer":
 		if len(pos) != 2 {
 			return UsageError{"pando monorepo transfer <owner/name> <new-owner> [--yes]"}
@@ -150,6 +159,9 @@ func monorepoView(e *Env, h *server.HTTP, full string, asJSON bool) error {
 		kind = "plain git repo"
 	}
 	e.printf("%s  %s  (you are %s)\n", m.Full(), kind, dash(m.Role))
+	if m.Description != "" {
+		e.printf("  %s\n", m.Description)
+	}
 	e.printf("  id        %s\n", m.ID)
 	e.printf("  created   %s\n", ago(m.CreatedAt))
 	e.printf("  members   %d (%d owner(s)): pando members list %s\n", len(members.Members), owners, m.Full())
@@ -168,6 +180,31 @@ func monorepoView(e *Env, h *server.HTTP, full string, asJSON bool) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Path, dash(short(head[r.Path].Head)), r.CloneURL)
 	}
 	return tw.Flush()
+}
+
+// monorepoDescribe is `pando monorepo edit --description <text>` (owners):
+// the one line shown under its name on the web.
+func monorepoDescribe(e *Env, srvFlag, mono, description string, asJSON bool) error {
+	if n := len([]rune(description)); n > 160 {
+		return fmt.Errorf("a description is at most 160 characters; this one has %d", n)
+	}
+	h, full, err := e.target(srvFlag, mono)
+	if err != nil {
+		return err
+	}
+	m, err := h.DescribeMonorepo(e.Ctx, full, description)
+	if err != nil {
+		return ownerOnly(err, full, "edit its description")
+	}
+	if asJSON {
+		return e.printJSON(m.JSON)
+	}
+	if description == "" {
+		e.printf("%s has no description now.\n", m.Full())
+		return nil
+	}
+	e.printf("%s: %s\n", m.Full(), m.Description)
+	return nil
 }
 
 // monorepoRename is `pando monorepo rename <new-name>` (owners). The old

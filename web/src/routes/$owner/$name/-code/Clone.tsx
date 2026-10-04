@@ -8,8 +8,12 @@ import { Chevron } from "../../../../ui/Icons";
 
 const heading = "mb-2 text-[13px] leading-[18px] font-semibold text-bark";
 
-export function Clone({ full, repos, plain }: { full: string; repos: readonly Repo[]; plain: boolean }) {
-  const [path, setPath] = useState(repos[0]?.path ?? "");
+/**
+ * `pando clone` for the whole monorepo, then git for one project. On a
+ * project's own page (`only`), its worktree command and its URL, no select.
+ */
+export function Clone({ full, repos, plain, only }: { full: string; repos: readonly Repo[]; plain: boolean; only?: Repo }) {
+  const [path, setPath] = useState(only?.path ?? repos[0]?.path ?? "");
   const repo = repos.find((r) => r.path === path) ?? repos[0];
 
   return (
@@ -25,10 +29,16 @@ export function Clone({ full, repos, plain }: { full: string; repos: readonly Re
               <h4 className={heading}>With Pando</h4>
               <Cmd text={`pando clone ${full}`} wide />
             </div>
+            {only && only.path !== "." ? (
+              <div className="mt-3.5 border-t border-rule-faint pt-3.5">
+                <h4 className={heading}>A worktree for a new branch</h4>
+                <Cmd text={`pando worktree add ${only.path} <branch>`} wide />
+              </div>
+            ) : null}
             {repo ? (
               <div className="mt-3.5 border-t border-rule-faint pt-3.5">
                 <h4 className={heading}>{plain ? "With git" : "One project, with git"}</h4>
-                {plain ? null : (
+                {plain || only ? null : (
                   <div className="mb-2 flex items-center gap-2">
                     <select
                       aria-label="Project"

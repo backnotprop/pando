@@ -9,8 +9,14 @@ export const homeSearch = Schema.toStandardSchemaV1(Schema.Struct({ in: Schema.o
 /** The sign-in page: where to come back to. */
 export const loginSearch = Schema.toStandardSchemaV1(Schema.Struct({ return_to: Schema.optionalKey(Schema.String) }));
 
-/** A root file: `?v=` shows an older version. */
-export const fileSearch = Schema.toStandardSchemaV1(Schema.Struct({ v: Schema.optionalKey(Schema.String) }));
+/** A file: `?v=` shows an older version of a root file; `?ref=` a project's file at a branch or commit. */
+export const fileSearch = Schema.toStandardSchemaV1(Schema.Struct({ v: Schema.optionalKey(Schema.String), ref: Schema.optionalKey(Schema.String) }));
+
+/** A project's code: `?ref=` for a branch or a commit (the default branch without it). */
+export const refSearch = Schema.toStandardSchemaV1(Schema.Struct({ ref: Schema.optionalKey(Schema.String) }));
+
+/** A repo's branches: `?tab=merged` for what landed on main. */
+export const branchesSearch = Schema.toStandardSchemaV1(Schema.Struct({ tab: Schema.optionalKey(Schema.String) }));
 
 /** A version number from `?v=`, or null for now. */
 export function versionOf(v: string | undefined): number | null {

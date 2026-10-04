@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { AppLink } from "./paths";
 
-export function Tab({ link, current, label, count }: { link: AppLink; current: boolean; label: string; count?: number | undefined }) {
+export function Tab({ link, current, label, count }: { link: AppLink; current: boolean; label: string; count?: number | string | undefined }) {
   return (
     <Link
       {...link}
@@ -13,7 +13,7 @@ export function Tab({ link, current, label, count }: { link: AppLink; current: b
       className="flex flex-none items-baseline gap-2 border-b-[1.5px] border-transparent pb-[11px] text-[14px] text-ash hover:text-bark aria-[current=page]:border-bark aria-[current=page]:text-bark"
     >
       {label}
-      {count ? <span className="font-mono text-[12.5px] leading-[15px] text-ash">{count}</span> : null}
+      {count === undefined ? null : <span className="font-mono text-[12.5px] leading-[15px] text-ash">{count}</span>}
     </Link>
   );
 }
@@ -44,7 +44,7 @@ function useMoreToTheRight(bar: React.RefObject<HTMLElement | null>) {
   return more;
 }
 
-export function TabBar({ label, children, className = "mt-[22px] mb-7" }: { label: string; children: ReactNode; className?: string }) {
+export function TabBar({ label, children, className = "mt-[22px] mb-7 gap-7 shadow-[inset_0_-1px_0_var(--rootline)]" }: { label: string; children: ReactNode; className?: string }) {
   const bar = useRef<HTMLElement>(null);
   const more = useMoreToTheRight(bar);
 
@@ -53,7 +53,7 @@ export function TabBar({ label, children, className = "mt-[22px] mb-7" }: { labe
       ref={bar}
       aria-label={label}
       // The rule is an inset shadow, not a border, so the scrolling bar does not clip the current tab's underline.
-      className={`flex gap-7 overflow-x-auto shadow-[inset_0_-1px_0_var(--rootline)] [scrollbar-width:none] ${className} ${more ? "[mask-image:linear-gradient(to_right,#000_calc(100%-24px),transparent)]" : ""}`}
+      className={`flex overflow-x-auto [scrollbar-width:none] ${className} ${more ? "[mask-image:linear-gradient(to_right,#000_calc(100%-24px),transparent)]" : ""}`}
     >
       {children}
     </nav>

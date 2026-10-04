@@ -1,14 +1,15 @@
-// A monorepo's frame: the breadcrumb (from the address), its name with its
-// avatar, and its tabs. Every page under /{owner}/{name} renders inside.
+// A monorepo's frame: it finds the monorepo, draws the breadcrumb from the
+// address, and keeps the monorepo's own socket open while one of its pages is.
+// Each page draws its own head (-frame/heads.tsx).
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, notFound, Outlet, useLocation } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
-import { machinesQuery, membersQuery, monorepoQuery } from "../../../api/queries";
-import { Avatar } from "../../../ui/Avatar";
+import { monorepoQuery } from "../../../api/queries";
+import { startMonorepoFeed } from "../../../live/monorepo";
 import { Page } from "../../../ui/pages";
-import { blobLink, monoLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
-import { Tab, TabBar } from "../../../ui/TabBar";
+import { blobLink, codeBlobLink, codeLink, ownerLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -24,34 +25,66 @@ export const Route = createFileRoute("/$owner/$name")({
       return await queryClient.ensureQueryData(monorepoQuery(monorepo));
     } catch (error) {
       if (error instanceof Error && isMissing(error)) throw notFound();
+
       throw error;
     }
   },
   component: MonorepoFrame,
 });
 
-const TABS = ["activity", "machines", "ci", "members", "settings"] as const;
+/** Folder crumbs for a path, each opening its folder; the last one is the page. */
+function pathCrumbs(parts: string[], folder: (dir: string) => Crumb["link"], lastLink?: Crumb["link"]): Crumb[] {
+  return parts.map((p, i) =>
+    i === parts.length - 1 ? { label: p, link: lastLink } : { label: p, link: folder(parts.slice(0, i + 1).join("/")), wide: true },
+  );
+}
 
-/** The breadcrumb after owner / name, read from the address. */
-function pathCrumbs(full: string, rest: string[]): Crumb[] {
+/** The breadcrumb after owner / name, read from the address: `rest` is the path after /{owner}/{name}. */
+function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   const [kind = "", ...parts] = rest;
-  const dirs = (upTo: number) => parts.slice(0, upTo).map((p, i) => ({ label: p, link: treeLink(full, parts.slice(0, i + 1).join("/")), wide: true }));
+  const repoPath = plain ? "." : `projects/${parts[0] ?? ""}`;
 
-  if (kind === "tree") return [...dirs(parts.length - 1), { label: parts.at(-1) ?? "" }];
+  if (kind === "projects" && !plain) {
+    const [, sub = "", ...path] = parts;
+    const project: Crumb = { label: repoPath, link: path.length || sub ? codeLink(full, repoPath, "") : undefined, project: repoPath };
 
-  if (kind === "blob") return [...dirs(parts.length - 1), { label: parts.at(-1) ?? "" }];
+    if (sub === "branches") return path.length ? [{ ...project, wide: true }, { label: path.join("/") }] : [project, { label: "branches" }];
 
-  if (kind === "history") return [...dirs(parts.length - 1), { label: parts.at(-1) ?? "", link: blobLink(full, parts.join("/")) }, { label: "history" }];
+    return [project, ...codeCrumbs(full, repoPath, sub, path)];
+  }
 
-  if (kind === "projects") return [{ label: `projects/${parts[0] ?? ""}` }];
+  if (plain && kind === "branches") return parts.length ? [{ label: parts.join("/") }] : [{ label: "branches" }];
+
+  if (plain) return codeCrumbs(full, ".", kind, parts);
+
+  if (kind === "tree" || kind === "blob") return pathCrumbs(parts, (dir) => treeLink(full, dir));
+
+  if (kind === "history") return [...pathCrumbs(parts, (dir) => treeLink(full, dir), blobLink(full, parts.join("/"))), { label: "history" }];
 
   return kind ? [{ label: kind }] : [];
+}
+
+/** A repo's code pages: folders, a file, a file's history. */
+function codeCrumbs(full: string, repoPath: string, kind: string, path: string[]): Crumb[] {
+  const folder = (dir: string) => codeLink(full, repoPath, dir);
+
+  if (kind === "history") return [...pathCrumbs(path, folder, codeBlobLink(full, repoPath, path.join("/"), null)), { label: "history" }];
+
+  if (kind === "tree" || kind === "blob") return pathCrumbs(path, folder);
+
+  return [];
 }
 
 function MonorepoFrame() {
   const { monorepo } = Route.useRouteContext();
   const info = Route.useLoaderData();
   const { pathname } = useLocation();
+  const queryClient = useQueryClient();
+
+  const { owner, name } = monorepo;
+
+  // One socket per monorepo, kept across its pages (the context object is new on each navigation).
+  useEffect(() => startMonorepoFeed(queryClient, monorepoRef(owner, name)), [queryClient, owner, name]);
 
   const rest = pathname
     .split("/")
@@ -59,32 +92,16 @@ function MonorepoFrame() {
     .filter(Boolean)
     .map((p) => decodeURIComponent(p));
 
-  const full = monorepo.full;
-  const tab = TABS.find((t) => rest[0] === t) ?? "code";
-  const members = useQuery(membersQuery(monorepo)).data;
-  const machines = useQuery({ ...machinesQuery(monorepo), enabled: info.kind === "monorepo" }).data;
-  const crumbs: Crumb[] = [{ label: monorepo.owner, link: ownerLink(monorepo.owner), wide: true }, { label: monorepo.name, monorepo: full }, ...pathCrumbs(full, rest)];
+  const crumbs: Crumb[] = [
+    { label: monorepo.owner, link: ownerLink(monorepo.owner), wide: true },
+    { label: monorepo.name, monorepo: monorepo.full },
+    ...crumbsFor(monorepo.full, info.kind === "repo", rest),
+  ];
 
   return (
     <Page crumbs={crumbs}>
-      <div className="flex items-end justify-between gap-8 phone:flex-col phone:items-start phone:gap-4">
-        <h1 className="flex items-center gap-3.5 font-mono text-[24px] leading-[30px] tracking-[-.01em]">
-          <Avatar name={monorepo.name} org size={36} />
-          <span>
-            <span className="text-ash">{monorepo.owner}/</span>
-            {monorepo.name}
-          </span>
-        </h1>
-      </div>
-      <TabBar label={full}>
-        <Tab link={monoLink(full)} current={tab === "code"} label="Code" />
-        <Tab link={tabLink(full, "activity")} current={tab === "activity"} label="Activity" />
-        {info.kind === "monorepo" ? <Tab link={tabLink(full, "machines")} current={tab === "machines"} label="Machines" count={machines} /> : null}
-        {info.kind === "monorepo" ? <Tab link={tabLink(full, "ci")} current={tab === "ci"} label="CI" /> : null}
-        <Tab link={tabLink(full, "members")} current={tab === "members"} label="Members" count={members} />
-        <Tab link={tabLink(full, "settings")} current={tab === "settings"} label="Settings" />
-      </TabBar>
       <Outlet />
     </Page>
   );
 }
+

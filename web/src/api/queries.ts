@@ -64,7 +64,7 @@ export const headsQuery = (m: MonorepoRef) =>
 /** A repo's open branches, counted on the first page (100). */
 export const openBranchesQuery = (m: MonorepoRef, repo: RepoName) =>
   queryOptions({
-    queryKey: [...key(m), "branches", repo],
+    queryKey: [...key(m), "r", repo, "open-count"],
     queryFn: () => read(Routes.listBranches(m.owner, m.name, repo, "open", null)).then((r) => r.branches.length),
   });
 

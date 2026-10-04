@@ -1,13 +1,14 @@
 // The quiet top bar: the mark (home), the breadcrumb (owner / monorepo with
 // its switcher / path), and your name, which opens a small menu.
 import { Menu } from "@base-ui/react/menu";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { signOut } from "../api/actions";
-import { meQuery, monoreposQuery } from "../api/queries";
+import { monorepoRef } from "../api/names";
+import { meQuery, monoreposQuery, openBranchesQuery, reposQuery } from "../api/queries";
 import { Avatar } from "./Avatar";
 import { Chevron, Mark } from "./Icons";
-import { type AppLink, monoLink } from "./paths";
+import { type AppLink, monoLink, repoLink } from "./paths";
 import { MenuHeading, MenuLink, MenuPopup, MenuRule, menuItem } from "./menu";
 import { ago, since, useNow } from "./time";
 
@@ -19,6 +20,8 @@ export interface Crumb {
   link?: AppLink;
   /** The monorepo crumb: its avatar, and the chevron that switches monorepo. */
   monorepo?: string;
+  /** A project crumb (its repo path): the chevron that switches project. */
+  project?: string;
   /** Dropped on a phone, so the breadcrumb fits. */
   wide?: boolean;
 }
@@ -60,6 +63,35 @@ function Switcher({ current }: { current: string }) {
   );
 }
 
+function ProjectSwitcher({ full, current }: { full: string; current: string }) {
+  const [owner = "", name = ""] = full.split("/");
+  const monorepo = monorepoRef(owner, name);
+  const repos = useQuery(reposQuery(monorepo)).data ?? [];
+  const open = useQueries({ queries: repos.map((r) => openBranchesQuery(monorepo, r.name)) });
+
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        aria-label="Switch project"
+        className="flex h-7 w-[22px] items-center justify-center rounded-md text-ash hover:bg-loam hover:text-bark data-popup-open:bg-loam data-popup-open:text-bark"
+      >
+        <Chevron className="block h-3.5 w-2.5" />
+      </Menu.Trigger>
+      <MenuPopup offset={10}>
+        <MenuHeading>Projects in {name}</MenuHeading>
+        {repos.map((r, i) => (
+          <MenuLink key={r.path} link={repoLink(full, r.path)} current={r.path === current}>
+            <span className="font-mono text-[13px]">{r.path}</span>
+            <span className="ml-auto text-[12px] text-ash">{open[i]?.data === undefined ? "" : `${open[i]?.data} open`}</span>
+          </MenuLink>
+        ))}
+        <MenuRule />
+        <MenuLink link={monoLink(full)}>{name}, all files</MenuLink>
+      </MenuPopup>
+    </Menu.Root>
+  );
+}
+
 function NameMenu() {
   const me = useQuery(meQuery).data;
 
@@ -82,6 +114,9 @@ function NameMenu() {
   );
 }
 
+/** The monorepo the breadcrumb is in. */
+const full = (crumbs: Crumb[]) => crumbs.find((c) => c.monorepo)?.monorepo ?? "";
+
 export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
   return (
     <header className="relative flex h-14 items-center gap-1.5 px-(--margin)">
@@ -89,8 +124,8 @@ export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
         <Mark className="block" />
       </Link>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-0.5 font-mono text-[14px] leading-5">
-        {crumbs.map((c) => (
-          <span key={c.label} className={`inline-flex min-w-0 items-center ${c.wide ? "phone:hidden" : ""}`}>
+        {crumbs.map((c, i) => (
+          <span key={`${i}:${c.label}`} className={`inline-flex min-w-0 items-center ${c.wide ? "phone:hidden" : ""}`}>
             <span aria-hidden="true" className="px-1.5 font-sans text-[18px] text-rootline">
               /
             </span>
@@ -103,9 +138,19 @@ export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
                 <Switcher current={c.monorepo} />
               </>
             ) : c.link ? (
-              <Link {...c.link} className={crumbLink}>
-                {c.label}
-              </Link>
+              <>
+                <Link {...c.link} className={crumbLink}>
+                  {c.label}
+                </Link>
+                {c.project ? <ProjectSwitcher full={full(crumbs)} current={c.project} /> : null}
+              </>
+            ) : c.project ? (
+              <>
+                <span aria-current="page" className="px-1.5 py-1 whitespace-nowrap text-bark">
+                  {c.label}
+                </span>
+                <ProjectSwitcher full={full(crumbs)} current={c.project} />
+              </>
             ) : (
               <span aria-current="page" className="overflow-hidden px-1.5 py-1 text-ellipsis whitespace-nowrap text-bark">
                 {c.label}

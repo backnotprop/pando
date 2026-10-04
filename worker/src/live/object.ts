@@ -341,6 +341,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS applied (commit_sha TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS reserved (path TEXT NOT NULL, merge TEXT NOT NULL, PRIMARY KEY (path, merge));
     `);
   }
 
@@ -1352,14 +1353,18 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // again until a call succeeds, so a call whose answer was lost may come
   // twice. A commit already applied changes nothing, so a live save made
   // since is never replaced a second time.
-  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
+  //
+  // Each path it changes drops its `pending` row: an older live save there
+  // was replaced by the merge, so a later commit must never put it back on
+  // git main (CODE-VS-MODEL M1). It ends the merge's reservation.
+  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[]; merge?: string }): Promise<{ versions: number[] }> {
     this.testApply(false);
 
-    if (this.applied(input.commit)) return { versions: [] };
+    if (this.applied(input.commit)) return this.endReservation(input.merge, []);
     // Hash first, the only await: the loop below reads and writes with no await.
     const changes = await Promise.all(input.changes.map((c) => hashed(c)));
 
-    if (this.applied(input.commit)) return { versions: [] }; // the same commit, applied by a call that ran meanwhile
+    if (this.applied(input.commit)) return this.endReservation(input.merge, []); // the same commit, applied by a call that ran meanwhile
 
     if (input.monorepo && this.kv("monorepo") !== input.monorepo) this.setKv("monorepo", input.monorepo);
     const versions: number[] = [];
@@ -1389,13 +1394,50 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         });
       }
 
+      this.sql.exec("DELETE FROM pending WHERE path = ? AND version < ?", c.path, version);
       versions.push(version);
       this.broadcast(this.changeMessage(this.row(version)));
     }
 
     this.sql.exec("INSERT INTO applied (commit_sha, at) VALUES (?, ?)", input.commit, Date.now());
     this.setKv("parent", input.commit);
+    const out = await this.endReservation(input.merge, versions);
     this.testApply(true);
+
+    return out;
+  }
+
+  // ---- a merge's reservation (Durable Object RPC, called by the monorepo object) ----
+  //
+  // A merge into the meta layer reserves the paths its branch changes before
+  // it lands, and applyFromMain or release ends that (CODE-VS-MODEL M1).
+  // While a path is reserved no commit carries it, so no older live save of
+  // it can land on git main after the merge: git main and the live files
+  // agree once the merge is applied. Live saves of it are taken as usual,
+  // and the merge's version replaces them (the merge wins), until the owner
+  // answers question 3 (QUESTIONS.md, 2026-10-04). If the answer is "the
+  // merge waits", reserve also commits any pending version of these paths at
+  // once and answers git main's new sha (the merge then merges against it),
+  // and change() answers a live save of a reserved path `stale`.
+
+  /** Reserve paths for a merge; a commit of any of them already on its way lands (or fails) first. */
+  async reserve(merge: string, paths: string[]): Promise<{ reserved: number }> {
+    for (const p of paths) this.sql.exec("INSERT OR IGNORE INTO reserved (path, merge) VALUES (?, ?)", p, merge);
+    const busy = this.committing;
+
+    if (busy && paths.some((p) => busy.paths.has(p))) await busy.done;
+
+    return { reserved: paths.length };
+  }
+
+  /** End a merge's reservation (the merge did not land). Saves that waited are committed as usual. */
+  async release(merge: string): Promise<void> {
+    await this.endReservation(merge, []);
+  }
+
+  private async endReservation(merge: string | undefined, versions: number[]): Promise<{ versions: number[] }> {
+    if (merge) this.sql.exec("DELETE FROM reserved WHERE merge = ?", merge);
+    await this.scheduleCommit();
 
     return { versions };
   }
@@ -1410,14 +1452,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!gitWriter(this.env)) return; // no Artifacts binding: versions are kept, not committed
 
     if (this.initializing()) return; // pando init commits everything when it is done
-    const next = this.sql.exec<{ due: number | null }>("SELECT MIN(due) AS due FROM pending").one().due;
+    const next = this.sql.exec<{ due: number | null }>("SELECT MIN(due) AS due FROM pending WHERE path NOT IN (SELECT path FROM reserved)").one().due;
 
     if (next === null) return;
     await this.alarmBy(next);
   }
 
+  /** The commit on its way, if any: its paths, and when it is done (landed or failed). */
+  private committing: { paths: Set<string>; done: Promise<void> } | null = null;
+
   // One commit per alarm, so each gets its own CPU budget; the next alarm is
-  // set right away while more is due.
+  // set right away while more is due. Paths reserved by a merge wait.
   async alarm(): Promise<void> {
     if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM event_outbox").one().n > 0) await this.drain();
     const writer = gitWriter(this.env);
@@ -1425,7 +1470,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!writer || this.initializing()) return;
 
     const due = this.sql
-      .exec<{ path: string; version: number }>("SELECT path, version FROM pending WHERE due <= ? ORDER BY version", Date.now() + GROUP_MS)
+      .exec<{ path: string; version: number }>(
+        "SELECT path, version FROM pending WHERE due <= ? AND path NOT IN (SELECT path FROM reserved) ORDER BY version",
+        Date.now() + GROUP_MS,
+      )
       .toArray();
 
     if (!due.length) return this.scheduleCommit();
@@ -1449,12 +1497,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       bytes += r.size ?? 0;
     }
 
+    const run = timed(
+      "object",
+      { route: "meta.commit", monorepo_id: this.kv("monorepo"), repo: "meta", files: rows.length },
+      () => this.commitRows(writer, rows, this.kv("init_commit") === "1"),
+    );
+
+    // A merge reserving one of these paths waits for this commit (reserve).
+    this.committing = { paths: new Set(rows.map((r) => r.path)), done: run.then(() => undefined, () => undefined) };
+
     try {
-      await timed(
-        "object",
-        { route: "meta.commit", monorepo_id: this.kv("monorepo"), repo: "meta", files: rows.length },
-        () => this.commitRows(writer, rows, this.kv("init_commit") === "1"),
-      );
+      await run;
     } catch (e) {
       this.setKv("commit_error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
       const retry = Math.min(intParam(this.kv("retry_ms"), RETRY_MIN_MS) * (this.kv("retry_ms") ? 2 : 1), RETRY_MAX_MS);
@@ -1462,6 +1515,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       await this.alarmBy(Date.now() + retry);
 
       return;
+    } finally {
+      this.committing = null;
     }
 
     this.setKv("retry_ms", null);

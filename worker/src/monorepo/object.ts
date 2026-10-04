@@ -297,7 +297,11 @@ export class MonorepoObject extends DurableObject<Env> {
       ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t),
       (name) => this.repoRow(name), (repo) => this.currentMain(repo), ATTEMPTS_KEPT,
     );
-    this.metaApply = new MetaApplyOut(this.sql, (row) => this.applyToMetaLayer(row), (t) => this.feed.armAt(t));
+    this.metaApply = new MetaApplyOut(
+      this.sql,
+      (row) => (row.kind === "apply" ? this.applyToMetaLayer(row) : this.env.META.get(this.env.META.idFromName(this.info()!.id)).release(row.merge)),
+      (t) => this.feed.armAt(t),
+    );
     this.ci = new CiStore(ctx, env, this.sql, {
       info: () => this.info(),
       publish: (e) => this.publish(e),
@@ -952,36 +956,68 @@ export class MonorepoObject extends DurableObject<Env> {
     let out;
     const engine = gitwrite;
 
+    const repo = () => ({
+      artifacts: timedArtifacts(this.env.ARTIFACTS),
+      name: r.artifacts_name,
+      // The object's cached write token for this one repo (C3), not one minted per push.
+      write: { remote: r.remote, token: (fresh: boolean) => repoToken(this.env, r.artifacts_name, "write", r.created_at, "local", fresh) },
+    });
+
+    const options = (h: string, baseSha: string) => ({
+      base: r.default_branch, head: h, baseSha, message,
+      author: { name: a.identity.name ?? a.identity.login, email },
+      committer: { name: "Pando", email: "pando@pando.invalid" },
+    });
+
     const attemptMerge = (h: string, baseSha: string) =>
       // One of the repo's two write slots, held for the merge's push; Artifacts' "busy" is retried.
       this.gatedTimed(r.artifacts_name, () =>
-        retryBusy(
-          () =>
-            engine.mergeCommit(
-              {
-                artifacts: timedArtifacts(this.env.ARTIFACTS),
-                name: r.artifacts_name,
-                // The object's cached write token for this one repo (C3), not one minted per push.
-                write: { remote: r.remote, token: (fresh) => repoToken(this.env, r.artifacts_name, "write", r.created_at, "local", fresh) },
-              },
-              {
-                base: r.default_branch, head: h, baseSha, message,
-                author: { name: a.identity.name ?? a.identity.login, email },
-                committer: { name: "Pando", email: "pando@pando.invalid" },
-              },
-            ),
-          (e) => isBusy(e instanceof Error ? e.message : String(e)),
-        ),
+        retryBusy(() => engine.mergeCommit(repo(), options(h, baseSha)), (e) => isBusy(e instanceof Error ? e.message : String(e))),
       );
 
-    try {
-      out = await attemptMerge(head, base);
+    // Into the meta layer, each try first reserves the paths the branch
+    // changes in the live layer (CODE-VS-MODEL M1): no commit of an older
+    // live save of them lands on main after the merge, until the merge's
+    // update reaches the live files. The reservation always ends: by that
+    // update (its meta_apply row), or by a release if the try did not land.
+    let metaMerge: string | null = null;
 
-      if (out.status === "ref_moved" && !read) {
-        // The recorded main was behind Artifacts: read the refs (which also re-checks the head) and try once more.
+    const attemptMeta = async (h: string, baseSha: string) => {
+      const dry = await engine.mergeCommit(repo(), { ...options(h, baseSha), dryRun: true });
+
+      if (dry.status !== "mergeable") return dry; // a conflict, up to date, or main moved: answered as the merge's own
+      const merge = randomId("mg_");
+      this.metaApply.reserving(merge);
+      let landed = false;
+
+      try {
+        const paths = await this.branchPaths(r.artifacts_name, dry.mergeBase, h);
+        await this.env.META.get(this.env.META.idFromName(this.info()!.id)).reserve(merge, paths);
+        const res = await attemptMerge(h, dry.old);
+        landed = res.status === "merged";
+
+        return res;
+      } finally {
+        if (landed) {
+          metaMerge = merge; // the merge's record turns its row into the update
+        } else {
+          this.metaApply.release(merge);
+          await this.metaApply.flush();
+        }
+      }
+    };
+
+    const attempt = isMeta ? attemptMeta : attemptMerge;
+
+    try {
+      out = await attempt(head, base);
+
+      // The recorded main was behind Artifacts: read the refs (which also re-checks the head) and try once more.
+      // Into the meta layer, whose main also moves by live commits, up to three tries.
+      for (let tries = 1; out.status === "ref_moved" && (!read || (isMeta && tries < 3)); tries++) {
         ({ head, base, read } = await this.mergeHeads(r, a, true));
         note({ heads_from: "artifacts after ref_moved" });
-        out = await attemptMerge(head, base);
+        out = await attempt(head, base);
       }
     } catch (err) {
       if (err instanceof HttpError) throw err;
@@ -1021,7 +1057,7 @@ export class MonorepoObject extends DurableObject<Env> {
     );
 
     // The live files get the merge through the outbox, written with the record (CODE-VS-MODEL M2).
-    if (isMeta) this.metaApply.landed(randomId("mg_"), out.old, out.sha, a.identity);
+    if (isMeta) this.metaApply.landed(metaMerge ?? randomId("mg_"), out.old, out.sha, a.identity);
     this.sql.exec(
       `INSERT INTO branches (repo, name, head, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (repo, name) DO UPDATE SET deleted_at = NULL`,
@@ -1059,8 +1095,19 @@ export class MonorepoObject extends DurableObject<Env> {
     return result;
   }
 
+  /** The paths a branch changes since its merge base: merging it into main changes no others. */
+  private async branchPaths(name: string, mergeBase: string, head: string): Promise<string[]> {
+    return withRepo(this.env, name, async (repo) => {
+      const [a, b] = await Promise.all([repo.readCommit(mergeBase), repo.readCommit(head)]);
+
+      if (!a || !b) throw new HttpError(502, "artifacts", "the branch's commits could not be read");
+
+      return (await changedFiles(repo, a.treeHash, b.treeHash)).map((f) => f.path);
+    });
+  }
+
   /** A merge landed on the meta layer's main: hand the changed files to the live meta layer (a meta_apply row). Throws when it did not. */
-  private async applyToMetaLayer(row: MetaApplyRow): Promise<void> {
+  private async applyToMetaLayer(row: MetaApplyRow & { kind: "apply" }): Promise<void> {
     const m = this.info()!.id;
     const { before, commit_sha: commit, who } = row;
 
@@ -1084,7 +1131,7 @@ export class MonorepoObject extends DurableObject<Env> {
     });
 
     const author = `${who.name ?? who.login} <${who.email ?? `${who.login}@users.pando.invalid`}>`;
-    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, login: who.login, changes });
+    await this.env.META.get(this.env.META.idFromName(m)).applyFromMain({ monorepo: m, commit, author, login: who.login, changes, merge: row.merge });
   }
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────

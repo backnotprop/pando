@@ -1,7 +1,9 @@
 // Merges into the meta layer, and the live files every machine holds
-// (concurrency CODE-VS-MODEL M2). A merge's update of the live files
+// (concurrency CODE-VS-MODEL M1, M2). A merge's update of the live files
 // (applyFromMain) that fails is tried again until it is done, and is applied
-// once even when its answer was lost.
+// once even when its answer was lost. After a merge, git main and the live
+// files agree, even when a live save of a file the branch changes was
+// waiting for its commit as the merge landed.
 //
 //   npx wrangler dev --port 8851 --persist-to <dir> --var META_TEST:1
 //   PANDO_URL=http://localhost:8851 node test/meta-merge.mjs
@@ -9,6 +11,7 @@
 // Credentials stay in memory and are never printed. Git never reaches the
 // macOS keychain. It deletes its monorepo.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,6 +49,8 @@ const git = (args, cwd) => {
 
   return { ok: r.status === 0, out: `${r.stdout}${r.stderr}` };
 };
+
+const blobSha = (bytes) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes])).digest("hex");
 
 const commit = (dir, files, message) => {
   for (const [path, text] of Object.entries(files)) {
@@ -158,6 +163,66 @@ try {
   check("applied once although its answer was lost and it was sent again", fromMain(TOML).length === 2 && versions.length === 2, `${fromMain(TOML).length} on the socket, ${versions.length} in history`);
   r = await call("GET", `${base}/meta/file?path=${encodeURIComponent(TOML)}`);
   check("the live file is the second merge's", r.text === 'local_only = ["scratch/", "tmp/"]\n', JSON.stringify(r.text));
+
+  // ── M1: after a merge into the meta layer, git main and the live files agree ──
+  const gitMain = (path) => {
+    git(["fetch", "-q", metaUrl, "main"], meta);
+    const g = git(["show", `FETCH_HEAD:${path}`], meta);
+
+    return g.ok ? g.out : null;
+  };
+
+  const liveFile = async (path) => {
+    const f = await call("GET", `${base}/meta/file?path=${encodeURIComponent(path)}`);
+
+    return f.status === 200 ? f.text : null;
+  };
+
+  const save = async (path, text, baseVersion) => {
+    const bytes = Buffer.from(text);
+    const sid = `s-${path}-${Date.now()}`;
+    ws.send(JSON.stringify({ type: "save", id: sid, path, base_version: baseVersion, sha: blobSha(bytes), bytes: bytes.toString("base64") }));
+
+    return waitFor(() => frames.find((f) => f.id === sid && (f.type === "accepted" || f.type === "stale" || f.type === "refused")), 10_000);
+  };
+
+  // Everything live is in git (nothing waits for its commit), then the files compared.
+  const settled = async () => waitFor(async () => {
+    const st = (await call("GET", `${base}/meta/status`)).json;
+
+    return st?.uncommitted === 0 && !st?.commit_error ? st : null;
+  }, 30_000);
+
+  const agree = async (paths) => {
+    const pairs = [];
+
+    for (const p of paths) pairs.push([p, gitMain(p), await liveFile(p)]);
+
+    return { ok: pairs.every(([, g, l]) => g === l), detail: pairs.map(([p, g, l]) => `${p}: git ${JSON.stringify(g)}, live ${JSON.stringify(l)}`).join("; ") };
+  };
+
+  // A branch made from main before a live save changes the same file; it merges seconds after the save.
+  check("a branch changing notes/plan.md is pushed", pushBranch("fix", { "notes/plan.md": "from the branch\n" }));
+  const saved = await save("notes/plan.md", "ana, live\n", 0);
+  check("a live save of notes/plan.md is accepted (its commit is due in 10 s)", saved?.type === "accepted", saved?.type);
+  r = await merge("fix");
+  check("the branch merges, or is refused as a conflict", (r.status === 200 && r.json?.status === "merged") || (r.status === 409 && r.json?.error?.code === "conflict"), `${r.status} ${r.json?.status ?? r.json?.error?.code}`);
+  check("then every live save is committed, with no commit error", !!(await settled()));
+  let same = await agree(["notes/plan.md"]);
+  check("git main and the live files hold the same notes/plan.md (git never goes back to the older live save)", same.ok, same.detail);
+
+  // The branch changes another file: the merge lands, and the live save is committed on top of it.
+  // notes/plan.md is saved again on top of the merge's version: its reservation has ended, so it commits too.
+  const planNow = (await call("GET", `${base}/meta/history?path=notes/plan.md&limit=1`)).json?.versions?.[0]?.version ?? 0;
+  const again = await save("notes/plan.md", "ana, after the merge\n", planNow);
+  check("a live save of notes/plan.md on top of the merge's version is accepted", again?.type === "accepted", again?.type);
+  check("a branch changing other.md is pushed", pushBranch("other", { "other.md": "other, from the branch\n" }));
+  const saved2 = await save("notes/plan2.md", "ana, live 2\n", 0);
+  r = await merge("other");
+  check("a branch changing another file merges", saved2?.type === "accepted" && r.status === 200 && r.json?.status === "merged", `${saved2?.type}, ${r.status} ${r.json?.status ?? r.json?.error?.code}`);
+  check("then every live save is committed, with no commit error", !!(await settled()));
+  same = await agree(["notes/plan.md", "notes/plan2.md", "other.md", TOML]);
+  check("git main and the live files agree on every path both hold, the save after the merge included", same.ok && gitMain("notes/plan.md") === "ana, after the merge\n", same.detail);
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

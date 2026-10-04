@@ -7,9 +7,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { revokeCredential } from "../../api/actions";
 import { credentialsQuery, meQuery } from "../../api/queries";
 import { button, Cmd, Refusal, row, SectionHead, thead } from "../../ui/controls";
-import { Page, Title } from "../../ui/pages";
-import { ownerLink } from "../../ui/paths";
+import { Title } from "../../ui/pages";
 import { ago, since, useNow } from "../../ui/time";
+import { SettingsFrame } from "./-frame";
 
 export const Route = createFileRoute("/settings/machines")({
   loader: ({ context: { queryClient } }) => Promise.all([queryClient.ensureQueryData(meQuery), queryClient.ensureQueryData(credentialsQuery)]),
@@ -54,7 +54,7 @@ function YourMachines() {
   const rows = [...all.filter((c) => c.id !== me.credential.id), me.credential];
 
   return (
-    <Page crumbs={[{ label: me.login, link: ownerLink(me.login) }, { label: "machines" }]}>
+    <SettingsFrame login={me.login} page="machines">
       <div className="max-w-[880px]">
         <Title>Your machines</Title>
         <div className="mt-7">
@@ -89,6 +89,6 @@ function YourMachines() {
           <Cmd text={`pando credential create --name ${nextSandbox(all)}`} />
         </div>
       </div>
-    </Page>
+    </SettingsFrame>
   );
 }

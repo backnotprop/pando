@@ -11,8 +11,10 @@
 //   retry timer (C25-LIVE-HOME.md);
 // - keeps the member list the queue consumer last read from the accounts;
 // - keeps presence from the follower sockets' hello;
-// - sends the monorepo's summary line, coalesced, at most every 10 s (60 s
-//   when large), only when it changed;
+// - sends the monorepo's summary line, coalesced, at most every 10 s, only
+//   when it changed; above the split it sends only the crossing (members'
+//   feeds then mark it large), and the home reads the line when it loads
+//   (routes.ts), as it reads a large monorepo's events;
 // - answers needs-you from stored branch facts.
 // It never calls Artifacts or another object; the Worker does the fan-out.
 
@@ -27,7 +29,7 @@ import type { ObjectInfo, StatusRecord } from "../monorepo/types";
 import { isRecord, isTextList, parseJson, type Json, type JsonObject } from "../parse";
 import {
   ACTIVITY_KINDS, closesOf, FANOUT_MAX, feedEventOf, flagOf, HELLO_WORKTREES_MAX, isNeedState, MEMBERS_INLINE_MAX, nameOf, needChangesOf, pushSummaryOf, seqBound,
-  statusStateOf, storedPointerOf, summaryOf, textOf, TICK_LARGE_MS, TICK_SMALL_MS, verdictOf, wholeOf,
+  statusStateOf, storedPointerOf, summaryOf, textOf, TICK_SMALL_MS, verdictOf, wholeOf,
   type FeedEvent, type FeedMessage, type Key, type Line, type NeedChange, type NeedRow, type NeedState, type PushNumbers,
   type StoredPointer, type Summary,
 } from "./shape";
@@ -145,6 +147,9 @@ function logged(what: string): (cause: unknown) => void {
 export class FeedOut {
   /** The one flush in progress, if any (single flight: two flushes would send the same rows twice). */
   private flushing: Promise<void> | null = null;
+
+  /** The summary line the home last read, until something changes it (scheduleSummary drops it). */
+  private lineRead: Summary | null = null;
 
   constructor(
     private ctx: DurableObjectState,
@@ -903,16 +908,32 @@ export class FeedOut {
     };
   }
 
+  /**
+   * The line as the home reads it (a large monorepo's, which its members'
+   * feeds do not get): computed once, then kept until the next change, so
+   * many people loading their homes cost one computation.
+   */
+  line(): Summary {
+    this.lineRead ??= this.summary();
+
+    return this.lineRead;
+  }
+
   private tickMs(): number {
     const t = Number(this.env.FEED_TICK_MS);
 
-    if (Number.isFinite(t) && t > 0) return t;
-
-    return this.isLarge() ? TICK_LARGE_MS : TICK_SMALL_MS;
+    return Number.isFinite(t) && t > 0 ? t : TICK_SMALL_MS;
   }
 
-  /** Ask for a summary tick: at most one per tick interval, coalesced (`now`: send at once). */
+  /**
+   * The line may have changed: ask for a summary tick, at most one per tick
+   * interval, coalesced (`soon`: send at once). Above the split there is no
+   * tick but the crossing's (`soon`).
+   */
   scheduleSummary(soon = false): void {
+    this.lineRead = null;
+
+    if (!soon && this.isLarge()) return;
     const due = Number(this.get("tick_due") ?? 0);
     const next = soon ? Date.now() : Math.max(Date.now(), Number(this.get("tick_last") ?? 0) + this.tickMs());
 
@@ -959,6 +980,10 @@ export class FeedOut {
     this.set("tick_last", String(Date.now()));
 
     if (!this.monorepo()) return;
+    const large = this.isLarge();
+
+    // Above the split, members' feeds hear the crossing once (they mark it large), then nothing until it crosses back.
+    if (large && this.get("told_large") === "1") return;
     const rows = this.needs();
     const s = this.summary(rows);
     const { at: _at, ...same } = s;
@@ -989,6 +1014,7 @@ export class FeedOut {
     this.set("needs_last", JSON.stringify(Object.fromEntries(needsNow)));
 
     if (!this.get("members_at")) return; // no feed has joined yet
+    this.set("told_large", large ? "1" : "0");
     this.queue({ t: "summary", summary: s, needs_changed: changed.slice(0, 50), needs_more: changed.length > 50 }, false);
   }
 }

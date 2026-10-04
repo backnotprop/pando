@@ -16,6 +16,7 @@ import { Route as OwnerNameRouteRouteImport } from './routes/$owner/$name/route'
 import { Route as OrgsOrgRouteRouteImport } from './routes/orgs/$org/route'
 import { Route as OrgsNewRouteImport } from './routes/orgs/new'
 import { Route as SettingsMachinesRouteImport } from './routes/settings/machines'
+import { Route as SettingsProfileRouteImport } from './routes/settings/profile'
 import { Route as OwnerNameIndexRouteImport } from './routes/$owner/$name/index'
 import { Route as OwnerNameActivityRouteImport } from './routes/$owner/$name/activity'
 import { Route as OwnerNameMachinesRouteImport } from './routes/$owner/$name/machines'
@@ -76,6 +77,11 @@ const OrgsNewRoute = OrgsNewRouteImport.update({
 const SettingsMachinesRoute = SettingsMachinesRouteImport.update({
   id: '/settings/machines',
   path: '/settings/machines',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsProfileRoute = SettingsProfileRouteImport.update({
+  id: '/settings/profile',
+  path: '/settings/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OwnerNameIndexRoute = OwnerNameIndexRouteImport.update({
@@ -225,6 +231,7 @@ export interface FileRoutesByFullPath {
   '/orgs/$org': typeof OrgsOrgRouteRouteWithChildren
   '/orgs/new': typeof OrgsNewRoute
   '/settings/machines': typeof SettingsMachinesRoute
+  '/settings/profile': typeof SettingsProfileRoute
   '/$owner/': typeof OwnerIndexRoute
   '/$owner/$name/activity': typeof OwnerNameActivityRoute
   '/$owner/$name/machines': typeof OwnerNameMachinesRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/orgs/new': typeof OrgsNewRoute
   '/settings/machines': typeof SettingsMachinesRoute
+  '/settings/profile': typeof SettingsProfileRoute
   '/$owner': typeof OwnerIndexRoute
   '/$owner/$name/activity': typeof OwnerNameActivityRoute
   '/$owner/$name/machines': typeof OwnerNameMachinesRoute
@@ -293,6 +301,7 @@ export interface FileRoutesById {
   '/orgs/$org': typeof OrgsOrgRouteRouteWithChildren
   '/orgs/new': typeof OrgsNewRoute
   '/settings/machines': typeof SettingsMachinesRoute
+  '/settings/profile': typeof SettingsProfileRoute
   '/$owner/': typeof OwnerIndexRoute
   '/$owner/$name/activity': typeof OwnerNameActivityRoute
   '/$owner/$name/machines': typeof OwnerNameMachinesRoute
@@ -330,6 +339,7 @@ export interface FileRouteTypes {
     | '/orgs/$org'
     | '/orgs/new'
     | '/settings/machines'
+    | '/settings/profile'
     | '/$owner/'
     | '/$owner/$name/activity'
     | '/$owner/$name/machines'
@@ -363,6 +373,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/orgs/new'
     | '/settings/machines'
+    | '/settings/profile'
     | '/$owner'
     | '/$owner/$name/activity'
     | '/$owner/$name/machines'
@@ -397,6 +408,7 @@ export interface FileRouteTypes {
     | '/orgs/$org'
     | '/orgs/new'
     | '/settings/machines'
+    | '/settings/profile'
     | '/$owner/'
     | '/$owner/$name/activity'
     | '/$owner/$name/machines'
@@ -433,6 +445,7 @@ export interface RootRouteChildren {
   OrgsOrgRouteRoute: typeof OrgsOrgRouteRouteWithChildren
   OrgsNewRoute: typeof OrgsNewRoute
   SettingsMachinesRoute: typeof SettingsMachinesRoute
+  SettingsProfileRoute: typeof SettingsProfileRoute
   OwnerIndexRoute: typeof OwnerIndexRoute
 }
 
@@ -485,6 +498,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/machines'
       fullPath: '/settings/machines'
       preLoaderRoute: typeof SettingsMachinesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/profile': {
+      id: '/settings/profile'
+      path: '/settings/profile'
+      fullPath: '/settings/profile'
+      preLoaderRoute: typeof SettingsProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$owner/$name/': {
@@ -769,6 +789,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrgsOrgRouteRoute: OrgsOrgRouteRouteWithChildren,
   OrgsNewRoute: OrgsNewRoute,
   SettingsMachinesRoute: SettingsMachinesRoute,
+  SettingsProfileRoute: SettingsProfileRoute,
   OwnerIndexRoute: OwnerIndexRoute,
 }
 export const routeTree = rootRouteImport

@@ -75,6 +75,9 @@ import {
   OrgMember,
   OrgMemberList,
   Owner,
+  Profile,
+  Contributions,
+  ContributionPeriod,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -126,6 +129,9 @@ const decoders = {
   MonorepoRenamed: refuses(MonorepoRenamed),
   MonorepoCreated: refuses(MonorepoCreated),
   Owner: refuses(Owner),
+  Profile: refuses(Profile),
+  Contributions: refuses(Contributions),
+  ContributionPeriod: refuses(ContributionPeriod),
   Org: refuses(Org),
   OrgList: refuses(OrgList),
   OrgMember: refuses(OrgMember),

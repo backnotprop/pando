@@ -1,0 +1,37 @@
+---
+title: Profiles
+description: Your profile, its contribution graph, and what counts on it.
+sidebar:
+  order: 5
+---
+
+Everyone has a profile at `/<login>`: a picture (your sign-in's, or your initials), your name, a short bio, where you are, up to 4 links, the organizations you share with the person looking, the repositories you worked in this year, a graph of the last 12 months, and your activity by month. Change your name, bio, location and links in **Edit profile** (`/settings/profile`). Once you save a name there, signing in no longer changes it.
+
+## What counts
+
+One square is one day. Its shade says how busy the day was against your own busy days, in four steps.
+
+| Counts | When | For whom |
+| --- | --- | --- |
+| A commit | it reaches a repository's main: by a merge, or with the repository's history when its main first arrives (`pando init` in an existing repo, or a first push of main) | its author, and everyone named on a `Co-authored-by:` line at the end of its message, matched by their sign-in email |
+| A commit of the shared files | Pando commits the files outside `projects/`, one commit for each 10-second window of saves | everyone whose save it carries, once each |
+| A branch opened | its first push | the person whose sign-in pushed it |
+| A review | it is posted | its author |
+| A repository made | it is made | the person who made it |
+
+Pushes, merges themselves, checks and single saves do not count. Merge commits never count.
+
+- **Agents count as you.** An agent works under your sign-in and commits with your email (`pando worktree add` sets it), so its work is yours, counted once per commit. An agent's own `Co-authored-by` line matches no one and is skipped.
+- **Your email is your sign-in email.** A commit counts for you when its author or co-author email is the email you sign in with. Check what git uses with `git config user.email`.
+- **Only repositories you are in.** A commit counts for a person who can open the repository when it lands.
+- **A day is yours, not the server's.** Squares follow the time zone of the person looking, at today's offset for the whole year.
+
+## Who sees what
+
+Everyone signed in sees your picture, name, bio, location, links and join date. A viewer sees your work only in repositories they can open themselves; nothing else is counted for them, and no other repository is named. Your own profile follows the same rule: a repository you leave stops showing.
+
+## When counts show
+
+- **After a merge,** about half a second.
+- **When a repository arrives with history,** its last 12 months are read in the background, about 10 seconds for every 1,000 commits. Older commits are not read.
+- **Your own work lands live.** With your profile open, the day's square steps up and glows once.

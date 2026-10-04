@@ -1,7 +1,8 @@
 // What an activity line changes in the cache, wherever it arrives from (the
-// person's socket or a monorepo's): it takes its place in the logs, plays its
-// arrival once, and refreshes the data it touched.
-import type { EventsPage, FeedEvent } from "@pando/contract";
+// person's socket or a monorepo's): it takes its place in the logs, moves its
+// monorepo up the home's list, plays its arrival once, and refreshes the data
+// it touched.
+import type { EventsPage, FeedEvent, MonorepoSummary } from "@pando/contract";
 import type { InfiniteData, InvalidateQueryFilters, QueryClient } from "@tanstack/react-query";
 import { lineKey, markArrived } from "./arrivals";
 import { patchMachineActivity } from "./rows";
@@ -69,6 +70,21 @@ function refresh(qc: QueryClient, filters: InvalidateQueryFilters) {
   });
 }
 
+/** The home's list order: most recently active first. */
+export const byActivity = (a: MonorepoSummary, b: MonorepoSummary) =>
+  (b.last_activity_at ?? "").localeCompare(a.last_activity_at ?? "") || a.full_name.localeCompare(b.full_name);
+
+/**
+ * The line's monorepo was active at its time. A large monorepo's line comes
+ * only by its own socket and its summary is not sent, so this is what moves
+ * it on an open home.
+ */
+function touchList(qc: QueryClient, e: FeedEvent) {
+  qc.setQueryData<readonly MonorepoSummary[]>(["monorepos"], (list) =>
+    list?.map((m) => (m.id === e.monorepo_id && (m.last_activity_at ?? "") < e.at ? { ...m, last_activity_at: e.at } : m)).sort(byActivity),
+  );
+}
+
 export function applyLine(qc: QueryClient, e: FeedEvent): void {
   const key = lineKey(e);
   const first = !applied.has(key);
@@ -88,6 +104,7 @@ export function applyLine(qc: QueryClient, e: FeedEvent): void {
   }
 
   if (!first) return;
+  touchList(qc, e);
   patchMachineActivity(qc, e);
 
   if (e.kind === "meta.saved") {

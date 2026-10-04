@@ -1,0 +1,76 @@
+/* The contribution graph's five steps, per theme (owner, Q5: "match theme").
+   Step 0 is an empty day; steps 1 to 4 rise from the page's ground to one
+   colour from the theme's own palette, mixed in OKLab, so each step is
+   lighter (by day, darker) than the one before. None is the theme's Rust
+   (failure) or its Foxfire (arrival): Foxfire is kept for the one glow when
+   your own work lands while your profile is open. Hues measured in OKLCH;
+   the nearest of Rust and Foxfire is named for each.
+   - Pando, dark and light: its ink, the text colour (cream; near-black by
+     day), as the mocks drew it. Hue 89, 53 from Rust (36).
+   - Plannotator: its slate ground's own ink, cool white, the way Iris's is.
+     Its accent orange sits 25 degrees from its Rust and its violet is its
+     Foxfire, so neither is used.
+   - Iris: its ink, cool white (dark) or near-black (light). Its ember is 20
+     degrees from its Rust, its violet is its Foxfire.
+   - Cloudflare: its brand gold (#ffce4b, hue 88; light: a darker step of it),
+     62 from its Rust (25) and 122 from its cyan Foxfire. Its orange is 14 from
+     its Rust.
+   - Black Rainbow: its spectrum without its red (Rust) or pink (Foxfire):
+     blue, green, cyan, then yellow, each lighter than the last. */
+
+:root {
+  --graph-ink: var(--bark);
+  --graph-ground: var(--soil);
+  --graph-0: color-mix(in oklab, var(--bark) 7%, var(--graph-ground));
+  --graph-1: color-mix(in oklab, var(--graph-ink) 24%, var(--graph-ground));
+  --graph-2: color-mix(in oklab, var(--graph-ink) 44%, var(--graph-ground));
+  --graph-3: color-mix(in oklab, var(--graph-ink) 68%, var(--graph-ground));
+  --graph-4: color-mix(in oklab, var(--graph-ink) 92%, var(--graph-ground));
+  /* The glow: Foxfire, or by day in Pando's light its highlighter fill. */
+  --graph-glow: color-mix(in srgb, var(--fox) 60%, transparent);
+}
+html[data-theme="pando-light"] {
+  --graph-glow: var(--fox-fill);
+}
+html[data-theme$="-light"] {
+  --graph-0: color-mix(in oklab, var(--bark) 9%, var(--graph-ground));
+}
+html[data-theme="cloudflare-dark"] {
+  --graph-ink: #ffce4b;
+  --graph-1: color-mix(in oklab, var(--graph-ink) 30%, var(--graph-ground));
+  --graph-2: color-mix(in oklab, var(--graph-ink) 50%, var(--graph-ground));
+  --graph-3: color-mix(in oklab, var(--graph-ink) 74%, var(--graph-ground));
+  --graph-4: var(--graph-ink);
+}
+html[data-theme="cloudflare-light"] {
+  --graph-ink: #8a6400;
+  --graph-1: color-mix(in oklab, var(--graph-ink) 26%, var(--graph-ground));
+  --graph-2: color-mix(in oklab, var(--graph-ink) 46%, var(--graph-ground));
+  --graph-3: color-mix(in oklab, var(--graph-ink) 70%, var(--graph-ground));
+  --graph-4: var(--graph-ink);
+}
+html[data-theme="black-rainbow"] {
+  --graph-0: #161616;
+  --graph-1: color-mix(in oklab, #4379fb 70%, var(--graph-ground));
+  --graph-2: #3fc24c;
+  --graph-3: #56daf9;
+  --graph-4: #e8c959;
+}
+
+/* Today's square when your own work lands live: Foxfire around it, once, then
+   its step's colour (the app's only other motion is a line's arrival). */
+@keyframes graph-glow {
+  from,
+  40% {
+    box-shadow: 0 0 0 2px var(--graph-glow), 0 0 10px var(--graph-glow);
+  }
+}
+.graph-glow {
+  animation: graph-glow 3s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-glow {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--graph-glow);
+  }
+}

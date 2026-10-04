@@ -7,7 +7,10 @@
 // - the index: one row per monorepo the person belongs to, with its summary
 //   line, whether it is large (read on demand), and how far back the
 //   pointers cover it;
-// - the person's hibernating sockets.
+// - the person's hibernating sockets;
+// - their contribution counts (profile SPEC section 3.2): one counter per UTC
+//   hour, monorepo and kind, and the key of every credit applied (kept 30
+//   days), so a credit delivered twice counts once.
 // It makes no outbound calls; the routes merge in what comes from logs.
 
 import type * as Contract from "@pando/contract";
@@ -38,6 +41,7 @@ type PersonFrame =
   | { type: "needs"; monorepo: string; monorepo_id: string; changed: NeedChange[]; more: boolean }
   | { type: "joined"; monorepo: string; monorepo_id: string; large: boolean }
   | { type: "left"; monorepo: string; monorepo_id: string }
+  | { type: "contributed"; monorepo: string; monorepo_id: string; hour: string; kind: ContribKind; n: number }
   | { type: "resync"; landed: number }
   | { type: "caught_up"; landed: number }
   | { type: "error"; message: string };
@@ -78,7 +82,38 @@ CREATE TABLE IF NOT EXISTS pointers (
 CREATE INDEX IF NOT EXISTS pointers_key ON pointers (at, monorepo, seq);
 CREATE INDEX IF NOT EXISTS pointers_mono ON pointers (monorepo, at, seq);
 CREATE UNIQUE INDEX IF NOT EXISTS pointers_landed ON pointers (landed);
+CREATE TABLE IF NOT EXISTS contrib (
+  hour TEXT NOT NULL, monorepo TEXT NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL,
+  PRIMARY KEY (hour, monorepo, kind));
+CREATE TABLE IF NOT EXISTS contrib_applied (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
 `;
+
+/** What a credit counts. Repositories made are read from D1 with the profile. */
+export type ContribKind = "commit" | "branch" | "review";
+
+/** One counter step: `n` more of `kind` in the UTC hour `hour` ("2026-10-03T17"). */
+export interface ContribRow {
+  hour: string;
+  kind: ContribKind;
+  n: number;
+}
+
+/** A credit's key is kept this long; the facts outbox gives up on a job after about 6 minutes. */
+const APPLIED_KEEP_MS = 30 * 86_400_000;
+
+/** Counters older than this go: the graph shows the last year. */
+const CONTRIB_KEEP_MS = 400 * 86_400_000;
+
+/** A credit's live frame goes out for work of this recent past only (a repository's history does not flash). */
+const LIVE_FRAME_MS = 48 * 3_600_000;
+
+/** The person's counts over a window, summed in the viewer's time zone. */
+export interface ContribSums {
+  /** By day and kind. */
+  days: { date: string; kind: ContribKind; n: number }[];
+  /** By calendar month, monorepo and kind. */
+  months: { month: string; monorepo: string; kind: ContribKind; n: number }[];
+}
 
 /** The routes re-read the person's monorepos from the accounts when the index is older than this. */
 const RECONCILE_MS = 60_000;
@@ -416,6 +451,78 @@ export class FeedObject extends DurableObject<Env> {
   /** The index (for the home's list and needs-you). */
   summaries(): IndexRow[] {
     return this.index();
+  }
+
+  // ── Contributions (profile SPEC section 3.2) ─────────────────────────────
+
+  /**
+   * Count a credit once: its key is new, so its rows are added; a key seen
+   * before (a delivery retried after a lost answer) adds nothing. One
+   * synchronous step. Recent work also goes out live as `contributed`.
+   * `label`: the monorepo's owner/name for the frame.
+   */
+  credit(key: string, monorepo: string, label: string, rows: ContribRow[]): boolean {
+    const t = Date.now();
+    const fresh = this.sql.exec("INSERT OR IGNORE INTO contrib_applied (key, at) VALUES (?, ?)", key, t).rowsWritten > 0;
+
+    if (!fresh) return false;
+
+    for (const r of rows) {
+      this.sql.exec(
+        "INSERT INTO contrib (hour, monorepo, kind, n) VALUES (?, ?, ?, ?) ON CONFLICT (hour, monorepo, kind) DO UPDATE SET n = n + excluded.n",
+        r.hour, monorepo, r.kind, r.n,
+      );
+    }
+
+    const recent = new Date(t - LIVE_FRAME_MS).toISOString().slice(0, 13);
+
+    for (const r of rows) if (r.hour >= recent) this.broadcast({ type: "contributed", monorepo: label, monorepo_id: monorepo, hour: r.hour, kind: r.kind, n: r.n });
+    this.pruneContrib(t);
+
+    return true;
+  }
+
+  /** At most once a day: keys past their 30 days and counters past the graph's year go. */
+  private pruneContrib(t: number): void {
+    if (t - Number(this.get("contrib_pruned_at") ?? 0) < 86_400_000) return;
+    this.set("contrib_pruned_at", String(t));
+    this.sql.exec("DELETE FROM contrib_applied WHERE at < ?", t - APPLIED_KEEP_MS);
+    this.sql.exec("DELETE FROM contrib WHERE hour < ?", new Date(t - CONTRIB_KEEP_MS).toISOString().slice(0, 13));
+  }
+
+  /** The monorepos the person has counts in, in the UTC hours `from` to `to` (inclusive). */
+  contributedIds(from: string, to: string): string[] {
+    return this.rows<{ monorepo: string }>("SELECT DISTINCT monorepo FROM contrib WHERE hour >= ? AND hour <= ?", from, to).map((r) => r.monorepo);
+  }
+
+  /**
+   * The counts of the UTC hours `from` to `to` (inclusive), in monorepos
+   * `only` (the ones the viewer can open), summed by day and by month in the
+   * viewer's zone (`tz`: minutes east of UTC).
+   */
+  contributions(only: string[], tz: number, from: string, to: string): ContribSums {
+    const shift = `${tz >= 0 ? "+" : ""}${tz} minutes`;
+    const among = JSON.stringify(only);
+    const where = "hour >= ?2 AND hour <= ?3 AND monorepo IN (SELECT value FROM json_each(?4))";
+
+    return {
+      days: this.rows<{ date: string; kind: ContribKind; n: number }>(
+        `SELECT date(hour || ':00:00', ?1) AS date, kind, SUM(n) AS n FROM contrib WHERE ${where} GROUP BY 1, 2 ORDER BY 1`,
+        shift, from, to, among,
+      ),
+      months: this.rows<{ month: string; monorepo: string; kind: ContribKind; n: number }>(
+        `SELECT strftime('%Y-%m', hour || ':00:00', ?1) AS month, monorepo, kind, SUM(n) AS n FROM contrib WHERE ${where} GROUP BY 1, 2, 3`,
+        shift, from, to, among,
+      ),
+    };
+  }
+
+  /** One day's counts by monorepo and kind (UTC hours `from` to `to`, the day's in the viewer's zone). */
+  contributionDay(only: string[], from: string, to: string): { monorepo: string; kind: ContribKind; n: number }[] {
+    return this.rows<{ monorepo: string; kind: ContribKind; n: number }>(
+      "SELECT monorepo, kind, SUM(n) AS n FROM contrib WHERE hour >= ?1 AND hour <= ?2 AND monorepo IN (SELECT value FROM json_each(?3)) GROUP BY 1, 2",
+      from, to, JSON.stringify(only),
+    );
   }
 
   // ── The window ───────────────────────────────────────────────────────────

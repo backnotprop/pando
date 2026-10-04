@@ -6,6 +6,9 @@ import * as Schema from "effect/Schema";
 /** The home: `?in=owner/name` narrows the log and "Needs you" to one monorepo. */
 export const homeSearch = Schema.toStandardSchemaV1(Schema.Struct({ in: Schema.optionalKey(Schema.String) }));
 
+/** A person's profile: `?day=2026-10-03` shows that day's activity under the graph. */
+export const profileSearch = Schema.toStandardSchemaV1(Schema.Struct({ day: Schema.optionalKey(Schema.String) }));
+
 /** The sign-in page: where to come back to. */
 export const loginSearch = Schema.toStandardSchemaV1(Schema.Struct({ return_to: Schema.optionalKey(Schema.String) }));
 

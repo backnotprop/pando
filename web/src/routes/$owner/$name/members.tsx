@@ -77,7 +77,7 @@ function People({ people, owner, org = null, label = "Members", inOrg = false }:
           <li key={m.login} className="border-t border-rule-faint">
             <div className={`${row} ${columns}`}>
               <span className="flex min-w-0 items-center gap-3">
-                <Avatar name={m.login} size={28} />
+                <Avatar name={m.login} picture={m.picture_url} size={28} />
                 <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
                   <span>
                     <Ref kind="person" link={ownerLink(m.login)}>

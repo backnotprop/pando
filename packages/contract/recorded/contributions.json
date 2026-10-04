@@ -1,0 +1,119 @@
+{
+  "schema": "Contributions",
+  "route": "GET /v1/users/{login}/contributions?tz=-420 (your own)",
+  "status": 200,
+  "body": {
+    "login": "rec-muu4ew7h",
+    "tz": -420,
+    "from": "2025-10-05",
+    "to": "2026-10-04",
+    "total": 18,
+    "levels": [
+      1,
+      18,
+      19,
+      20
+    ],
+    "days": [
+      {
+        "date": "2026-10-04",
+        "n": 18,
+        "commit": 8,
+        "branch": 7,
+        "review": 1,
+        "created": 2
+      }
+    ],
+    "monorepos": [
+      {
+        "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+        "owner_type": "org",
+        "kind": "monorepo",
+        "n": 17,
+        "months": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          17
+        ]
+      },
+      {
+        "full_name": "org-muu4ew7h/in-muu4ew7h",
+        "owner_type": "org",
+        "kind": "repo",
+        "n": 1,
+        "months": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    ],
+    "kinds": {
+      "commit": 8,
+      "branch": 7,
+      "review": 1,
+      "created": 2
+    },
+    "months": [
+      {
+        "period": "2026-10",
+        "commit": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 8
+          }
+        ],
+        "branch": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 7
+          }
+        ],
+        "review": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 1
+          }
+        ],
+        "created": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "at": "2026-10-04T17:54:38.895Z"
+          },
+          {
+            "full_name": "org-muu4ew7h/in-muu4ew7h",
+            "at": "2026-10-04T17:55:22.117Z"
+          }
+        ],
+        "joined": [
+          {
+            "org": "org-muu4ew7h",
+            "name": "Rec Org",
+            "at": "2026-10-04T17:55:22.094Z",
+            "created": true
+          }
+        ]
+      }
+    ]
+  }
+}

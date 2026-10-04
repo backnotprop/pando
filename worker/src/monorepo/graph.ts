@@ -6,6 +6,7 @@
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { withRepo } from "./artifacts";
+import { coAuthorEmails } from "./trailers";
 
 export interface CommitInfo {
   parents: string[];
@@ -16,6 +17,8 @@ export interface CommitInfo {
   author?: { name: string; email: string };
   committer?: { name: string; email: string };
   authoredAt?: number;
+  /** The emails its Co-authored-by trailers name (read from the whole message, before it is cut). */
+  coauthors?: string[];
 }
 
 function info(c: ArtifactsCommitMetadata): CommitInfo {
@@ -23,6 +26,7 @@ function info(c: ArtifactsCommitMetadata): CommitInfo {
     parents: c.parents, time: c.committedAt, tree: c.treeHash,
     message: c.message.length > 4096 ? c.message.slice(0, 4096) : c.message,
     author: c.author, committer: c.committer, authoredAt: c.authoredAt,
+    coauthors: coAuthorEmails(c.message),
   };
 }
 
@@ -131,6 +135,61 @@ export async function compare(env: Env, artifactsName: string, base: string, hea
   return withRepo(env, artifactsName, (repo) => compareWith(commitReader(repo), base, head));
 }
 
+/** Where a paged walk goes on: each queued commit and its paint (FROM_BASE, FROM_HEAD or both). */
+export type Frontier = { sha: string; paint: number }[];
+
+/**
+ * The commits reachable from `head` and not from `base` (with `base` null:
+ * all of them), newest first by commit time, down to `since` (Unix seconds):
+ * a merge's new commits, or a repository's history, a page at a time. Git's
+ * paint-down walk as compareWith does it, with no budget: at most `max`
+ * commits are read for one page and `next` says where the walk goes on (empty
+ * when it is done). A commit is taken when it leaves the queue with only
+ * head's paint (by then every child has painted it). Commits older than
+ * `since` end their line. Clock skew can count a commit a page apart twice.
+ */
+export async function walkAhead(read: CommitReader, start: Frontier, since: number, max: number): Promise<{ commits: string[]; next: Frontier }> {
+  const queue = new Heap();
+  const paint = new Map<string, number>();
+  const commits: string[] = [];
+  let walked = 0;
+
+  for (const s of start) {
+    paint.set(s.sha, (paint.get(s.sha) ?? 0) | s.paint);
+    queue.push(s.sha, (await read(s.sha)).time);
+  }
+
+  const live = () => queue.rest().some((sha) => !((paint.get(sha) ?? 0) & FROM_BASE));
+
+  while (queue.size && live() && walked < max) {
+    const sha = queue.pop()!;
+    const f = paint.get(sha) ?? 0;
+    const c = await read(sha);
+    walked++;
+
+    if (c.time < since) continue;
+
+    if (f === FROM_HEAD) commits.push(sha);
+
+    for (const p of c.parents) {
+      const pf = paint.get(p) ?? 0;
+
+      if ((pf | f) !== pf) {
+        paint.set(p, pf | f);
+        queue.push(p, (await read(p)).time);
+      }
+    }
+  }
+
+  return { commits, next: live() ? queue.rest().map((sha) => ({ sha, paint: paint.get(sha) ?? 0 })) : [] };
+}
+
+/** The first page of a walk: `head` against `base` (null: a whole history). */
+export const walkStart = (base: string | null, head: string): Frontier => [
+  ...(base ? [{ sha: base, paint: FROM_BASE }] : []),
+  { sha: head, paint: FROM_HEAD },
+];
+
 /** A max-heap of commits by commit time. */
 class Heap {
   private items: { sha: string; time: number }[] = [];
@@ -185,6 +244,11 @@ class Heap {
     this.inQueue.delete(top.sha);
 
     return top.sha;
+  }
+
+  /** The commits still queued, in no order. */
+  rest(): string[] {
+    return this.items.map((it) => it.sha);
   }
 
   anyLive(flags: Map<string, number>): boolean {

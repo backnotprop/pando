@@ -41,11 +41,18 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **A repository with more than 100 members** is read from its own log on each page, rather than copied into each member's feed.
 - **A new member sees the latest 500 lines** at once; older ones come from the log.
 - **After a lost connection, the home replays up to 500 lines.** Past that, the page reloads.
-- **Counts can be behind:** a repository's line and the Needs you counts by up to 10 seconds (60 seconds over 100 members); a membership change reaches the live feed within 60 seconds.
+- **Counts can be behind:** a repository's line and the Needs you counts by up to 10 seconds; a membership change reaches the live feed within 60 seconds. Over 100 members, a repository's line and counts are read when your home loads, and again when you come back to its tab; its last activity moves as its lines arrive.
 - **Needs you covers 50 repositories** and 500 rows at a time.
 - **At most 32,768 people can have one repository open live at once.** That is Cloudflare's limit on connections to one Durable Object.
 - **One machine reports at most 1,000 worktrees.**
 - **A repo's first push to main counts up to 250 commits** in the activity.
+
+## Profiles
+
+- **The graph shows the last 12 months**, from the Sunday 52 weeks back to today.
+- **A bio is at most 160 characters;** a name and a location 100; at most 4 links, each an https address of at most 2,048 characters.
+- **Days follow the viewer's time zone at today's offset:** up to an hour off across a daylight-saving change, and half-hour zones are rounded to the hour.
+- **A repository's history and a merge are counted about 10 seconds per 1,000 commits,** in the background. A commit dated in the future counts on the day it landed.
 
 ## Hooks
 

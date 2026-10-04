@@ -14,6 +14,8 @@ export * from "./monorepo.ts";
 
 export * from "./org.ts";
 
+export * from "./profile.ts";
+
 export * from "./needs.ts";
 
 export * from "./feed.ts";

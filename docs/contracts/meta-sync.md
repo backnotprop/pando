@@ -470,6 +470,16 @@ new monorepo with the same name starts with nothing. The caller deletes the
 R2 objects under `meta/<id>/` and the Artifacts repo. A client that
 gets `4404` stops syncing and keeps its files.
 
+## Losing access
+
+When someone can no longer open the monorepo (an owner removed them, they
+left the org that owns it, or a transfer moved it away from that org), the
+Worker calls `closeSockets([login])` on the meta layer object, and the same
+on the monorepo object for the event socket. Their sockets close with code
+`4403` ("you no longer have access to this monorepo"). A client that gets
+`4403`, or a reconnect answered 403 `not_a_member`, stops syncing, keeps its
+files and says why.
+
 ## Identity
 
 Every request, the WebSocket upgrade included, carries

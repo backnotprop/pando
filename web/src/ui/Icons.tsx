@@ -143,3 +143,40 @@ export const CopyIcon = (p: Props) => (
     </g>
   </svg>
 );
+
+/** A profile's facts (the profile mock): where a person is, when they joined, an org in the timeline, a review. */
+export const PinIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35">
+      <path d="M8 14s4.5-4.2 4.5-7.5a4.5 4.5 0 0 0-9 0C3.5 9.8 8 14 8 14z" />
+      <circle cx="8" cy="6.5" r="1.6" />
+    </g>
+  </svg>
+);
+
+export const CalendarIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35">
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.6" />
+      <path d="M2.5 6.75h11M5.5 2v3M10.5 2v3" />
+    </g>
+  </svg>
+);
+
+export const OrgIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round">
+      <rect x="2.75" y="2.75" width="10.5" height="10.5" rx="2" />
+      <path d="M5.75 6h1M9.25 6h1M5.75 8.75h1M9.25 8.75h1M7 13.25v-2h2v2" />
+    </g>
+  </svg>
+);
+
+export const ReviewIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M2.5 4.5a1.5 1.5 0 0 1 1.5-1.5h8a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" />
+      <path d="M5.9 7.1l1.4 1.4 2.8-2.9" />
+    </g>
+  </svg>
+);

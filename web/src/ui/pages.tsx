@@ -24,7 +24,7 @@ export function NotFoundPage() {
     <Page crumbs={[{ label: "not found" }]}>
       <Title>Nothing at this path.</Title>
       <p className="mt-2 text-[14px] text-bark-dim">
-        <Lnk to="/">Back to your monorepos</Lnk>
+        <Lnk to="/">Back to your repositories</Lnk>
       </p>
     </Page>
   );

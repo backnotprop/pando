@@ -74,10 +74,11 @@ export async function routeMeta(request: Request, env: LiveEnv, monorepo: string
 
 /**
  * Tests only (META_TEST=1 and the bootstrap secret): POST /v1/_meta/test
- * {monorepo, fail?, lose?, crash?, apply_fail?, apply_lose?} sets the meta
- * layer object's next event sends to fail, to lose their answer, or to crash
- * the object first, and its next updates from main to fail, or to apply and
- * lose their answer; GET ?monorepo= shows its outbox. The monorepo is its id.
+ * {monorepo, fail?, lose?, crash?, apply_fail?, apply_lose?, reserve_hold_ms?}
+ * sets the meta layer object's next event sends to fail, to lose their
+ * answer, or to crash the object first; its next updates from main to fail,
+ * or to apply and lose their answer; and its next merge reservation to stay
+ * open that long first. GET ?monorepo= shows its outbox. The monorepo is its id.
  */
 export async function metaTestRoute(request: Request, env: Env): Promise<Response> {
   if (env.META_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
@@ -100,6 +101,8 @@ export async function metaTestRoute(request: Request, env: Env): Promise<Respons
   if (isRecord(b) && isWholeNumber(b.apply_fail)) set.applyFail = b.apply_fail;
 
   if (isRecord(b) && isWholeNumber(b.apply_lose)) set.applyLose = b.apply_lose;
+
+  if (isRecord(b) && isWholeNumber(b.reserve_hold_ms)) set.reserveHoldMs = b.reserve_hold_ms;
 
   return Response.json(await env.META.get(env.META.idFromName(id)).testOutbox(set));
 }

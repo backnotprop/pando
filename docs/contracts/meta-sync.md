@@ -10,7 +10,8 @@ layer's main through a reviewed branch). Ask pando-ops for changes.
 The meta layer is the monorepo's root: every file outside `projects/` and
 outside references. It is plain files on every machine. A save on one machine
 reaches every other machine within about a second, and becomes a git commit
-on the meta layer's `main` after about 10 seconds of quiet.
+on the meta layer's `main` after about 10 seconds of quiet (at most about
+60 seconds for a file saved again and again).
 
 One `MetaLayerObject` (a Durable Object with SQLite) per monorepo holds every
 saved version. Each machine keeps one WebSocket to it.
@@ -44,6 +45,7 @@ The object refuses, and the client never sends:
 | Credentials | a reference pointer (`.pando/references/**.toml`) whose `url` carries a user or password | `credentials` | 400 |
 | Bad path | empty, absolute, `\`, NUL, `.` or `..` segments, empty segments, longer than 1,024 bytes | `bad_path` | 400 |
 | Bad sha | `sha` does not match `bytes` | `bad_sha` | 400 |
+| File and folder of one name | a file named like a live folder (`notes` beside `notes/a.md`: "notes is a folder here"), or a path inside a live file (`notes/a.md` beside a file `notes`: "notes is a file here"). Git holds no such pair, so the second is refused (saves, renames and restores) and stays on its machine. Case-only twins (`Notes.md` beside `notes.md`) are allowed, as git allows them (the owner's choice, 2026-10-04) | `file_folder` | 409 |
 
 The client also skips everything inside a folder with its own `.git` (a
 directory or a file): such a folder is a repo or a reference, and only its
@@ -217,7 +219,14 @@ above:
   out as a save on top of the version it was last synced to (a newer remote
   change makes a fresh conflict, never a silent overwrite).
 - **Refused.** A refused change is dropped and not retried until the file
-  changes again.
+  changes again. `pando sync` logs why ("the server refused notes/a.md:
+  notes is a file here (file_folder)").
+- **Case-only twins.** Two paths that differ only in case (`Notes.md`,
+  `notes.md`) are two files on the server, in git and on Linux. A Mac's file
+  system keeps one file for both, so there they overwrite each other: on a
+  case-insensitive file system, `pando sync` names each such pair once, in
+  a one-line warning ("warning: Notes.md and notes.md differ only in case;
+  ... Rename one.").
 - **`pando sync --once`** sends and receives what is waiting, then exits.
   It exits 0 only when every change here is in Pando. It exits 3 when some
   are not, and names each path with why: frozen after a conflict (its edits
@@ -266,8 +275,7 @@ A rename is two versions: on its delete side `to` is the new path, on its
 save side `from` is the old path; both are `null` on any other change.
 
 `commit` is the meta layer commit that carries the version, or `null` until
-it is committed (and for good on a live save a merge from `main` replaced
-before its commit: see "Updates from `main`"). `login` is the saver's Pando login beside `author`, the
+it is committed. `login` is the saver's Pando login beside `author`, the
 display name (2026-10-03): set from the checked credential on live saves,
 restores, and changes merged on `main` (the merger); `null` on versions
 from before then. Socket `change` messages and `meta.saved` events carry it
@@ -345,18 +353,30 @@ pando resolve decisions/HISTORY.md                # unfreeze after a conflict
 When a path has had no change for 10 seconds, the object commits it to the
 meta layer's `main` (the Artifacts repo `<id>--meta`) through
 gitwrite's `commitChanges` (see `gitwrite.md`), one commit at a time
-through the repo's write gate. Which paths share a commit is one Worker
-setting, `META_COMMIT_GROUPING`:
+through the repo's write gate.
 
-- `author` (the default today): paths due within 2 seconds of each other
-  that share an author, machine and agent go in one commit.
-- `window` (ARCHITECTURE C7; waiting for the owner's answer to round 2,
-  question 8): everything due goes in one commit, whoever saved it. The
-  last saver is its author; every other person is a `Co-authored-by:` line,
-  and each agent and machine gets its own `Pando-Agent:` and
-  `Pando-Machine:` line. Measured on Artifacts, ten people saving inside one
-  window: one commit, everything committed 11 s after the saves, against ten
-  commits and 25 s with `author`.
+A path that never goes quiet (an agent's running notes, a board a script
+updates every 5 seconds) is committed anyway: a path is due at the earlier
+of 10 seconds after its last save and 60 seconds after its first save not
+yet in git (the owner's choice, 2026-10-04). After that commit, the next
+wait starts at the path's next save. A file saved every 5 seconds becomes
+about one commit a minute, git at most about 62 seconds behind for it
+(measured: 62.2 s, on Artifacts). The maximum wait is one Worker setting,
+`META_COMMIT_MAX_WAIT_MS` (default `60000`).
+
+Which paths share a commit is one Worker setting, `META_COMMIT_GROUPING`:
+
+- `window` (the default, the owner's choice, 2026-10-04; `wrangler.jsonc`
+  sets it): everything due goes in one commit, whoever saved it. The last
+  saver is its author; every other person is a `Co-authored-by:` line, and
+  each agent and machine gets its own `Pando-Agent:` and `Pando-Machine:`
+  line. Measured on Artifacts, ten people saving inside one window: one
+  commit, everything committed 11 s after the saves, against ten commits
+  and 25 to 27 s with `author`.
+- `author`: paths due within 2 seconds of each other that share an author,
+  machine and agent go in one commit. It falls behind past about 0.7
+  different savers a second, and can keep a file saved often waiting
+  behind other people's commits.
 
 - A commit holds at most 1,000 files and about 24 MiB, so a big first
   upload becomes several commits.
@@ -386,7 +406,8 @@ object calls the meta layer object (Durable Object RPCs, not public):
 
 ```ts
 const meta = env.META.get(id);
-await meta.reserve("mg_1f2e...", ["notes/plan.md"]);  // before the merge lands: the paths the branch changes
+await meta.reserve("mg_1f2e...", ["notes/plan.md"]);  // before the merge lands: the paths the branch changes;
+                                                       // answers {sha, committed}: main after committing their live saves
 // ...the merge lands on main, then:
 await meta.applyFromMain({
   monorepo: "acme",
@@ -401,24 +422,24 @@ await meta.release("mg_1f2e...");  // instead, when the merge did not land
 Each change becomes a version with `source: "main"`, with no base check (main
 wins), and is broadcast. This is the only way `.pando/**` changes.
 
-- **Git main and the live files agree after a merge.** Before a merge
-  lands, the monorepo object reserves the paths the branch changes since its
-  merge base (a dry run of the merge finds the base). While a path is
-  reserved, no commit carries it, and a commit of it already on its way
-  lands first (the merge then merges against it). `applyFromMain` drops the
-  `pending` row of each path it changes: a live save there was replaced by
-  the merge, so no later commit puts its older bytes back on git main over
-  the merge. The reservation ends with `applyFromMain`, or with `release`
-  when the merge did not land; a reservation whose merge never answered
-  (the monorepo object stopped mid-merge) is released after 5 minutes.
-- **A live save the merge replaces.** For now the merge wins, as before: a
-  live save of a path the branch changes, made in the seconds before the
-  merge lands, is replaced on every machine by the merged bytes, with no
-  conflict copy. It stays in history with `commit: null`. The owner is
-  choosing between this and "the merge waits" (question 3, 2026-10-04): the
-  merge would first commit such a save, then be refused as a normal
-  conflict if the branch changed the same file, and a live save of a
-  reserved path would be answered `stale` while the merge lands.
+- **The merge waits for live saves** (the owner's choice, 2026-10-04).
+  Before a merge lands, the monorepo object reserves the paths the branch
+  changes since its merge base (a dry run of the merge finds the base). The
+  meta layer object then commits, at once, any live save of those paths
+  still waiting for its commit, and answers git main's sha; the merge
+  merges against it. If the branch changed the same file, the merge is
+  refused, 409 `conflict`: "notes/plan.md changed live; merge main into
+  your branch, push, and merge again". No live save is replaced silently.
+- **While a merge lands** (about 2 seconds), a live save, delete or rename
+  of a reserved path is answered `stale` with the path's current state, so
+  the client keeps its bytes in a conflict copy and freezes the path, as
+  for any lost race. No commit carries a reserved path, and a commit of it
+  already on its way lands first.
+- **Git main and the live files agree after a merge.** `applyFromMain`
+  drops the `pending` row of each path it changes, and ends the
+  reservation; `release` ends it when the merge did not land. A
+  reservation whose merge never answered (the monorepo object stopped
+  mid-merge) is released after 5 minutes.
 - Into the meta layer, a merge whose `main` moved meanwhile (a live commit)
   is tried up to three times, each against `main` as it is, before it
   answers 409 `ref_moved`.

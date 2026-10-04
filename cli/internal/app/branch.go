@@ -15,10 +15,13 @@ import (
 	"pando/internal/server"
 )
 
-// Branch is `pando branch list`.
+// Branch is `pando branch list | view`.
 func Branch(e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "view" {
+		return branchView(e, args[1:])
+	}
 	if len(args) == 0 || (args[0] != "list" && args[0] != "ls") {
-		return UsageError{"pando branch list [--repo <path>] [--all] [--json]"}
+		return UsageError{"pando branch list [--repo <path>] [--all] [--json] | view [<branch>] [--commits] [--json]"}
 	}
 	fs := flags("branch list")
 	repoFlag := fs.String("repo", "", "the repo (default: the one you are in, or every repo)")
@@ -441,4 +444,134 @@ func count(b server.Branch, n *int) string {
 		return "?"
 	}
 	return num(n)
+}
+
+// branchView is `pando branch view [<branch>]`: one branch as its page shows
+// it: state, ahead and behind, whether it merges, checks, reviews and its
+// head commit; with --commits, every commit it adds.
+func branchView(e *Env, args []string) error {
+	fs := flags("branch view")
+	repoFlag := fs.String("repo", "", "the repo (default: the one you are in)")
+	commits := fs.Bool("commits", false, "list the branch's commits (those not on main)")
+	asJSON := fs.Bool("json", false, "print JSON: the branch, its reviews and its commits as the API gives them")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) > 1 {
+		return UsageError{"pando branch view [<branch>] [--repo <path>] [--commits] [--json]"}
+	}
+	root, err := e.root()
+	if err != nil {
+		return err
+	}
+	repo, branch, _, err := e.branchArgs(root, *repoFlag, pos)
+	if err != nil {
+		return err
+	}
+	srv, err := e.open(root)
+	if err != nil {
+		return err
+	}
+	h, ok := srv.(*server.HTTP)
+	if !ok {
+		return errors.New("branch view needs a Pando server; this one is a local file:// server")
+	}
+	full, name := root.FullName(), repoName(root, repo)
+	b, err := h.GetBranch(e.Ctx, full, name, branch)
+	if err != nil {
+		return err
+	}
+	reviews, rawReviews, err := h.ListReviews(e.Ctx, full, name, branch)
+	if err != nil {
+		return err
+	}
+	limit := 1
+	if *commits {
+		limit = 250
+	}
+	cs, err := h.BranchCommits(e.Ctx, full, name, branch, limit)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		out, err := json.Marshal(map[string]json.RawMessage{"branch": b.JSON, "reviews": answerField(rawReviews, "reviews"), "commits": cs.JSON})
+		if err != nil {
+			return err
+		}
+		return e.printJSON(out)
+	}
+	e.printf("%s  %s  in %s\n", b.Name, b.State, label(root, repo))
+	if b.Title != "" {
+		e.printf("  %s\n", b.Title)
+	}
+	head := short(b.Head)
+	if len(cs.Commits) > 0 && cs.Commits[0].SHA == b.Head {
+		head += "  " + cs.Commits[0].Title
+	}
+	e.printf("  head      %s\n", head)
+	by := dash(b.Author)
+	if b.PushedMachine != "" {
+		by += ", last pushed from " + b.PushedMachine
+	}
+	e.printf("  author    %s, %s\n", by, ago(b.UpdatedAt))
+	if b.State == "merged" {
+		forced := ""
+		if b.Forced {
+			forced = ", past its checks"
+		}
+		e.printf("  merged    by %s %s as %s%s\n", dash(b.MergedBy), ago(b.MergedAt), short(b.MergeCommit), forced)
+	} else {
+		e.printf("  vs main   %s ahead, %s behind; merge %s\n", count(*b, b.Ahead), count(*b, b.Behind), mergeWord(*b))
+		if len(b.ConflictPaths) > 0 {
+			e.printf("            changed on both sides: %s\n", strings.Join(b.ConflictPaths, ", "))
+		}
+	}
+	req := "none required"
+	if len(b.Checks.Required) > 0 {
+		req = "required: " + strings.Join(b.Checks.Required, ", ")
+	}
+	e.printf("  checks    %s (%s)\n", dash(b.Checks.State), req)
+	tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
+	for _, st := range b.Checks.Statuses {
+		from := st.App
+		if from == "" {
+			from = st.Creator
+		}
+		fmt.Fprintf(tw, "            %s\t%s\t%s\t%s\n", st.Context, st.State, dash(from), st.Description)
+	}
+	for _, m := range b.Checks.Missing {
+		fmt.Fprintf(tw, "            %s\tmissing\t-\t\n", m)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(reviews) == 0 {
+		e.printf("  reviews   none\n")
+	}
+	verdict := map[string]string{"approve": "approved", "request_changes": "asked for changes", "comment": "commented"}
+	for i, r := range reviews {
+		lead := "  reviews   "
+		if i > 0 {
+			lead = "            "
+		}
+		body, _, _ := strings.Cut(r.Body, "\n")
+		if body != "" {
+			body = ": " + body
+		}
+		e.printf("%s%s %s on %s, %s%s\n", lead, r.Author, verdict[r.Verdict], short(r.Head), ago(r.CreatedAt), body)
+	}
+	if !*commits {
+		return nil
+	}
+	e.printf("\n%d commit(s) not on main", cs.Total)
+	if cs.Truncated {
+		e.printf(" (the newest %d here)", len(cs.Commits))
+	}
+	e.printf(":\n")
+	tw = tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
+	for _, c := range cs.Commits {
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", short(c.SHA), c.Title, dash(c.Author.Name), ago(c.Author.Date))
+	}
+	return tw.Flush()
 }

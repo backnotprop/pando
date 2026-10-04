@@ -48,7 +48,7 @@ function Rename() {
 }
 
 function Delete() {
-  const { monorepo, info } = useMonorepo();
+  const { monorepo } = useMonorepo();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [typed, setTyped] = useState("");
@@ -67,7 +67,7 @@ function Delete() {
 
   return (
     <section className="mt-11">
-      <SectionHead title={info.kind === "repo" ? "Delete this repo" : "Delete this monorepo"} className="mb-3" />
+      <SectionHead title="Delete this repository" className="mb-3" />
       <form
         className="flex items-center gap-2.5 phone:flex-wrap"
         onSubmit={(e) => {

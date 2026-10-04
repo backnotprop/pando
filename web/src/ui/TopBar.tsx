@@ -40,13 +40,13 @@ function Switcher({ current }: { current: string }) {
   return (
     <Menu.Root>
       <Menu.Trigger
-        aria-label="Switch monorepo"
+        aria-label="Switch repository"
         className="flex h-7 w-[22px] flex-none items-center justify-center rounded-md text-ash hover:bg-loam hover:text-bark data-popup-open:bg-loam data-popup-open:text-bark"
       >
         <Caret kind="switch" />
       </Menu.Trigger>
       <MenuPopup offset={10}>
-        <MenuHeading>Switch monorepo</MenuHeading>
+        <MenuHeading>Switch repository</MenuHeading>
         {(lines.data ?? []).map((m) => (
           <MenuLink key={m.id} link={monoLink(m.full_name)} current={m.full_name === current}>
             <Avatar name={m.name} org size={18} />
@@ -54,14 +54,11 @@ function Switcher({ current }: { current: string }) {
               <span className="text-ash">{m.owner}/</span>
               {m.name}
             </span>
-            <span className="ml-auto text-[12px] text-ash">
-              {m.kind === "repo" ? "repo, " : ""}
-              {m.last_activity_at ? lastSeen(m.last_activity_at, clock) : ""}
-            </span>
+            <span className="ml-auto text-[12px] text-ash">{m.last_activity_at ? lastSeen(m.last_activity_at, clock) : ""}</span>
           </MenuLink>
         ))}
         <MenuRule />
-        <MenuLink link={{ to: "/" }}>All monorepos</MenuLink>
+        <MenuLink link={{ to: "/" }}>All repositories</MenuLink>
       </MenuPopup>
     </Menu.Root>
   );
@@ -96,13 +93,19 @@ function ProjectSwitcher({ full, current }: { full: string; current: string }) {
   );
 }
 
-/** The mode's three choices sit in one row, as a segmented control. */
+/** The mode's three choices sit in one row, as a segmented control; under a dark-only theme they show Dark, and none can be picked. */
 const modeItem =
-  "flex h-7 flex-1 cursor-pointer items-center justify-center rounded-[5px] text-[13px] text-bark-dim outline-none data-checked:bg-pop-hi data-checked:text-bark data-highlighted:text-bark data-highlighted:shadow-[inset_0_0_0_1px_var(--rule-hi)]";
+  "flex h-7 flex-1 cursor-pointer items-center justify-center rounded-[5px] text-[13px] text-bark-dim outline-none data-checked:bg-pop-hi data-checked:text-bark data-highlighted:text-bark data-highlighted:shadow-[inset_0_0_0_1px_var(--rule-hi)] data-disabled:cursor-default data-disabled:text-ash data-disabled:data-checked:text-bark-dim";
 
-/** The theme and its mode, kept in this browser (public/theme.js). A choice keeps the menu open, so the page changes under it. */
+/**
+ * The theme and its mode, kept in this browser (public/theme.js). A choice
+ * keeps the menu open, so the page changes under it. A dark-only theme (Black
+ * Rainbow) shows Mode as Dark, not to be picked, and says so; the mode kept
+ * for the other themes is left as it was.
+ */
 function ThemeSetting() {
   const { theme, mode } = useThemeChoice();
+  const darkOnly = THEMES.some((t) => t.id === theme && t.darkOnly);
 
   return (
     <>
@@ -120,8 +123,16 @@ function ThemeSetting() {
         </Menu.RadioGroup>
       </Menu.Group>
       <Menu.Group>
-        <Menu.GroupLabel className={menuHeading}>Mode</Menu.GroupLabel>
-        <Menu.RadioGroup value={mode} onValueChange={(id: Mode) => setTheme({ mode: id })} className="mx-1 mb-1 flex gap-0.5 rounded-[7px] border border-rootline p-0.5">
+        <Menu.GroupLabel className={`${menuHeading} flex`}>
+          Mode
+          {darkOnly ? <span className="ml-auto">dark only</span> : null}
+        </Menu.GroupLabel>
+        <Menu.RadioGroup
+          value={darkOnly ? "dark" : mode}
+          onValueChange={(id: Mode) => setTheme({ mode: id })}
+          disabled={darkOnly}
+          className="mx-1 mb-1 flex gap-0.5 rounded-[7px] border border-rootline p-0.5"
+        >
           {MODES.map((m) => (
             <Menu.RadioItem key={m.id} value={m.id} className={modeItem}>
               {m.label}
@@ -163,7 +174,7 @@ const full = (crumbs: Crumb[]) => crumbs.find((c) => c.monorepo)?.monorepo ?? ""
 export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
   return (
     <header className="relative flex h-14 items-center gap-1.5 px-(--margin)">
-      <Link to="/" aria-label="Home: your monorepos" className="-ml-1.5 flex size-8 items-center justify-center rounded-[7px] text-bark hover:bg-loam">
+      <Link to="/" aria-label="Home: your repositories" className="-ml-1.5 flex size-8 items-center justify-center rounded-[7px] text-bark hover:bg-loam">
         <Mark className="block" />
       </Link>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-0.5 text-[14px] leading-5">

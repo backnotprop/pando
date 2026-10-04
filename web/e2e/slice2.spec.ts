@@ -5,7 +5,8 @@
 // through the page, a branch left conflicting by that merge, and the
 // monorepo's Activity tab taking a push live. Pages hold still while things
 // move under them: every frame keeps the top bar and the code when main or
-// the branch on screen moves. Real Worker, real git.
+// the branch on screen moves, and a push replays no check's arrival. Real
+// Worker, real git.
 import { expect, type Locator, test } from "@playwright/test";
 import { BASE, browserPost, ciStatus, Machine, nextSignIn, watchFrames } from "./seed";
 
@@ -92,6 +93,10 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       url = (await browserPost(page, `/v1/monorepos/${full}/repos`, { path: "projects/web" })).clone_url;
       made.machine = await Machine.make(page, `laptop-${id}`);
       const m = machine();
+      // The project requires e2e (the root's .pando/pando.toml, the meta layer's first push): a branch page lists it before any CI reports.
+      const meta = `${BASE}/${full}/meta.git`;
+
+      m.push(m.commit("meta", meta, "main", { ".pando/pando.toml": '[repos."projects/web"]\nrequired_checks = ["e2e"]\n' }, "Require e2e"), meta, "main");
 
       const start = {
         "README.md": "# web\n\nThe web project.\n",
@@ -254,6 +259,29 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       m.push(m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "fern") }, "Fern"), url, "files");
       await shown("fern");
       expect((await frames()).filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
+    });
+
+    await test.step("a push to a branch replays no arrival on its unchanged check rows", async () => {
+      const m = machine();
+      const e2e = page.getByRole("list", { name: "Checks" }).getByRole("listitem").filter({ hasText: "e2e" });
+
+      await page.goto(`${project}/branches/files`);
+      await expect(e2e).toContainText("not reported");
+      await page.waitForTimeout(1000);
+      // The new head's check runs take half a second to read, as on a slower connection, so a replay would show.
+      await page.route(/\/ci\/builds\?/, async (route) => {
+        await new Promise((done) => setTimeout(done, 500));
+        await route.continue();
+      });
+      const frames = await watchFrames(page);
+
+      m.push(m.commit("web", url, "files", { "src/later.ts": "export const later = 1;\n" }, "Later on files"), url, "files");
+      await expect(page.getByRole("list", { name: "Commits" }).getByText("Later on files")).toBeVisible({ timeout: 30_000 });
+      // The new head's check runs are read; the row is the same: "e2e not reported".
+      await page.waitForTimeout(2000);
+      await expect(e2e).toContainText("not reported");
+      expect((await frames()).flatMap((f) => f.arrived).filter((text) => text.includes("e2e"))).toEqual([]);
+      await page.unrouteAll();
     });
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {

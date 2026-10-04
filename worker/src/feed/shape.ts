@@ -41,10 +41,8 @@ export const PAGE_MAX = 200;
 /** Frames a reconnecting socket gets before it is told to resync. */
 export const REPLAY_MAX = 500;
 
-/** A monorepo's summary line is sent at most this often (small, large). */
+/** A small monorepo's summary line is sent at most this often (a large one's is read when the home loads). */
 export const TICK_SMALL_MS = 10_000;
-
-export const TICK_LARGE_MS = 60_000;
 
 /** Worktree ids one follower's hello may carry. */
 export const HELLO_WORKTREES_MAX = 1_000;

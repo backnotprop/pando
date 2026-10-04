@@ -17,9 +17,10 @@ import { pool } from "../monorepo/views";
 import { finishTiming, runTimed, startTiming } from "../timing";
 import { isRecord, isWholeNumber, type Json } from "../parse";
 import { fanOut, feedStub } from "./consumer";
+import type { IndexRow } from "./object";
 import {
   decodeCursor, encodeCursor, feedMessageOf, LOGS_MAX, mergePages, NEED_STATES, needStatesOf, NEEDS_MONOREPOS_MAX, PAGE_DEFAULT, PAGE_MAX,
-  textOf, uncovered, type FeedEvent, type FeedMessage,
+  textOf, uncovered, type FeedEvent, type FeedMessage, type Summary,
 } from "./shape";
 
 export function isFeedPath(path: string): boolean {
@@ -157,7 +158,9 @@ async function eventsPage(env: Env, login: string, url: URL) {
 
   if (inn && !p.known) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
   const readLog = (name: string) => monorepoStub(env, name).eventsBefore(cursor, limit);
-  const large = [...p.large].sort(byLast);
+  // Past LOGS_MAX, the most recently active are read: by their lines now, not the feed's copies (kept from the split's crossing).
+  const fresh = p.large.length > LOGS_MAX ? await largeLines(env, p.large.map((x) => x.name)) : new Map<string, Summary>();
+  const large = p.large.map((x) => ({ ...x, last: fresh.get(x.name)?.last_activity_at ?? x.last })).sort(byLast);
   const reading = large.slice(0, LOGS_MAX);
   // skipped: owner/names, for people.
   const skipped = large.slice(LOGS_MAX).map((x) => x.label ?? x.name);
@@ -182,10 +185,36 @@ async function eventsPage(env: Env, login: string, url: URL) {
   return { events: page, next: page.length === limit ? encodeCursor(page[limit - 1]) : null, from_logs: fromLogs, skipped };
 }
 
+/**
+ * Large monorepos send no summary line to their members' feeds (C25: nothing
+ * is copied above the split), so their lines are read from their objects, 10
+ * at a time. A read that fails is left out (the index's older line stands).
+ */
+async function largeLines(env: Env, names: string[]): Promise<Map<string, Summary>> {
+  const lines = new Map<string, Summary>();
+
+  await pool(names, 10, async (name) => {
+    try {
+      lines.set(name, await monorepoStub(env, name).feedSummary());
+    } catch (err) {
+      console.error(`feed: ${name}'s line not read (the index's older one stands):`, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  return lines;
+}
+
+/** Index rows with each large monorepo's line read from it. */
+async function withLargeLines(env: Env, rows: IndexRow[]): Promise<IndexRow[]> {
+  const lines = await largeLines(env, rows.flatMap((r) => (r.large ? [r.name] : [])));
+
+  return rows.map((r) => ({ ...r, summary: lines.get(r.name) ?? r.summary }));
+}
+
 /** GET /v1/monorepos?summary=1: the accounts' list, each with its line, most recently active first. */
 export async function monoreposSummary(env: Env, login: string) {
   const { list, rows } = await reconcile(env, login);
-  const by = new Map(rows.map((r) => [r.name, r]));
+  const by = new Map((await withLargeLines(env, rows)).map((r) => [r.name, r]));
 
   const monorepos = list.map((m) => {
     const s = by.get(m.id)?.summary ?? null;
@@ -221,7 +250,7 @@ async function needsPage(env: Env, login: string, url: URL) {
   const inn = await monorepoParam(env, url);
   const limit = int(url.searchParams.get("limit"), 100, 1, 500, "limit");
   const { rows } = await reconcile(env, login);
-  let targets = rows.filter((r) => !inn || r.name === inn.id);
+  let targets = await withLargeLines(env, rows.filter((r) => !inn || r.name === inn.id));
 
   if (inn && !targets.length) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
 

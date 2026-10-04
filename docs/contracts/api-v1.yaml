@@ -819,9 +819,11 @@ paths:
         any owner (`pando clone <name>`: the cli prefers your own namespace,
         else the only match, else it asks). With `?summary=1` (the web home): most recently active first,
         each with its one line (`MonorepoSummary`), answered from the person's
-        feed in one call (no call per monorepo). The line is up to 10 s behind
-        (60 s for a monorepo of more than 100 members): each monorepo sends it
-        only when it changed, at most that often. A monorepo the feed has not
+        feed in one call, plus one call per monorepo of more than 100 members.
+        A small monorepo's line is up to 10 s behind: it sends it to its
+        members' feeds only when it changed, at most that often. A large one
+        sends none (2,000 members would be 2,000 feed writes per change); its
+        line is read from it here, current. A monorepo the feed has not
         joined yet (seconds after it was made or joined) has nulls.
       tags: [monorepos]
       parameters:
@@ -894,6 +896,8 @@ paths:
         - `{"type": "needs", "monorepo", "monorepo_id", "changed": [{repo, branch, state}], "more"}`:
           branches that entered or left "needs you" (`state` null: left);
           `more`: over 50 changed, refetch listNeeds.
+          A large monorepo sends `summary` and `needs` only when it crosses
+          100 members (either way); its line is read again with the list.
         - `{"type": "joined", "monorepo", "monorepo_id", "large"}`, `{"type": "left", "monorepo", "monorepo_id"}`:
           refetch the first page and the list.
         - `{"type": "error", "message"}`: the frame sent was not understood
@@ -954,8 +958,9 @@ paths:
       description: |
         `issues`: per monorepo, the open issues assigned to the person, read
         from each monorepo's summary line (up to 10 s behind; the person's
-        socket's `summary` frame moves it, its `assigned`), most recently
-        updated first, with the newest one.
+        socket's `summary` frame moves it, its `assigned`; a large monorepo's
+        is read from it, current), most recently updated first, with the
+        newest one.
 
         Branches: from stored branch facts and statuses (no Artifacts call), asked only
         of the monorepos whose counts in their summary line are not zero (up

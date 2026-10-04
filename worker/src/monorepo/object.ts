@@ -2350,8 +2350,9 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.machines.list(this.feed.liveHelloSids());
   }
 
+  /** The summary line, as the home reads it for a large monorepo (whose members' feeds do not get it). */
   feedSummary(): Summary {
-    return this.feed.summary();
+    return this.feed.line();
   }
 
   /** Tests only (the crash and failure switches act only with FEED_TEST=1): the feed outbox. */

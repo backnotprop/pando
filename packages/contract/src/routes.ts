@@ -4,13 +4,14 @@
 // `/` is sent as %2F.
 import { BranchCommits, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
-import { CiBuildList } from "./ci.ts";
+import { CiBuildDetail, CiBuildList } from "./ci.ts";
+import { HistoryPage, LastCommits, TreePage } from "./files.ts";
 import { FullName, Login, MonorepoName, RepoName } from "./ids.ts";
 import { MonorepoEntry, MonorepoList, MonorepoSummaryList } from "./monorepo.ts";
 import { EventsPage } from "./feed.ts";
 import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { NeedsPage } from "./needs.ts";
-import { HeadList, MachineList, MemberList, Repo, RepoList } from "./repo.ts";
+import { HeadList, MachineList, MemberList, Repo, RepoList, WorktreeList } from "./repo.ts";
 import { Me, SignedOut } from "./user.ts";
 
 const query = (params: URLSearchParams): string => {
@@ -177,3 +178,46 @@ export const listCiBuilds = (owner: Login, name: MonorepoName, repo: RepoName | 
 
   return { path: `${monorepoBase(owner, name)}/ci/builds${query(params)}`, response: CiBuildList };
 };
+
+/** GET .../ci/builds/{build}: a build (Pando's `cib_` id) and its jobs. */
+export const getCiBuild = (owner: Login, name: MonorepoName, build: string) => ({
+  path: `${monorepoBase(owner, name)}/ci/builds/${encodeURIComponent(build)}`,
+  response: CiBuildDetail,
+});
+
+/** ref and path as the file routes take them: the default branch and the root when null. */
+const fileQuery = (ref: string | null, path: string | null, more: [string, string][] = []): string => {
+  const params = new URLSearchParams();
+
+  if (ref !== null) params.set("ref", ref);
+
+  if (path !== null && path !== "") params.set("path", path);
+
+  for (const [k, v] of more) params.set(k, v);
+
+  return query(params);
+};
+
+/** GET .../repos/{repo}/tree: a folder at a ref (default: the default branch's root); `cursor` is a page's `next`. */
+export const getTree = (owner: Login, name: MonorepoName, repo: RepoName, ref: string | null, path: string | null, cursor: string | null = null) => ({
+  path: `${repoBase(owner, name, repo)}/tree${fileQuery(ref, path, cursor === null ? [] : [["cursor", cursor]])}`,
+  response: TreePage,
+});
+
+/** GET .../repos/{repo}/tree/last-commits: each entry's last commit; `names` narrows to one page of a large folder. */
+export const getLastCommits = (owner: Login, name: MonorepoName, repo: RepoName, ref: string | null, path: string | null, names: string[] | null = null) => ({
+  path: `${repoBase(owner, name, repo)}/tree/last-commits${fileQuery(ref, path, names === null ? [] : [["names", names.join(",")]])}`,
+  response: LastCommits,
+});
+
+/** GET .../repos/{repo}/history: commits that changed a path (a file or a folder; the root when null); `cursor` is a page's `next`. */
+export const getHistory = (owner: Login, name: MonorepoName, repo: RepoName, ref: string | null, path: string | null, cursor: string | null = null) => ({
+  path: `${repoBase(owner, name, repo)}/history${fileQuery(cursor === null ? ref : null, path, cursor === null ? [] : [["cursor", cursor]])}`,
+  response: HistoryPage,
+});
+
+/** GET .../worktrees: every worktree; `repo` (a repo path, `projects/web`) narrows to one repo's. */
+export const listWorktrees = (owner: Login, name: MonorepoName, repoPath: string | null) => ({
+  path: `${monorepoBase(owner, name)}/worktrees${repoPath === null ? "" : `?${new URLSearchParams({ repo: repoPath })}`}`,
+  response: WorktreeList,
+});

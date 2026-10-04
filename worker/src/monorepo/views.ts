@@ -33,6 +33,8 @@ export interface BranchView {
   stale: boolean;
   /** When stale: the last known mergeable answer (mergeable says "pending"). */
   last_mergeable: string | null;
+  /** The paths changed differently on both sides, from the dry run behind mergeable (or last_mergeable while stale); null unless that answer is "conflicts". */
+  conflict_paths: string[] | null;
   facts_at: string | null;
 }
 
@@ -45,7 +47,13 @@ export interface BranchList {
   due: string[];
 }
 
-const mergeableCache = new Map<string, string>();
+/** A dry run's answer: mergeable, and the paths that conflict when it is "conflicts" (else null). */
+export interface DryRun {
+  mergeable: string;
+  conflict_paths: string[] | null;
+}
+
+const mergeableCache = new Map<string, DryRun>();
 
 /** Thrown when main moved during a dry run: the facts would be for a main that is gone. */
 export class MainMoved extends Error {
@@ -55,16 +63,20 @@ export class MainMoved extends Error {
   }
 }
 
-/** "clean", "conflicts", "up_to_date" or "unknown", from a gitwrite dry run (cached per isolate by main and head). */
-export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: string, ahead: number | null): Promise<string> {
-  if (ahead === 0) return "up_to_date";
+/**
+ * "clean", "conflicts", "up_to_date" or "unknown", from a gitwrite dry run
+ * (cached per isolate by main and head). The dry run walks the whole merge,
+ * so on "conflicts" it has every conflicting path at no extra read.
+ */
+export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: string, ahead: number | null): Promise<DryRun> {
+  if (ahead === 0) return { mergeable: "up_to_date", conflict_paths: null };
 
-  if (!gitwrite) return "unknown";
+  if (!gitwrite) return { mergeable: "unknown", conflict_paths: null };
   const key = `${r.artifacts_name}:${main}:${head}`;
   const hit = mergeableCache.get(key);
 
   if (hit) return hit;
-  let v = "unknown";
+  let v: DryRun = { mergeable: "unknown", conflict_paths: null };
 
   try {
     const out = await gitwrite.mergeCommit(
@@ -74,15 +86,17 @@ export async function mergeableOf(env: Env, r: RepoRecord, main: string, head: s
 
     // main moved while we looked: the answer is for nothing; a newer computation is coming.
     if (out.status === "ref_moved") throw new MainMoved();
-    v = out.status === "mergeable" ? "clean" : out.status === "conflict" ? "conflicts" : out.status === "up_to_date" ? "up_to_date" : "unknown";
+
+    if (out.status === "conflict") v = { mergeable: "conflicts", conflict_paths: out.paths };
+    else v = { mergeable: out.status === "mergeable" ? "clean" : out.status === "up_to_date" ? "up_to_date" : "unknown", conflict_paths: null };
   } catch (err) {
     if (err instanceof MainMoved) throw err;
-    v = "unknown";
+    v = { mergeable: "unknown", conflict_paths: null };
   }
 
   if (mergeableCache.size > 5000) mergeableCache.clear();
 
-  if (v !== "unknown") mergeableCache.set(key, v);
+  if (v.mergeable !== "unknown") mergeableCache.set(key, v);
 
   return v;
 }

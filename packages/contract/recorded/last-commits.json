@@ -1,0 +1,51 @@
+{
+  "schema": "LastCommits",
+  "route": "GET .../repos/{repo}/tree/last-commits?ref=main",
+  "status": 200,
+  "body": {
+    "ref": "main",
+    "commit": "421b0bea184e0daaef6f06b828d33f6b633a84ef",
+    "path": "",
+    "complete": true,
+    "entries": {
+      "README.md": {
+        "sha": "6f8dd6e53fd3e78d3a995da423d449615513c73e",
+        "title": "First commit",
+        "author": {
+          "name": "Ana Lima",
+          "email": "ana@pando.invalid"
+        },
+        "at": "2026-10-04T01:05:19.000Z",
+        "merged_branch": null
+      },
+      "merged.txt": {
+        "sha": "d63dcdfcea97e11a6c9a750c557d9e805bc08c64",
+        "title": "Merge branch 'feat/merge-me'",
+        "author": {
+          "name": "Ana Lima",
+          "email": "rec-mut4cnpt@users.pando.invalid"
+        },
+        "at": "2026-10-04T01:05:26.000Z",
+        "merged_branch": {
+          "branch": "feat/merge-me",
+          "title": null
+        }
+      },
+      "ready.txt": {
+        "sha": "421b0bea184e0daaef6f06b828d33f6b633a84ef",
+        "title": "Merge branch 'feat/ready'",
+        "author": {
+          "name": "Ana Lima",
+          "email": "rec-mut4cnpt@users.pando.invalid"
+        },
+        "at": "2026-10-04T01:05:31.000Z",
+        "merged_branch": {
+          "branch": "feat/ready",
+          "title": null
+        }
+      }
+    },
+    "older": null,
+    "retry_after_ms": null
+  }
+}

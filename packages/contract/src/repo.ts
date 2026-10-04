@@ -31,6 +31,31 @@ export const RepoList = Schema.Struct({ repos: Schema.Array(Repo) });
 
 export interface RepoList extends Schema.Schema.Type<typeof RepoList> {}
 
+/** A worktree a machine reported (pando worktree add): sparse, fuse or fskit. */
+export const Worktree = Schema.Struct({
+  id: Schema.String,
+  /** The repo's path, `projects/web`. */
+  repo: Schema.String,
+  branch: Schema.String,
+  /** Where it lives on the machine. */
+  path: Schema.String,
+  /** The credential's name: the machine as people see it. */
+  machine: Schema.String,
+  agent: Schema.NullOr(Schema.String),
+  kind: Schema.Literals(["sparse", "fuse", "fskit"]),
+  /** The user whose credential reported it. */
+  reported_by: Login,
+  created_at: Timestamp,
+  last_seen_at: Timestamp,
+});
+
+export interface Worktree extends Schema.Schema.Type<typeof Worktree> {}
+
+/** GET .../worktrees[?repo=&machine=]: every worktree in the monorepo, by machine, then path. */
+export const WorktreeList = Schema.Struct({ worktrees: Schema.Array(Worktree) });
+
+export interface WorktreeList extends Schema.Schema.Type<typeof WorktreeList> {}
+
 /** A code repo's main as Pando last moved it (a merge, or the first push), from its own records. */
 export const RepoHead = Schema.Struct({
   /** The repo's name in URLs. */

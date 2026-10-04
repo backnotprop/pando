@@ -1,0 +1,43 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch} (conflicting: conflict_paths)",
+  "status": 200,
+  "body": {
+    "name": "feat/clash",
+    "head": "1ec0949eeb695458b7463ee300b1b4a6888e1c95",
+    "base": "6f8dd6e53fd3e78d3a995da423d449615513c73e",
+    "author": "rec-mut4cnpt",
+    "title": null,
+    "description": null,
+    "ahead": 1,
+    "behind": 4,
+    "mergeable": "conflicts",
+    "checks": {
+      "sha": "1ec0949eeb695458b7463ee300b1b4a6888e1c95",
+      "state": "missing",
+      "required": [
+        "ci/test"
+      ],
+      "missing": [
+        "ci/test"
+      ],
+      "statuses": []
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "ana-mbp",
+    "created_at": "2026-10-04T01:05:24.074Z",
+    "updated_at": "2026-10-04T01:05:24.074Z",
+    "stale": false,
+    "last_mergeable": null,
+    "conflict_paths": [
+      "merged.txt"
+    ],
+    "facts_at": "2026-10-04T01:05:33.528Z"
+  }
+}

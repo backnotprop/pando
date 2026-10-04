@@ -4,28 +4,28 @@
   "status": 200,
   "body": {
     "branch": "feat/ready",
-    "head": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
+    "head": "6cc2b842aa432544682225869b281f18ba60806e",
     "base_branch": "main",
-    "merge_base": "e0a9f8645fcc85724aa367524e8dcb13a9e26e04",
+    "merge_base": "6f8dd6e53fd3e78d3a995da423d449615513c73e",
     "total": 1,
     "truncated": false,
     "commits": [
       {
-        "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
+        "sha": "6cc2b842aa432544682225869b281f18ba60806e",
         "parents": [
-          "e0a9f8645fcc85724aa367524e8dcb13a9e26e04"
+          "6f8dd6e53fd3e78d3a995da423d449615513c73e"
         ],
         "title": "Add the ready file",
         "message": "Add the ready file\n\nSo the page has something to show.\n\nCo-authored-by: Claude <noreply@anthropic.com>\nPando-Machine: ana-mbp",
         "author": {
           "name": "Ana Lima",
           "email": "ana@pando.invalid",
-          "date": "2026-10-03T23:04:03.000Z"
+          "date": "2026-10-04T01:05:20.000Z"
         },
         "committer": {
           "name": "Ana Lima",
           "email": "ana@pando.invalid",
-          "date": "2026-10-03T23:04:03.000Z"
+          "date": "2026-10-04T01:05:20.000Z"
         },
         "trailers": {
           "agent": null,

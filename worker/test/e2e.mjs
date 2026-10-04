@@ -394,6 +394,7 @@ try {
   }
 
   check("the list says conflicts once the facts land", listed?.mergeable === "conflicts" && listed?.stale === false, `${listed?.mergeable} stale=${listed?.stale}`);
+  check("and names the conflicting paths before anyone presses Merge (the dry run's list, as the 409's)", JSON.stringify(listed?.conflict_paths) === '["README.md"]', JSON.stringify(listed?.conflict_paths));
 
   // ── Worktrees ──
   const wt = `wt_${id}`;

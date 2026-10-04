@@ -26,24 +26,24 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **A machine's read-only main can trail the server by up to 10 seconds** while merges keep landing in that repo. It moves at the first merge, then again once merges pause for 3 seconds, or every 10 seconds if they never pause.
 - **A read-only main in a repo where the machine has no branch worktree** is not followed live. It catches up within 5 minutes, or at once when a branch worktree is added there.
 - **One shared file: at most 100 MB.** A larger file stays on its own machine.
-- **Every event is kept.** A monorepo's event log has no cap. Each event takes 0.3 to 1.3 KB, under Cloudflare's 10 GB per Durable Object: about 8 to 30 million events per monorepo.
+- **Every event is kept.** A repository's event log has no cap. Each event takes 0.3 to 1.3 KB, under Cloudflare's 10 GB per Durable Object: about 8 to 30 million events per repository.
 
 ## Sign-in and access
 
 - **A browser session ends after 30 days without use.** Each use pushes the end back.
 - **A revoked credential, or a removed member, keeps working for up to 15 seconds.** Each Cloudflare server remembers a sign-in check that long.
-- **For up to about 15 seconds after a monorepo is deleted,** a git request can still be answered from a Cloudflare server that cached the monorepo's record. After that, git gets "this monorepo was deleted".
+- **For up to about 15 seconds after a repository is deleted,** a git request can still be answered from a Cloudflare server that cached the repository's record. After that, git gets "this monorepo was deleted" (the server's own words).
 
 ## Your home
 
-- **Your activity feed keeps 7 days,** up to 1,000,000 lines. Older pages are read from each monorepo's own log.
-- **A page of activity is 1 to 200 lines** (50 by default), and reads at most 20 monorepos' logs. The rest are listed as skipped.
-- **A monorepo with more than 100 members** is read from its own log on each page, rather than copied into each member's feed.
+- **Your activity feed keeps 7 days,** up to 1,000,000 lines. Older pages are read from each repository's own log.
+- **A page of activity is 1 to 200 lines** (50 by default), and reads at most 20 repositories' logs. The rest are listed as skipped.
+- **A repository with more than 100 members** is read from its own log on each page, rather than copied into each member's feed.
 - **A new member sees the latest 500 lines** at once; older ones come from the log.
 - **After a lost connection, the home replays up to 500 lines.** Past that, the page reloads.
-- **Counts can be behind:** a monorepo's line and the Needs you counts by up to 10 seconds (60 seconds over 100 members); a membership change reaches the live feed within 60 seconds.
-- **Needs you covers 50 monorepos** and 500 rows at a time.
-- **At most 32,768 people can have one monorepo open live at once.** That is Cloudflare's limit on connections to one Durable Object.
+- **Counts can be behind:** a repository's line and the Needs you counts by up to 10 seconds (60 seconds over 100 members); a membership change reaches the live feed within 60 seconds.
+- **Needs you covers 50 repositories** and 500 rows at a time.
+- **At most 32,768 people can have one repository open live at once.** That is Cloudflare's limit on connections to one Durable Object.
 - **One machine reports at most 1,000 worktrees.**
 - **A repo's first push to main counts up to 250 commits** in the activity.
 
@@ -60,9 +60,9 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 
 Pando's side:
 
-- **One Buildkite API token per Pando server.** Pando starts builds and reads their details with the server's own token, so builds start only for Buildkite organizations that token can reach. A token per monorepo is not built yet.
-- **One Buildkite organization per monorepo.**
-- **At most 40 calls to Buildkite a minute per monorepo.** Buildkite allows 50 per token; monorepos sharing one token can together reach Buildkite's limit, and Pando then waits for it to reset.
+- **One Buildkite API token per Pando server.** Pando starts builds and reads their details with the server's own token, so builds start only for Buildkite organizations that token can reach. A token per repository is not built yet.
+- **One Buildkite organization per repository.**
+- **At most 40 calls to Buildkite a minute per repository.** Buildkite allows 50 per token; repositories sharing one token can together reach Buildkite's limit, and Pando then waits for it to reset.
 - **A job's log shows its last 1 MiB.** A log over 64 MiB opens only in Buildkite.
 - **The first 100 annotations and artifacts** of a build. Download links last about 60 seconds (Buildkite's).
 - **30 builds a page,** 100 at most.
@@ -79,4 +79,4 @@ Buildkite's free plan, after its 30-day trial (Buildkite's numbers, read 2026-10
 - A job stops after 4 hours.
 - Builds and logs are kept 30 days.
 - 5 users and 1 cluster.
-- 15 webhooks per organization, so one Buildkite organization serves at most 15 Pando monorepos.
+- 15 webhooks per organization, so one Buildkite organization serves at most 15 Pando repositories.

@@ -4,41 +4,41 @@
   "status": 200,
   "body": {
     "ref": "main",
-    "commit": "fbaab58aa4cc1e4c6a2eae45424785611b6ca09f",
+    "commit": "88848ba1b2707b1ed3d6de20cdef6da86a327771",
     "path": "",
     "complete": true,
     "entries": {
       "README.md": {
-        "sha": "c6a914b4318733382b9ad43250ee5c051e65b0b0",
+        "sha": "f5a4c90b4685e936e93cf6b90f34497cf4f3205f",
         "title": "First commit",
         "author": {
           "name": "Ana Lima",
           "email": "ana@pando.invalid"
         },
-        "at": "2026-10-04T13:31:05.000Z",
+        "at": "2026-10-04T13:58:22.000Z",
         "merged_branch": null
       },
       "merged.txt": {
-        "sha": "f0b6886ddb0bffe091a2d0200cb83fd0f903f7b9",
+        "sha": "98b26bad825f440b2cf34b1bbe7f503bfd008120",
         "title": "Merge branch 'feat/merge-me'",
         "author": {
           "name": "Ana Lima",
-          "email": "rec-mutuzslr@users.pando.invalid"
+          "email": "rec-mutvywkn@users.pando.invalid"
         },
-        "at": "2026-10-04T13:31:12.000Z",
+        "at": "2026-10-04T13:58:26.000Z",
         "merged_branch": {
           "branch": "feat/merge-me",
           "title": null
         }
       },
       "ready.txt": {
-        "sha": "fbaab58aa4cc1e4c6a2eae45424785611b6ca09f",
+        "sha": "88848ba1b2707b1ed3d6de20cdef6da86a327771",
         "title": "Merge branch 'feat/ready'",
         "author": {
           "name": "Ana Lima",
-          "email": "rec-mutuzslr@users.pando.invalid"
+          "email": "rec-mutvywkn@users.pando.invalid"
         },
-        "at": "2026-10-04T13:31:18.000Z",
+        "at": "2026-10-04T13:58:31.000Z",
         "merged_branch": {
           "branch": "feat/ready",
           "title": null

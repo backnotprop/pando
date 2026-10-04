@@ -4,6 +4,6 @@
   "status": 200,
   "body": {
     "signed_out": false,
-    "logout_url": "http://localhost:8797/"
+    "logout_url": "http://localhost:8821/"
   }
 }

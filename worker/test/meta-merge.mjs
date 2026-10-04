@@ -1,9 +1,10 @@
 // Merges into the meta layer, and the live files every machine holds
 // (concurrency CODE-VS-MODEL M1, M2). A merge's update of the live files
 // (applyFromMain) that fails is tried again until it is done, and is applied
-// once even when its answer was lost. After a merge, git main and the live
-// files agree, even when a live save of a file the branch changes was
-// waiting for its commit as the merge landed.
+// once even when its answer was lost. The merge waits for live saves: one
+// of a file the branch changes is committed first, so the merge is refused
+// as a conflict, and a save while the merge lands is answered stale. After
+// a merge, git main and the live files agree.
 //
 //   npx wrangler dev --port 8851 --persist-to <dir> --var META_TEST:1
 //   PANDO_URL=http://localhost:8851 node test/meta-merge.mjs
@@ -201,28 +202,46 @@ try {
     return { ok: pairs.every(([, g, l]) => g === l), detail: pairs.map(([p, g, l]) => `${p}: git ${JSON.stringify(g)}, live ${JSON.stringify(l)}`).join("; ") };
   };
 
-  // A branch made from main before a live save changes the same file; it merges seconds after the save.
+  const versionOf = async (path) => (await call("GET", `${base}/meta/history?path=${encodeURIComponent(path)}&limit=1`)).json?.versions?.[0]?.version ?? 0;
+
+  // The merge waits for live saves (the owner's choice, 2026-10-04). A branch
+  // made from main before a live save changes the same file; it merges
+  // seconds after the save: the save is committed at once, and the merge is
+  // refused as a normal conflict, in plain words.
   check("a branch changing notes/plan.md is pushed", pushBranch("fix", { "notes/plan.md": "from the branch\n" }));
   const saved = await save("notes/plan.md", "ana, live\n", 0);
   check("a live save of notes/plan.md is accepted (its commit is due in 10 s)", saved?.type === "accepted", saved?.type);
+  const t0 = Date.now();
   r = await merge("fix");
-  check("the branch merges, or is refused as a conflict", (r.status === 200 && r.json?.status === "merged") || (r.status === 409 && r.json?.error?.code === "conflict"), `${r.status} ${r.json?.status ?? r.json?.error?.code}`);
+  check(
+    "the merge is refused: notes/plan.md changed live",
+    r.status === 409 && r.json?.error?.code === "conflict" && r.json?.error?.message === "notes/plan.md changed live; merge main into your branch, push, and merge again",
+    `${r.status} ${r.json?.status ?? r.json?.error?.code}: ${r.json?.error?.message ?? ""}`,
+  );
+  const atOnce = gitMain("notes/plan.md");
+  check("the live save is on git main at once, not 10 s later", atOnce === "ana, live\n", `${JSON.stringify(atOnce)} ${Date.now() - t0} ms after the merge was asked`);
   check("then every live save is committed, with no commit error", !!(await settled()));
   let same = await agree(["notes/plan.md"]);
-  check("git main and the live files hold the same notes/plan.md (git never goes back to the older live save)", same.ok, same.detail);
+  check("git main and the live files hold the live save of notes/plan.md", same.ok && gitMain("notes/plan.md") === "ana, live\n", same.detail);
 
-  // The branch changes another file: the merge lands, and the live save is committed on top of it.
-  // notes/plan.md is saved again on top of the merge's version: its reservation has ended, so it commits too.
-  const planNow = (await call("GET", `${base}/meta/history?path=notes/plan.md&limit=1`)).json?.versions?.[0]?.version ?? 0;
-  const again = await save("notes/plan.md", "ana, after the merge\n", planNow);
-  check("a live save of notes/plan.md on top of the merge's version is accepted", again?.type === "accepted", again?.type);
-  check("a branch changing other.md is pushed", pushBranch("other", { "other.md": "other, from the branch\n" }));
+  // A branch whose file has no live save waiting merges. While it lands, a
+  // live save of that file is answered stale (the client keeps a conflict
+  // copy); after it, saves go on top of the merge's version and commit.
+  check("a branch changing notes/plan.md and other.md is pushed", pushBranch("other", { "notes/plan.md": "from the branch, after main\n", "other.md": "other, from the branch\n" }));
+  await call("POST", "/v1/_meta/test", { monorepo: MID, reserve_hold_ms: 3_000 }, BOOT);
+  const landing = merge("other");
+  // The switch reads 0 again once the merge has reserved its files and holds.
+  await waitFor(async () => (await call("GET", `/v1/_meta/test?monorepo=${MID}`, null, BOOT)).json?.reserveHoldMs === 0, 15_000);
+  const during = await save("notes/plan.md", "ana, while the merge lands\n", await versionOf("notes/plan.md"));
+  check("while the merge lands, a live save of its file is answered stale, with the file's current bytes", during?.type === "stale" && during?.current?.bytes === Buffer.from("ana, live\n").toString("base64"), during?.type);
+  r = await landing;
+  check("then the merge lands", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.status ?? r.json?.error?.code}`);
   const saved2 = await save("notes/plan2.md", "ana, live 2\n", 0);
-  r = await merge("other");
-  check("a branch changing another file merges", saved2?.type === "accepted" && r.status === 200 && r.json?.status === "merged", `${saved2?.type}, ${r.status} ${r.json?.status ?? r.json?.error?.code}`);
+  const again = await save("notes/plan.md", "ana, after the merge\n", await versionOf("notes/plan.md"));
+  check("after the merge, live saves on top of its version are accepted", saved2?.type === "accepted" && again?.type === "accepted", `${saved2?.type}, ${again?.type}`);
   check("then every live save is committed, with no commit error", !!(await settled()));
   same = await agree(["notes/plan.md", "notes/plan2.md", "other.md", TOML]);
-  check("git main and the live files agree on every path both hold, the save after the merge included", same.ok && gitMain("notes/plan.md") === "ana, after the merge\n", same.detail);
+  check("git main and the live files agree on every path both hold", same.ok && gitMain("notes/plan.md") === "ana, after the merge\n", same.detail);
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

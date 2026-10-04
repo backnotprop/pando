@@ -3,7 +3,7 @@
   "route": "POST .../repos/{repo}/hooks {type: buildkite} (Add pipeline)",
   "status": 201,
   "body": {
-    "id": "hk_549bd8ffb2b4c9b3",
+    "id": "hk_663a3e4ab192e0e7",
     "type": "buildkite",
     "url": null,
     "events": [
@@ -15,7 +15,7 @@
     },
     "app": "buildkite",
     "active": true,
-    "created_at": "2026-10-04T13:31:25.208Z",
-    "created_by": "rec-mutuzslr"
+    "created_at": "2026-10-04T13:58:35.372Z",
+    "created_by": "rec-mutvywkn"
   }
 }

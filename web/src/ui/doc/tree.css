@@ -1,0 +1,64 @@
+/* Plannotator's diff file tree (PlannotatorTree.tsx), scoped to `.pn-tree` as
+   the viewer's styles are to `.pn-doc` (doc.css): Tailwind over the tree's
+   own source only, every utility nested under `.pn-tree`, theme values
+   inlined, no Preflight. This file loads with the tree's lazy chunk only.
+
+   - The row rules come from the package's theme.css (.file-tree-item), which
+     is not imported.
+   - Colours: Plannotator's tokens set here from Pando's, on `.pn-tree` only.
+     Added and removed counts and letters take the diff's own colours (sage
+     and wood, theme.css); nothing is red, which reads as Rust, and the
+     renamed letter's fixed blue becomes slate. The chosen file is a quiet
+     Loam row with Bark text. */
+
+@import "tailwindcss/theme.css" theme(inline reference);
+
+@theme inline reference {
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-success: var(--success);
+  --color-destructive: var(--destructive);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+.pn-tree {
+  --foreground: var(--bark);
+  --muted: var(--loam);
+  --muted-foreground: var(--ash);
+  --success: var(--diffs-token-inserted);
+  --destructive: var(--diffs-token-deleted);
+  --radius: 10px;
+
+  @tailwind utilities source(none);
+
+  .file-tree-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    color: var(--muted-foreground);
+  }
+  .file-tree-item:hover {
+    background: var(--muted);
+    color: var(--foreground);
+  }
+  .file-tree-item.active {
+    background: var(--muted);
+    color: var(--foreground);
+  }
+  .additions {
+    color: var(--success);
+  }
+  .deletions {
+    color: var(--destructive);
+  }
+  [title^="Renamed"] {
+    color: var(--diffs-token-function);
+  }
+}
+
+@source "../../../../node_modules/@plannotator/ui/components/DiffFileTree.tsx";

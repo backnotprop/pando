@@ -4,16 +4,16 @@
   "status": 201,
   "body": {
     "connection": {
-      "id": "m_073abf87b436d424--cic_183e4a580d86",
+      "id": "m_b03271178f23aa74--cic_f99ed9c62372",
       "service": "buildkite",
       "organization": "o",
       "web_url": "https://buildkite.com/o",
       "token": "worker_secret",
-      "created_at": "2026-10-04T13:31:12.060Z",
-      "created_by": "rec-mutuzslr",
+      "created_at": "2026-10-04T13:58:26.545Z",
+      "created_by": "rec-mutvywkn",
       "last_event": null,
       "last_refused": null,
-      "webhook_url": "http://localhost:8797/v1/integrations/buildkite/m_073abf87b436d424--cic_183e4a580d86"
+      "webhook_url": "http://localhost:8821/v1/integrations/buildkite/m_b03271178f23aa74--cic_f99ed9c62372"
     },
     "webhook_token": "<webhook-token>"
   }

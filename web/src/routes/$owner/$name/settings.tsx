@@ -1,13 +1,21 @@
 // Settings, for owners: the name (Rename; the old name keeps leading here),
-// and Delete, which you type the full owner/name to enable (ruling).
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+// Transfer to an org you are in or to yourself (mock `transfer`; the old
+// address keeps leading here too), and Delete, which you type the full
+// owner/name to enable (ruling).
+import type { Login } from "@pando/contract";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { deleteMonorepo, rename } from "../../../api/actions";
-import { button, Empty, field, Refusal, SectionHead } from "../../../ui/controls";
+import { myOrgsQuery, transfer } from "../../../api/orgs";
+import { meQuery } from "../../../api/queries";
+import { Avatar } from "../../../ui/Avatar";
+import { button, Empty, field, Lnk, Refusal, SectionHead } from "../../../ui/controls";
+import { Select } from "../../../ui/dropdown";
 import { OwnHead, useMonorepo } from "./-frame/heads";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
+  loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(myOrgsQuery),
   component: Settings,
 });
 
@@ -47,8 +55,68 @@ function Rename() {
   );
 }
 
+/** The new owner: an org you are in, or you (the server lets a monorepo come back to a person only if they own it themselves). */
+function Transfer() {
+  const { monorepo } = useMonorepo();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const me = useSuspenseQuery(meQuery).data;
+  const orgs = useSuspenseQuery(myOrgsQuery).data;
+  const targets = [me.login, ...orgs.map((o) => o.login)].filter((o) => o !== monorepo.owner);
+  const [picked, setPicked] = useState<string>("");
+  const to = targets.find((t) => t === picked) ?? targets[0] ?? null;
+  const [typed, setTyped] = useState("");
+  const hint = `Type ${monorepo.full} to transfer`;
+
+  const move = useMutation({
+    mutationFn: (owner: Login) => transfer(monorepo, owner),
+    onSuccess: async (moved) => {
+      await qc.invalidateQueries({ queryKey: ["monorepos"] });
+      await navigate({ to: "/$owner/$name/settings", params: { owner: moved.owner, name: moved.name } });
+    },
+  });
+
+  return (
+    <section className="mt-11">
+      <SectionHead title="Transfer" className="mb-3" />
+      {to ? (
+        <>
+          <form
+            className="flex items-center gap-2.5 phone:flex-wrap"
+            onSubmit={(e) => {
+              e.preventDefault();
+
+              if (typed === monorepo.full) move.mutate(to);
+            }}
+          >
+            <Select label="New owner" value={to} onChange={setPicked} lead={<Avatar name={to} org={to !== me.login} size={18} />}>
+              {targets.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
+            <input className={`${field} w-[280px] phone:w-full`} placeholder={hint} aria-label={hint} value={typed} onChange={(e) => setTyped(e.target.value)} />
+            <button type="submit" className={button("solid")} disabled={typed !== monorepo.full || move.isPending}>
+              Transfer
+            </button>
+          </form>
+          <p className="mt-3 text-[13.5px] text-bark-dim">
+            <span className="text-bark">{monorepo.full}</span> will be <span className="text-bark">{`${to}/${monorepo.name}`}</span>. The old address keeps working.
+          </p>
+          <Refusal error={move.error} />
+        </>
+      ) : (
+        <Empty>
+          You are in no organization to move it into. <Lnk to="/orgs/new">New organization</Lnk>
+        </Empty>
+      )}
+    </section>
+  );
+}
+
 function Delete() {
-  const { monorepo, info } = useMonorepo();
+  const { monorepo } = useMonorepo();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [typed, setTyped] = useState("");
@@ -67,7 +135,7 @@ function Delete() {
 
   return (
     <section className="mt-11">
-      <SectionHead title={info.kind === "repo" ? "Delete this repo" : "Delete this monorepo"} className="mb-3" />
+      <SectionHead title="Delete this repository" className="mb-3" />
       <form
         className="flex items-center gap-2.5 phone:flex-wrap"
         onSubmit={(e) => {
@@ -96,6 +164,7 @@ function Settings() {
         {info.role === "owner" ? (
           <>
             <Rename />
+            <Transfer />
             <Delete />
           </>
         ) : (

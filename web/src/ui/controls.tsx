@@ -2,6 +2,7 @@
 // button that says "Copied", the empty line, and a section heading.
 import { Link, type LinkProps } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
+import { CheckIcon, CopyIcon } from "./Icons";
 
 export const lnk = "cursor-pointer border-b border-ash-half pb-px text-bark-dim hover:border-bark hover:text-bark";
 
@@ -32,15 +33,30 @@ export function CopyButton({ text, label = "Copy", className }: { text: string; 
 
 export const copyInCmd = "h-[26px] cursor-pointer rounded-md bg-loam px-2.5 font-sans text-[12px] leading-[14px] text-bark-dim hover:text-bark";
 
-/** `$ pando clone ramos/pando` with Copy. `url` drops the `$` and lets a long URL wrap. On a phone it never runs past the screen. */
-export function Cmd({ text, url = false, wide = false }: { text: string; url?: boolean; wide?: boolean }) {
+/** Copy as an icon (then a check for 1.2 s), for a command box with no room for the word. */
+function CopyIconButton({ text }: { text: string }) {
+  const [shown, copy] = useCopy("Copy");
+
+  return (
+    <button type="button" aria-label={shown} title={shown} className="flex size-[26px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ash hover:bg-loam hover:text-bark" onClick={() => copy(text)}>
+      {shown === "Copied" ? <CheckIcon className="block size-[15px]" /> : <CopyIcon className="block size-[15px]" />}
+    </button>
+  );
+}
+
+/**
+ * `$ pando clone ramos/pando` with Copy. `url` drops the `$` and lets a long
+ * URL wrap. `bare` (a side column's, the org page's mock) drops the `$` and
+ * copies from an icon. On a phone it never runs past the screen.
+ */
+export function Cmd({ text, url = false, wide = false, bare = false }: { text: string; url?: boolean; wide?: boolean; bare?: boolean }) {
   return (
     <span
       className={`items-center gap-3 rounded-lg border border-rootline pr-1 pl-3 font-mono text-[13px] leading-[16px] whitespace-nowrap text-bark ${wide ? "flex w-full" : "inline-flex phone:max-w-full"} ${url ? "min-h-[34px] py-1.5" : "h-[34px]"}`}
     >
-      {url ? null : <span className="text-ash">$</span>}
+      {url || bare ? null : <span className="text-ash">$</span>}
       <code className={`${wide ? "min-w-0 flex-1 overflow-hidden text-ellipsis" : "phone:min-w-0 phone:overflow-hidden phone:text-ellipsis"} ${url ? "text-[12px] leading-[17px] break-all whitespace-normal" : ""}`}>{text}</code>
-      <CopyButton text={text} className={copyInCmd} />
+      {bare ? <CopyIconButton text={text} /> : <CopyButton text={text} className={copyInCmd} />}
     </span>
   );
 }

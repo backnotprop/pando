@@ -12,7 +12,8 @@
 // branches, posts statuses, a review and a worktree, feeds a Buildkite build
 // in through its webhook, merges (forced, refused, clean), saves and
 // restores root files, breaks pando.toml (checks unknown), records every route the contract covers and every
-// socket frame, and deletes the monorepo, pass or fail. Tokens are stripped before anything is written; credentials stay in
+// socket frame, then makes an org (with two more people), makes a repo in it and moves the monorepo into it,
+// and deletes both monorepos, pass or fail (an org can't be deleted yet). Tokens are stripped before anything is written; credentials stay in
 // memory. Git runs with a temp HOME, no system config and no keychain.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -123,8 +124,11 @@ const name = `rec-${id}`;
 
 const full = `${login}/${name}`;
 
-/** The monorepo's name now: the rename near the end changes it, and the cleanup deletes by it. */
+/** The monorepo's name now: the rename and the transfer near the end change it, and the cleanup deletes by it. */
 let current = full;
+
+/** Other monorepos the run made (in the org), deleted at the end. */
+const others = [];
 
 // A stand-in for Buildkite's REST API on this machine (an ephemeral port): the connection's api_url points here, so the
 // CI routes that read the service (configuration, log, annotations, artifacts, Rebuild, Cancel, Retry) answer for real.
@@ -694,6 +698,54 @@ try {
   record("renamed.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {name}", r.status, r.json);
 
   if (r.status === 200) current = r.json.full_name;
+
+  // Organizations: whose /{name} is; an org with bo (a member) and an invite; a repo made in it; the monorepo moved
+  // into it, where ana is an owner both ways, bo is in by the org and cy by a row of his own.
+  const org = `org-${id}`;
+
+  r = await call("GET", `/v1/users/${login}`, secret);
+  record("owner-user.json", "Owner", "GET /v1/users/{name} (a person)", r.status, r.json);
+  r = await call("POST", "/v1/orgs", secret, { login: org, name: "Rec Org" });
+  record("org.json", "Org", "POST /v1/orgs", r.status, r.json);
+
+  if (r.status !== 201) throw new Error(`no org: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  r = await call("PATCH", `/v1/orgs/${org}`, secret, { description: "A recorded organization", website: "https://example.com" });
+  record("org-patched.json", "Org", "PATCH /v1/orgs/{org}", r.status, r.json);
+  r = await call("GET", `/v1/users/${org}`, secret);
+  record("owner-org.json", "Owner", "GET /v1/users/{name} (an org)", r.status, r.json);
+  r = await call("PUT", `/v1/orgs/${org}/members/bo-${id}`, secret, { role: "member" });
+  record("org-member.json", "OrgMember", "PUT /v1/orgs/{org}/members/{login}", r.status, r.json);
+  r = await call("GET", `/v1/orgs/${org}/members`, secret);
+  record("org-members.json", "OrgMemberList", "GET /v1/orgs/{org}/members", r.status, r.json);
+  r = await call("GET", "/v1/user/orgs", secret);
+  record("orgs.json", "OrgList", "GET /v1/user/orgs", r.status, r.json);
+  r = await call("POST", `/v1/orgs/${org}/invites`, secret, { email: "cy@example.com", role: "member" });
+  record("org-invite.json", "OrgInviteResult", "POST /v1/orgs/{org}/invites (no one has signed in with it yet: invited)", r.status, r.json);
+  r = await call("GET", `/v1/orgs/${org}/invites`, secret);
+  record("org-invites.json", "InviteList", "GET /v1/orgs/{org}/invites", r.status, r.json);
+  r = await call("POST", "/v1/monorepos", secret, { name: `in-${id}`, owner: org, kind: "repo" });
+  record("monorepo-created.json", "MonorepoCreated", "POST /v1/monorepos {name, owner: <org>, kind: repo}", r.status, r.json);
+
+  if (r.status === 201) others.push(r.json.monorepo.full_name);
+  r = await call("POST", "/v1/users", BOOT, { login: `cy-${id}`, name: "Cy Ortiz" });
+
+  if (r.status !== 201) throw new Error(`no third user: ${r.status}`);
+  await call("PUT", `/v1/monorepos/${current}/members/cy-${id}`, secret, { role: "member" });
+  r = await call("PATCH", `/v1/monorepos/${current}`, secret, { owner: org });
+  record("transferred.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {owner: <org>}", r.status, r.json);
+
+  if (r.status !== 200) throw new Error(`no transfer: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  current = r.json.full_name;
+  r = await call("GET", `/v1/monorepos/${current}/members`, secret);
+  record("members-org.json", "MemberList", "GET .../members (an org's monorepo: via both, org and direct)", r.status, r.json);
+  r = await call("GET", `/v1/monorepos?owner=${org}`, secret);
+  record("monorepos-owner.json", "MonorepoList", "GET /v1/monorepos?owner=<org>", r.status, r.json);
+  r = await call("GET", `/v1/monorepos?owner=${org}&summary=1`, secret);
+  record("monorepos-owner-summary.json", "MonorepoSummaryList", "GET /v1/monorepos?owner=<org>&summary=1", r.status, r.json);
+  r = await call("GET", `/v1/events?owner=${org}&limit=5`, secret);
+  record("events-owner.json", "EventsPage", "GET /v1/events?owner=<org>&limit=5", r.status, r.json);
+  r = await call("DELETE", `/v1/orgs/${org}/members/bo-${id}`, secret);
+  record("org-member-removed.json", "NoContent", "DELETE /v1/orgs/{org}/members/{login}", r.status, r.json);
   console.log(`recorded ${written.length} files for ${monorepoId}`);
 } catch (error) {
   failed = true;
@@ -701,10 +753,10 @@ try {
 } finally {
   for (const socket of sockets) socket.ws.close();
 
-  if (made) {
-    const d = await call("DELETE", `/v1/monorepos/${current}?confirm=${current}`, secret);
+  for (const name of made ? [current, ...others] : []) {
+    const d = await call("DELETE", `/v1/monorepos/${name}?confirm=${name}`, secret);
 
-    console.log(`deleted ${current}: ${d.status}`);
+    console.log(`deleted ${name}: ${d.status}`);
 
     if (d.status >= 300) failed = true;
   }

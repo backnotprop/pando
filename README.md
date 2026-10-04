@@ -72,6 +72,7 @@ PANDO_URL=http://localhost:8797 node test/e2e.mjs
 | --- | --- | --- |
 | e2e, events, namespaces, gate, objectinfo, files, facts | none | |
 | ci | none | Runs a stand-in Buildkite on a free port. |
+| cli | none | Builds the cli and drives it (`pando api`, `ci build`, `monorepo rename`, ...); a stand-in Buildkite on a free port. |
 | busy | `--var DOOR_TEST:1` | |
 | hooks | `--var HOOKS_TEST:1` | Without it, the crash checks are skipped. |
 | facts-outbox | `--var FACTS_TEST:1 --var FACTS_RETRY_MS:300,300` | |

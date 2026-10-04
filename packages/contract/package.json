@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Effect Schema for Pando's /v1 API, shared by the Worker and the web.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./names": "./src/namespaces.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts",

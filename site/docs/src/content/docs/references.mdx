@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Some git repos in your monorepo are yours to work on. Others are someone else's code you keep nearby to read: a library's source, an example, a docs repo. Pando tells them apart by where they sit, and treats each the right way.
+Some git repos in your repository are yours to work on. Others are someone else's code you keep nearby to read: a library's source, an example, a docs repo. Pando tells them apart by where they sit, and treats each the right way.
 
 ```
 acme/
@@ -20,11 +20,11 @@ Pando looks for every folder that has its own `.git`.
 - **Under `projects/`, it is a project.** You and your agents work on it: branches, worktrees, review, and a protected main. Pushes go to Pando.
 - **Anywhere else, it is a reference.** Pando never syncs its files and never takes pushes for it.
 
-`pando init` sorts them this way when it makes the monorepo, and lists both before it changes anything.
+`pando init` sorts them this way when it makes the repository, and lists both before it changes anything.
 
 ## What a reference does on other machines
 
-The monorepo's shared files carry a small pointer for each reference: the repo's address, the branch it follows, and the exact commit you have. It lives at `.pando/references/<path>.toml`:
+The repository's shared files carry a small pointer for each reference: the repo's address, the branch it follows, and the exact commit you have. It lives at `.pando/references/<path>.toml`:
 
 ```toml
 url = "https://github.com/cloudflare/workers-oauth-provider.git"

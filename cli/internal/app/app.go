@@ -3,9 +3,11 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -315,4 +317,86 @@ func label(root *config.Root, repo string) string {
 		return root.FullName()
 	}
 	return repo
+}
+
+// target is the signed-in Pando server (not file://) and a monorepo's
+// owner/name: mono (owner/name, or a name of yours), else the one this
+// folder is in.
+func (e *Env) target(srvFlag, mono string) (*server.HTTP, string, error) {
+	if mono == "" {
+		root, err := e.root()
+		if err != nil {
+			return nil, "", UsageError{"which monorepo? add --monorepo <owner/name>, or run this inside its folder"}
+		}
+		mono = root.FullName()
+	}
+	srv, _, err := e.signedIn(srvFlag)
+	if err != nil {
+		return nil, "", err
+	}
+	h, ok := srv.(*server.HTTP)
+	if !ok {
+		return nil, "", errors.New("this needs a Pando server; this one is a local file:// server")
+	}
+	if _, _, full := splitFull(mono); !full {
+		m, err := resolveMonorepo(e, srv, mono)
+		if err != nil {
+			return nil, "", err
+		}
+		mono = m.Full()
+	}
+	return h, mono, nil
+}
+
+// repoIn picks a repo of the monorepo full: repoFlag (a path such as
+// projects/web, or a name such as projects-web), else the repo this folder
+// is in when it is that monorepo's, else its only repo.
+func (e *Env) repoIn(h *server.HTTP, full, repoFlag string) (server.Repo, error) {
+	repos, err := h.ListRepos(e.Ctx, full)
+	if err != nil {
+		return server.Repo{}, err
+	}
+	if repoFlag != "" {
+		return pickRepo(repos, full, repoFlag)
+	}
+	if root, err := e.root(); err == nil && strings.EqualFold(root.FullName(), full) {
+		if rel, err := root.Rel(e.Cwd); err == nil {
+			if path, ok := root.RepoFor(rel); ok {
+				return pickRepo(repos, full, path)
+			}
+		}
+	}
+	if len(repos) == 1 {
+		return repos[0], nil
+	}
+	var paths []string
+	for _, r := range repos {
+		paths = append(paths, r.Path)
+	}
+	return server.Repo{}, fmt.Errorf("which repo? pass --repo <path> (repos: %s)", strings.Join(paths, ", "))
+}
+
+// printJSON prints an answer of the API as it came: indented on a terminal,
+// compact in a pipe. An empty answer (204) prints nothing.
+func (e *Env) printJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil
+	}
+	var b bytes.Buffer
+	var err error
+	if stdoutTerminal(e) {
+		err = json.Indent(&b, data, "", "  ")
+	} else {
+		err = json.Compact(&b, data)
+	}
+	if err != nil {
+		b.Reset()
+		b.Write(data) // not JSON: as it came
+	}
+	b.WriteByte('\n')
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, err = e.Stdout.Write(b.Bytes())
+	return err
 }

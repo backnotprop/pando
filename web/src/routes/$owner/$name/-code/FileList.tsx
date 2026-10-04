@@ -1,13 +1,13 @@
 // Browsing files the way GitHub does (owner ruling): one folder at a time as a
 // list, folders first, each row with its last change and when; the
 // latest-change bar on top; the folder's README underneath.
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Avatar } from "../../../../ui/Avatar";
 import { lnk } from "../../../../ui/controls";
 import { FileIcon, FolderIcon, RepoIcon } from "../../../../ui/Icons";
 import type { MetaVersion } from "@pando/contract";
-import { Markdown } from "../../../../ui/Markdown";
+import { Doc } from "../../../../ui/doc/Doc";
 import type { AppLink } from "../../../../ui/paths";
 import { ago, since, useNow } from "../../../../ui/time";
 
@@ -79,15 +79,20 @@ export function FileList({ bar, rows }: { bar: ReactNode; rows: readonly Row[] }
   );
 }
 
-export function Readme({ name, text }: { name: string; text: string }) {
+/** A folder's README under its list, through Plannotator's viewer; its name opens the file's page. `fileLink` is a file's page by its path. */
+export function Readme({ path, text, raw, fileLink }: { path: string; text: string; raw: string; fileLink: (path: string) => AppLink }) {
+  const navigate = useNavigate();
+
   return (
     <section className="mt-6 overflow-hidden rounded-[10px] border border-rootline">
       <h3 className="flex items-center gap-2 border-b border-rule-faint px-4 py-[11px] font-mono text-[13px] leading-[16px] text-bark-dim">
         <FileIcon className="inline-block size-4 text-ash" />
-        {name}
+        <Link {...fileLink(path)} className="hover:text-bark">
+          {path.slice(path.lastIndexOf("/") + 1)}
+        </Link>
       </h3>
       <div className="px-[26px] pt-[22px] pb-2.5">
-        <Markdown text={text} />
+        <Doc path={path} text={text} raw={raw} openFile={(to) => void navigate(fileLink(to))} />
       </div>
     </section>
   );

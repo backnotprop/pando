@@ -22,6 +22,11 @@ const AGENTS = "You are in this monorepo.\n\n# What this place is\n\nA test mono
 
 const RULINGS = "# Rulings in force\n\n- **One monorepo per project.** Code sits under `projects/`.\n";
 
+// An HTML file whose scripts would mark the page if any ran: an inline script, a handler, a body script.
+const CARD = `<!doctype html><html><head><style>h1 { color: #2a6; }</style><script>window.__ran = "head";</script></head>
+<body onload="window.__ran = 'onload'"><h1>Brand card</h1><p><a href="NOTES.md">The notes</a></p><script>document.body.dataset.ran = "body";</script></body></html>
+`;
+
 test("slice 1: sign in, home, live activity, code, file, raw, history, sign out", async ({ page }) => {
   // Script errors and console errors (a CSP refusal among them) fail the run. A 401 while signed out is expected.
   const errors: string[] = [];
@@ -74,14 +79,27 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       const repo = await browserPost(page, `/v1/monorepos/${full}/repos`, { path: "projects/web" });
       cloneUrl = repo.clone_url;
       made.machine = await Machine.make(page, `laptop-${id}`);
-      await saveRootFiles(page, full, machine().name, { "AGENTS.md": AGENTS, "decisions/RULINGS.md": RULINGS, "backlog/board.md": "# Board\n" });
+      await saveRootFiles(page, full, machine().name, {
+        "AGENTS.md": AGENTS,
+        "decisions/RULINGS.md": RULINGS,
+        "backlog/board.md": "# Board\n",
+        "research/card.html": CARD,
+        "research/NOTES.md": "# Notes\n",
+      });
       const dir = machine().commit("web", cloneUrl, "main", { "README.md": "# web\n" }, "Start the web project");
       machine().push(dir, cloneUrl, "main");
     });
 
-    await test.step("the home lists the monorepo just made", async () => {
+    await test.step("the home lists the monorepo just made, and loads nothing of the document viewer", async () => {
+      const loaded: string[] = [];
+      const record = (r: { url: () => string }) => loaded.push(r.url());
+
+      page.on("request", record);
       await page.goto("/");
       await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) })).toBeVisible();
+      await page.waitForLoadState("networkidle");
+      page.off("request", record);
+      expect(loaded.filter((url) => /PlannotatorDoc|bridge-script|katex|mermaid/.test(url))).toEqual([]);
     });
 
     await test.step("a git push shows up in the activity log live, without a reload", async () => {
@@ -104,7 +122,10 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(files.getByRole("link", { name: "decisions" })).toBeVisible();
       await expect(files.getByRole("link", { name: "projects" })).toBeVisible();
       await expect(files.getByRole("link", { name: "AGENTS.md" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "What this place is" })).toBeVisible();
+      // The README (AGENTS.md here) renders through Plannotator's viewer, with no Preview | Code; its name opens its page.
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "What this place is" })).toBeVisible();
+      await expect(page.getByRole("group", { name: "View" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "AGENTS.md" }).getByRole("link")).toHaveAttribute("href", `/${full}/blob/AGENTS.md`);
       await page.getByRole("button", { name: "Clone" }).click();
       await expect(page.getByText(`pando clone ${full}`)).toBeVisible();
       await expect(page.getByText(cloneUrl)).toBeVisible();
@@ -116,11 +137,39 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(page).toHaveURL(`${BASE}/${full}/tree/decisions`);
       await page.getByRole("list", { name: "Files" }).getByRole("link", { name: "RULINGS.md" }).click();
       await expect(page).toHaveURL(`${BASE}/${full}/blob/decisions/RULINGS.md`);
-      await expect(page.getByRole("heading", { name: "Rulings in force" })).toBeVisible();
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Rulings in force" })).toBeVisible();
       await expect(page.getByText("Saved version")).toBeVisible();
     });
 
+    await test.step("a root Markdown file: Preview by default, Code at ?plain=1 with its source lines", async () => {
+      const views = page.getByRole("group", { name: "View" });
+
+      await expect(views.getByRole("link", { name: "Preview" })).toHaveAttribute("aria-current", "page");
+      await views.getByRole("link", { name: "Code" }).click();
+      await expect(page).toHaveURL(`${BASE}/${full}/blob/decisions/RULINGS.md?plain=1`);
+      await expect(views.getByRole("link", { name: "Code" })).toHaveAttribute("aria-current", "page");
+      await expect(views.getByRole("link", { name: "Preview" })).not.toHaveAttribute("aria-current", "page");
+      await expect(page.getByText("# Rulings in force")).toBeVisible();
+      await expect(page.locator(".pn-doc")).toHaveCount(0);
+      await views.getByRole("link", { name: "Preview" }).click();
+      await expect(page).toHaveURL(`${BASE}/${full}/blob/decisions/RULINGS.md`);
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Rulings in force" })).toBeVisible();
+    });
+
+    await test.step("an HTML file renders in the viewer with none of its scripts run, and its relative link opens that file", async () => {
+      await page.goto(`/${full}/blob/research/card.html`);
+      const card = page.frameLocator(".pn-doc iframe");
+
+      await expect(card.getByRole("heading", { name: "Brand card" })).toBeVisible();
+      expect(await card.locator("body").evaluate(() => ["__ran" in window, document.body.dataset.ran ?? null, document.querySelectorAll("script:not([src])").length])).toEqual([false, null, 0]);
+      expect(await page.evaluate(() => "__ran" in window)).toBe(false);
+      await card.getByRole("link", { name: "The notes" }).click();
+      await expect(page).toHaveURL(`${BASE}/${full}/blob/research/NOTES.md`);
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Notes" })).toBeVisible();
+    });
+
     await test.step("Raw serves the file's bytes as plain text", async () => {
+      await page.goto(`/${full}/blob/decisions/RULINGS.md`);
       const raw = page.getByRole("link", { name: "Raw" });
       await expect(raw).toHaveAttribute("href", `/${full}/raw/decisions/RULINGS.md`);
       const res = await page.request.get(`/${full}/raw/decisions/RULINGS.md`);

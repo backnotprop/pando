@@ -62,6 +62,21 @@ export async function post<A, I>(schema: Schema.Codec<A, I>, path: string, body:
   return decoded(schema, res, path);
 }
 
+/** A write a route names (POST or PATCH), with an optional JSON body, and its decoded answer. */
+export async function write<A, I>(route: { method: "POST" | "PATCH"; path: string; response: Schema.Codec<A, I> }, body?: Record<string, string>): Promise<A> {
+  const headers = new Headers({ accept: "application/json" });
+
+  if (body) headers.set("content-type", "application/json");
+  const res = await send(route.path, { method: route.method, headers, body: body ? JSON.stringify(body) : undefined });
+
+  return decoded(route.response, res, route.path);
+}
+
+/** A DELETE a route names: it answers 204, no body. */
+export async function remove(route: { method: "DELETE"; path: string }): Promise<void> {
+  await send(route.path, { method: route.method, headers: { accept: "application/json" } });
+}
+
 /** POST JSON where some refusals are answers, not failures (a merge's 409 and 412): either decoded body. */
 export async function postOrRefused<A, I, B, J>(
   ok: Schema.Codec<A, I>,

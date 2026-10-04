@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.doc.json",
     "e2e": "playwright test --project=e2e",
     "shots": "PANDO_SF_FONTS=1 playwright test --project=shots"
   },
@@ -14,8 +14,10 @@
     "@base-ui/react": "1.8.0",
     "@pando/contract": "*",
     "@pierre/diffs": "1.3.6",
+    "@plannotator/ui": "0.49.0",
     "@tanstack/react-query": "5.104.1",
     "@tanstack/react-router": "1.170.41",
+    "dompurify": "3.4.16",
     "effect": "4.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"

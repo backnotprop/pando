@@ -2,7 +2,7 @@
 // files at a ref, its branches and a branch's page. Keys sit under
 // ["m", owner, name, "r", repo], so a line on the monorepo's socket can
 // refresh one repo's data.
-import { type Repo, type RepoName, Routes } from "@pando/contract";
+import { type CiBuild, type CiJob, type Repo, type RepoName, Routes } from "@pando/contract";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type * as Schema from "effect/Schema";
 import { codeRawHref } from "../ui/paths";
@@ -27,8 +27,6 @@ export const branchQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "branch", branch],
     queryFn: () => read(Routes.getBranch(m.owner, m.name, repo, branch)),
-    // Facts are computed off the request (`pending`); ask again until they are in.
-    refetchInterval: (q) => (q.state.data?.mergeable === "pending" ? 3000 : false),
   });
 
 export const commitsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
@@ -36,8 +34,8 @@ export const commitsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
 
 /**
  * Files changed: the branch's head against its merge base with main, each file
- * with its patch. The browser revalidates it by its ETag (main and head), so
- * asking again after a line on the socket costs a 304 when nothing moved.
+ * with its patch. Read again when a row brings a new head (live/rows.ts); the
+ * browser revalidates it by its ETag (main and head), a 304 when nothing moved.
  */
 export const branchDiffQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({ queryKey: [...repoKey(m, repo), "branch", branch, "diff"], queryFn: () => read(Routes.branchDiff(m.owner, m.name, repo, branch)) });
@@ -55,27 +53,41 @@ export const worktreeQuery = (m: MonorepoRef, repoPath: string, branch: string) 
     queryFn: () => read(Routes.listWorktrees(m.owner, m.name, repoPath)).then((r) => r.worktrees.find((w) => w.branch === branch) ?? null),
   });
 
+/** The job that reports a check on the branch's head, and its build (for its page). */
 export interface CheckRun {
-  duration_s: number | null;
-  url: string | null;
+  job: CiJob;
+  build: CiBuild;
 }
 
-/** Each check's run on the branch's head, from the CI service's stored builds: its time and its link. */
+/** The branch's head's builds (by Pando's id), and each check's run among them. */
+export interface CheckRuns {
+  builds: ReadonlyMap<string, CiBuild>;
+  runs: ReadonlyMap<string, CheckRun>;
+}
+
+/** Whether `job` of `build` reports its check over `held`: the newest build's job does; a retried job never. */
+export const reports = (job: CiJob, build: CiBuild, held: CheckRun | undefined) =>
+  !job.retried && (!held || held.build.id === build.id || (build.created_at ?? "") > (held.build.created_at ?? ""));
+
+/**
+ * Each check's run on the branch's head, from the CI service's stored builds
+ * (Pando's rows, no call to the service). The page's row socket keeps it
+ * current from ci.build and ci.job rows (live/rows.ts).
+ */
 export const checkRunsQuery = (m: MonorepoRef, repo: RepoName, branch: string, sha: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "runs", sha],
-    queryFn: async () => {
+    queryFn: async (): Promise<CheckRuns> => {
       const builds = (await read(Routes.listCiBuilds(m.owner, m.name, repo, branch))).builds.filter((b) => b.sha === sha);
       const runs = new Map<string, CheckRun>();
 
-      // Builds come newest first: the first job seen for a check is the one that reports it.
       for (const b of builds) {
         for (const j of (await read(Routes.getCiBuild(m.owner, m.name, b.id))).jobs) {
-          if (j.check && !j.retried && !runs.has(j.check)) runs.set(j.check, { duration_s: j.duration_s, url: j.web_url });
+          if (j.check && reports(j, b, runs.get(j.check))) runs.set(j.check, { job: j, build: b });
         }
       }
 
-      return runs;
+      return { builds: new Map(builds.map((b) => [b.id, b])), runs };
     },
   });
 

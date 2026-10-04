@@ -1,15 +1,17 @@
 // Syntax colour for a file's page, loaded on first use (FileView), the
 // language from the file's name: Pierre's File in the page's flow,
-// highlighted off the main thread by the shared worker (pierre.ts). The
+// highlighted off the main thread by the shared worker (ui/syntax.ts). The
 // render cache, keyed by blob oid, outlives each page.
 import { getFiletypeFromFileName } from "@pierre/diffs";
 import { File, WorkerPoolContext } from "@pierre/diffs/react";
 import { useMemo } from "react";
+import { CODE_LAYOUT, codePool, SYNTAX_THEME } from "../../../../ui/syntax";
 import { Lines } from "./Lines";
-import { LAYOUT, pool } from "./pierre";
+
+const pool = codePool();
 
 // Only the glyph colours differ from the plain lines.
-const options = { theme: "pando", disableFileHeader: true, unsafeCSS: LAYOUT };
+const options = { theme: SYNTAX_THEME, disableFileHeader: true, unsafeCSS: CODE_LAYOUT };
 
 /** `id` is the blob's oid: the render cache's key, with the language (one blob can sit under two names). */
 export default function Colour({ name, text, id }: { name: string; text: string; id: string | null }) {

@@ -9,31 +9,16 @@ import type { QueryClient } from "@tanstack/react-query";
 import { decodeMonorepoFrame } from "../api/client";
 import type { MonorepoRef } from "../api/names";
 import { applyLine } from "./lines";
-
-const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
-
-const PING_MS = 30_000;
+import { keepOpen } from "./socket";
 
 export function startMonorepoFeed(qc: QueryClient, m: MonorepoRef): () => void {
-  let socket: WebSocket | null = null;
   let lastN: number | null = null;
-  let attempt = 0;
-  let stopped = false;
-  let retry: ReturnType<typeof setTimeout> | undefined;
-  let ping: ReturnType<typeof setInterval> | undefined;
 
   const refetch = () => void qc.invalidateQueries({ queryKey: ["activity", m.full] });
 
-  const connect = () => {
-    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${Routes.monorepoFeedSocketPath(m.owner, m.name, lastN)}`);
-
-    socket = ws;
-    ws.onopen = () => {
-      ping = setInterval(() => ws.send("ping"), PING_MS);
-    };
-
-    ws.onmessage = (msg) => {
-      const f = decodeMonorepoFrame(String(msg.data));
+  return keepOpen(() => Routes.monorepoFeedSocketPath(m.owner, m.name, lastN), {
+    frame: (data) => {
+      const f = decodeMonorepoFrame(data);
 
       if (!f) return;
 
@@ -44,7 +29,6 @@ export function startMonorepoFeed(qc: QueryClient, m: MonorepoRef): () => void {
           break;
         case "caught_up":
           lastN = f.feed_n ?? lastN;
-          attempt = 0;
           break;
         case "feed_resync":
           lastN = f.feed_n;
@@ -56,27 +40,6 @@ export function startMonorepoFeed(qc: QueryClient, m: MonorepoRef): () => void {
         case "error":
           break;
       }
-    };
-
-    ws.onclose = (e) => {
-      clearInterval(ping);
-
-      // 4404: the monorepo was deleted.
-      if (stopped || e.code === 4404) return;
-
-      const wait = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] ?? 30_000;
-
-      attempt += 1;
-      retry = setTimeout(connect, wait * (0.8 + Math.random() * 0.4));
-    };
-  };
-
-  connect();
-
-  return () => {
-    stopped = true;
-    clearTimeout(retry);
-    clearInterval(ping);
-    socket?.close();
-  };
+    },
+  });
 }

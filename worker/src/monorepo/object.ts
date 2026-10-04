@@ -42,6 +42,7 @@ import type {
   RepoRecord,
   StatusRecord,
   StreamEvent,
+  KeyedEvent,
   RefusalExtra,
   MergeResult,
   EventSocketAttachment,
@@ -344,6 +345,14 @@ export class MonorepoObject extends DurableObject<Env> {
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
 
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
+
+    // A meta layer event's key (KeyedEvent): each (source, version) is in the log once.
+    if (!ecols.includes("source")) {
+      this.sql.exec("ALTER TABLE events ADD COLUMN source TEXT");
+      this.sql.exec("ALTER TABLE events ADD COLUMN source_version INTEGER");
+    }
+
+    this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS events_once ON events (source, source_version)");
     // The CI service that reported a status (ci/statustoken.ts), stamped by Pando.
     const scols = this.rows<{ name: string }>("PRAGMA table_info(statuses)").map((c) => c.name);
 
@@ -1236,16 +1245,20 @@ export class MonorepoObject extends DurableObject<Env> {
   // is self-contained JSON, so the same rows could later also go to an event
   // log for hooks and replay.
 
-  /** Record an event and send it to every open event socket. Returns its seq. */
-  publish(e: StreamEvent): number {
+  /** Record an event and send it to every open event socket. Returns its seq; a keyed event already in the log is not sent again. */
+  publish(e: StreamEvent, key: Omit<KeyedEvent, "event"> | null = null): number {
     if (!EVENT_STREAM) return 0;
+    const had = key ? this.row<{ seq: number }>("SELECT seq FROM events WHERE source = ? AND source_version = ?", key.source, key.version) : null;
+
+    if (had) return had.seq;
     const at = now();
     const { seq: _s, at: _a, via: _v, ...rest } = e;
     const body = JSON.stringify(rest);
     const tags = eventTags(e);
 
     const seq = this.sql.exec<{ seq: number }>(
-      "INSERT INTO events (at, kind, body, tags) VALUES (?, ?, ?, ?) RETURNING seq", at, e.kind, body, ` ${tags.join(" ")} `,
+      "INSERT INTO events (at, kind, body, tags, source, source_version) VALUES (?, ?, ?, ?, ?, ?) RETURNING seq",
+      at, e.kind, body, ` ${tags.join(" ")} `, key?.source ?? null, key?.version ?? null,
     ).one().seq;
 
     const line = this.feed.onPublish(seq, at, body);
@@ -1272,11 +1285,11 @@ export class MonorepoObject extends DurableObject<Env> {
     return seq;
   }
 
-  /** Events from the meta layer object, in order (meta.saved, machine.connected, machine.disconnected). */
-  publishMany(events: StreamEvent[]): number {
+  /** Events from the meta layer object's outbox, in order (meta.saved, machine.connected, machine.disconnected), each once by its key. */
+  publishMeta(events: KeyedEvent[]): number {
     let seq = 0;
 
-    for (const e of events) seq = this.publish(e);
+    for (const { event, ...key } of events) seq = this.publish(event, key);
 
     return seq;
   }

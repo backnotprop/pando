@@ -1,12 +1,14 @@
 // One changed file's patch as Pierre's unified diff, loaded on first use
 // (FilesChanged.tsx): the code view's metrics and token colours, coloured by
-// the shared worker (pierre.ts). Added lines are tinted with the inserted
+// the shared worker (ui/syntax.ts). Added lines are tinted with the inserted
 // token's colour and removed ones with the deleted token's (theme.css), so
 // nothing reads as Rust (conflicts, failures) or Foxfire (arrival).
 import { processFile } from "@pierre/diffs";
 import { FileDiff, WorkerPoolContext } from "@pierre/diffs/react";
 import { useMemo } from "react";
-import { LAYOUT, pool } from "./pierre";
+import { CODE_LAYOUT, codePool, SYNTAX_THEME } from "../../../../ui/syntax";
+
+const pool = codePool();
 
 // Line and number tints alike, a little quieter than Pierre's (15% of the
 // token's colour in the dark, 10% in the light); the unchanged lines between
@@ -23,7 +25,7 @@ const DIFF = `
 [data-separator-content] { padding-inline: 52px 0; }
 `;
 
-const options = { theme: "pando", diffStyle: "unified", hunkSeparators: "line-info-basic", disableFileHeader: true, unsafeCSS: LAYOUT + DIFF } as const;
+const options = { theme: SYNTAX_THEME, diffStyle: "unified", hunkSeparators: "line-info-basic", disableFileHeader: true, unsafeCSS: CODE_LAYOUT + DIFF } as const;
 
 /** `id` names this patch for the render cache (its blobs on each side). */
 export default function Diff({ patch, id }: { patch: string; id: string }) {

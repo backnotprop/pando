@@ -4,6 +4,7 @@
 import type { EventsPage, FeedEvent } from "@pando/contract";
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { lineKey, markArrived } from "./arrivals";
+import { patchMachineActivity } from "./rows";
 
 /** Newest first by the display key (at, monorepo_id, seq), as the server orders pages. */
 function newer(a: FeedEvent, b: FeedEvent): boolean {
@@ -31,6 +32,9 @@ function withLine(data: InfiniteData<EventsPage, string>, e: FeedEvent): Infinit
   return { ...data, pages: [{ ...first, events }, ...rest] };
 }
 
+/** ["m", owner, name, "r", repo, "branch", name] and [..., "runs", sha]: kept current by rows. */
+const rowFed = (key: readonly unknown[]) => (key[5] === "branch" && key.length === 7) || key[5] === "runs";
+
 export function applyLine(qc: QueryClient, e: FeedEvent): void {
   markArrived(lineKey(e));
 
@@ -40,11 +44,7 @@ export function applyLine(qc: QueryClient, e: FeedEvent): void {
 
   const [owner, name] = e.monorepo.split("/");
 
-  // A machine did something: its row on the Machines tab.
-  if (e.machine) void qc.invalidateQueries({ queryKey: ["m", owner, name, "machines"] });
-
-  // A check moved: a CI service's builds and jobs did too.
-  if (e.kind === "status") void qc.invalidateQueries({ queryKey: ["m", owner, name, "ci"] });
+  patchMachineActivity(qc, e);
 
   if (e.kind === "meta.saved") {
     void qc.invalidateQueries({ queryKey: ["m", owner, name, "meta"] });
@@ -52,8 +52,9 @@ export function applyLine(qc: QueryClient, e: FeedEvent): void {
     return;
   }
 
-  // A push, a merge, a check or a review: that repo's branches, pages and files.
-  if (e.repo) void qc.invalidateQueries({ queryKey: ["m", owner, name, "r", e.repo] });
+  // A push, a merge, a check or a review: that repo's branches, pages and files. A branch's own record
+  // and its checks' runs come as rows on the branch page's socket (live/rows.ts), so they are not read again here.
+  if (e.repo) void qc.invalidateQueries({ queryKey: ["m", owner, name, "r", e.repo], predicate: (q) => !rowFed(q.queryKey) });
 
   if (e.kind === "push" || e.kind === "merged") void qc.invalidateQueries({ queryKey: ["m", owner, name, "heads"] });
 }

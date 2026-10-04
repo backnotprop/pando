@@ -14,6 +14,7 @@ import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
+import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
 import { ciBuildLink } from "../../../../ui/paths";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
@@ -118,10 +119,10 @@ const toneOf = (word: string) => (word === "passed" ? "text-bark-dim" : word ===
  * and its time, which ticks each second while it runs. A check that moves
  * while the page is open plays the arrival.
  */
-function CheckRows({ repo, branch, checks }: { repo: Repo; branch: Branch; checks: Checks }) {
+function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch; checks: Checks; live: boolean }) {
   const { monorepo, info } = useMonorepo();
   // Read from Pando's stored builds, not only when a status names a service: a job shows the moment it is queued.
-  const runs = useQuery(checkRunsQuery(monorepo, repo.name, branch.name, branch.head)).data;
+  const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch.name, branch.head), refetchInterval: fallback(live) }).data?.runs;
   const names = [...new Set([...checks.required, ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
   const words = names.map((name) => checkWord(checks.statuses.find((x) => x.context === name), runs?.get(name)));
   const clock = useSeconds(words.includes("running"));
@@ -328,7 +329,15 @@ function Worktree({ repo, branch }: { repo: Repo; branch: string }) {
 
 export function BranchPage({ repo, branch }: { repo: Repo; branch: string }) {
   const { monorepo } = useMonorepo();
-  const b = useSuspenseQuery(branchQuery(monorepo, repo.name, branch)).data;
+  const qc = useQueryClient();
+
+  // The branch's row, its checks and its jobs come live on the repo's rows; the record and its runs are read once more when the socket opens.
+  const live = useRows(monorepo, [`repo:${repo.name}`], () => {
+    void qc.invalidateQueries({ queryKey: branchQuery(monorepo, repo.name, branch).queryKey, exact: true });
+    void qc.invalidateQueries({ queryKey: [...repoKey(monorepo, repo.name), "runs"] });
+  });
+
+  const b = useSuspenseQuery({ ...branchQuery(monorepo, repo.name, branch), refetchInterval: fallback(live) }).data;
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
   const n = b.state === "merged" ? commits.total : (b.ahead ?? commits.total);
@@ -356,7 +365,7 @@ export function BranchPage({ repo, branch }: { repo: Repo; branch: string }) {
           <MergeBox repo={repo} b={b} />
           <div className="mt-10">
             <SectionHead title="Checks" />
-            <CheckRows repo={repo} branch={b} checks={b.checks} />
+            <CheckRows repo={repo} branch={b} checks={b.checks} live={live} />
           </div>
           <Worktree repo={repo} branch={branch} />
         </aside>

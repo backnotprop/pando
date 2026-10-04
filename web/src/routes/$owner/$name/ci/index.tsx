@@ -8,6 +8,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { disconnect } from "../../../../api/actions";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciQuery } from "../../../../api/ci";
+import { CI_TOPICS, fallback, syncCi, useRows } from "../../../../live/rows";
 import { monorepoQuery } from "../../../../api/queries";
 import buildkiteMark from "../../../../ui/buildkite-mark.svg";
 import { button, copyInCmd, CopyButton, Empty, lnk, Refusal, row, SectionHead, thead } from "../../../../ui/controls";
@@ -168,8 +169,10 @@ function Pipelines() {
 
 function CiTab() {
   const { monorepo, info } = useMonorepo();
-  const ci = useSuspenseQuery(ciQuery(monorepo)).data;
-  const builds = useSuspenseQuery(ciBuildsQuery(monorepo)).data;
+  const qc = useQueryClient();
+  const live = useRows(monorepo, CI_TOPICS, () => syncCi(qc, monorepo));
+  const ci = useSuspenseQuery({ ...ciQuery(monorepo), refetchInterval: fallback(live) }).data;
+  const builds = useSuspenseQuery({ ...ciBuildsQuery(monorepo), refetchInterval: fallback(live) }).data;
   const owner = info.role === "owner";
   const connected = ci.connections.length > 0;
 

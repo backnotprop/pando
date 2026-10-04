@@ -135,9 +135,9 @@ export class Machine {
     readonly author = "Web Lane",
   ) {}
 
-  /** A machine credential for the signed-in person (POST /v1/user/credentials). */
-  static async make(page: Page, name: string, author?: string): Promise<Machine> {
-    const made = await browserPost(page, "/v1/user/credentials", { name });
+  /** A machine credential for the signed-in person (POST /v1/user/credentials); `kind` sandbox for a cloud sandbox. */
+  static async make(page: Page, name: string, author?: string, kind: "machine" | "sandbox" = "machine"): Promise<Machine> {
+    const made = await browserPost(page, "/v1/user/credentials", { name, kind });
 
     return new Machine(made.secret, name, author);
   }

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { newBuild } from "../../../../../api/actions";
 import { ciBuildQuery, ciKey, ciPipelineQuery } from "../../../../../api/ci";
+import { CI_TOPICS, fallback, syncCi, useRows } from "../../../../../live/rows";
 import { monorepoQuery } from "../../../../../api/queries";
 import { button, CopyButton, Empty, lnk, Refusal, SectionHead } from "../../../../../ui/controls";
 import { tool } from "../../-code/FileView";
@@ -48,7 +49,9 @@ function NewBuild({ pipeline, branch }: { pipeline: string; branch: string }) {
 function PipelinePage() {
   const { monorepo } = useMonorepo();
   const slug = Route.useParams().pipeline;
-  const { pipeline: p, builds } = useSuspenseQuery(ciPipelineQuery(monorepo, slug)).data;
+  const qc = useQueryClient();
+  const live = useRows(monorepo, CI_TOPICS, () => syncCi(qc, monorepo));
+  const { pipeline: p, builds } = useSuspenseQuery({ ...ciPipelineQuery(monorepo, slug), refetchInterval: fallback(live) }).data;
   // The checks its last build ran carry the service's mark.
   const last = useQuery({ ...ciBuildQuery(monorepo, p.last_build?.id ?? ""), enabled: p.last_build !== null }).data;
   const ran = new Set((last?.jobs ?? []).flatMap((j) => (j.check && !j.retried ? [j.check] : [])));

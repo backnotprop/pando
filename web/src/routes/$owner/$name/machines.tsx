@@ -1,9 +1,9 @@
 // The Machines tab: one row per machine working in the monorepo, latest
 // activity first. Each row: the person and the machine, its worktrees (each
 // opens its branch), what it did last and when, and whether it is connected.
-// A connect makes no activity line, so the open tab asks again every 5 s.
+// Each machine's row comes live on the tab's socket (machine.updated).
 import type { FeedEvent, Machine, MachineWorktree, Repo } from "@pando/contract";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Fragment } from "react";
 import type { MonorepoRef } from "../../../api/names";
@@ -12,6 +12,7 @@ import { describe } from "../../../ui/activity";
 import { Avatar } from "../../../ui/Avatar";
 import { Empty, row, thead } from "../../../ui/controls";
 import { branchLink, repoLink } from "../../../ui/paths";
+import { fallback, useRows } from "../../../live/rows";
 import { since, useNow } from "../../../ui/time";
 import { MonorepoHead, useMonorepo } from "./-frame/heads";
 
@@ -65,7 +66,9 @@ function Last({ m, monorepo, id }: { m: Machine; monorepo: MonorepoRef; id: Feed
 function Machines() {
   const { monorepo, info } = useMonorepo();
   const clock = useNow();
-  const machines = useSuspenseQuery({ ...machinesQuery(monorepo), refetchInterval: 5000 }).data;
+  const qc = useQueryClient();
+  const live = useRows(monorepo, ["kind:machine.updated"], () => void qc.invalidateQueries({ queryKey: machinesQuery(monorepo).queryKey }));
+  const machines = useSuspenseQuery({ ...machinesQuery(monorepo), refetchInterval: fallback(live) }).data;
   const repos: readonly Repo[] = useSuspenseQuery(reposQuery(monorepo)).data;
   const first = repos[0]?.path;
 

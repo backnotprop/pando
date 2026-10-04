@@ -10,6 +10,7 @@ import { useState } from "react";
 import { cancelBuild, rebuild, retryJob } from "../../../../../api/actions";
 import { ciAnnotationsQuery, ciArtifactsQuery, ciBuildIdQuery, ciBuildQuery, ciKey, ciLogQuery, going } from "../../../../../api/ci";
 import { monorepoQuery } from "../../../../../api/queries";
+import { CI_TOPICS, fallback, syncCi, useRows } from "../../../../../live/rows";
 import { Avatar } from "../../../../../ui/Avatar";
 import { button, lnk, Refusal, SectionHead } from "../../../../../ui/controls";
 import { Chevron } from "../../../../../ui/Icons";
@@ -200,7 +201,9 @@ function BuildPage() {
   const { monorepo } = useMonorepo();
   const { id } = Route.useLoaderData();
   const { job: opened } = Route.useSearch();
-  const b = useSuspenseQuery(ciBuildQuery(monorepo, id)).data;
+  const qc = useQueryClient();
+  const live = useRows(monorepo, CI_TOPICS, () => syncCi(qc, monorepo));
+  const b = useSuspenseQuery({ ...ciBuildQuery(monorepo, id), refetchInterval: fallback(live) }).data;
   const clock = useSeconds(going(b.state));
   // The newer job of a Retry replaces the older one.
   const jobs = b.jobs.filter((j) => !j.retried);

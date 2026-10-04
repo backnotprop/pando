@@ -9,8 +9,6 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { BASE, type JsonValue, type Machine } from "./seed";
 
-const ORG = "o";
-
 export interface BuildOptions {
   state?: string;
   commit: string;
@@ -31,10 +29,10 @@ export interface JobOptions {
   retried?: boolean;
 }
 
-const pipeline = (slug: string) => ({
+const pipeline = (org: string, slug: string) => ({
   id: `pl-${slug}`,
-  url: `https://api.buildkite.com/v2/organizations/${ORG}/pipelines/${slug}`,
-  web_url: `https://buildkite.com/${ORG}/${slug}`,
+  url: `https://api.buildkite.com/v2/organizations/${org}/pipelines/${slug}`,
+  web_url: `https://buildkite.com/${org}/${slug}`,
   name: slug,
   slug,
   repository: "https://example.invalid/repo.git",
@@ -42,11 +40,11 @@ const pipeline = (slug: string) => ({
   visibility: "private",
 });
 
-const build = (slug: string, n: number, o: BuildOptions) => ({
+const build = (org: string, slug: string, n: number, o: BuildOptions) => ({
   id: `bld-${slug}-${n}`,
   graphql_id: "x",
-  url: `https://api.buildkite.com/v2/organizations/${ORG}/pipelines/${slug}/builds/${n}`,
-  web_url: `https://buildkite.com/${ORG}/${slug}/builds/${n}`,
+  url: `https://api.buildkite.com/v2/organizations/${org}/pipelines/${slug}/builds/${n}`,
+  web_url: `https://buildkite.com/${org}/${slug}/builds/${n}`,
   number: n,
   state: o.state ?? "scheduled",
   blocked: false,
@@ -63,14 +61,14 @@ const build = (slug: string, n: number, o: BuildOptions) => ({
   finished_at: o.finished_at ?? null,
 });
 
-const job = (id: string, key: string, o: JobOptions) => ({
+const job = (org: string, id: string, key: string, o: JobOptions) => ({
   id,
   graphql_id: "x",
   type: "script",
   name: o.name ?? key,
   step_key: key,
   state: o.state,
-  web_url: `https://buildkite.com/${ORG}/p/builds/1#${id}`,
+  web_url: `https://buildkite.com/${org}/p/builds/1#${id}`,
   log_url: "x",
   raw_log_url: "x",
   command: "npm test",
@@ -87,19 +85,26 @@ export class Buildkite {
   readonly calls: string[] = [];
   /** Create-build requests from Pando: the hook on a push, Rebuild, New build. */
   readonly created: { commit: string; branch: string }[] = [];
+  /** A job's log, by job id. */
   logs = new Map<string, string>();
-  annotations: { id: string; context: string; style: string; body_html: string }[] = [];
-  artifacts: { id: string; job_id: string; path: string; filename: string; file_size: number }[] = [];
-  yaml = "steps:\n  - key: ci\n    command: npm test\n";
+  /** A build's annotations and artifacts, by build number. */
+  annotations = new Map<number, { id: string; context: string; style: string; body_html: string }[]>();
+  artifacts = new Map<number, { id: string; job_id: string; path: string; filename: string; file_size: number }[]>();
+  /** A pipeline's YAML, by slug. */
+  yaml = new Map<string, string>();
   private nextNumber = 100;
   private connection = "";
   private webhookToken = "";
 
-  private constructor(private readonly server: Server) {}
+  /** `org`: the Buildkite organization's slug the connection names. */
+  private constructor(
+    private readonly server: Server,
+    readonly org: string,
+  ) {}
 
-  static async start(): Promise<Buildkite> {
+  static async start(org = "o"): Promise<Buildkite> {
     const server = createServer();
-    const bk = new Buildkite(server);
+    const bk = new Buildkite(server, org);
 
     server.on("request", (req: IncomingMessage, res: ServerResponse) => {
       let raw = "";
@@ -124,7 +129,7 @@ export class Buildkite {
 
   /** Connects Buildkite organization `o` to the monorepo, as its owner, with REST calls coming here. */
   async connect(owner: Machine, full: string): Promise<void> {
-    const res = await owner.api("POST", `/v1/monorepos/${full}/ci/connections`, { service: "buildkite", organization: ORG, api_url: this.url });
+    const res = await owner.api("POST", `/v1/monorepos/${full}/ci/connections`, { service: "buildkite", organization: this.org, api_url: this.url });
     const out = await res.json();
 
     if (res.status !== 201) throw new Error(`connect: ${res.status} ${JSON.stringify(out)}`);
@@ -134,14 +139,14 @@ export class Buildkite {
 
   /** A pipeline that builds a repo: the repo's buildkite hook (each push asks here for a build). */
   async pipeline(owner: Machine, full: string, repo: string, slug: string): Promise<void> {
-    const res = await owner.api("POST", `/v1/monorepos/${full}/repos/${repo}/hooks`, { type: "buildkite", buildkite: { organization: ORG, pipeline: slug, api_url: `${this.url}/buildkite` } });
+    const res = await owner.api("POST", `/v1/monorepos/${full}/repos/${repo}/hooks`, { type: "buildkite", buildkite: { organization: this.org, pipeline: slug, api_url: `${this.url}/buildkite` } });
 
     if (!res.ok) throw new Error(`hook: ${res.status} ${await res.text()}`);
   }
 
   /** A webhook, as Buildkite sends it, with the connection's token. */
   async send(event: string, slug: string, n: number, b: BuildOptions, j?: { id: string; key: string } & JobOptions): Promise<void> {
-    const body = { event, build: build(slug, n, b), pipeline: pipeline(slug), ...(j ? { job: job(j.id, j.key, j) } : null) };
+    const body = { event, build: build(this.org, slug, n, b), pipeline: pipeline(this.org, slug), ...(j ? { job: job(this.org, j.id, j.key, j) } : null) };
 
     const res = await fetch(`${BASE}/v1/integrations/buildkite/${this.connection}`, {
       method: "POST",
@@ -166,33 +171,33 @@ export class Buildkite {
       return void json(201, {});
     }
 
-    const at = `/v2/organizations/${ORG}/pipelines/`;
+    const at = `/v2/organizations/${this.org}/pipelines/`;
 
     if (!path.startsWith(at)) return void json(404, { message: "Not Found" });
     const [slug = "", ...rest] = path.slice(at.length).split("/");
     const tail = rest.join("/");
     let m: RegExpExecArray | null;
 
-    if (tail === "" && req.method === "GET") return void json(200, { ...pipeline(slug), configuration: this.yaml });
+    if (tail === "" && req.method === "GET") return void json(200, { ...pipeline(this.org, slug), configuration: this.yaml.get(slug) ?? "steps:\n  - key: ci\n    command: npm test\n" });
 
     if (tail === "builds" && req.method === "POST") {
       const asked = JSON.parse(raw);
       this.created.push(asked);
 
-      return void json(201, { ...build(slug, this.nextNumber++, { commit: asked.commit, branch: asked.branch, message: asked.message }), pipeline: pipeline(slug) });
+      return void json(201, { ...build(this.org, slug, this.nextNumber++, { commit: asked.commit, branch: asked.branch, message: asked.message }), pipeline: pipeline(this.org, slug) });
     }
 
     if ((m = /^builds\/(\d+)\/cancel$/.exec(tail)) && req.method === "PUT") {
-      return void json(200, { ...build(slug, Number(m[1]), { state: "canceling", commit: "HEAD", branch: "main", message: "" }), pipeline: pipeline(slug) });
+      return void json(200, { ...build(this.org, slug, Number(m[1]), { state: "canceling", commit: "HEAD", branch: "main", message: "" }), pipeline: pipeline(this.org, slug) });
     }
 
-    if ((m = /^builds\/\d+\/jobs\/([^/]+)\/retry$/.exec(tail)) && req.method === "PUT") return void json(200, job(`${m[1]}-retry`, "ci", { state: "scheduled" }));
+    if ((m = /^builds\/\d+\/jobs\/([^/]+)\/retry$/.exec(tail)) && req.method === "PUT") return void json(200, job(this.org, `${m[1]}-retry`, "ci", { state: "scheduled" }));
 
     if ((m = /^builds\/\d+\/jobs\/([^/]+)\/log$/.exec(tail))) return void res.writeHead(200, { "content-type": "text/plain" }).end(this.logs.get(m[1] ?? "") ?? "");
 
-    if (/^builds\/\d+\/annotations$/.test(tail)) return void json(200, this.annotations);
+    if ((m = /^builds\/(\d+)\/annotations$/.exec(tail))) return void json(200, this.annotations.get(Number(m[1])) ?? []);
 
-    if (/^builds\/\d+\/artifacts$/.test(tail)) return void json(200, this.artifacts);
+    if ((m = /^builds\/(\d+)\/artifacts$/.exec(tail))) return void json(200, this.artifacts.get(Number(m[1])) ?? []);
 
     if ((m = /^builds\/\d+\/jobs\/[^/]+\/artifacts\/([^/]+)\/download$/.exec(tail))) return void res.writeHead(302, { location: `https://artifacts.example/${m[1]}` }).end();
 

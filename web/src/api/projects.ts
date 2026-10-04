@@ -30,8 +30,6 @@ export const branchQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "branch", branch],
     queryFn: () => read(Routes.getBranch(m.owner, m.name, repo, branch)),
-    // Facts are computed off the request (`pending`); ask again until they are in.
-    refetchInterval: (q) => (q.state.data?.mergeable === "pending" ? 3000 : false),
   });
 
 export const commitsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
@@ -56,28 +54,36 @@ export interface CheckRun {
   build: CiBuild;
 }
 
+/** The branch's head's builds (by Pando's id), and each check's run among them. */
+export interface CheckRuns {
+  builds: ReadonlyMap<string, CiBuild>;
+  runs: ReadonlyMap<string, CheckRun>;
+}
+
+/** Whether `job` of `build` reports its check over `held`: the newest build's job does; a retried job never. */
+export const reports = (job: CiJob, build: CiBuild, held: CheckRun | undefined) =>
+  !job.retried && (!held || held.build.id === build.id || (build.created_at ?? "") > (held.build.created_at ?? ""));
+
 /**
  * Each check's run on the branch's head, from the CI service's stored builds
- * (Pando's rows, no call to the service). A job moving from queued to running
- * changes no check, so no line says so: while one is going, ask every 5 s.
+ * (Pando's rows, no call to the service). The page's row socket keeps it
+ * current from ci.build and ci.job rows (live/rows.ts).
  */
 export const checkRunsQuery = (m: MonorepoRef, repo: RepoName, branch: string, sha: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "runs", sha],
-    queryFn: async () => {
+    queryFn: async (): Promise<CheckRuns> => {
       const builds = (await read(Routes.listCiBuilds(m.owner, m.name, repo, branch))).builds.filter((b) => b.sha === sha);
       const runs = new Map<string, CheckRun>();
 
-      // Builds come newest first: the first job seen for a check is the one that reports it.
       for (const b of builds) {
         for (const j of (await read(Routes.getCiBuild(m.owner, m.name, b.id))).jobs) {
-          if (j.check && !j.retried && !runs.has(j.check)) runs.set(j.check, { job: j, build: b });
+          if (j.check && reports(j, b, runs.get(j.check))) runs.set(j.check, { job: j, build: b });
         }
       }
 
-      return runs;
+      return { builds: new Map(builds.map((b) => [b.id, b])), runs };
     },
-    refetchInterval: (q) => ([...(q.state.data?.values() ?? [])].some((r) => r.job.state === "queued" || r.job.state === "running") ? 5000 : false),
   });
 
 /** One folder at a ref (the default branch when null); null for the root of a repo with no commits yet. */

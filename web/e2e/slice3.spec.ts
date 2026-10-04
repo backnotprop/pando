@@ -5,7 +5,7 @@
 // failing job's log, a sanitised annotation, Retry, Rebuild and Cancel, and
 // the pipeline's page; then a rename (the old name redirects) and a delete
 // with the typed confirmation. Real Worker, real git, real browser.
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
 import { BASE, browserPost, Machine, nextSignIn } from "./seed";
 
@@ -23,6 +23,27 @@ const person = { id: `user_ops_${id}`, email: `${login}@pando.invalid`, email_ve
 
 // A second person with an account: an invite adds her at once.
 const bea = { id: `user_bea_${id}`, email: `bea-${id}@pando.invalid`, email_verified: true, first_name: "Bea", last_name: "Lane" };
+
+/** GETs the page makes for paths matching `path`: `from()` starts counting, `since()` says how many since then. */
+function reads(page: Page, path: RegExp) {
+  let seen: string[] = [];
+  let counting = false;
+
+  page.on("request", (r) => {
+    const u = new URL(r.url());
+
+    if (counting && r.method() === "GET" && path.test(u.pathname)) seen.push(u.pathname + u.search);
+  });
+
+  return {
+    from: () => {
+      seen = [];
+      counting = true;
+    },
+    since: () => seen.length,
+    seen: () => seen,
+  };
+}
 
 interface Made {
   machine: Machine | null;
@@ -80,15 +101,22 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       m.push(m.commit("web", url, "main", { "README.md": "# web\n" }, "Start the web project"), url, "main");
     });
 
-    await test.step("a machine connects with a worktree: the Machines tab shows it connected", async () => {
+    // GETs of the Machines tab's list, counted while its socket is up: rows come by the socket, not by polling.
+    const machinesReads = reads(page, /\/machines$/);
+
+    await test.step("a machine connects with a worktree: the open Machines tab shows it connected, live", async () => {
       const m = machine();
       const wt = await m.api("PUT", `/v1/monorepos/${full}/worktrees/wt-${id}`, { repo: "projects/web", branch: "feature", path: "projects/web/worktrees/feature", machine: m.name, kind: "sparse" });
 
       expect(wt.ok).toBe(true);
-      made.socket = await m.follow(full, [`wt-${id}`]);
       await page.goto(`${BASE}/${full}/machines`);
       const row = page.getByRole("list", { name: "Machines" }).getByRole("listitem").filter({ hasText: m.name });
 
+      // Its push of main made its row; it is not connected yet.
+      await expect(row.getByText("offline", { exact: true })).toBeVisible();
+      await page.waitForTimeout(2000);
+      machinesReads.from();
+      made.socket = await m.follow(full, [`wt-${id}`]);
       await expect(row.getByText("connected", { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(row.getByRole("link", { name: "feature" })).toBeVisible();
       await expect(page.getByRole("navigation", { name: full }).getByRole("link", { name: /Machines/ })).toHaveText(/1$/);
@@ -105,6 +133,9 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       made.socket?.close();
       made.socket = null;
       await expect(row.getByText("offline", { exact: true })).toBeVisible({ timeout: 30_000 });
+      // Longer than the old 5 s poll: still no read of the list.
+      await page.waitForTimeout(6000);
+      expect(machinesReads.since()).toBe(0);
     });
 
     await test.step("Your machines lists the machine and this browser, and revokes a sandbox", async () => {
@@ -169,6 +200,9 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
 
     const t0 = Date.now();
     const at = (ms: number) => new Date(t0 + ms).toISOString();
+    // GETs of stored builds and jobs (the check rows', the CI tab's, a build page's): none while the socket is up.
+    const runsReads = reads(page, /\/ci\/builds(\/cib_[^/]+)?$/);
+    const ciReads = reads(page, /\/ci(\/builds(\/cib_[^/]+)?)?$/);
     const b7 = () => ({ commit: sha, branch: "feature", message: "Start a feature", created_at: at(-60_000) });
     const run7 = () => ({ ...b7(), state: "running", started_at: at(-59_000) });
 
@@ -180,6 +214,9 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       const checks = page.getByRole("list", { name: "Checks" });
       const typecheck = checks.getByRole("listitem").filter({ hasText: "typecheck" });
 
+      // The check rows' builds and jobs come as rows on the page's socket: no read of them once it is up.
+      await page.waitForTimeout(2000);
+      runsReads.from();
       await bk.send("build.scheduled", "web-ci", 7, b7());
       await bk.send("job.scheduled", "web-ci", 7, run7(), { id: "job-tc", key: "typecheck", state: "scheduled", created_at: at(-59_500) });
       await expect(typecheck.getByText("queued", { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -196,6 +233,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await bk.send("job.scheduled", "web-ci", 7, run7(), { id: "job-ci", key: "ci", state: "scheduled", created_at: at(-59_000) });
       await bk.send("job.started", "web-ci", 7, run7(), { id: "job-ci", key: "ci", state: "running", created_at: at(-59_000), started_at: at(-6_000) });
       await expect(checks.getByRole("listitem").filter({ hasText: "ci" }).filter({ hasNotText: "typecheck" }).getByText("running", { exact: true })).toBeVisible({ timeout: 30_000 });
+      expect(runsReads.seen()).toEqual([]);
     });
 
     await test.step("a check opens its job on the build's page, where the running log grows", async () => {
@@ -216,21 +254,23 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
     await test.step("the build fails while its page is open: the job's exit status and Retry, the annotation sanitised, the artifact", async () => {
       const bk = buildkite();
 
-      bk.annotations = [
+      bk.annotations.set(7, [
         {
           id: "an-1",
           context: "test-summary",
           style: "error",
           body_html: `<p><strong>1 failed</strong>, 41 passed</p><img src="x" onerror="window.__pwned = 1"><script>window.__pwned = 2</script><p><a href="javascript:window.__pwned = 3">a link</a></p>`,
         },
-      ];
-      bk.artifacts = [{ id: "art-1", job_id: "job-ci", path: "test-results/junit.xml", filename: "junit.xml", file_size: 38_912 }];
+      ]);
+      bk.artifacts.set(7, [{ id: "art-1", job_id: "job-ci", path: "test-results/junit.xml", filename: "junit.xml", file_size: 38_912 }]);
+      ciReads.from();
       await bk.send("job.finished", "web-ci", 7, run7(), { id: "job-ci", key: "ci", state: "failed", exit_status: 1, created_at: at(-59_000), started_at: at(-6_000), finished_at: at(-1_000) });
       await bk.send("build.finished", "web-ci", 7, { ...b7(), state: "failed", started_at: at(-59_000), finished_at: at(-500) });
       const jobs = page.getByRole("list", { name: "Jobs" });
 
       await expect(jobs.getByText("failed", { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(jobs.getByText("exit status 1")).toBeVisible();
+      expect(ciReads.seen()).toEqual([]);
       const note = page.getByRole("region", { name: "test-summary" });
 
       await expect(note.getByText("1 failed")).toBeVisible({ timeout: 30_000 });
@@ -274,9 +314,12 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
 
       await expect(builds.getByRole("listitem").filter({ hasText: "#7" }).getByText("failed", { exact: true })).toBeVisible();
       await expect(rebuilt.getByText("running", { exact: true })).toBeVisible();
+      await page.waitForTimeout(2000);
+      ciReads.from();
       await buildkite().send("build.finished", "web-ci", 100, { commit: sha, branch: "feature", message: "Start a feature", state: "canceled", finished_at: at(0) });
       await expect(rebuilt.getByText("canceled", { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(rebuilt).toHaveClass(/arrived/);
+      expect(ciReads.seen()).toEqual([]);
     });
 
     await test.step("rename: the monorepo answers at its new name, and the old name redirects there", async () => {

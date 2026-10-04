@@ -10,7 +10,7 @@
 // while its socket is up. Real Worker, real git, real browser.
 import { expect, type Page, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
-import { BASE, browserPost, Machine, nextSignIn } from "./seed";
+import { BASE, browserPost, ciStatus, Machine, nextSignIn } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -383,6 +383,22 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(rebuilt.getByText("canceled", { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(rebuilt).toHaveClass(/arrived/);
       expect(ciReads.seen()).toEqual([]);
+    });
+
+    await test.step("a check on a commit no branch is at names the commit: lint passed on <sha>", async () => {
+      const m = machine();
+      const dir = m.commit("web", url, `side-${id}`, { "s1.txt": "1\n" }, "Side one");
+
+      m.commit("web", url, `side-${id}`, { "s2.txt": "2\n" }, "Side two");
+      m.push(dir, url, `side-${id}`);
+      const first = m.git(dir, "rev-parse", "HEAD~1").trim();
+
+      await page.goto(`${BASE}/${full}/activity`);
+      await ciStatus(m, full, "projects-web", first, "lint", "success");
+      const line = page.getByTestId("activity").getByRole("listitem").filter({ hasText: "lint" }).first();
+
+      await expect(line.getByText("passed on", { exact: true })).toBeVisible({ timeout: 30_000 });
+      await expect(line.getByText(first.slice(0, 7), { exact: true })).toBeVisible();
     });
 
     await test.step("a broken .pando/pando.toml: the branch says its required checks are unknown, and why; only Merge anyway", async () => {

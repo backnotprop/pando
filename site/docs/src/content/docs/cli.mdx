@@ -7,6 +7,8 @@ sidebar:
 
 `pando help` prints the same list. Flags can go before or after a command's other arguments.
 
+The CLI names a repository a monorepo in its own words: the `pando monorepo` command, the `--monorepo` flag and its help text. They mean the repository.
+
 ## Sign in
 
 ### pando login
@@ -45,7 +47,7 @@ pando auth status
 
 Shows the server, where the credential comes from, this machine's name, and who the server says you are. It takes `--server <url>` too.
 
-## Set up a monorepo
+## Set up a repository
 
 ### pando init
 
@@ -53,7 +55,7 @@ Shows the server, where the credential comes from, this machine's name, and who 
 pando init [folder] [--name <name>] [--yes] [--dry-run]
 ```
 
-Makes a Pando monorepo or plain repo from a folder (default: the current folder), and you become its owner. A git repo becomes a plain repo. Any other folder becomes a monorepo: each git repo under `projects/` becomes one of its repos, other git repos inside it become [references](/references/), and the rest of the folder becomes its shared files. Run it again after a failure: it skips what is done.
+Makes a Pando repository from a folder (default: the current folder), and you become its owner. A git repo becomes a plain repository. Any other folder becomes a repository with projects: each git repo under `projects/` becomes one of its projects, other git repos inside it become [references](/references/), and the rest of the folder becomes its shared files. Run it again after a failure: it skips what is done.
 
 | Flag | What it does |
 | --- | --- |
@@ -70,7 +72,7 @@ A name is lower-case letters, digits, `.`, `_` and `-`, at most 39 characters, w
 pando clone <owner/name | name> [folder] [--text-only]
 ```
 
-Sets up a monorepo or plain repo on this machine: the shared files outside `projects/`, a read-only main for every repo, and the references. The folder defaults to the name. A bare `name` means the one in your own account, else the only one so named that you belong to.
+Sets up a repository on this machine: the shared files outside `projects/`, a read-only main for every project, and the references. The folder defaults to the name. A bare `name` means the one in your own account, else the only one so named that you belong to.
 
 | Flag | What it does |
 | --- | --- |
@@ -84,7 +86,7 @@ Sets up a monorepo or plain repo on this machine: the shared files outside `proj
 pando status
 ```
 
-Run inside a monorepo: shows the server and your role, then each repo with this machine's worktrees (branch, kind, commit, changed files, unpushed commits) and each reference. With a state it posts a check instead; see [pando status in a CI build](#pando-status-in-a-ci-build).
+Run inside a repository: shows the server and your role, then each project with this machine's worktrees (branch, kind, commit, changed files, unpushed commits) and each reference. With a state it posts a check instead; see [pando status in a CI build](#pando-status-in-a-ci-build).
 
 ## Worktrees and branches
 
@@ -99,7 +101,7 @@ pando worktree add <repo> <branch> | list | remove <path> | follow | mount
 | Subcommand | What it does |
 | --- | --- |
 | `add <repo> <branch> [folders...]` | Makes the branch off main if it is new, and checks it out at `<repo>/worktrees/<branch>` (a `/` in the branch name becomes `-`). Branch `main` gives a read-only main. Folders, with the sparse kind, check out only those folders. |
-| `list` | Every worktree of the monorepo on every machine: path, branch, machine, kind, ahead, behind, and when it was last seen. |
+| `list` | Every worktree of the repository on every machine: path, branch, machine, kind, ahead, behind, and when it was last seen. |
 | `remove <path>` | Takes a worktree off this machine. It refuses when there is uncommitted or unpushed work. The branch stays on the server until it merges. |
 | `follow` | Keeps this machine's read-only mains at the server's main until stopped. `pando sync` runs the same follower. |
 | `mount` | Mounts again the worktrees whose mount stopped, after a restart for example. Sparse worktrees need nothing. |
@@ -181,7 +183,7 @@ Lands the branch on main with a merge commit. It stops when checks are not green
 pando reference update <path> | sync
 ```
 
-A reference is someone else's repo inside the monorepo, kept as a pointer to one commit. See [References](/references/).
+A reference is someone else's repo inside the repository, kept as a pointer to one commit. See [References](/references/).
 
 | Subcommand | What it does |
 | --- | --- |
@@ -190,7 +192,7 @@ A reference is someone else's repo inside the monorepo, kept as a pointer to one
 
 `--kind <kind>` (`fuse`, `fskit` or `sparse`) sets how a new reference folder is checked out.
 
-## Members, credentials and monorepos
+## Members, credentials and repositories
 
 ### pando members
 
@@ -198,7 +200,7 @@ A reference is someone else's repo inside the monorepo, kept as a pointer to one
 pando members list | invite <email> [--owner] | remove <who>
 ```
 
-Each subcommand takes the monorepo as `owner/name` before its other arguments, or uses the monorepo you are in.
+Each subcommand takes the repository as `owner/name` before its other arguments, or uses the repository you are in.
 
 | Subcommand | What it does |
 | --- | --- |
@@ -240,8 +242,8 @@ pando monorepo list | delete <owner/name> [--yes]
 
 | Subcommand | What it does |
 | --- | --- |
-| `list` | Your monorepos and plain repos, with your role in each. |
-| `delete <owner/name>` | Owners only. Deletes every repo in it, their history, and its shared files. There is no undo. You type the full name to confirm. Folders on this machine stay. |
+| `list` | Your repositories, with your role in each. |
+| `delete <owner/name>` | Owners only. Deletes every project in it, their history, and its shared files. There is no undo. You type the full name to confirm. Folders on this machine stay. |
 
 | Flag | What it does |
 | --- | --- |
@@ -261,7 +263,7 @@ pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>
 
 | Subcommand | What it does |
 | --- | --- |
-| `connect --org <slug>` | Connects a Buildkite organization to the monorepo. It prints the webhook URL and token to put in Buildkite, and the steps. The token is shown once, only on a terminal. |
+| `connect --org <slug>` | Connects a Buildkite organization to the repository. It prints the webhook URL and token to put in Buildkite, and the steps. The token is shown once, only on a terminal. |
 | `status` | The connections, the last event Pando received, and each pipeline with its last build. |
 | `disconnect --org <slug>` | Removes the connection. Its builds leave Pando; its checks stay. |
 | `pipeline add <repo> <pipeline>` | Owners only. Each push to a branch of the repo then starts a build of that Buildkite pipeline. |
@@ -270,8 +272,8 @@ pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>
 
 | Flag | What it does |
 | --- | --- |
-| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
-| `--org <slug>` | The Buildkite organization, as in `buildkite.com/<slug>`. With `pipeline`, the default is the monorepo's one connected organization. |
+| `--monorepo <owner/name>` | The repository. Default: the one you are in. |
+| `--org <slug>` | The Buildkite organization, as in `buildkite.com/<slug>`. With `pipeline`, the default is the repository's one connected organization. |
 | `--out <file>` | With `connect`: write the webhook token to this file, readable only by you, instead of the terminal. |
 | `--paste-token` | With `connect`: use the token Buildkite made, typed with no echo, instead of a new one. |
 | `--server <url>` | The Pando server. Default: the configured one. |
@@ -292,9 +294,9 @@ Only in a build Pando started. Posts a check on the build's commit, using `PANDO
 
 ## Shared files
 
-A monorepo's shared files are every file outside `projects/` and outside references: notes, decisions, plans. They are plain files on every machine. While `pando sync` runs, a save on one machine goes to the others as soon as it is made, and becomes a git commit after 10 seconds without changes.
+A repository's shared files are every file outside `projects/` and outside references: notes, decisions, plans. They are plain files on every machine. While `pando sync` runs, a save on one machine goes to the others as soon as it is made, and becomes a git commit after 10 seconds without changes.
 
-Each of these commands takes `--root <folder>` for a monorepo in another folder than the one you are in.
+Each of these commands takes `--root <folder>` for a repository in another folder than the one you are in.
 
 ### pando sync
 

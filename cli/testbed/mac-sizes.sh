@@ -73,6 +73,12 @@ t1=$(ms)
 main="$work/clone/projects/app/worktrees/main"
 grep -q 'fskit worktree' "$work/clone.log" && ok "main is an FSKit worktree, ready in $((t1 - t0)) ms" || { bad "not an FSKit worktree"; cat "$work/clone.log"; exit 1; }
 
+echo "== a folder, not a drive: mounted nobrowse, so not on the Desktop or in Finder's sidebar"
+mount | grep -F " on $main (" | grep -q nobrowse && ok "mounted nobrowse" || bad "no nobrowse: $(mount | grep -F " on $main (")"
+# Finder's volume list: mountedVolumeURLs without hidden volumes.
+finder=$(osascript -l JavaScript -e 'function run(a){ObjC.import("Foundation"); var l=$.NSFileManager.defaultManager.mountedVolumeURLsIncludingResourceValuesForKeysOptions($(), $.NSVolumeEnumerationSkipHiddenVolumes); for (var i=0;i<l.count;i++){ if (ObjC.unwrap(l.objectAtIndex(i).path)===a[0]) return "listed"; } return "hidden";}' "$main")
+[ "$finder" = hidden ] && ok "not in Finder's volume list" || bad "Finder lists $main as a volume"
+
 AFS="${PANDO_ARTIFACT_FS:-artifact-fs}" bash "$HYD" "$main" > /dev/null
 state=$(cd "$main/../.." && printf '%s' "$PWD" | shasum -a 256 | cut -c1-10)
 [ -d "${PANDO_HOME:-$HOME/.pando}/afs/app-$state" ] || { bad "no daemon state for $main; downloads cannot be counted"; exit 1; }

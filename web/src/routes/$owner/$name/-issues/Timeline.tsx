@@ -219,9 +219,9 @@ function BranchName({ repoPath, branch }: { repoPath: string; branch: string }) 
   );
 }
 
-/** An event's glyph and its words. Null for a kind with no line (a comment is a box). */
-function eventOf(x: TimelineItem, actor: string): { glyph: ReactNode; words: ReactNode; big?: boolean } | null {
-  const who = <span className="fox-cool text-bark">{actor}</span>;
+/** An event's glyph and its words. Null for a kind with no line (a comment is a box). A link Pando made from a commit or a title has no person: it is told without one. */
+function eventOf(x: TimelineItem): { glyph: ReactNode; words: ReactNode; big?: boolean } | null {
+  const who = x.actor ? <span className="fox-cool text-bark">{x.actor}</span> : null;
   const tag = <TagIcon className="size-3.5" />;
 
   switch (x.kind) {
@@ -277,7 +277,9 @@ function eventOf(x: TimelineItem, actor: string): { glyph: ReactNode; words: Rea
         glyph: <BranchIcon className="size-3.5" />,
         words: (
           <>
-            {who} linked <BranchName repoPath={x.repo_path} branch={x.branch} />
+            {who ? <>{who} linked </> : null}
+            <BranchName repoPath={x.repo_path} branch={x.branch} />
+            {who ? null : " linked"}
             {x.source === "commit" ? <> from a commit {x.sha ? sha(x.sha) : null}</> : x.source === "title" ? " named in the branch title" : null}
           </>
         ),
@@ -287,7 +289,9 @@ function eventOf(x: TimelineItem, actor: string): { glyph: ReactNode; words: Rea
         glyph: <BranchIcon className="size-3.5" />,
         words: (
           <>
-            {who} unlinked <BranchName repoPath={x.repo_path} branch={x.branch} />
+            {who ? <>{who} unlinked </> : null}
+            <BranchName repoPath={x.repo_path} branch={x.branch} />
+            {who ? null : " unlinked"}
           </>
         ),
       };
@@ -322,7 +326,7 @@ function eventOf(x: TimelineItem, actor: string): { glyph: ReactNode; words: Rea
 function EventLine({ x, arrival }: { x: TimelineItem; arrival: string }) {
   const clock = useNow();
   const [fresh] = useState(() => takeArrived(arrival));
-  const shown = eventOf(x, x.actor ?? "Pando");
+  const shown = eventOf(x);
 
   if (!shown) return null;
 

@@ -1,0 +1,15 @@
+{
+  "schema": "Org",
+  "route": "PATCH /v1/orgs/{org}",
+  "status": 200,
+  "body": {
+    "type": "org",
+    "login": "org-mutxvkul",
+    "name": "Rec Org",
+    "description": "A recorded organization",
+    "website": "https://example.com",
+    "created_at": "2026-10-04T14:52:11.855Z",
+    "role": "owner",
+    "members": 1
+  }
+}

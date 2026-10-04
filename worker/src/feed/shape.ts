@@ -15,7 +15,7 @@
 // the label is added when a line is sent or read. Queue messages are internal
 // and their `monorepo` is the id.
 
-import { isOneOf, isRecord, isText, isWholeNumber, type Json } from "../parse";
+import { isOneOf, isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 import type { ReviewVerdict, StatusRecord } from "../monorepo/types";
 import type { AssignedByLogin } from "../issues/schema";
 
@@ -64,6 +64,7 @@ export const MEMBERS_INLINE_MAX = 1_000;
  */
 export const ACTIVITY_KINDS = [
   "push", "branch.opened", "branch.deleted", "merged", "review", "status", "worktree.reported", "worktree.removed", "meta.saved",
+  "issue.opened", "issue.commented", "issue.closed", "issue.reopened",
 ] as const;
 
 /**
@@ -108,6 +109,17 @@ export interface MergedSummary {
   /** The branch's title. */
   title: string | null;
   head: string | null;
+  /** The issues the merge closes (its MergeResult's); left out by lines from before issues. */
+  closes?: number[];
+}
+
+/** issue.opened, issue.commented, issue.closed (by a person), issue.reopened. */
+export interface IssueSummary {
+  number: number;
+  title: string;
+  reason: "completed" | "not_planned" | null;
+  /** A comment's first 140 characters. */
+  excerpt: string | null;
 }
 
 export interface ReviewSummary {
@@ -168,6 +180,20 @@ const REVIEW_VERDICTS: readonly ReviewVerdict[] = ["comment", "request_changes",
 
 const STATUS_STATES: readonly StatusRecord["state"][] = ["pending", "success", "failure", "error"];
 
+/** A merged line's closed issues, when it carries them (`{}` keeps the key out). */
+export function closesOf(v: Json | undefined): { closes?: number[] } {
+  return Array.isArray(v) ? { closes: v.filter(isWholeNumber) } : {};
+}
+
+/** An issue line's summary; null without a number and title. */
+export function issueSummaryOf(r: JsonObject): IssueSummary | null {
+  const number = wholeOf(r.number);
+  const title = textOf(r.title);
+  const reason = r.reason === "completed" || r.reason === "not_planned" ? r.reason : null;
+
+  return number !== null && title !== null ? { number, title, reason, excerpt: textOf(r.excerpt) } : null;
+}
+
 /** A review's verdict, from a stored line or an event's row. */
 export function verdictOf(v: Json | undefined): ReviewVerdict | null {
   return isText(v) && isOneOf(REVIEW_VERDICTS, v) ? v : null;
@@ -189,7 +215,7 @@ export function lineOf(kind: string, v: Json | undefined): Line | null {
     case "branch.deleted":
       return { kind, summary: r && { before: textOf(r.before) } };
     case "merged":
-      return { kind, summary: r && { merge_commit: textOf(r.merge_commit), forced: flagOf(r.forced), title: textOf(r.title), head: textOf(r.head) } };
+      return { kind, summary: r && { merge_commit: textOf(r.merge_commit), forced: flagOf(r.forced), title: textOf(r.title), head: textOf(r.head), ...closesOf(r.closes) } };
     case "review":
       return { kind, summary: r && { verdict: verdictOf(r.verdict), comments: wholeOf(r.comments) ?? 0, head: textOf(r.head) } };
     case "status": {
@@ -207,6 +233,11 @@ export function lineOf(kind: string, v: Json | undefined): Line | null {
       return { kind, summary: r && { path: textOf(r.path), worktree: textOf(r.worktree) } };
     case "meta.saved":
       return { kind, summary: r && { path: textOf(r.path), version: wholeOf(r.version), deleted: r.deleted === true } };
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened":
+      return { kind, summary: r && issueSummaryOf(r) };
     default:
       return null;
   }
@@ -362,7 +393,8 @@ export type Line =
   | { kind: "review"; summary: ReviewSummary | null }
   | { kind: "status"; summary: StatusSummary | null }
   | { kind: "worktree.reported" | "worktree.removed"; summary: WorktreeSummary | null }
-  | { kind: "meta.saved"; summary: MetaSavedSummary | null };
+  | { kind: "meta.saved"; summary: MetaSavedSummary | null }
+  | { kind: "issue.opened" | "issue.commented" | "issue.closed" | "issue.reopened"; summary: IssueSummary | null };
 
 /** What a monorepo object stores per activity event: the event without its monorepo, seq and at. */
 export type StoredPointer = Line & {

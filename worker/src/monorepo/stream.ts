@@ -6,8 +6,8 @@
 export const EVENT_STREAM = true;
 
 /** The topics an event is sent on (sockets subscribe with ?topics=, as acceptWebSocket tags). */
-export function eventTags(e: { kind: string; repo?: string | null; collection: string | null }): string[] {
-  const t = ["all", `kind:${e.kind}`];
+export function eventTags(e: { kind: string; repo?: string | null; collection: string | null; topics?: string[] }): string[] {
+  const t = ["all", `kind:${e.kind}`, ...(e.topics ?? [])];
 
   if (e.repo) t.push(`repo:${e.repo}`);
 
@@ -29,7 +29,7 @@ export function parseTopics(q: string | null): string[] | null {
 
   if (!topics.length || topics.length > 10) return null;
   // `feed`: the activity lines (C25), as the person's feed shows them, for a large monorepo on the home.
-  const ok = topics.every((t) => t.length <= 200 && /^(all|main|meta|feed|main:[A-Za-z0-9._-]+|repo:[A-Za-z0-9._-]+|kind:[a-z._]+)$/.test(t));
+  const ok = topics.every((t) => t.length <= 200 && /^(all|main|meta|feed|issues|issue:[1-9][0-9]{0,8}|main:[A-Za-z0-9._-]+|repo:[A-Za-z0-9._-]+|kind:[a-z._]+)$/.test(t));
 
   return ok ? topics : null;
 }

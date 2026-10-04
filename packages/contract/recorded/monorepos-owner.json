@@ -1,0 +1,29 @@
+{
+  "schema": "MonorepoList",
+  "route": "GET /v1/monorepos?owner=<org>",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_1f6c0ad534f417d2",
+        "owner": "org-mutxvkul",
+        "name": "in-mutxvkul",
+        "full_name": "org-mutxvkul/in-mutxvkul",
+        "kind": "repo",
+        "created_at": "2026-10-04T14:52:11.878Z",
+        "owner_type": "org",
+        "role": "owner"
+      },
+      {
+        "id": "m_6bb0e9eea359f448",
+        "owner": "org-mutxvkul",
+        "name": "rec-mutxvkul-renamed",
+        "full_name": "org-mutxvkul/rec-mutxvkul-renamed",
+        "kind": "monorepo",
+        "created_at": "2026-10-04T14:51:40.008Z",
+        "owner_type": "org",
+        "role": "owner"
+      }
+    ]
+  }
+}

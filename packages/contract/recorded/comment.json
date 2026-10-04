@@ -1,0 +1,15 @@
+{
+  "schema": "IssueComment",
+  "route": "POST .../issues/{n}/comments",
+  "status": 201,
+  "body": {
+    "id": "ic_05230732a9fc7ce8",
+    "body": "Seen on staging too.",
+    "body_version": 1,
+    "author": "rec-mutxvkul",
+    "machine": "ana-mbp",
+    "created_at": "2026-10-04T14:52:08.821Z",
+    "updated_at": "2026-10-04T14:52:08.821Z",
+    "reactions": []
+  }
+}

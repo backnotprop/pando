@@ -36,6 +36,7 @@ CREATE INDEX IF NOT EXISTS issue_links_branch ON issue_links (repo, branch);
 CREATE TABLE IF NOT EXISTS issue_reactions (
   issue INTEGER NOT NULL, comment TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, login TEXT NOT NULL, created_at TEXT NOT NULL,
   PRIMARY KEY (issue, comment, content, login));
+CREATE TABLE IF NOT EXISTS issue_closes (merge INTEGER PRIMARY KEY, closes TEXT NOT NULL, named TEXT NOT NULL, due INTEGER NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS issues_fts USING fts5(title, body, content='issues', content_rowid='number');
 CREATE TRIGGER IF NOT EXISTS issues_fts_insert AFTER INSERT ON issues BEGIN
   INSERT INTO issues_fts (rowid, title, body) VALUES (new.number, new.title, new.body);

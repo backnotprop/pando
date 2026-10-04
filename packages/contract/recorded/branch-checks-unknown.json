@@ -4,16 +4,16 @@
   "status": 200,
   "body": {
     "name": "feat/clash",
-    "head": "3c2a38cc1cd4f6a413a378da35b765ecf104c0c9",
-    "base": "c6a914b4318733382b9ad43250ee5c051e65b0b0",
-    "author": "rec-mutuzslr",
+    "head": "0bd1cd3c887cb71282a51c9ff963b80764c0fb7b",
+    "base": "6fa744a7f88cbcbca89bece60da607a1f5d69c2a",
+    "author": "rec-mutxvkul",
     "title": null,
     "description": null,
     "ahead": 1,
     "behind": 4,
     "mergeable": "conflicts",
     "checks": {
-      "sha": "3c2a38cc1cd4f6a413a378da35b765ecf104c0c9",
+      "sha": "0bd1cd3c887cb71282a51c9ff963b80764c0fb7b",
       "state": "unknown",
       "required": null,
       "missing": [],
@@ -28,13 +28,13 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "ana-mbp",
-    "created_at": "2026-10-04T13:31:10.074Z",
-    "updated_at": "2026-10-04T13:31:10.074Z",
+    "created_at": "2026-10-04T14:51:50.216Z",
+    "updated_at": "2026-10-04T14:51:50.216Z",
     "stale": false,
     "last_mergeable": null,
     "conflict_paths": [
       "merged.txt"
     ],
-    "facts_at": "2026-10-04T13:31:19.845Z"
+    "facts_at": "2026-10-04T14:51:56.730Z"
   }
 }

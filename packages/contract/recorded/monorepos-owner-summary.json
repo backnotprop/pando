@@ -1,0 +1,64 @@
+{
+  "schema": "MonorepoSummaryList",
+  "route": "GET /v1/monorepos?owner=<org>&summary=1",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_6bb0e9eea359f448",
+        "owner": "org-mutxvkul",
+        "name": "rec-mutxvkul-renamed",
+        "full_name": "org-mutxvkul/rec-mutxvkul-renamed",
+        "kind": "monorepo",
+        "created_at": "2026-10-04T14:51:40.008Z",
+        "owner_type": "org",
+        "role": "owner",
+        "last_activity_at": "2026-10-04T14:52:10.579Z",
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 0,
+          "conflicts": 1,
+          "failing": 1
+        },
+        "members": 3,
+        "large": false,
+        "repos": 1,
+        "open_branches": 2,
+        "assigned": {
+          "rec-mutxvkul": {
+            "count": 1,
+            "newest": {
+              "number": 1,
+              "title": "Login fails an hour after sign-in",
+              "updated_at": "2026-10-04T14:52:08.840Z"
+            }
+          }
+        }
+      },
+      {
+        "id": "m_1f6c0ad534f417d2",
+        "owner": "org-mutxvkul",
+        "name": "in-mutxvkul",
+        "full_name": "org-mutxvkul/in-mutxvkul",
+        "kind": "repo",
+        "created_at": "2026-10-04T14:52:11.878Z",
+        "owner_type": "org",
+        "role": "owner",
+        "last_activity_at": null,
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 0,
+          "conflicts": 0,
+          "failing": 0
+        },
+        "members": 2,
+        "large": false,
+        "repos": 1,
+        "open_branches": 0,
+        "assigned": {}
+      }
+    ]
+  }
+}

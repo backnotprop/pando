@@ -1,5 +1,6 @@
 // The home's routes (C25), across every monorepo a person belongs to:
-//   GET /v1/events                 the activity log (JSON pages; with Upgrade, the person's live socket)
+//   GET /v1/events                 the activity log (JSON pages; with Upgrade, the person's live socket);
+//                                  ?in=owner/name narrows to one monorepo, ?owner=<owner> to one owner's
 //   GET /v1/monorepos?summary=1    the monorepo list with each one's line (wired in monorepo/api.ts)
 //   GET /v1/branches               "needs you": open branches that are ready, conflicting or failing
 //   /v1/_feed/test                 tests only (FEED_TEST=1 and the bootstrap secret)
@@ -11,7 +12,7 @@ import type { Env } from "../env";
 import { credential, HttpError, toErrorResponse } from "../http";
 import { accounts, authenticateRequest } from "../accounts/auth";
 import { isBootstrap, monorepoStub } from "../monorepo/session";
-import { monorepoRef } from "../monorepo/names";
+import { monorepoRef, validNamespace } from "../monorepo/names";
 import { pool } from "../monorepo/views";
 import { finishTiming, runTimed, startTiming } from "../timing";
 import { isRecord, isWholeNumber, type Json } from "../parse";
@@ -134,7 +135,18 @@ async function eventsPage(env: Env, login: string, url: URL) {
 
   if (c && !cursor) bad("cursor: pass back a `next` from an earlier page");
   const inn = await monorepoParam(env, url);
-  const only = inn?.id ?? null;
+  const owner = url.searchParams.get("owner")?.toLowerCase() || null;
+
+  if (owner !== null && inn) bad("in or owner, not both");
+  let only = inn ? [inn.id] : null;
+
+  if (owner !== null) {
+    // The person's monorepos under that owner, from the accounts (the truth); none is an empty page.
+    only = validNamespace(owner) ? (await accounts(env).monoreposOf(login, undefined, owner)).map((m) => m.id) : [];
+
+    if (!only.length) return { events: [], next: null, from_logs: false, skipped: [] };
+  }
+
   const feed = feedStub(env, login);
   let p = await feed.page(cursor, limit, only);
 

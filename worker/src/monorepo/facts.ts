@@ -25,6 +25,7 @@ import { MainMoved, mergeableOf, pool, type DryRun, type Mergeable } from "./vie
 import type { RepoRecord } from "./types";
 import { sendPushSummary } from "../feed/push";
 import { runReconcile } from "./reconcile";
+import { closingsIn, commitClosings } from "../issues/commits";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
 export const SWEEP_DAYS = 7;
@@ -50,6 +51,8 @@ export interface Facts {
   mergeable: Mergeable;
   /** On "conflicts": every path changed differently on both sides (the dry run's own list). */
   conflict_paths: string[] | null;
+  /** Issues the branch's own commits close, each with the newest commit naming it; null when they were not read. */
+  issue_refs: { number: number; sha: string }[] | null;
 }
 
 export type FactsMessage = (
@@ -58,27 +61,33 @@ export type FactsMessage = (
   | { type: "branch"; monorepo: string; repo: string; branch: string; head: string }
   // The refs compare (CODE-VS-MODEL.md P1): Artifacts' refs against the records, every branch.
   | { type: "refs"; monorepo: string; repo: string }
+  // A merge whose read of its commits ran out of time: the issues they name get a merge_referenced item.
+  | { type: "merge_refs"; monorepo: string; repo: string; merge: number; base: string; head: string }
 ) & {
   /** The push behind this job (C25): its event waits for the commit count and head title computed here. */
   push?: { seq: number; before: string };
 };
 
-/** One branch's facts against main. Reads Artifacts. */
-export async function computeFacts(env: Env, r: RepoRecord, main: string, head: string, read?: CommitReader): Promise<Facts> {
+/** One branch's facts against main, and the issues its commits close (`names`: this monorepo's owner/name). Reads Artifacts. */
+export async function computeFacts(env: Env, r: RepoRecord, main: string, head: string, read?: CommitReader, names: readonly string[] = []): Promise<Facts> {
   const go = async (rd: CommitReader): Promise<Facts> => {
     let base: string | null = null;
     let ahead: number | null = null;
     let behind: number | null = null;
+    let issueRefs: Facts["issue_refs"] = null;
 
     try {
-      ({ mergeBase: base, ahead, behind } = await compareWith(rd, main, head));
+      const c = await compareWith(rd, main, head);
+      ({ mergeBase: base, ahead, behind } = c);
+      // The walk cached each commit's message: reading the keywords costs no Artifacts call.
+      issueRefs = await closingsIn(rd, c.aheadCommits, names);
     } catch {
       /* too far apart: unknown */
     }
 
     const dry: DryRun = base ? await mergeableOf(env, r, main, head, ahead) : { mergeable: "unknown", conflict_paths: null };
 
-    return { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths };
+    return { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths, issue_refs: issueRefs };
   };
 
   return read ? go(read) : withRepo(env, r.artifacts_name, (repo) => go(commitReader(repo)));
@@ -141,6 +150,13 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
 
   if (m.type === "refs") return { computed: await runReconcile(env, stub, r, { all: true }), abandoned: false };
 
+  if (m.type === "merge_refs") {
+    const refs = await withRepo(env, r.artifacts_name, (repo) => commitClosings(commitReader(repo), m.base, m.head, [info.label]));
+    await stub.issueMergeReferenced(m.merge, refs.map((x) => x.number));
+
+    return { computed: refs.length, abandoned: false };
+  }
+
   if (m.push) {
     const t0 = Date.now();
     await sendPushSummary(env, stub, r, m.push, m.type === "branch" ? m.head : m.main, m.type === "sweep");
@@ -152,7 +168,7 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
 
     if (!main) return { computed: 0, abandoned: true };
     const required = await requiredKept(env, info, r);
-    const f = await computeFacts(env, r, main, m.head);
+    const f = await computeFacts(env, r, main, m.head, undefined, [info.label]);
 
     return { computed: (await stub.writeFacts(m.repo, m.branch, f, required)) ? 1 : 0, abandoned: false };
   }
@@ -177,7 +193,7 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
       }
 
       try {
-        const f = await computeFacts(env, r, m.main, b.head, read);
+        const f = await computeFacts(env, r, m.main, b.head, read, [info.label]);
 
         if (await stub.writeFacts(m.repo, b.name, f, required)) computed++;
       } catch (err) {

@@ -11,13 +11,13 @@
       "type": "event",
       "landed": 1,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 2,
-        "at": "2026-10-04T13:31:07.273Z",
+        "at": "2026-10-04T14:51:48.125Z",
         "kind": "push",
         "summary": {
-          "head": "c6a914b4318733382b9ad43250ee5c051e65b0b0",
+          "head": "6fa744a7f88cbcbca89bece60da607a1f5d69c2a",
           "before": null,
           "commits": 1,
           "head_title": "First commit"
@@ -25,7 +25,7 @@
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "main",
-        "actor": "rec-mutuzslr",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     },
@@ -33,13 +33,32 @@
       "type": "event",
       "landed": 6,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 10,
-        "at": "2026-10-04T13:31:10.858Z",
+        "at": "2026-10-04T14:51:50.904Z",
+        "kind": "branch.deleted",
+        "summary": {
+          "before": "2c294f8e462e64bfd4f318bc505a2040b546bdfa"
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "chore/gone",
+        "actor": "rec-mutxvkul",
+        "machine": "ana-mbp"
+      }
+    },
+    {
+      "type": "event",
+      "landed": 11,
+      "event": {
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
+        "seq": 9,
+        "at": "2026-10-04T14:51:50.624Z",
         "kind": "branch.opened",
         "summary": {
-          "head": "2b5724060cec0bdcdfef28ee585ffe370720f736",
+          "head": "2c294f8e462e64bfd4f318bc505a2040b546bdfa",
           "before": null,
           "commits": 1,
           "head_title": "A branch to delete"
@@ -47,26 +66,7 @@
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "chore/gone",
-        "actor": "rec-mutuzslr",
-        "machine": "ana-mbp"
-      }
-    },
-    {
-      "type": "event",
-      "landed": 7,
-      "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
-        "seq": 12,
-        "at": "2026-10-04T13:31:11.408Z",
-        "kind": "branch.deleted",
-        "summary": {
-          "before": "2b5724060cec0bdcdfef28ee585ffe370720f736"
-        },
-        "repo": "projects-web",
-        "repo_path": "projects/web",
-        "branch": "chore/gone",
-        "actor": "rec-mutuzslr",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     },
@@ -74,20 +74,20 @@
       "type": "event",
       "landed": 12,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 22,
-        "at": "2026-10-04T13:31:12.053Z",
+        "at": "2026-10-04T14:51:51.463Z",
         "kind": "review",
         "summary": {
           "verdict": "approve",
           "comments": 1,
-          "head": "4df471f0a8e51038aab60e7e9010161444c6c53b"
+          "head": "69f334d2f3889dee78c4f094e61529b24141eead"
         },
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-mutuzslr",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     },
@@ -95,17 +95,17 @@
       "type": "event",
       "landed": 13,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 27,
-        "at": "2026-10-04T13:31:12.072Z",
+        "at": "2026-10-04T14:51:51.474Z",
         "kind": "status",
         "summary": {
           "context": "lint",
           "state": "success",
           "description": "#1 passed in 8 s",
           "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
-          "sha": "4df471f0a8e51038aab60e7e9010161444c6c53b",
+          "sha": "69f334d2f3889dee78c4f094e61529b24141eead",
           "duration_s": null,
           "app": "buildkite"
         },
@@ -120,21 +120,22 @@
       "type": "event",
       "landed": 14,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 30,
-        "at": "2026-10-04T13:31:13.192Z",
+        "at": "2026-10-04T14:51:51.948Z",
         "kind": "merged",
         "summary": {
-          "merge_commit": "f0b6886ddb0bffe091a2d0200cb83fd0f903f7b9",
+          "merge_commit": "bbd1791f4e2676772581c2947a74ddb7878cf5b9",
           "forced": true,
           "title": null,
-          "head": "e7d35160c4fc3b2f24d079ef73c7f6cb72143b90"
+          "head": "5ca12c88e89ae77dfad28777688f0e0d43856826",
+          "closes": []
         },
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/merge-me",
-        "actor": "rec-mutuzslr",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     },
@@ -142,19 +143,19 @@
       "type": "event",
       "landed": 15,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 32,
-        "at": "2026-10-04T13:31:13.202Z",
+        "at": "2026-10-04T14:51:51.954Z",
         "kind": "worktree.reported",
         "summary": {
           "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
-          "worktree": "wt-mutuzslr"
+          "worktree": "wt-mutxvkul"
         },
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
-        "actor": "rec-mutuzslr",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     },
@@ -162,10 +163,10 @@
       "type": "event",
       "landed": 18,
       "event": {
-        "monorepo_id": "m_073abf87b436d424",
-        "monorepo": "rec-mutuzslr/rec-mutuzslr",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 35,
-        "at": "2026-10-04T13:31:13.458Z",
+        "at": "2026-10-04T14:51:52.209Z",
         "kind": "meta.saved",
         "summary": {
           "path": "docs/deep/notes.md",
@@ -175,16 +176,16 @@
         "repo": "meta",
         "repo_path": ".",
         "branch": null,
-        "actor": "rec-mutuzslr",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     },
     {
       "type": "summary",
-      "monorepo": "rec-mutuzslr/rec-mutuzslr",
-      "monorepo_id": "m_073abf87b436d424",
+      "monorepo": "rec-mutxvkul/rec-mutxvkul",
+      "monorepo_id": "m_6bb0e9eea359f448",
       "summary": {
-        "last_activity_at": "2026-10-04T13:31:13.458Z",
+        "last_activity_at": "2026-10-04T14:51:52.209Z",
         "worktrees_active": 0,
         "machines_active": 0,
         "needs": {
@@ -197,18 +198,23 @@
         "repos": 1,
         "open_branches": 3,
         "assigned": {},
-        "at": "2026-10-04T13:31:14.575Z"
+        "at": "2026-10-04T14:51:53.128Z"
       }
     },
     {
       "type": "needs",
-      "monorepo": "rec-mutuzslr/rec-mutuzslr",
-      "monorepo_id": "m_073abf87b436d424",
+      "monorepo": "rec-mutxvkul/rec-mutxvkul",
+      "monorepo_id": "m_6bb0e9eea359f448",
       "changed": [
         {
           "repo": "projects-web",
           "branch": "feat/clash",
           "state": "conflicts"
+        },
+        {
+          "repo": "projects-web",
+          "branch": "feat/failing",
+          "state": "failing"
         },
         {
           "repo": "projects-web",

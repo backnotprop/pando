@@ -105,3 +105,41 @@ export const BranchIcon = (p: Props) => (
     </g>
   </svg>
 );
+
+/** An org's facts (the mocks' org header): its website, its people, its repositories. */
+export const LinkIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <path d="M6.6 9.4a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9" />
+      <path d="M9.4 6.6a2.6 2.6 0 0 0-3.7 0L3.5 8.8a2.6 2.6 0 0 0 3.7 3.7l.9-.9" />
+    </g>
+  </svg>
+);
+
+export const PersonIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.4">
+      <circle cx="8" cy="5.5" r="2.7" />
+      <path d="M2.8 13.8c.8-2.6 2.8-4 5.2-4s4.4 1.4 5.2 4" />
+    </g>
+  </svg>
+);
+
+export const RepoBookIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round">
+      <path d="M3.25 2.75h8.5a1 1 0 0 1 1 1v9.5H4.5a1.25 1.25 0 0 1-1.25-1.25z" />
+      <path d="M3.25 12a1.25 1.25 0 0 1 1.25-1.25h8.25" />
+    </g>
+  </svg>
+);
+
+/** Copy, where a command's box has no room for the word (the org page's side column). */
+export const CopyIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35">
+      <rect x="5.25" y="5.25" width="8" height="8" rx="1.5" />
+      <path d="M10.75 5.25V4.25a1.5 1.5 0 0 0-1.5-1.5h-5a1.5 1.5 0 0 0-1.5 1.5v5a1.5 1.5 0 0 0 1.5 1.5h1" />
+    </g>
+  </svg>
+);

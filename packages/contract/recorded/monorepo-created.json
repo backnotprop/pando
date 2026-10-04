@@ -1,0 +1,30 @@
+{
+  "schema": "MonorepoCreated",
+  "route": "POST /v1/monorepos {name, owner: <org>, kind: repo}",
+  "status": 201,
+  "body": {
+    "monorepo": {
+      "id": "m_1f6c0ad534f417d2",
+      "owner": "org-mutxvkul",
+      "name": "in-mutxvkul",
+      "full_name": "org-mutxvkul/in-mutxvkul",
+      "kind": "repo",
+      "created_at": "2026-10-04T14:52:11.878Z",
+      "owner_type": "org",
+      "role": "owner"
+    },
+    "repos": [
+      {
+        "monorepo": "org-mutxvkul/in-mutxvkul",
+        "name": "in-mutxvkul",
+        "path": ".",
+        "description": null,
+        "default_branch": "main",
+        "clone_url": "http://localhost:8797/org-mutxvkul/in-mutxvkul.git",
+        "created_at": "2026-10-04T14:52:13.940Z",
+        "created_by": "rec-mutxvkul"
+      }
+    ],
+    "replaced_alias": null
+  }
+}

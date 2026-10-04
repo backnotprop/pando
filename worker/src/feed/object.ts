@@ -117,7 +117,7 @@ export interface WindowPage {
   large: { name: string; label: string | null; last: string | null }[];
   /** Small monorepos the window may not fully cover for this page; `after` is where coverage starts. */
   uncovered: { name: string; label: string | null; after: string; last: string | null }[];
-  /** Only for `only`: false when it is not in the index. */
+  /** Only for `only`: false when none of them is in the index. */
   known: boolean;
   /** The index is old or never made: re-read the person's monorepos from the accounts and reconcile. */
   need_list: boolean;
@@ -168,8 +168,11 @@ export class FeedObject extends DurableObject<Env> {
     };
   }
 
-  private index(only: string | null = null): IndexRow[] {
-    return this.rows<IndexSqlRow>(`SELECT ${INDEX_COLUMNS} FROM monorepos WHERE (?1 IS NULL OR name = ?1) ORDER BY name`, only).map((r) => this.indexRow(r));
+  /** The index rows, or only those of the monorepos in `only`. */
+  private index(only: string[] | null = null): IndexRow[] {
+    const among = only === null ? null : JSON.stringify(only);
+
+    return this.rows<IndexSqlRow>(`SELECT ${INDEX_COLUMNS} FROM monorepos WHERE (?1 IS NULL OR name IN (SELECT value FROM json_each(?1))) ORDER BY name`, among).map((r) => this.indexRow(r));
   }
 
   private indexRowOf(monorepo: string): IndexSqlRow | null {
@@ -349,9 +352,9 @@ export class FeedObject extends DurableObject<Env> {
    * One page from the window: lines older than `cursor`, newest first, from
    * small monorepos in the index; and which monorepos the routes must read
    * from their logs (large ones always; small ones the window may not cover
-   * this far back).
+   * this far back). `only`: these monorepos only (one, or an owner's).
    */
-  page(cursor: Key | null, limit: number, only: string | null): WindowPage {
+  page(cursor: Key | null, limit: number, only: string[] | null): WindowPage {
     const reconciled = Number(this.get("reconciled_at") ?? 0);
     const need_list = Date.now() - reconciled > RECONCILE_MS;
     const idx = this.index(only);
@@ -362,25 +365,28 @@ export class FeedObject extends DurableObject<Env> {
 
     let rows: P[];
 
-    if (only) {
+    if (only?.length === 1) {
+      const [one] = only;
       rows = cursor
         ? this.rows<P>(
             `SELECT monorepo, seq, at, body FROM pointers WHERE monorepo = ?1 AND (at < ?2 OR (at = ?2 AND seq < ?3))
              ORDER BY at DESC, seq DESC LIMIT ?4`,
-            only, cursor.at, only < cursor.monorepo_id ? Number.MAX_SAFE_INTEGER : only > cursor.monorepo_id ? 0 : cursor.seq, limit,
+            one, cursor.at, one < cursor.monorepo_id ? Number.MAX_SAFE_INTEGER : one > cursor.monorepo_id ? 0 : cursor.seq, limit,
           )
-        : this.rows<P>("SELECT monorepo, seq, at, body FROM pointers WHERE monorepo = ? ORDER BY at DESC, seq DESC LIMIT ?", only, limit);
+        : this.rows<P>("SELECT monorepo, seq, at, body FROM pointers WHERE monorepo = ? ORDER BY at DESC, seq DESC LIMIT ?", one, limit);
 
       if (idx[0].large) rows = [];
     } else {
-      const join = "FROM pointers p JOIN monorepos m ON m.name = p.monorepo AND m.large = 0";
+      // Every small monorepo in the index, or those of `only` (bound first: its ? comes first).
+      const among = only ? [JSON.stringify(only)] : [];
+      const join = `FROM pointers p JOIN monorepos m ON m.name = p.monorepo AND m.large = 0${only ? " AND m.name IN (SELECT value FROM json_each(?))" : ""}`;
       rows = cursor
         ? this.rows<P>(
             `SELECT p.monorepo, p.seq, p.at, p.body ${join} WHERE (p.at, p.monorepo, p.seq) < (?, ?, ?)
              ORDER BY p.at DESC, p.monorepo DESC, p.seq DESC LIMIT ?`,
-            cursor.at, cursor.monorepo_id, cursor.seq, limit,
+            ...among, cursor.at, cursor.monorepo_id, cursor.seq, limit,
           )
-        : this.rows<P>(`SELECT p.monorepo, p.seq, p.at, p.body ${join} ORDER BY p.at DESC, p.monorepo DESC, p.seq DESC LIMIT ?`, limit);
+        : this.rows<P>(`SELECT p.monorepo, p.seq, p.at, p.body ${join} ORDER BY p.at DESC, p.monorepo DESC, p.seq DESC LIMIT ?`, ...among, limit);
     }
 
     const labels = this.labels();

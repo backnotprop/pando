@@ -12,7 +12,8 @@
 // branches, posts statuses, a review and a worktree, feeds a Buildkite build
 // in through its webhook, merges (forced, refused, clean), saves and
 // restores root files, breaks pando.toml (checks unknown), records every route the contract covers and every
-// socket frame, and deletes the monorepo, pass or fail. Tokens are stripped before anything is written; credentials stay in
+// socket frame, then makes an org (with two more people), makes a repo in it and moves the monorepo into it,
+// and deletes both monorepos, pass or fail (an org can't be deleted yet). Tokens are stripped before anything is written; credentials stay in
 // memory. Git runs with a temp HOME, no system config and no keychain.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -123,8 +124,11 @@ const name = `rec-${id}`;
 
 const full = `${login}/${name}`;
 
-/** The monorepo's name now: the rename near the end changes it, and the cleanup deletes by it. */
+/** The monorepo's name now: the rename and the transfer near the end change it, and the cleanup deletes by it. */
 let current = full;
+
+/** Other monorepos the run made (in the org), deleted at the end. */
+const others = [];
 
 // A stand-in for Buildkite's REST API on this machine (an ephemeral port): the connection's api_url points here, so the
 // CI routes that read the service (configuration, log, annotations, artifacts, Rebuild, Cancel, Retry) answer for real.
@@ -689,11 +693,152 @@ try {
   r = await call("POST", `${repoPath}/branches/feat%2Fclash/merge`, secret, { expected_head: clashHead });
   record("merge-checks-unknown.json", "ErrorBody", "POST .../branches/{branch}/merge (pando.toml broken: 503 checks_unknown)", r.status, r.json);
 
+  // Issues: a label; an issue with labels, an assignee, a project and a task list; a comment and reactions; a stale
+  // edit (409); its timeline after a rename, a label off, a close and a reopen; a merge that closes another (forced:
+  // pando.toml is broken above); the lists; their row frames and activity lines; Needs you with the assignment.
+  const issuesPath = `${base}/issues`;
+  const issueSocket = openSocket(`${base}/events?topics=issues`, secret);
+
+  sockets.push(issueSocket);
+  await waitFor(() => issueSocket.open, 10_000);
+  r = await call("POST", `${base}/labels`, secret, { name: "area/web", color: "teal", description: "The web app" });
+  record("label.json", "Label", "POST .../labels", r.status, r.json);
+  r = await call("POST", issuesPath, secret, { title: "Login fails after token refresh", body: "Steps:\n\n- [x] sign in\n- [ ] wait an hour", labels: ["bug", "area/web"], assignees: [login], project: "projects-web" }, { "idempotency-key": "rec-1" });
+  record("issue.json", "Issue", "POST .../issues (labels, an assignee, a project, a task list)", r.status, r.json);
+
+  const n1 = r.json?.number;
+  const n2 = (await call("POST", issuesPath, secret, { title: "Fixed by a merge" })).json?.number;
+
+  r = await call("POST", `${issuesPath}/${n1}/comments`, secret, { body: "Seen on staging too." }, { "idempotency-key": "rec-c1" });
+  record("comment.json", "IssueComment", "POST .../issues/{n}/comments", r.status, r.json);
+
+  const commentId = r.json?.id;
+
+  r = await call("PUT", `${issuesPath}/${n1}/reactions/%2B1`, secret);
+  record("reactions.json", "ReactionsAnswer", "PUT .../issues/{n}/reactions/{content}", r.status, r.json);
+  await call("PUT", `${issuesPath}/${n1}/comments/${commentId}/reactions/heart`, secret);
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { body: "Steps:\n\n- [x] sign in\n- [x] wait an hour", base_version: 1 });
+  r = await call("PATCH", `${issuesPath}/${n1}`, secret, { body: "An older edit", base_version: 1 });
+  record("issue-edited-409.json", "ErrorBody", "PATCH .../issues/{n} (a stale base_version: 409 edited with current)", r.status, r.json);
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { title: "Login fails an hour after sign-in", remove_labels: ["area/web"] });
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { state: "closed", state_reason: "not_planned" });
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { state: "open" });
+  r = await call("GET", `${issuesPath}/${n1}/timeline`, secret);
+  record("timeline.json", "Timeline", "GET .../issues/{n}/timeline", r.status, r.json);
+  git(["checkout", "-q", "main"], src);
+  git(["pull", "-q", clone, "main"], src);
+  git(["checkout", "-qb", "fix/login"], src);
+
+  const fixHead = commit(src, "login.txt", "fixed\n", `Keep the session (fixes #${n2})`);
+
+  git(["push", "-q", clone, "fix/login"], src);
+  r = await call("POST", `${repoPath}/branches/fix%2Flogin/merge?force=1`, secret, { expected_head: fixHead });
+  record("merge-closing.json", "MergeResult", "POST .../branches/{branch}/merge (closes an issue)", r.status, r.json);
+
+  const closedIssue = await waitFor(async () => {
+    const x = await call("GET", `${issuesPath}/${n2}`, secret);
+
+    return x.json?.state === "closed" ? x : null;
+  }, 15_000);
+
+  if (!closedIssue) throw new Error("the merge never closed its issue");
+  record("issue-closed-by-merge.json", "Issue", "GET .../issues/{n} (closed by a merge, a branch linked from a commit)", closedIssue.status, closedIssue.json);
+  r = await call("GET", `${issuesPath}?state=all`, secret);
+  record("issues.json", "IssueList", "GET .../issues?state=all", r.status, r.json);
+  r = await call("GET", `${issuesPath}?state=closed&linked=projects-web:fix%2Flogin`, secret);
+  record("issues-closed-filtered.json", "IssueList", "GET .../issues?state=closed&linked=<repo>:<branch>", r.status, r.json);
+  r = await call("GET", `${issuesPath}/${n1}/comments/${commentId}`, secret);
+  record("comment-get.json", "IssueComment", "GET .../issues/{n}/comments/{id} (with a reaction)", r.status, r.json);
+  r = await call("GET", `${base}/labels`, secret);
+  record("labels.json", "LabelList", "GET .../labels", r.status, r.json);
+  await waitFor(() => ["issue.opened", "issue.commented", "issue.closed", "issue.reopened", "issue.updated", "label.updated"].every((k) => issueSocket.frames.some((f) => f.kind === k)), 10_000);
+
+  const issueFrames = [];
+  const issueKept = new Set();
+
+  for (const frame of issueSocket.frames) {
+    const key = frame.type === "event" ? `${frame.kind}|${frame.items?.[0]?.kind ?? ""}|${frame.reactions ? "r" : ""}${frame.comment ? "c" : ""}` : frame.type;
+
+    if (issueKept.has(key)) continue;
+
+    issueKept.add(key);
+    issueFrames.push(frame);
+  }
+
+  record("issue-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=issues (WebSocket)", 101, issueFrames);
+  await waitFor(() => ["issue.opened", "issue.commented", "issue.closed", "issue.reopened"].every((k) => live.frames.some((f) => f.type === "event" && f.event?.kind === k)), 15_000);
+
+  const activityIssueFrames = [];
+
+  for (const k of ["issue.opened", "issue.commented", "issue.closed", "issue.reopened", "merged"]) {
+    const f = live.frames.findLast((x) => x.type === "event" && x.event?.kind === k);
+
+    if (f) activityIssueFrames.push(f);
+  }
+
+  record("activity-issue-frames.json", "ActivityFrame[]", "GET /v1/events (WebSocket): issue lines, and a merge closing one", 101, activityIssueFrames);
+
+  const needsIssues = await waitFor(async () => {
+    const x = await call("GET", "/v1/branches", secret);
+
+    return x.json?.issues?.length ? x : null;
+  }, 20_000);
+
+  if (needsIssues) record("needs-issues.json", "NeedsPage", "GET /v1/branches (an issue assigned to the person)", needsIssues.status, needsIssues.json);
+
   // Settings: rename, last (the old name keeps working; the cleanup deletes by the new one).
   r = await call("PATCH", base, secret, { name: `${name}-renamed` });
   record("renamed.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {name}", r.status, r.json);
 
   if (r.status === 200) current = r.json.full_name;
+
+  // Organizations: whose /{name} is; an org with bo (a member) and an invite; a repo made in it; the monorepo moved
+  // into it, where ana is an owner both ways, bo is in by the org and cy by a row of his own.
+  const org = `org-${id}`;
+
+  r = await call("GET", `/v1/users/${login}`, secret);
+  record("owner-user.json", "Owner", "GET /v1/users/{name} (a person)", r.status, r.json);
+  r = await call("POST", "/v1/orgs", secret, { login: org, name: "Rec Org" });
+  record("org.json", "Org", "POST /v1/orgs", r.status, r.json);
+
+  if (r.status !== 201) throw new Error(`no org: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  r = await call("PATCH", `/v1/orgs/${org}`, secret, { description: "A recorded organization", website: "https://example.com" });
+  record("org-patched.json", "Org", "PATCH /v1/orgs/{org}", r.status, r.json);
+  r = await call("GET", `/v1/users/${org}`, secret);
+  record("owner-org.json", "Owner", "GET /v1/users/{name} (an org)", r.status, r.json);
+  r = await call("PUT", `/v1/orgs/${org}/members/bo-${id}`, secret, { role: "member" });
+  record("org-member.json", "OrgMember", "PUT /v1/orgs/{org}/members/{login}", r.status, r.json);
+  r = await call("GET", `/v1/orgs/${org}/members`, secret);
+  record("org-members.json", "OrgMemberList", "GET /v1/orgs/{org}/members", r.status, r.json);
+  r = await call("GET", "/v1/user/orgs", secret);
+  record("orgs.json", "OrgList", "GET /v1/user/orgs", r.status, r.json);
+  r = await call("POST", `/v1/orgs/${org}/invites`, secret, { email: "cy@example.com", role: "member" });
+  record("org-invite.json", "OrgInviteResult", "POST /v1/orgs/{org}/invites (no one has signed in with it yet: invited)", r.status, r.json);
+  r = await call("GET", `/v1/orgs/${org}/invites`, secret);
+  record("org-invites.json", "InviteList", "GET /v1/orgs/{org}/invites", r.status, r.json);
+  r = await call("POST", "/v1/monorepos", secret, { name: `in-${id}`, owner: org, kind: "repo" });
+  record("monorepo-created.json", "MonorepoCreated", "POST /v1/monorepos {name, owner: <org>, kind: repo}", r.status, r.json);
+
+  if (r.status === 201) others.push(r.json.monorepo.full_name);
+  r = await call("POST", "/v1/users", BOOT, { login: `cy-${id}`, name: "Cy Ortiz" });
+
+  if (r.status !== 201) throw new Error(`no third user: ${r.status}`);
+  await call("PUT", `/v1/monorepos/${current}/members/cy-${id}`, secret, { role: "member" });
+  r = await call("PATCH", `/v1/monorepos/${current}`, secret, { owner: org });
+  record("transferred.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {owner: <org>}", r.status, r.json);
+
+  if (r.status !== 200) throw new Error(`no transfer: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  current = r.json.full_name;
+  r = await call("GET", `/v1/monorepos/${current}/members`, secret);
+  record("members-org.json", "MemberList", "GET .../members (an org's monorepo: via both, org and direct)", r.status, r.json);
+  r = await call("GET", `/v1/monorepos?owner=${org}`, secret);
+  record("monorepos-owner.json", "MonorepoList", "GET /v1/monorepos?owner=<org>", r.status, r.json);
+  r = await call("GET", `/v1/monorepos?owner=${org}&summary=1`, secret);
+  record("monorepos-owner-summary.json", "MonorepoSummaryList", "GET /v1/monorepos?owner=<org>&summary=1", r.status, r.json);
+  r = await call("GET", `/v1/events?owner=${org}&limit=5`, secret);
+  record("events-owner.json", "EventsPage", "GET /v1/events?owner=<org>&limit=5", r.status, r.json);
+  r = await call("DELETE", `/v1/orgs/${org}/members/bo-${id}`, secret);
+  record("org-member-removed.json", "NoContent", "DELETE /v1/orgs/{org}/members/{login}", r.status, r.json);
   console.log(`recorded ${written.length} files for ${monorepoId}`);
 } catch (error) {
   failed = true;
@@ -701,10 +846,10 @@ try {
 } finally {
   for (const socket of sockets) socket.ws.close();
 
-  if (made) {
-    const d = await call("DELETE", `/v1/monorepos/${current}?confirm=${current}`, secret);
+  for (const name of made ? [current, ...others] : []) {
+    const d = await call("DELETE", `/v1/monorepos/${name}?confirm=${name}`, secret);
 
-    console.log(`deleted ${current}: ${d.status}`);
+    console.log(`deleted ${name}: ${d.status}`);
 
     if (d.status >= 300) failed = true;
   }

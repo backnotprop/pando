@@ -1,0 +1,51 @@
+{
+  "schema": "Issue",
+  "route": "GET .../issues/{n} (closed by a merge, a branch linked from a commit)",
+  "status": 200,
+  "body": {
+    "number": 2,
+    "title": "Fixed by a merge",
+    "state": "closed",
+    "state_reason": "completed",
+    "project": null,
+    "project_path": null,
+    "labels": [],
+    "assignees": [],
+    "author": "rec-mutxvkul",
+    "comments": 0,
+    "tasks": null,
+    "linked_branches": 1,
+    "created_at": "2026-10-04T14:52:08.817Z",
+    "updated_at": "2026-10-04T14:52:11.584Z",
+    "closed_at": "2026-10-04T14:52:11.584Z",
+    "closed_by": "rec-mutxvkul",
+    "closed_by_merge": {
+      "repo": "projects-web",
+      "repo_path": "projects/web",
+      "branch": "fix/login",
+      "merge_commit": "c5ede19abae47e71ddd11bc135d947badbcc233e"
+    },
+    "body": "",
+    "body_version": 1,
+    "machine": "ana-mbp",
+    "links": [
+      {
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "fix/login",
+        "sources": [
+          "commit"
+        ],
+        "sha": "d3105238befdd2529b0945198d4203c8047b9f96",
+        "linked_by": null,
+        "branch_state": "merged",
+        "merged_at": "2026-10-04T14:52:10.578Z",
+        "closed_issue": true
+      }
+    ],
+    "participants": [
+      "rec-mutxvkul"
+    ],
+    "reactions": []
+  }
+}

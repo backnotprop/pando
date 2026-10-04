@@ -7,6 +7,7 @@ import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
 import { isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
 import { ciRoutes } from "../ci/routes";
+import { issueRoutes } from "../issues/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -29,6 +30,7 @@ import {
   repoNameFor,
   validBranchName,
   validMonorepoName,
+  validNamespace,
   validRepoPath,
   ZERO,
 } from "./names";
@@ -38,6 +40,7 @@ import type { BranchRecord, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, R
 
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
+import { orgRoutes } from "../accounts/org-routes";
 import { feedMembership, membersBeforeDelete } from "../feed/membership";
 import { monoreposSummary } from "../feed/routes";
 
@@ -225,7 +228,14 @@ async function createArtifactsRepo(env: Env, name: string, description: string):
 
 type UserVars = { auth: Auth };
 
-const userAuthed = async (c: Context<{ Bindings: Env; Variables: Vars & UserVars }>, next: () => Promise<void>) => {
+type UserEnv = { Bindings: Env; Variables: Vars & UserVars };
+
+/** The routes of the signed-in person (no monorepo in the path), and one request to them. */
+export type UserApp = Hono<UserEnv>;
+
+export type UserContext = Context<UserEnv>;
+
+const userAuthed = async (c: UserContext, next: () => Promise<void>) => {
   const auth = await authenticateRequest(c.env, c.req.raw, null);
 
   if (!auth) throw new HttpError(401, "unauthorized", "unknown, expired or revoked credential");
@@ -233,7 +243,7 @@ const userAuthed = async (c: Context<{ Bindings: Env; Variables: Vars & UserVars
   await next();
 };
 
-const users = new Hono<{ Bindings: Env; Variables: Vars & UserVars }>();
+const users = new Hono<UserEnv>();
 
 users.onError((err) => toErrorResponse(err));
 
@@ -242,6 +252,12 @@ users.use("/v1/user", userAuthed);
 users.use("/v1/user/*", userAuthed);
 
 users.use("/v1/monorepos", userAuthed);
+
+users.use("/v1/users/*", userAuthed);
+
+users.use("/v1/orgs", userAuthed);
+
+users.use("/v1/orgs/*", userAuthed);
 
 users.get("/v1/user", (c) => {
   const a = c.get("auth");
@@ -279,13 +295,23 @@ users.delete("/v1/user/credentials/:id", async (c) => {
 // ── Monorepos ─────────────────────────────────────────────────────────────
 
 // ?name=<name>: the caller's monorepos with that name, under any owner, their own first (pando clone <name>).
+// ?owner=<owner>: only that owner's (an org's page), with or without summary=1.
 users.get("/v1/monorepos", async (c) => {
-  if (c.req.query("summary") === "1") return c.json((await monoreposSummary(c.env, c.get("auth").user.login)) satisfies typeof Contract.MonorepoSummaryList.Encoded);
+  const login = c.get("auth").user.login;
+  const owner = c.req.query("owner")?.toLowerCase();
+  const none = owner !== undefined && !validNamespace(owner);
+
+  if (c.req.query("summary") === "1") {
+    const all = await monoreposSummary(c.env, login);
+
+    return c.json({ monorepos: owner === undefined ? all.monorepos : all.monorepos.filter((m) => m.owner === owner) } satisfies typeof Contract.MonorepoSummaryList.Encoded);
+  }
+
   const name = c.req.query("name")?.toLowerCase();
 
-  if (name !== undefined && !validMonorepoName(name)) return c.json({ monorepos: [] } satisfies typeof Contract.MonorepoList.Encoded);
+  if (none || (name !== undefined && !validMonorepoName(name))) return c.json({ monorepos: [] } satisfies typeof Contract.MonorepoList.Encoded);
 
-  return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login, name) } satisfies typeof Contract.MonorepoList.Encoded);
+  return c.json({ monorepos: await accounts(c.env).monoreposOf(login, name, owner) } satisfies typeof Contract.MonorepoList.Encoded);
 });
 
 users.post("/v1/monorepos", async (c) => {
@@ -297,12 +323,16 @@ users.post("/v1/monorepos", async (c) => {
   const kind = b.kind ?? "monorepo";
 
   if (kind !== "monorepo" && kind !== "repo") bad("kind is monorepo or repo");
-  // owner: your own namespace (organizations come later).
+  // owner: your own namespace, or an org you are in (any of its people may).
   const ownerName = isText(b.owner) ? b.owner.toLowerCase() : a.user.login;
-
-  if (ownerName !== a.user.login) throw new HttpError(403, "not_your_namespace", `you can make monorepos under ${a.user.login} only (organizations come later)`);
   const acc = accounts(c.env);
-  const claimed = await acc.claimMonorepo(ownerName, name, kind, a.user.login);
+  const inOrg = ownerName !== a.user.login && (await acc.orgRole(ownerName, a.user.login)) !== null;
+
+  if (ownerName !== a.user.login && !inOrg) {
+    throw new HttpError(403, "not_your_namespace", `you can make monorepos under ${a.user.login} or an organization you are in`);
+  }
+
+  const claimed = await acc.claimMonorepo(ownerName, name, kind, a.user.login, inOrg ? "org" : "user");
 
   if (!claimed) throw new HttpError(409, "monorepo_exists", `${ownerName}/${name} exists`);
   const { info, replaced_alias } = claimed;
@@ -327,18 +357,23 @@ users.post("/v1/monorepos", async (c) => {
     }
 
     forgetCachedAuth();
-    await feedMembership(c.env, info.id, [a.user.login]);
+    // In an org, every one of its people has it at once.
+    await feedMembership(c.env, info.id, inOrg ? (await acc.members(info.id)).map((m) => m.login) : [a.user.login]);
     c.set("m", info.id);
     c.set("full", info.full_name);
     c.set("info", info);
 
-    return c.json({ monorepo: { ...info, role: "owner" }, repos: repos.map((r) => repoView({ origin: new URL(c.req.url).origin, full: info.full_name, kind: info.kind }, r)), replaced_alias }, 201);
+    const repoViews = repos.map((r) => repoView({ origin: new URL(c.req.url).origin, full: info.full_name, kind: info.kind }, r));
+
+    return c.json({ monorepo: { ...info, role: "owner" }, repos: repoViews, replaced_alias } satisfies typeof Contract.MonorepoCreated.Encoded, 201);
   } catch (err) {
     await acc.releaseMonorepo(info.id);
     await stub.destroy();
     throw err;
   }
 });
+
+orgRoutes(users);
 
 api.route("/", users);
 
@@ -391,15 +426,21 @@ api.get("/v1/monorepos/:o/:m", (c) => c.json({ ...c.get("info"), role: c.get("id
 
 // Rename or transfer: the label moves, the id and everything stored stay. The old name keeps working (an alias).
 api.patch("/v1/monorepos/:o/:m", async (c) => {
-  owner(c, "rename or transfer a monorepo");
+  const by = owner(c, "rename or transfer a monorepo");
   const b = await body(c.req);
   const info = c.get("info");
   const to = monorepoRef(b.owner === undefined ? info.owner : String(b.owner), b.name === undefined ? info.name : String(b.name));
 
-  if (!to) bad("name: letters, digits, '.', '_', '-'; owner: a person's login");
-  const out = unwrap(await accounts(c.env).renameMonorepo(info.id, to));
+  if (!to) bad("name: letters, digits, '.', '_', '-'; owner: a person's login or an organization");
+  const acc = accounts(c.env);
+  // A transfer changes who has it through an org: everyone before and after gets a membership message.
+  const moving = to.owner !== info.owner;
+  const before = moving ? await acc.members(info.id) : [];
+  const out = unwrap(await acc.renameMonorepo(info.id, to, by.login));
   await c.get("stub").setLabel(out.info.full_name);
   forgetCachedAuth();
+
+  if (moving) await feedMembership(c.env, info.id, [...before, ...(await acc.members(info.id))].map((m) => m.login));
 
   return c.json({ ...out.info, role: "owner", replaced_alias: out.replaced_alias } satisfies typeof Contract.MonorepoRenamed.Encoded);
 });
@@ -678,7 +719,7 @@ async function branchViews(
       const read = commitReader(repo);
       await views.pool(due, SWEEP_PARALLEL, async (name) => {
         try {
-          const f = await computeFacts(c.env, r, m, heads.get(name)!, read);
+          const f = await computeFacts(c.env, r, m, heads.get(name)!, read, [c.get("full")]);
           await stub.writeFacts(r.name, name, f, required);
         } catch (err) {
           if (!(err instanceof views.MainMoved)) throw err; // main moved: the row stays pending
@@ -1073,6 +1114,7 @@ async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
     message: str(b.message, "message", { optional: true, max: 50_000 }),
     expected_head: str(b.expected_head, "expected_head", { optional: true }),
     origin: new URL(c.req.url).origin,
+    test_refs_late: c.env.DOOR_TEST === "1" && c.req.header("x-pando-test-merge-refs-late") === "1",
   });
 
   return c.json(unwrap(out) satisfies typeof Contract.MergeResult.Encoded);
@@ -1311,6 +1353,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
 // ── CI (ci/routes.ts): the CI tab's reads and actions, and connections ──
 
 ciRoutes(api);
+
+// ── Issues and labels (issues/routes.ts) ──
+
+issueRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

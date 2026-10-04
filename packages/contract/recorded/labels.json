@@ -1,0 +1,39 @@
+{
+  "schema": "LabelList",
+  "route": "GET .../labels",
+  "status": 200,
+  "body": {
+    "labels": [
+      {
+        "name": "area/web",
+        "color": "teal",
+        "description": "The web app",
+        "open_issues": 0
+      },
+      {
+        "name": "bug",
+        "color": "orange",
+        "description": "Something isn't working",
+        "open_issues": 1
+      },
+      {
+        "name": "documentation",
+        "color": "teal",
+        "description": "Improvements or additions to documentation",
+        "open_issues": 0
+      },
+      {
+        "name": "enhancement",
+        "color": "blue",
+        "description": "New feature or request",
+        "open_issues": 0
+      },
+      {
+        "name": "question",
+        "color": "purple",
+        "description": "Further information is requested",
+        "open_issues": 0
+      }
+    ]
+  }
+}

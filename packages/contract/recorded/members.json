@@ -5,13 +5,14 @@
   "body": {
     "members": [
       {
-        "login": "rec-mutuzslr",
+        "login": "rec-mutxvkul",
         "name": "Ana Lima",
         "picture_url": null,
         "role": "owner",
-        "added_at": "2026-10-04T13:30:57.845Z",
+        "added_at": "2026-10-04T14:51:40.008Z",
         "added_by": null,
-        "last_active_at": "2026-10-04T13:30:57.837Z"
+        "last_active_at": "2026-10-04T14:51:39.998Z",
+        "via": "direct"
       }
     ]
   }

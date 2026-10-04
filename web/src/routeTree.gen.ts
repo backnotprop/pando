@@ -13,12 +13,17 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OwnerIndexRouteImport } from './routes/$owner/index'
 import { Route as OwnerNameRouteRouteImport } from './routes/$owner/$name/route'
+import { Route as OrgsOrgRouteRouteImport } from './routes/orgs/$org/route'
+import { Route as OrgsNewRouteImport } from './routes/orgs/new'
 import { Route as SettingsMachinesRouteImport } from './routes/settings/machines'
 import { Route as OwnerNameIndexRouteImport } from './routes/$owner/$name/index'
 import { Route as OwnerNameActivityRouteImport } from './routes/$owner/$name/activity'
 import { Route as OwnerNameMachinesRouteImport } from './routes/$owner/$name/machines'
 import { Route as OwnerNameMembersRouteImport } from './routes/$owner/$name/members'
 import { Route as OwnerNameSettingsRouteImport } from './routes/$owner/$name/settings'
+import { Route as OrgsOrgIndexRouteImport } from './routes/orgs/$org/index'
+import { Route as OrgsOrgPeopleRouteImport } from './routes/orgs/$org/people'
+import { Route as OrgsOrgSettingsRouteImport } from './routes/orgs/$org/settings'
 import { Route as OwnerNameBlobSplatRouteImport } from './routes/$owner/$name/blob/$'
 import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$name/branches/index'
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
@@ -55,6 +60,16 @@ const OwnerNameRouteRoute = OwnerNameRouteRouteImport.update({
   path: '/$owner/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OrgsOrgRouteRoute = OrgsOrgRouteRouteImport.update({
+  id: '/orgs/$org',
+  path: '/orgs/$org',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrgsNewRoute = OrgsNewRouteImport.update({
+  id: '/orgs/new',
+  path: '/orgs/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsMachinesRoute = SettingsMachinesRouteImport.update({
   id: '/settings/machines',
   path: '/settings/machines',
@@ -84,6 +99,21 @@ const OwnerNameSettingsRoute = OwnerNameSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => OwnerNameRouteRoute,
+} as any)
+const OrgsOrgIndexRoute = OrgsOrgIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OrgsOrgRouteRoute,
+} as any)
+const OrgsOrgPeopleRoute = OrgsOrgPeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
+  getParentRoute: () => OrgsOrgRouteRoute,
+} as any)
+const OrgsOrgSettingsRoute = OrgsOrgSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => OrgsOrgRouteRoute,
 } as any)
 const OwnerNameBlobSplatRoute = OwnerNameBlobSplatRouteImport.update({
   id: '/blob/$',
@@ -174,13 +204,18 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/$owner/$name': typeof OwnerNameRouteRouteWithChildren
+  '/orgs/$org': typeof OrgsOrgRouteRouteWithChildren
+  '/orgs/new': typeof OrgsNewRoute
   '/settings/machines': typeof SettingsMachinesRoute
   '/$owner/': typeof OwnerIndexRoute
   '/$owner/$name/activity': typeof OwnerNameActivityRoute
   '/$owner/$name/machines': typeof OwnerNameMachinesRoute
   '/$owner/$name/members': typeof OwnerNameMembersRoute
   '/$owner/$name/settings': typeof OwnerNameSettingsRoute
+  '/orgs/$org/people': typeof OrgsOrgPeopleRoute
+  '/orgs/$org/settings': typeof OrgsOrgSettingsRoute
   '/$owner/$name/': typeof OwnerNameIndexRoute
+  '/orgs/$org/': typeof OrgsOrgIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
@@ -200,13 +235,17 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/orgs/new': typeof OrgsNewRoute
   '/settings/machines': typeof SettingsMachinesRoute
   '/$owner': typeof OwnerIndexRoute
   '/$owner/$name/activity': typeof OwnerNameActivityRoute
   '/$owner/$name/machines': typeof OwnerNameMachinesRoute
   '/$owner/$name/members': typeof OwnerNameMembersRoute
   '/$owner/$name/settings': typeof OwnerNameSettingsRoute
+  '/orgs/$org/people': typeof OrgsOrgPeopleRoute
+  '/orgs/$org/settings': typeof OrgsOrgSettingsRoute
   '/$owner/$name': typeof OwnerNameIndexRoute
+  '/orgs/$org': typeof OrgsOrgIndexRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -227,13 +266,18 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/$owner/$name': typeof OwnerNameRouteRouteWithChildren
+  '/orgs/$org': typeof OrgsOrgRouteRouteWithChildren
+  '/orgs/new': typeof OrgsNewRoute
   '/settings/machines': typeof SettingsMachinesRoute
   '/$owner/': typeof OwnerIndexRoute
   '/$owner/$name/activity': typeof OwnerNameActivityRoute
   '/$owner/$name/machines': typeof OwnerNameMachinesRoute
   '/$owner/$name/members': typeof OwnerNameMembersRoute
   '/$owner/$name/settings': typeof OwnerNameSettingsRoute
+  '/orgs/$org/people': typeof OrgsOrgPeopleRoute
+  '/orgs/$org/settings': typeof OrgsOrgSettingsRoute
   '/$owner/$name/': typeof OwnerNameIndexRoute
+  '/orgs/$org/': typeof OrgsOrgIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
@@ -256,13 +300,18 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/$owner/$name'
+    | '/orgs/$org'
+    | '/orgs/new'
     | '/settings/machines'
     | '/$owner/'
     | '/$owner/$name/activity'
     | '/$owner/$name/machines'
     | '/$owner/$name/members'
     | '/$owner/$name/settings'
+    | '/orgs/$org/people'
+    | '/orgs/$org/settings'
     | '/$owner/$name/'
+    | '/orgs/$org/'
     | '/$owner/$name/projects/$project'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
@@ -282,13 +331,17 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/orgs/new'
     | '/settings/machines'
     | '/$owner'
     | '/$owner/$name/activity'
     | '/$owner/$name/machines'
     | '/$owner/$name/members'
     | '/$owner/$name/settings'
+    | '/orgs/$org/people'
+    | '/orgs/$org/settings'
     | '/$owner/$name'
+    | '/orgs/$org'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -308,13 +361,18 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/$owner/$name'
+    | '/orgs/$org'
+    | '/orgs/new'
     | '/settings/machines'
     | '/$owner/'
     | '/$owner/$name/activity'
     | '/$owner/$name/machines'
     | '/$owner/$name/members'
     | '/$owner/$name/settings'
+    | '/orgs/$org/people'
+    | '/orgs/$org/settings'
     | '/$owner/$name/'
+    | '/orgs/$org/'
     | '/$owner/$name/projects/$project'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
@@ -336,6 +394,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   OwnerNameRouteRoute: typeof OwnerNameRouteRouteWithChildren
+  OrgsOrgRouteRoute: typeof OrgsOrgRouteRouteWithChildren
+  OrgsNewRoute: typeof OrgsNewRoute
   SettingsMachinesRoute: typeof SettingsMachinesRoute
   OwnerIndexRoute: typeof OwnerIndexRoute
 }
@@ -368,6 +428,20 @@ declare module '@tanstack/react-router' {
       path: '/$owner/$name'
       fullPath: '/$owner/$name'
       preLoaderRoute: typeof OwnerNameRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orgs/$org': {
+      id: '/orgs/$org'
+      path: '/orgs/$org'
+      fullPath: '/orgs/$org'
+      preLoaderRoute: typeof OrgsOrgRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orgs/new': {
+      id: '/orgs/new'
+      path: '/orgs/new'
+      fullPath: '/orgs/new'
+      preLoaderRoute: typeof OrgsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/machines': {
@@ -411,6 +485,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/$owner/$name/settings'
       preLoaderRoute: typeof OwnerNameSettingsRouteImport
       parentRoute: typeof OwnerNameRouteRoute
+    }
+    '/orgs/$org/': {
+      id: '/orgs/$org/'
+      path: '/'
+      fullPath: '/orgs/$org/'
+      preLoaderRoute: typeof OrgsOrgIndexRouteImport
+      parentRoute: typeof OrgsOrgRouteRoute
+    }
+    '/orgs/$org/people': {
+      id: '/orgs/$org/people'
+      path: '/people'
+      fullPath: '/orgs/$org/people'
+      preLoaderRoute: typeof OrgsOrgPeopleRouteImport
+      parentRoute: typeof OrgsOrgRouteRoute
+    }
+    '/orgs/$org/settings': {
+      id: '/orgs/$org/settings'
+      path: '/settings'
+      fullPath: '/orgs/$org/settings'
+      preLoaderRoute: typeof OrgsOrgSettingsRouteImport
+      parentRoute: typeof OrgsOrgRouteRoute
     }
     '/$owner/$name/blob/$': {
       id: '/$owner/$name/blob/$'
@@ -588,10 +683,28 @@ const OwnerNameRouteRouteWithChildren = OwnerNameRouteRoute._addFileChildren(
   OwnerNameRouteRouteChildren,
 )
 
+interface OrgsOrgRouteRouteChildren {
+  OrgsOrgPeopleRoute: typeof OrgsOrgPeopleRoute
+  OrgsOrgSettingsRoute: typeof OrgsOrgSettingsRoute
+  OrgsOrgIndexRoute: typeof OrgsOrgIndexRoute
+}
+
+const OrgsOrgRouteRouteChildren: OrgsOrgRouteRouteChildren = {
+  OrgsOrgPeopleRoute: OrgsOrgPeopleRoute,
+  OrgsOrgSettingsRoute: OrgsOrgSettingsRoute,
+  OrgsOrgIndexRoute: OrgsOrgIndexRoute,
+}
+
+const OrgsOrgRouteRouteWithChildren = OrgsOrgRouteRoute._addFileChildren(
+  OrgsOrgRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   OwnerNameRouteRoute: OwnerNameRouteRouteWithChildren,
+  OrgsOrgRouteRoute: OrgsOrgRouteRouteWithChildren,
+  OrgsNewRoute: OrgsNewRoute,
   SettingsMachinesRoute: SettingsMachinesRoute,
   OwnerIndexRoute: OwnerIndexRoute,
 }

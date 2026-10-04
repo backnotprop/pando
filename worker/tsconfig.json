@@ -7,7 +7,9 @@
     "types": [],
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "paths": { "@pando/contract": ["../packages/contract/src/index.ts"] }
   },
   "include": ["worker-configuration.d.ts", "src", "test"]
 }

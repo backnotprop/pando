@@ -153,7 +153,8 @@ try {
     const lostHead = git(["rev-parse", "HEAD"], src).out.trim();
     g = git(["push", url, "lost"], src, RECORD_FAIL);
     check("a push whose record fails still tells git it landed (no error)", g.ok && !/error|rejected|failed/i.test(g.out), g.out.split("\n").filter(Boolean).slice(-2).join(" | "));
-    const eventsOf = async () => ((await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500`, S)).json?.events ?? []).filter((e) => e.collection === "branches" && e.row?.name === "lost");
+    // The record's own events (not branch.updated, which the facts job sends whenever its facts land).
+    const eventsOf = async () => ((await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500`, S)).json?.events ?? []).filter((e) => e.collection === "branches" && e.row?.name === "lost" && e.kind !== "branch.updated");
     const deliveries = async () => ((await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/hooks/${hook}/deliveries`, S)).json?.deliveries ?? []).filter((d) => d.event === "push");
     await new Promise((res) => setTimeout(res, 1_000));
     check("and nothing was recorded yet: no event, no hook delivery", (await eventsOf()).length === 0 && (await deliveries()).length === 0 && !got.some((x) => x.body?.branch === "lost"));

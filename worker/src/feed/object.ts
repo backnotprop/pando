@@ -10,6 +10,7 @@
 // - the person's hibernating sockets.
 // It makes no outbound calls; the routes merge in what comes from logs.
 
+import type * as Contract from "@pando/contract";
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { now } from "../http";
@@ -542,7 +543,7 @@ export class FeedObject extends DurableObject<Env> {
 
   private send(ws: WebSocket, frame: PersonFrame): void {
     try {
-      ws.send(JSON.stringify(frame));
+      ws.send(JSON.stringify(frame satisfies typeof Contract.ActivityFrame.Encoded));
     } catch {
       // closed
     }

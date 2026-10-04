@@ -399,6 +399,14 @@ try {
 
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches?state=merged`, B);
   check("the branch shows as merged", r.json?.branches?.some((b) => b.name === B1 && b.state === "merged"));
+  // A merged branch keeps its Files changed, as GitHub keeps a merged pull request's: against main just before the merge.
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/diff?patches=1`, B);
+  const kept = Object.fromEntries((r.json?.files ?? []).map((f) => [f.path, f.status]));
+  check(
+    "a merged branch's Files changed still lists its changes, against the merge commit's first parent",
+    r.status === 200 && r.json?.base === parents[1] && r.json?.head === head && r.json?.files_total === 4 && kept["src/a.txt"] === "modified" && kept["src/new.txt"] === "added" && kept["src/gone.txt"] === "deleted" && kept["docs/guide/new-name.md"] === "renamed",
+    `${r.status} base ${r.json?.base?.slice(0, 7)} vs ${parents[1]?.slice(0, 7)}: ${JSON.stringify(kept)}`,
+  );
 
   // ── A conflict, and force ──
   r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches`, B, { name: "agent-2/conflict", title: "Conflicting" });

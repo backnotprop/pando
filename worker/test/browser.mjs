@@ -278,8 +278,7 @@ try {
   r = await api("GET", "/v1/user", { session });
   check("the signed-out session no longer works", r.status === 401);
   r = await api("GET", "/v1/logout");
-  const page = await r.text();
-  check("GET /v1/logout is a one-button page that posts to /v1/logout", r.status === 200 && /<form method="post" action="\/v1\/logout">/.test(page) && /frame-ancestors 'none'/.test(r.headers.get("content-security-policy") ?? ""));
+  check("GET /v1/logout goes to the app, where the name menu signs out (no page of its own)", r.status === 303 && new URL(r.headers.get("location") ?? "", URL_).pathname === "/", `${r.status} ${r.headers.get("location")}`);
   r = await api("POST", "/v1/logout", { session: s2.session, origin: ORIGIN });
   check("a form sign-out is sent on with 303", r.status === 303 && /sessions\/logout/.test(r.headers.get("location") ?? ""));
 

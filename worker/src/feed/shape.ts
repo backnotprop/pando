@@ -15,7 +15,8 @@
 // the label is added when a line is sent or read. Queue messages are internal
 // and their `monorepo` is the id.
 
-import { isRecord, isText, isWholeNumber, type Json } from "../parse";
+import { isOneOf, isRecord, isText, isWholeNumber, type Json } from "../parse";
+import type { ReviewVerdict, StatusRecord } from "../monorepo/types";
 
 /** Monorepos with this many members or fewer copy their events into members' feeds (an owner limit). */
 export const FANOUT_MAX = 100;
@@ -70,22 +71,12 @@ export const ACTIVITY_KINDS = [
  * moved by a rename); `monorepo` is its owner/name, added when the line is
  * sent or read.
  */
-export interface FeedEvent {
+export type FeedEvent = StoredPointer & {
   monorepo_id: string;
   monorepo: string;
   seq: number;
   at: string;
-  kind: string;
-  /** The repo's name in URLs, and its path (`projects/web`; `.` for the meta layer and a plain repo). */
-  repo: string | null;
-  repo_path: string | null;
-  branch: string | null;
-  /** The person (a login), and the machine (the credential's name). */
-  actor: string | null;
-  machine: string | null;
-  /** Per kind: push {commits, head_title, head}; status {context, state, duration_s, app}; worktree.* {path}; and so on. */
-  summary: LineSummary | null;
-}
+};
 
 // ── A line's summary, per kind (the shapes packages/contract/src/feed.ts declares) ──
 
@@ -119,14 +110,14 @@ export interface MergedSummary {
 }
 
 export interface ReviewSummary {
-  verdict: string | null;
+  verdict: ReviewVerdict | null;
   comments: number;
   head: string | null;
 }
 
 export interface StatusSummary {
   context: string;
-  state: string;
+  state: StatusRecord["state"];
   description: string | null;
   target_url: string | null;
   sha: string;
@@ -172,52 +163,62 @@ export function pushSummaryOf(v: Json | undefined): PushSummary | null {
   return out;
 }
 
-/** A line's summary for its kind; null when the kind has none or the JSON does not carry one. */
-export function lineSummaryOf(kind: string, v: Json | undefined): LineSummary | null {
-  if (!isRecord(v)) return null;
+const REVIEW_VERDICTS: readonly ReviewVerdict[] = ["comment", "request_changes", "approve"];
+
+const STATUS_STATES: readonly StatusRecord["state"][] = ["pending", "success", "failure", "error"];
+
+/** A review's verdict, from a stored line or an event's row. */
+export function verdictOf(v: Json | undefined): ReviewVerdict | null {
+  return isText(v) && isOneOf(REVIEW_VERDICTS, v) ? v : null;
+}
+
+/** A status's state, from a stored line or an event's row. */
+export function statusStateOf(v: Json | undefined): StatusRecord["state"] | null {
+  return isText(v) && isOneOf(STATUS_STATES, v) ? v : null;
+}
+
+/** A line's kind with its summary; null when the kind is not an activity kind. The summary is null when the JSON does not carry one. */
+export function lineOf(kind: string, v: Json | undefined): Line | null {
+  const r = isRecord(v) ? v : null;
 
   switch (kind) {
     case "push":
     case "branch.opened":
-      return pushSummaryOf(v);
-
+      return { kind, summary: pushSummaryOf(v) };
     case "branch.deleted":
-      return { before: textOf(v.before) };
+      return { kind, summary: r && { before: textOf(r.before) } };
     case "merged":
-      return { merge_commit: textOf(v.merge_commit), forced: flagOf(v.forced), title: textOf(v.title), head: textOf(v.head) };
+      return { kind, summary: r && { merge_commit: textOf(r.merge_commit), forced: flagOf(r.forced), title: textOf(r.title), head: textOf(r.head) } };
     case "review":
-      return { verdict: textOf(v.verdict), comments: wholeOf(v.comments) ?? 0, head: textOf(v.head) };
+      return { kind, summary: r && { verdict: verdictOf(r.verdict), comments: wholeOf(r.comments) ?? 0, head: textOf(r.head) } };
     case "status": {
-      const context = textOf(v.context);
-      const state = textOf(v.state);
-      const sha = textOf(v.sha);
+      const context = textOf(r?.context);
+      const state = statusStateOf(r?.state);
+      const sha = textOf(r?.sha);
 
-      if (context === null || state === null || sha === null) return null;
+      if (!r || context === null || state === null || sha === null) return { kind, summary: null };
 
-      return { context, state, description: textOf(v.description), target_url: textOf(v.target_url), sha, duration_s: wholeOf(v.duration_s), app: textOf(v.app) };
+      return { kind, summary: { context, state, description: textOf(r.description), target_url: textOf(r.target_url), sha, duration_s: wholeOf(r.duration_s), app: textOf(r.app) } };
     }
 
     case "worktree.reported":
     case "worktree.removed":
-      return { path: textOf(v.path), worktree: textOf(v.worktree) };
+      return { kind, summary: r && { path: textOf(r.path), worktree: textOf(r.worktree) } };
     case "meta.saved":
-      return { path: textOf(v.path), version: wholeOf(v.version), deleted: v.deleted === true };
+      return { kind, summary: r && { path: textOf(r.path), version: wholeOf(r.version), deleted: r.deleted === true } };
     default:
       return null;
   }
 }
 
-/** A stored line (the event without its monorepo, seq and at). */
+/** A stored line (the event without its monorepo, seq and at); null when its kind is not an activity kind. */
 export function storedPointerOf(v: Json | undefined): StoredPointer | null {
   if (!isRecord(v)) return null;
-  const kind = textOf(v.kind);
+  const line = lineOf(textOf(v.kind) ?? "", v.summary);
 
-  if (kind === null) return null;
+  if (line === null) return null;
 
-  return {
-    kind, repo: textOf(v.repo), repo_path: textOf(v.repo_path), branch: textOf(v.branch), actor: textOf(v.actor), machine: textOf(v.machine),
-    summary: lineSummaryOf(kind, v.summary),
-  };
+  return { ...line, repo: textOf(v.repo), repo_path: textOf(v.repo_path), branch: textOf(v.branch), actor: textOf(v.actor), machine: textOf(v.machine) };
 }
 
 /** A whole line, as a queue message or a test request carries it. */
@@ -332,8 +333,26 @@ export function feedMessageOf(v: Json | undefined): FeedMessage | null {
   }
 }
 
+/** A line's kind with its own summary (the contract's byActivityKind). */
+export type Line =
+  | { kind: "push" | "branch.opened"; summary: PushSummary | null }
+  | { kind: "branch.deleted"; summary: BranchDeletedSummary | null }
+  | { kind: "merged"; summary: MergedSummary | null }
+  | { kind: "review"; summary: ReviewSummary | null }
+  | { kind: "status"; summary: StatusSummary | null }
+  | { kind: "worktree.reported" | "worktree.removed"; summary: WorktreeSummary | null }
+  | { kind: "meta.saved"; summary: MetaSavedSummary | null };
+
 /** What a monorepo object stores per activity event: the event without its monorepo, seq and at. */
-export type StoredPointer = Omit<FeedEvent, "monorepo_id" | "monorepo" | "seq" | "at">;
+export type StoredPointer = Line & {
+  /** The repo's name in URLs, and its path (`projects/web`; `.` for the meta layer and a plain repo). */
+  repo: string | null;
+  repo_path: string | null;
+  branch: string | null;
+  /** The person (a login), and the machine (the credential's name). */
+  actor: string | null;
+  machine: string | null;
+};
 
 /** One monorepo's line on the home. */
 export interface Summary {

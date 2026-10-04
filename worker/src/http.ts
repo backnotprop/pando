@@ -1,4 +1,5 @@
 // Errors and credentials shared by the API and the git door.
+import type * as Contract from "@pando/contract";
 import type { RefusalExtra } from "./monorepo/types";
 
 export class HttpError extends Error {
@@ -13,7 +14,7 @@ export class HttpError extends Error {
 }
 
 export function errorJson(status: number, code: string, message: string, extra: RefusalExtra = {}): Response {
-  return Response.json({ error: { code, message, ...extra } }, { status });
+  return Response.json({ error: { code, message, ...extra } } satisfies typeof Contract.ErrorBody.Encoded, { status });
 }
 
 export function toErrorResponse(cause: unknown): Response {

@@ -1,6 +1,7 @@
 // The /v1 API (docs/contracts/api-v1.yaml), except the meta layer's routes.
 
 import { Hono, type Context } from "hono";
+import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
 import { isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
@@ -14,6 +15,8 @@ import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
 import type { BranchList } from "./views";
 import { computeFacts, INLINE_MAX, SWEEP_PARALLEL } from "./facts";
+import { EVENTS, isHookEvent } from "./hooks";
+import { runReconcile } from "./reconcile";
 import * as files from "./files";
 import { objectsClient } from "../objects";
 import { EVENT_STREAM, parseTopics } from "./stream";
@@ -31,7 +34,7 @@ import {
 } from "./names";
 import type { MonorepoObject } from "./object";
 import { cachedRepo, forgetRepos, hashToken, monorepoStub, newToken } from "./session";
-import type { BranchRecord, HookEvent, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, StatusRecord } from "./types";
+import type { BranchRecord, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, ReviewComment, StatusRecord } from "./types";
 
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
@@ -243,7 +246,7 @@ users.use("/v1/monorepos", userAuthed);
 users.get("/v1/user", (c) => {
   const a = c.get("auth");
 
-  return c.json({ ...a.user, credential: a.credential });
+  return c.json({ ...a.user, credential: a.credential } satisfies typeof Contract.Me.Encoded);
 });
 
 users.post("/v1/user/credentials", async (c) => {
@@ -260,7 +263,7 @@ users.post("/v1/user/credentials", async (c) => {
 });
 
 users.get("/v1/user/credentials", async (c) => {
-  return c.json({ credentials: await accounts(c.env).listCredentials(c.get("auth").user.login) });
+  return c.json({ credentials: await accounts(c.env).listCredentials(c.get("auth").user.login) } satisfies typeof Contract.CredentialList.Encoded);
 });
 
 users.delete("/v1/user/credentials/:id", async (c) => {
@@ -277,12 +280,12 @@ users.delete("/v1/user/credentials/:id", async (c) => {
 
 // ?name=<name>: the caller's monorepos with that name, under any owner, their own first (pando clone <name>).
 users.get("/v1/monorepos", async (c) => {
-  if (c.req.query("summary") === "1") return c.json(await monoreposSummary(c.env, c.get("auth").user.login));
+  if (c.req.query("summary") === "1") return c.json((await monoreposSummary(c.env, c.get("auth").user.login)) satisfies typeof Contract.MonorepoSummaryList.Encoded);
   const name = c.req.query("name")?.toLowerCase();
 
-  if (name !== undefined && !validMonorepoName(name)) return c.json({ monorepos: [] });
+  if (name !== undefined && !validMonorepoName(name)) return c.json({ monorepos: [] } satisfies typeof Contract.MonorepoList.Encoded);
 
-  return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login, name) });
+  return c.json({ monorepos: await accounts(c.env).monoreposOf(c.get("auth").user.login, name) } satisfies typeof Contract.MonorepoList.Encoded);
 });
 
 users.post("/v1/monorepos", async (c) => {
@@ -384,7 +387,7 @@ api.use("/v1/monorepos/:o/:m", authed);
 
 api.use("/v1/monorepos/:o/:m/*", authed);
 
-api.get("/v1/monorepos/:o/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role }));
+api.get("/v1/monorepos/:o/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role } satisfies typeof Contract.MonorepoEntry.Encoded));
 
 // Rename or transfer: the label moves, the id and everything stored stay. The old name keeps working (an alias).
 api.patch("/v1/monorepos/:o/:m", async (c) => {
@@ -398,7 +401,7 @@ api.patch("/v1/monorepos/:o/:m", async (c) => {
   await c.get("stub").setLabel(out.info.full_name);
   forgetCachedAuth();
 
-  return c.json({ ...out.info, role: "owner", replaced_alias: out.replaced_alias });
+  return c.json({ ...out.info, role: "owner", replaced_alias: out.replaced_alias } satisfies typeof Contract.MonorepoRenamed.Encoded);
 });
 
 api.delete("/v1/monorepos/:o/:m", async (c) => {
@@ -486,7 +489,7 @@ api.get("/v1/monorepos/:o/:m/heads", async (c) => {
   // `seq`: open the event socket with ?since=<seq>&topics=main to miss nothing after this answer.
   const seq = EVENT_STREAM ? await stub.eventHead() : null;
 
-  return c.json({ heads, seq });
+  return c.json({ heads, seq } satisfies typeof Contract.HeadList.Encoded);
 });
 
 // ── The event stream ──────────────────────────────────────────────────────
@@ -515,14 +518,24 @@ api.get("/v1/monorepos/:o/:m/events", async (c) => {
   const topics = parseTopics(c.req.query("topics") ?? null);
 
   if (!topics) bad("topics: up to 10 of all, main, main:<repo>, repo:<repo>, meta, kind:<kind>, comma-separated");
+  const beforeQ = c.req.query("before");
+  const before = beforeQ === undefined || beforeQ === "" ? null : Number(beforeQ);
 
-  return c.json(await stub.events(since, limit, topics));
+  if (before !== null && (!Number.isSafeInteger(before) || before < 1)) bad("before must be a whole number from 1");
+  const repo = c.req.query("repo") || null;
+
+  if (repo !== null && !/^[A-Za-z0-9._-]{1,200}$/.test(repo)) bad("repo is a repo's name (as in its URL), or meta");
+  const kinds = (c.req.query("kinds") ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+
+  if (kinds.length > 20 || kinds.some((k) => !/^[a-z._]{1,64}$/.test(k))) bad("kinds: up to 20 event kinds, comma-separated");
+
+  return c.json(await stub.events(since, limit, topics, { before, repo, kinds }));
 });
 
 // ── Members ───────────────────────────────────────────────────────────────
 
 api.get("/v1/monorepos/:o/:m/members", async (c) => {
-  return c.json({ members: await accounts(c.env).members(c.get("m")) });
+  return c.json({ members: await accounts(c.env).members(c.get("m")) } satisfies typeof Contract.MemberList.Encoded);
 });
 
 api.put("/v1/monorepos/:o/:m/members/:login", async (c) => {
@@ -564,11 +577,11 @@ api.post("/v1/monorepos/:o/:m/invites", async (c) => {
 
   if (out.status === "added") await feedMembership(c.env, c.get("m"), [out.member.login]);
 
-  return c.json(out, out.status === "added" ? 200 : 201);
+  return c.json(out satisfies typeof Contract.InviteResult.Encoded, out.status === "added" ? 200 : 201);
 });
 
 api.get("/v1/monorepos/:o/:m/invites", async (c) => {
-  return c.json({ invites: await accounts(c.env).invites(c.get("m")) });
+  return c.json({ invites: await accounts(c.env).invites(c.get("m")) } satisfies typeof Contract.InviteList.Encoded);
 });
 
 api.delete("/v1/monorepos/:o/:m/invites/:email", async (c) => {
@@ -607,17 +620,17 @@ api.post("/v1/monorepos/:o/:m/repos", async (c) => {
     created_at: new Date().toISOString(), created_by: by.login,
   };
 
-  return c.json(repoView(homeOf(c), unwrap(await stub.addRepo(rec))), 201);
+  return c.json(repoView(homeOf(c), unwrap(await stub.addRepo(rec))) satisfies typeof Contract.Repo.Encoded, 201);
 });
 
 api.get("/v1/monorepos/:o/:m/repos", async (c) => {
-  return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(homeOf(c), r)) });
+  return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(homeOf(c), r)) } satisfies typeof Contract.RepoList.Encoded);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => {
   const r = await repoOf(c);
 
-  return c.json(repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)));
+  return c.json(repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)) satisfies typeof Contract.Repo.Encoded);
 });
 
 // ── Branches ──────────────────────────────────────────────────────────────
@@ -648,11 +661,12 @@ async function branchViews(
   const ask = { names: names ?? undefined, state, limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
   let list: BranchList = await stub.branchRows(r.name, ask);
 
-  // A push Artifacts accepted was not recorded (C2): write what was missed from Artifacts' refs, then read again.
+  // Kept pushes (C2): catch the records up to Artifacts' refs, then read again (another reconcile may have written them).
   if (list.reconcile) {
-    const refs = await listRefs(c.env, r).catch(() => null);
+    const pause = c.env.DOOR_TEST === "1" ? Math.min(Number(c.req.header("x-pando-test-reconcile-pause-ms") ?? 0), 10_000) : 0;
 
-    if (refs && (await stub.reconcile(r.name, Object.fromEntries(refs)))) list = await stub.branchRows(r.name, ask);
+    await runReconcile(c.env, stub, r, { pauseMs: pause > 0 ? pause : 0 }).catch(() => 0);
+    list = await stub.branchRows(r.name, ask);
   }
 
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);
@@ -687,7 +701,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) bad("limit is 1 to 500");
   const { due: _due, reconcile: _reconcile, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
 
-  return c.json(list);
+  return c.json(list satisfies typeof Contract.BranchList.Encoded);
 });
 
 api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
@@ -721,7 +735,7 @@ api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   // Its facts come from the queue (a branch.updated event); the answer says stale until then.
   const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
 
-  return c.json(view, 201);
+  return c.json(view satisfies typeof Contract.Branch.Encoded, 201);
 });
 
 /** /branches/<name>[/diff|/reviews|/merge], with the name raw or %2F-encoded. */
@@ -768,7 +782,7 @@ api.all("/v1/monorepos/:o/:m/repos/:r/branches/*", async (c) => {
 
     if (!v) throw new HttpError(404, "not_found", `no branch ${branch}`);
 
-    return c.json(v);
+    return c.json(v satisfies typeof Contract.Branch.Encoded);
   }
 
   if (rest === "" && method === "PATCH") {
@@ -793,7 +807,7 @@ api.all("/v1/monorepos/:o/:m/repos/:r/branches/*", async (c) => {
 
   if (rest === "commits" && method === "GET") return commits(c, r, branch);
 
-  if (rest === "reviews" && method === "GET") return c.json({ reviews: await c.get("stub").listReviews(r.name, branch) });
+  if (rest === "reviews" && method === "GET") return c.json({ reviews: await c.get("stub").listReviews(r.name, branch) } satisfies typeof Contract.ReviewList.Encoded);
 
   if (rest === "reviews" && method === "POST") return review(c, r, branch);
 
@@ -823,6 +837,10 @@ async function filesChanged(c: C, r: RepoRecord, branch: string): Promise<Respon
   }
 
   if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
+
+  // A merged branch keeps its changes, as GitHub keeps a merged pull request's: against main just before the merge (the
+  // merge commit's first parent), not today's main, which holds the head.
+  main = (await stub.mergedFrom(r.name, branch, head)) ?? main;
 
   if (!main) throw new HttpError(409, "no_main", `${r.default_branch} does not exist yet`);
   const tag = `${main}.${head}`;
@@ -855,7 +873,7 @@ async function filesChanged(c: C, r: RepoRecord, branch: string): Promise<Respon
     await files.storeAnswer(c.env, r.artifacts_name, key, answer);
   }
 
-  return c.json(answer, 200, headers);
+  return c.json(answer satisfies typeof Contract.BranchDiff.Encoded, 200, headers);
 }
 
 async function diff(c: C, r: RepoRecord, branch: string): Promise<Response> {
@@ -989,7 +1007,7 @@ async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
     total: out.total,
     truncated: out.total > out.list.length,
     commits: out.list,
-  });
+  } satisfies typeof Contract.BranchCommits.Encoded);
 }
 
 async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
@@ -1003,14 +1021,14 @@ async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
 
   if (!Array.isArray(comments) || comments.length > 1000) bad("comments must be a list");
 
-  const clean = comments.map((x, i) => {
+  const clean = comments.map((x, i): ReviewComment => {
     if (!isRecord(x)) bad(`comments[${i}] must be an object`);
     const line = x.line;
 
     if (line !== undefined && !isWholeNumber(line)) bad(`comments[${i}].line must be a line number`);
-    const side = x.side ?? "new";
 
-    if (side !== "new" && side !== "old") bad(`comments[${i}].side is new or old`);
+    if (x.side !== undefined && x.side !== "new" && x.side !== "old") bad(`comments[${i}].side is new or old`);
+    const side = x.side === "old" ? "old" : "new";
 
     // line is left out of the stored JSON when it was not sent (stringify drops undefined).
     return { path: str(x.path, `comments[${i}].path`, { max: 1000 })!, line, side, body: str(x.body, `comments[${i}].body`, { max: 20_000 })! };
@@ -1024,7 +1042,7 @@ async function review(c: C, r: RepoRecord, branch: string): Promise<Response> {
     if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
   } else if (!isSha(head)) bad("head must be a full sha");
 
-  return c.json(await c.get("stub").addReview(r.name, branch, head, verdict, text, clean, id), 201);
+  return c.json((await c.get("stub").addReview(r.name, branch, head, verdict, text, clean, id)) satisfies typeof Contract.Review.Encoded, 201);
 }
 
 async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
@@ -1057,7 +1075,7 @@ async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
     origin: new URL(c.req.url).origin,
   });
 
-  return c.json(unwrap(out));
+  return c.json(unwrap(out) satisfies typeof Contract.MergeResult.Encoded);
 }
 
 // ── Files ─────────────────────────────────────────────────────────────────
@@ -1099,7 +1117,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/tree", async (c) => {
   const limit = intParam(c.req.query("limit"), files.TREE_PAGE, files.TREE_PAGE, "limit");
   const out = await files.listFolder(w, commit, path, limit, c.req.query("cursor") ?? null);
 
-  return c.json({ ref, commit: commit.hash, path, ...out });
+  return c.json({ ref, commit: commit.hash, path, ...out } satisfies typeof Contract.TreePage.Encoded);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r/tree/last-commits", async (c) => {
@@ -1112,7 +1130,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/tree/last-commits", async (c) => {
   const names = c.req.query("names")?.split(",").filter(Boolean).slice(0, files.TREE_PAGE);
   const entries = names ? Object.fromEntries(names.filter((n) => n in out.entries).map((n) => [n, out.entries[n]])) : out.entries;
 
-  return c.json({ ref, commit: commit.hash, path, complete: out.complete, entries, older: out.older, retry_after_ms: out.complete ? null : 2000 });
+  return c.json({ ref, commit: commit.hash, path, complete: out.complete, entries, older: out.older, retry_after_ms: out.complete ? null : 2000 } satisfies typeof Contract.LastCommits.Encoded);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r/history", async (c) => {
@@ -1139,7 +1157,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/history", async (c) => {
 
   const stored = await obj.json<files.HistoryPage>(`/answer/${r.artifacts_name}/${key}`);
 
-  if (stored) return c.json({ ref, path, ...stored, complete_page: true });
+  if (stored) return c.json({ ref, path, ...stored, complete_page: true } satisfies typeof Contract.HistoryPage.Encoded);
   const stub = c.get("stub");
   const p = await files.walkHistory(w, start, path, limit, walked, (shas) => stub.mergedBranches(r.name, shas));
   const page: files.HistoryPage = { commits: p.changes, next: p.next ? `${p.next}.${p.walked}` : null, capped: p.capped };
@@ -1147,7 +1165,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/history", async (c) => {
   // A page cut short by the budget is not kept: the next ask walks further.
   if (!p.budgetCut) await files.storeAnswer(c.env, r.artifacts_name, key, page);
 
-  return c.json({ ref, path, ...page, complete_page: !p.budgetCut });
+  return c.json({ ref, path, ...page, complete_page: !p.budgetCut } satisfies typeof Contract.HistoryPage.Encoded);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r/files/*", async (c) => {
@@ -1189,7 +1207,7 @@ api.post("/v1/monorepos/:o/:m/repos/:r/statuses/:sha", async (c) => {
     c.get("stamp") ?? null,
   );
 
-  return c.json(s, 201);
+  return c.json(s satisfies typeof Contract.Status.Encoded, 201);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r/commits/*", async (c) => {
@@ -1203,16 +1221,11 @@ api.get("/v1/monorepos/:o/:m/repos/:r/commits/*", async (c) => {
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${ref}`);
   const required = await requiredKept(c.env, c.get("info"), r);
 
-  return c.json(combine(sha, required, await c.get("stub").statuses(r.name, sha)));
+  return c.json(combine(sha, required, await c.get("stub").statuses(r.name, sha)) satisfies typeof Contract.Checks.Encoded);
 });
 
 // ── Hooks ─────────────────────────────────────────────────────────────────
 
-const EVENTS: HookEvent[] = ["push", "branch.opened", "merged"];
-
-function isHookEvent(v: Json): v is HookEvent {
-  return v === "push" || v === "branch.opened" || v === "merged";
-}
 
 api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
   const by = owner(c, "register hooks");
@@ -1254,7 +1267,7 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
     }
   }
 
-  return c.json(await c.get("stub").addHook(r.name, { type, url, secret, events, config }, by), 201);
+  return c.json((await c.get("stub").addHook(r.name, { type, url, secret, events, config }, by)) satisfies typeof Contract.Hook.Encoded, 201);
 });
 
 api.get("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
@@ -1304,11 +1317,11 @@ ciRoutes(api);
 // ── Machines: one row per machine (credential), latest activity first ──────
 
 api.get("/v1/monorepos/:o/:m/machines", async (c) => {
-  return c.json({ machines: await c.get("stub").machineRows() });
+  return c.json({ machines: await c.get("stub").machineRows() } satisfies typeof Contract.MachineList.Encoded);
 });
 
 api.get("/v1/monorepos/:o/:m/worktrees", async (c) => {
-  return c.json({ worktrees: await c.get("stub").listWorktrees({ machine: c.req.query("machine"), repo: c.req.query("repo") }) });
+  return c.json({ worktrees: await c.get("stub").listWorktrees({ machine: c.req.query("machine"), repo: c.req.query("repo") }) } satisfies typeof Contract.WorktreeList.Encoded);
 });
 
 function worktreeId(c: C): string {
@@ -1332,10 +1345,9 @@ api.put("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
     path: str(b.path, "path", { max: 1000 })!,
     machine: str(b.machine, "machine", { max: 200 })!,
     agent: str(b.agent, "agent", { optional: true, max: 200 }) ?? null,
-    kind,
   };
 
-  return c.json(unwrap(await c.get("stub").putWorktree(id, w, c.get("identity"))));
+  return c.json(unwrap(await c.get("stub").putWorktree(id, { ...w, kind }, c.get("identity"))) satisfies typeof Contract.Worktree.Encoded);
 });
 
 api.get("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
@@ -1343,7 +1355,7 @@ api.get("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {
 
   if (!w) throw new HttpError(404, "not_found", "no such worktree");
 
-  return c.json(w);
+  return c.json(w satisfies typeof Contract.Worktree.Encoded);
 });
 
 api.delete("/v1/monorepos/:o/:m/worktrees/:id", async (c) => {

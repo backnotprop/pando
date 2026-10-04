@@ -498,6 +498,13 @@ try {
   p = await pageAll(A, `&in=${login.ana}/${S}`);
   const st = p.events.filter((x) => x.kind === "status");
   check("status lines: only changes of state (pending once, then failure with a duration)", st.length === 2 && st[0].summary.state === "failure" && Number.isInteger(st[0].summary.duration_s) && st[0].branch === "feat/x", st.map((x) => `${x.summary.state}:${x.summary.duration_s}`).join(" "));
+  // A status on main's head: its line names main (main has no row among the branches; its head is the repo's).
+  const mainHead = (await call("GET", `/v1/monorepos/${login.ana}/${S}/heads`, A)).json?.heads?.find((h) => h.repo === S)?.head;
+  await call("POST", `/v1/monorepos/${login.ana}/${S}/repos/${S}/statuses/${mainHead}`, A, { state: "success", context: "e2e" });
+
+  const onMain = await waitFor(async () => (await pageAll(A, `&in=${login.ana}/${S}`))?.events?.find((x) => x.kind === "status" && x.summary?.context === "e2e" && x.summary?.sha === mainHead) ?? null, 15_000);
+
+  check("a status on main's head: its line names the branch main", !!mainHead && onMain?.branch === "main", `${onMain ? onMain.branch : "no line"}`);
   // A conflict: c1 lands on main, c2 changed the same line differently.
   git(["checkout", "-q", "main"], src);
   git(["checkout", "-qb", "c1"], src);

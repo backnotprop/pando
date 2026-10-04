@@ -389,11 +389,12 @@ paths:
   /v1/logout:
     get:
       operationId: logoutPage
-      summary: A one-button page that posts to /v1/logout
+      summary: Opened in a browser, goes to the app
+      description: A GET never ends a session. It sends the browser to the app (`/`), where the name menu signs out (POST).
       tags: [users]
       security: []
       responses:
-        "200": { description: HTML }
+        "303": { description: "To `/`." }
     post:
       operationId: logout
       summary: Sign out this browser (and end its WorkOS session)
@@ -894,7 +895,12 @@ paths:
         `{"type": "error", "message"}` (the socket stays open).
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
-        latest `limit` with no `since`. With `Upgrade: websocket`: events after
+        latest `limit` with no `since`, oldest first either way. The pull also
+        takes `before=<seq>` (only events before it: page back through the
+        log with the first event's seq), `repo=<repo>` (that repo's events;
+        `meta` for the meta layer's) and `kinds=<kind>,<kind>` (at most 20),
+        each answered from an index on (repo, seq) or (kind, seq), and with
+        `topics` (matched over at most 5,000 rows). With `Upgrade: websocket`: events after
         `?since=` (at most 500, else one `{"type": "resync", "seq",
         "oldest_seq"}` frame: refetch, then resume from `seq`), then
         `{"type": "caught_up", "seq"}`, then live `{"type": "event", "seq", ...}`
@@ -920,6 +926,18 @@ paths:
           in: query
           description: "With `topics` including `feed`, on a WebSocket: replay the `feed` lines numbered after this."
           schema: { type: integer, minimum: 0 }
+        - name: before
+          in: query
+          description: "JSON only: events before this seq (the latest `limit` of them, oldest first)."
+          schema: { type: integer, minimum: 1 }
+        - name: repo
+          in: query
+          description: "JSON only: one repo's events (its name as in its URL; `meta` for the meta layer)."
+          schema: { type: string }
+        - name: kinds
+          in: query
+          description: "JSON only: these kinds, comma-separated, at most 20."
+          schema: { type: string }
       responses:
         "200":
           description: A page of events
@@ -3121,7 +3139,7 @@ components:
       required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]
       properties:
         base_branch: { type: string }
-        base: { type: string, description: "Main's head the diff was taken against." }
+        base: { type: string, description: "Main's head the diff was taken against; for a branch Pando merged at this head, main just before that merge (the merge commit's first parent), so a merged branch keeps its changes." }
         head: { type: string, description: The branch's head. }
         merge_base: { type: string }
         truncated: { type: boolean, description: "Some patches were left out past 2 MiB in all (`patch_omitted: budget`)." }
@@ -3332,7 +3350,7 @@ components:
         title: { type: [string, "null"] }
         description: { type: [string, "null"] }
         author: { type: [string, "null"], description: The branch's author (a user). }
-        pusher: { type: string, description: "The user who pushed; for `merged`, who merged." }
+        pusher: { type: [string, "null"], description: "The user who pushed; for `merged`, who merged. Null only when Pando found a push in Artifacts' refs whose pusher it never learned (its record and its keep both failed)." }
         seq: { type: [integer, "null"], description: "The event stream's seq for this change: drop repeats, sort by it." }
         merge_commit: { type: string, description: Only for `merged`. }
         diff_url: { type: string }

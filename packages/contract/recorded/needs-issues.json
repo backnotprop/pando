@@ -5,14 +5,14 @@
   "body": {
     "branches": [
       {
-        "monorepo": "rec-mutxvkul/rec-mutxvkul",
-        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-muu1ufmn/rec-muu1ufmn",
+        "monorepo_id": "m_77b463f0c88a971b",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/clash",
         "title": null,
-        "head": "0bd1cd3c887cb71282a51c9ff963b80764c0fb7b",
-        "author": "rec-mutxvkul",
+        "head": "996b768dd7c8a5c2d4f2be4fe7ce0199dbada24b",
+        "author": "rec-muu1ufmn",
         "pushed_machine": "ana-mbp",
         "state": "conflicts",
         "checks": {
@@ -20,17 +20,17 @@
           "failing": [],
           "failing_apps": {}
         },
-        "updated_at": "2026-10-04T14:51:50.216Z"
+        "updated_at": "2026-10-04T16:42:59.126Z"
       },
       {
-        "monorepo": "rec-mutxvkul/rec-mutxvkul",
-        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-muu1ufmn/rec-muu1ufmn",
+        "monorepo_id": "m_77b463f0c88a971b",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
         "title": null,
-        "head": "32326fabe5a269cf60fba75537d3beb9ff52add2",
-        "author": "rec-mutxvkul",
+        "head": "ecce3ac9b4eb4c1fd9e8be8627e31d5098aa8a29",
+        "author": "rec-muu1ufmn",
         "pushed_machine": "ana-mbp",
         "state": "failing",
         "checks": {
@@ -42,18 +42,18 @@
             "ci/test": null
           }
         },
-        "updated_at": "2026-10-04T14:51:49.061Z"
+        "updated_at": "2026-10-04T16:42:57.734Z"
       }
     ],
     "issues": [
       {
-        "monorepo": "rec-mutxvkul/rec-mutxvkul",
-        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-muu1ufmn/rec-muu1ufmn",
+        "monorepo_id": "m_77b463f0c88a971b",
         "count": 1,
         "newest": {
           "number": 1,
           "title": "Login fails an hour after sign-in",
-          "updated_at": "2026-10-04T14:52:08.840Z"
+          "updated_at": "2026-10-04T16:43:25.653Z"
         }
       }
     ],

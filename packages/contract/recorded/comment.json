@@ -3,13 +3,13 @@
   "route": "POST .../issues/{n}/comments",
   "status": 201,
   "body": {
-    "id": "ic_05230732a9fc7ce8",
+    "id": "ic_da02bd4d030f3c93",
     "body": "Seen on staging too.",
     "body_version": 1,
-    "author": "rec-mutxvkul",
+    "author": "rec-muu1ufmn",
     "machine": "ana-mbp",
-    "created_at": "2026-10-04T14:52:08.821Z",
-    "updated_at": "2026-10-04T14:52:08.821Z",
+    "created_at": "2026-10-04T16:43:25.631Z",
+    "updated_at": "2026-10-04T16:43:25.631Z",
     "reactions": []
   }
 }

@@ -23,6 +23,13 @@ License. Source: https://github.com/shikijs/shiki
 The TextMate grammars it bundles carry their own licences, as Shiki ships
 them (https://github.com/shikijs/textmate-grammars-themes).
 
+The web app shows the Buildkite mark (web/src/ui/buildkite-mark.svg) beside a
+check that Buildkite ran, to say which CI service ran it. The mark is a
+trademark of Buildkite Pty Ltd, used unaltered from
+https://buildkite.com/brand-assets ("Mark", SVG, sha256
+d3e31ab1ee183c5f2975291d219182d4ae6a37ac33c614fafcfa5d7e146628af). Its use
+does not mean that Buildkite endorses Pando.
+
 Pando's Mac app and file system extension (mac/) are derived from Oak's macOS FSKit mount app and extension (https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak), Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache License, Version 2.0. mac/NOTICE gives the source commit and every change made.
 
 Pando mounts worktrees with ArtifactFS (https://github.com/cloudflare/artifact-fs), Copyright Cloudflare, Inc., licensed under the Apache License, Version 2.0, through the fork https://github.com/backnotprop/artifact-fs. Parts of the fork's macOS front end are translated from Oak's FSKit backend; the fork's NOTICE has the details.

@@ -35,6 +35,12 @@ export const historyLink = (full: string, path: string) => linkOptions({ to: "/$
 export const tabLink = (full: string, tab: "activity" | "machines" | "ci" | "members" | "settings") =>
   linkOptions({ to: `/$owner/$name/${tab}`, params: split(full) });
 
+/** A CI pipeline's page, and one of its builds by number (/{owner}/{name}/ci/{pipeline}/{number}). */
+export const ciPipelineLink = (full: string, pipeline: string) => linkOptions({ to: "/$owner/$name/ci/$pipeline", params: { ...split(full), pipeline } });
+
+export const ciBuildLink = (full: string, pipeline: string, number: number) =>
+  linkOptions({ to: "/$owner/$name/ci/$pipeline/$number", params: { ...split(full), pipeline, number: String(number) } });
+
 // ── A repo's code: a monorepo's projects at /{owner}/{name}/projects/{project}/...,
 // a plain repo's at /{owner}/{name}/... (its code is its page). `ref` is a
 // branch or a commit; null is the default branch.
@@ -94,11 +100,16 @@ export type AppLink =
   | ReturnType<typeof blobLink>
   | ReturnType<typeof historyLink>
   | ReturnType<typeof tabLink>
+  | ReturnType<typeof ciPipelineLink>
+  | ReturnType<typeof ciBuildLink>
   | ReturnType<typeof codeLink>
   | ReturnType<typeof codeBlobLink>
   | ReturnType<typeof codeHistoryLink>
   | ReturnType<typeof branchesLink>
   | ReturnType<typeof branchLink>;
+
+/** A monorepo's own project: the one named after it (projects/pando in ramos/pando); lists put it first and leave its name off. */
+export const isHomeProject = (repoPath: string | null, monorepoName: string) => repoPath?.split("/").pop() === monorepoName;
 
 /** The full address, for Copy link and Copy raw link. */
 export const absolute = (href: string) => new URL(href, location.origin).toString();

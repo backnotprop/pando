@@ -23,7 +23,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp|avif|ico|bmp)$/i;
 
 const quiet = "px-5 py-7 text-[13.5px] text-ash";
 
-const tool =
+export const tool =
   "inline-flex h-7 cursor-pointer items-center rounded-md border border-rootline bg-soil px-2.5 text-[12.5px] leading-[15px] whitespace-nowrap text-bark-dim hover:border-rule-hi hover:text-bark";
 
 /** A document's two views: Preview (the default) and Code (`?plain=1`, GitHub's word). */

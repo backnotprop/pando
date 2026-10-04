@@ -259,7 +259,10 @@ export class MirrorOut {
     else if (problem.code !== "retrying" && at - (t.last_started ?? 0) >= PERSON_RETRY_MS) next = at;
     this.sql.exec("UPDATE mirror_targets SET dirty_since = COALESCE(dirty_since, ?), dirty_n = dirty_n + 1, next_at = ? WHERE repo = ?", at, next, key);
 
-    if (!s.on || next === null) return;
+    // Paused: an open page shows how far behind the row now is.
+    if (!s.on) return this.changed(key);
+
+    if (next === null) return;
 
     if (next <= at) this.kick();
     else this.armAt(next);

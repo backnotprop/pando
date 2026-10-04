@@ -2,11 +2,14 @@
 // changed file in its own box, as the code view draws a file. A header row
 // (the path, what happened to it, its added and removed lines) opens and
 // closes its unified diff, coloured by Diff.tsx (loaded on first use). A large
-// diff starts closed; a file with no patch says why.
-import type { BranchDiff, ChangedFile } from "@pando/contract";
+// diff starts closed; a file with no patch says why, with a link to the file.
+import type { BranchDiff, ChangedFile, Repo } from "@pando/contract";
+import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useState } from "react";
-import { Empty } from "../../../../ui/controls";
+import { Empty, lnk } from "../../../../ui/controls";
 import { Chevron } from "../../../../ui/Icons";
+import { codeBlobLink } from "../../../../ui/paths";
+import { useMonorepo } from "../-frame/heads";
 
 const Diff = lazy(() => import("../-code/Diff"));
 
@@ -50,7 +53,22 @@ function Path({ f }: { f: ChangedFile }) {
   );
 }
 
-function FileBox({ f, open, toggle }: { f: ChangedFile; open: boolean; toggle: () => void }) {
+/** No patch: why, and the file itself (at the branch's head, or before the branch for a deleted one). */
+function Omitted({ repo, diff, f }: { repo: Repo; diff: BranchDiff; f: ChangedFile }) {
+  const { monorepo } = useMonorepo();
+  const at = f.status === "deleted" ? diff.merge_base : diff.head;
+
+  return (
+    <p className={`${note} flex items-baseline gap-4`}>
+      {WHY[f.patch_omitted ?? "too_large"]}
+      <Link {...codeBlobLink(monorepo.full, repo.path, f.path, at)} className={`${lnk} ml-auto flex-none`}>
+        View file
+      </Link>
+    </p>
+  );
+}
+
+function FileBox({ repo, diff, f, open, toggle }: { repo: Repo; diff: BranchDiff; f: ChangedFile; open: boolean; toggle: () => void }) {
   const row = "flex min-h-11 w-full items-center gap-2.5 py-1.5 pr-4 pl-4 text-left";
   const status = <span className="flex-none text-[12.5px] leading-[15px] text-ash">{f.status}</span>;
 
@@ -64,7 +82,7 @@ function FileBox({ f, open, toggle }: { f: ChangedFile; open: boolean; toggle: (
           {status}
           <Counts f={f} />
         </div>
-        <p className={note}>{WHY[f.patch_omitted ?? "too_large"]}</p>
+        <Omitted repo={repo} diff={diff} f={f} />
       </li>
     );
   }
@@ -86,13 +104,13 @@ function FileBox({ f, open, toggle }: { f: ChangedFile; open: boolean; toggle: (
           </Suspense>
         </div>
       ) : (
-        <p className={note}>{f.status === "renamed" ? "Renamed, no line changes." : "No line changes."}</p>
+        <p className={note}>{f.status === "renamed" ? "Renamed, no line changes" : "No line changes"}</p>
       )}
     </li>
   );
 }
 
-export function FilesChanged({ diff }: { diff: BranchDiff }) {
+export function FilesChanged({ repo, diff }: { repo: Repo; diff: BranchDiff }) {
   // Open or closed by the person, per path; otherwise a large diff starts closed.
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
 
@@ -102,14 +120,14 @@ export function FilesChanged({ diff }: { diff: BranchDiff }) {
     <>
       {diff.too_many_files ? (
         <p className="mb-3.5 rounded-lg bg-loam px-3.5 py-2.5 text-[13.5px] text-bark-dim">
-          The first {diff.files.length.toLocaleString("en-US")} of {diff.files_total.toLocaleString("en-US")} files.
+          The first {diff.files.length.toLocaleString("en-US")} of {diff.files_total.toLocaleString("en-US")} files
         </p>
       ) : null}
       <ul aria-label="Files changed" className="grid gap-4">
         {diff.files.map((f) => {
           const open = chosen[f.path] ?? changed(f) <= START_CLOSED;
 
-          return <FileBox key={f.path} f={f} open={open} toggle={() => setChosen((c) => ({ ...c, [f.path]: !open }))} />;
+          return <FileBox key={f.path} repo={repo} diff={diff} f={f} open={open} toggle={() => setChosen((c) => ({ ...c, [f.path]: !open }))} />;
         })}
       </ul>
     </>

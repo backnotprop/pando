@@ -341,7 +341,7 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   const { monorepo } = useMonorepo();
   const diff = useQuery(branchDiffQuery(monorepo, repo.name, branch));
 
-  if (diff.data) return <FilesChanged diff={diff.data} />;
+  if (diff.data) return <FilesChanged repo={repo} diff={diff.data} />;
 
   return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
 }

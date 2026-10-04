@@ -430,7 +430,7 @@ pando org remove <org> <login | email> | leave <org>
 | --- | --- |
 | `--name <name>` | With `create`: its display name, up to 100 characters. |
 | `--owner` | With `add`: as an owner. Default: member. |
-| `--json` | With `create`, `list`, `view`, `members` and `add`: print the API's answer. |
+| `--json` | Print the API's answer: [create](/api/orgs/createOrg/), [list](/api/orgs/listMyOrgs/), [view](/api/orgs/getOrg/), [members](/api/orgs/listOrgMembers/), and add ([by login](/api/orgs/putOrgMember/) or [by email](/api/orgs/orgInvite/)). |
 | `--server <url>` | The Pando server. Default: the configured one. |
 
 An organization's display name (up to 100 characters), description (up to 160) and website (an `https` address, up to 2,048) are changed by its owners in the web, or with [`pando api`](#pando-api): `pando api -X PATCH /orgs/<org> -f description="..."`. Make a repository in one with `pando init --owner <org>`, or move one in with `pando monorepo transfer`.

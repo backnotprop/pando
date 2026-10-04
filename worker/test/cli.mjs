@@ -475,7 +475,8 @@ try {
 
   git(["add", "-A"], wt);
   git(["commit", "-qm", "Name the line"], wt);
-  const pushed = git(["push", "-q"], wt);
+  // As a person's git push from the worktree: the helper list cleared (git() does), then pando as the helper.
+  const pushed = git(["-c", `credential.helper=!'${bin}' credential`, "push", "-q"], wt);
   check("a commit pushed from the worktree", pushed.status === 0, scrub(pushed.stderr));
   r = await pando(["merge", "--force"], { cwd: wt });
   check(`pando merge says it closes #${n2}, from the merge's answer`, r.status === 0 && r.stdout.includes(`This merge closes #${n2} (`), said(r));
@@ -503,7 +504,8 @@ try {
   j = parsed(r);
   check("pando monorepo view <new name> --json: {monorepo, repos, members}", j?.monorepo?.full_name === renamed && j.repos?.[0]?.path === "projects/app" && j.members?.[0]?.login === LOGIN, said(r));
   r = await pando(["monorepo", "view", renamed]);
-  check("pando monorepo view: kind, role, repos with main's head", r.status === 0 && r.stdout.startsWith(`${renamed}  monorepo  (you are owner)`) && new RegExp(`projects/app\\s+${mainSha.slice(0, 7)}`).test(r.stdout), said(r));
+  const mainNow = (await call("GET", `/v1/monorepos/${renamed}/heads`, S)).json?.heads?.find((h) => h.path === "projects/app")?.head ?? mainSha;
+  check("pando monorepo view: kind, role, repos with main's head", r.status === 0 && r.stdout.startsWith(`${renamed}  monorepo  (you are owner)`) && new RegExp(`projects/app\\s+${mainNow.slice(0, 7)}`).test(r.stdout), said(r));
   r = await pando(["api", `/monorepos/${LOGIN}/${NAME}`]);
   check("the old name still leads to it", parsed(r)?.full_name === renamed, said(r));
   const remote = git(["remote", "get-url", "pando"], app).stdout.trim();

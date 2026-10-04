@@ -207,8 +207,10 @@ above:
   `<name>.conflict-local-<UTC timestamp>.<ext>` beside the file (for example
   `HISTORY.conflict-local-20261003T104200Z.md`), writes the object's current
   bytes to the file (or removes it if the current state is a delete), and
-  **freezes** the path. A losing delete just brings the file back, with no
-  copy and no freeze. Conflict copies are local only.
+  **freezes** the path. A losing delete brings the file back, with no copy
+  and no freeze; but if the file was made again here after the delete went
+  out, its new bytes are kept as a losing save's are (a conflict copy, and
+  the path frozen). Conflict copies are local only.
 - **Frozen.** A frozen path sends nothing. Changes from the object are written
   only while the file is untouched since the conflict, otherwise held.
   `pando resolve <path>` unfreezes it: if the file was edited, its bytes go

@@ -1236,6 +1236,14 @@ func (e *Engine) stale(m *serverMsg) {
 		e.queue(&Op{Kind: "save", Path: op.Path, Base: op.ToBase})
 		return
 	case "delete":
+		if _, err := os.Lstat(e.abs(op.Path)); err == nil {
+			// Made again here since the delete went out: its new bytes lose
+			// as a save's would, to a conflict copy (CODE-VS-MODEL M4).
+			if !e.lostSave(op, cur) {
+				return
+			}
+			break
+		}
 		e.writeCurrent(op.Path, cur)
 		if !cur.Deleted {
 			e.cfg.Log.Printf("%s changed on %s before your delete arrived, so it is back", op.Path, cur.Machine)

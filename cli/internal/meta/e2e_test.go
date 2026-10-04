@@ -679,6 +679,45 @@ func TestE2EOwnSaveAfterLostAnswer(t *testing.T) {
 	}
 }
 
+// Ben's save lands before ana's delete, and ana makes the file again before
+// the answer comes back. Her delete lost, but her new bytes are not lost:
+// they go to a conflict copy, as a losing save's would (CODE-VS-MODEL M4).
+func TestE2ELosingDeleteKeepsNewFile(t *testing.T) {
+	env := newEnv(t)
+	p := newProxy(t, env.server)
+	a := env.machineAt(t, "ana", p.url())
+	b := env.machine(t, "ben")
+	a.write("out.md", "v1\n")
+	waitContent(t, b, "out.md", "v1\n")
+
+	p.hold() // what the server sends ana waits in the proxy
+	b.write("out.md", "v2 from ben\n")
+	waitFor(t, "ben's save on the server", func() bool {
+		h, err := env.client().History(context.Background(), env.p("out.md"), 10)
+		return err == nil && len(h.Versions) == 2
+	})
+	os.Remove(a.path("out.md"))
+	time.Sleep(time.Second) // ana sends the delete on version 1; its stale answer waits in the proxy
+	a.write("out.md", "made again by ana\n")
+	time.Sleep(500 * time.Millisecond) // her watcher sees the new file
+	p.release()
+
+	waitContent(t, a, "out.md", "v2 from ben\n")
+	time.Sleep(500 * time.Millisecond)
+	copies := a.conflictCopies("out.md")
+	if len(copies) != 1 {
+		t.Errorf("%d conflict copies on ana, want 1", len(copies))
+	} else if kept, _ := os.ReadFile(copies[0]); string(kept) != "made again by ana\n" {
+		t.Errorf("the conflict copy holds %q", kept)
+	}
+	if frozen, _ := ListFrozen(a.root); len(frozen) != 1 || frozen[0].Path != env.p("out.md") {
+		t.Errorf("frozen on ana: %+v, want out.md", frozen)
+	}
+	if got, _ := b.read("out.md"); got != "v2 from ben\n" {
+		t.Errorf("ben's out.md reads %q", got)
+	}
+}
+
 func TestE2EHistoryAndRestore(t *testing.T) {
 	env := newEnv(t)
 	a := env.machine(t, "ana")

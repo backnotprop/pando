@@ -631,9 +631,10 @@ export class FeedOut {
           if (start) duration = Math.max(0, Math.round((Date.parse(textOf(row.created_at) ?? "") - Date.parse(start)) / 1000));
         }
 
+        // The branch at that commit; main has no row among the branches (its head is the repo's), so it is looked up there.
         branch = this.row<{ name: string }>(
           "SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1", repo, sha,
-        )?.name ?? null;
+        )?.name ?? this.row<{ name: string }>("SELECT default_branch AS name FROM repos WHERE name = ? AND default_head = ?", repo, sha)?.name ?? null;
         // app: the CI service that reported it (null: a member posted it, and `actor` is that member).
         line = { kind, summary: { context, state, description: textOf(row.description), target_url: textOf(row.target_url), sha, duration_s: duration, app: textOf(row.app) } };
         break;

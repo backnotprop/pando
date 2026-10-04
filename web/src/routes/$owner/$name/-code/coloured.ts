@@ -1,10 +1,11 @@
 // The coloured code view and the diff (Colour.tsx, Diff.tsx), loaded once the
 // signed-in app is idle after its first paint (routes/__root.tsx), with the
-// colour worker and its highlighter started and ready (ui/syntax.ts): the
-// first file a person opens is not left plain while they start. A page that
-// needs them sooner loads them itself. Until they are ready, or if their chunk
-// cannot load (a deploy replaced it while the tab was open), code shows as
-// plain lines. No Suspense: React holds a fallback at least 300 ms.
+// colour worker and its highlighter started and ready, and warmed on a few
+// lines in each common language (ui/syntax.ts): the first file a person opens
+// is not left plain while they start. A page that needs them sooner loads
+// them itself. Until they are ready, or if their chunk cannot load (a deploy
+// replaced it while the tab was open), code shows as plain lines. No
+// Suspense: React holds a fallback at least 300 ms.
 import { useEffect, useSyncExternalStore } from "react";
 import type ColourView from "./Colour";
 import type DiffView from "./Diff";
@@ -24,14 +25,16 @@ const waiting = new Set<() => void>();
 export function loadColourViews(): Promise<void> {
   loading ??= Promise.all([import("./Colour"), import("./Diff"), import("../../../../ui/syntax")])
     .then(async ([colour, diff, syntax]) => {
+      const pool = syntax.codePool();
+
       // Ready: Pierre draws at once, plain until the worker answers. A pool that fails falls back to the main thread.
-      await syntax
-        .codePool()
-        .initialize()
-        .catch(() => {});
+      await pool.initialize().catch(() => {});
       views = { Colour: colour.default, Diff: diff.default };
 
       for (const done of waiting) done();
+
+      // Then the worker colours a few lines in each common language, so the first real file in each is not left plain.
+      await syntax.warmGrammars(pool).catch(() => {});
     })
     .catch(() => {
       loading = null;

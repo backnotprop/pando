@@ -10,13 +10,19 @@ export interface Seen {
   state: string;
 }
 
-/** Whether a row came in, or changed state, after the page first showed the list (`rows` undefined: not loaded yet). */
+/**
+ * Whether a row came in, or changed state, after the page first showed the
+ * list. `rows` undefined: not loaded yet, or being read again under a new key
+ * (a branch's new head); nothing has arrived until they are known.
+ */
 export function useArrivals(rows: readonly Seen[] | undefined): (key: string) => boolean {
   const first = useRef<Map<string, string> | null>(null);
 
   if (rows && !first.current) first.current = new Map(rows.map((r) => [r.key, r.state]));
   const shown = first.current;
-  const now = new Map((rows ?? []).map((r) => [r.key, r.state]));
 
-  return (key) => shown !== null && shown.get(key) !== now.get(key);
+  if (!rows || !shown) return () => false;
+  const now = new Map(rows.map((r) => [r.key, r.state]));
+
+  return (key) => shown.get(key) !== now.get(key);
 }

@@ -6,7 +6,7 @@ import { Link } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Branch, Repo } from "@pando/contract";
 import { branchesQuery } from "../../../../api/projects";
-import { reposQuery } from "../../../../api/queries";
+import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { Cmd, Empty } from "../../../../ui/controls";
@@ -21,9 +21,13 @@ import { stateOf, toneClass, unknownWhy } from "./state";
 /** A plain repo's one repo (path `.`), for its pages at /{owner}/{name}. */
 export const plainRepo = async (qc: QueryClient, m: MonorepoRef) => (await qc.ensureQueryData(reposQuery(m))).find((r) => r.path === ".") ?? null;
 
-/** Both lists: each tab carries its count. */
+/** Both lists: each tab carries its count; and the Branches tab's own count. */
 export const loadBranches = (qc: QueryClient, m: MonorepoRef, repo: Repo) =>
-  Promise.all([qc.ensureInfiniteQueryData(branchesQuery(m, repo.name, "open")), qc.ensureInfiniteQueryData(branchesQuery(m, repo.name, "merged"))]);
+  Promise.all([
+    qc.ensureInfiniteQueryData(branchesQuery(m, repo.name, "open")),
+    qc.ensureInfiniteQueryData(branchesQuery(m, repo.name, "merged")),
+    qc.prefetchQuery(openBranchesQuery(m, repo.name)),
+  ]);
 
 const thead = "-mx-2.5 grid gap-4 px-2.5 pb-2 text-[12px] text-ash";
 

@@ -235,3 +235,55 @@ export class Machine {
     this.git(dir, "push", "-q", url, branch);
   }
 }
+
+/** What one frame showed: the top bar's height, the code's (the coloured view, else the plain lines) and its top, and the rows playing their arrival. */
+export interface Frame {
+  bar: number;
+  code: number;
+  top: number;
+  arrived: string[];
+}
+
+declare global {
+  interface Window {
+    /** The frames watchFrames saw, in the page under test. */
+    pandoFrames?: Frame[];
+  }
+}
+
+/**
+ * Records what the page shows at every animation frame from now on (in the
+ * page, by requestAnimationFrame), each change once: a flash of one frame is
+ * caught here, where an assertion that polls would miss it. The returned
+ * function reads the frames seen so far.
+ */
+export async function watchFrames(page: Page): Promise<() => Promise<Frame[]>> {
+  await page.evaluate(() => {
+    const frames: Frame[] = [];
+    const height = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().height) : 0);
+    const code = () => document.querySelector("diffs-container") ?? document.querySelector("main pre");
+    let last = "";
+
+    window.pandoFrames = frames;
+
+    const tick = () => {
+      const frame = {
+        bar: height(document.querySelector("header")),
+        code: height(code()),
+        top: Math.round(code()?.getBoundingClientRect().top ?? 0),
+        arrived: [...document.querySelectorAll(".arrived")].map((e) => e.textContent ?? ""),
+      };
+
+      const key = JSON.stringify(frame);
+
+      if (key !== last) frames.push(frame);
+
+      last = key;
+      requestAnimationFrame(tick);
+    };
+
+    requestAnimationFrame(tick);
+  });
+
+  return () => page.evaluate(() => window.pandoFrames ?? []);
+}

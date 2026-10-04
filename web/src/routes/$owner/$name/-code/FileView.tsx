@@ -1,22 +1,25 @@
 // A file's page body, shared by root files and a repo's code: the tools bar
 // (Preview and Code for a document, Raw, Copy, Copy link, Copy raw link) and
 // the file itself: a document (Markdown, HTML) through Plannotator's viewer,
-// other text with line numbers (plain at once, coloured when Colour.tsx has
-// loaded and the highlighter answers), images as images, other binary bytes
-// not shown.
+// other text with line numbers (plain until the coloured view is ready, then
+// coloured when the highlighter answers: coloured.ts), images as images,
+// other binary bytes not shown.
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
 import { MAX_SHOWN } from "../../../../api/client";
 import { CopyButton } from "../../../../ui/controls";
 import { Doc, isDoc } from "../../../../ui/doc/Doc";
 import { absolute, type AppLink } from "../../../../ui/paths";
+import { useColourViews } from "./coloured";
 import { Lines, Plain } from "./Lines";
 
-/** Without colour: the plain lines, numbered or not. */
-const Uncoloured = ({ text, numbers = true }: { text: string; numbers?: boolean }) => (numbers ? <Lines text={text} /> : <Plain text={text} />);
+/** Coloured once the view is ready (coloured.ts); until then, or if it cannot load, the plain lines, numbered or not. */
+function Coloured({ name, text, id, numbers = true }: { name: string; text: string; id: string | null; numbers?: boolean }) {
+  const views = useColourViews();
 
-// If the chunk cannot load (a deploy replaced it while the tab was open), the plain lines stay.
-const Colour = lazy(() => import("./Colour").catch(() => ({ default: Uncoloured })));
+  if (!views) return numbers ? <Lines text={text} /> : <Plain text={text} />;
+
+  return <views.Colour name={name} text={text} id={id} numbers={numbers} />;
+}
 
 /** Owner board, code view limits: colour up to 1 MiB, plain text to 10 MiB (MAX_SHOWN), Raw only past it. */
 const MAX_COLOURED = 1024 * 1024;
@@ -111,20 +114,12 @@ export function FileBody({ name, text, size, id = null, raw }: { name: string; t
     );
   }
 
-  return (
-    <Suspense fallback={<Lines text={text} />}>
-      <Colour name={name} text={text} id={id} />
-    </Suspense>
-  );
+  return <Coloured name={name} text={text} id={id} />;
 }
 
-/** Text coloured by its name's kind, without line numbers (a pipeline's YAML, as the prototype draws it): plain at once, coloured when Colour.tsx has loaded. */
+/** Text coloured by its name's kind, without line numbers (a pipeline's YAML, as the prototype draws it): plain until the coloured view is ready. */
 export function BareCode({ name, text }: { name: string; text: string }) {
-  return (
-    <Suspense fallback={<Plain text={text} />}>
-      <Colour name={name} text={text} id={null} numbers={false} />
-    </Suspense>
-  );
+  return <Coloured name={name} text={text} id={null} numbers={false} />;
 }
 
 /**

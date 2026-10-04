@@ -2,7 +2,7 @@
 // address, and keeps the monorepo's own socket open while one of its pages is.
 // Each page draws its own head (-frame/heads.tsx).
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, notFound, Outlet, redirect, useLocation } from "@tanstack/react-router";
+import { createFileRoute, notFound, Outlet, redirect, useMatches } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
@@ -96,7 +96,9 @@ function codeCrumbs(full: string, repoPath: string, kind: string, path: string[]
 function MonorepoFrame() {
   const { monorepo } = Route.useRouteContext();
   const info = Route.useLoaderData();
-  const { pathname } = useLocation();
+  // The breadcrumb follows the page on screen (its rendered match), not the address being loaded: while a link's page
+  // is read, the old page stays, and so does its breadcrumb.
+  const pathname = useMatches({ select: (matches) => matches.at(-1)?.pathname ?? "" });
   const queryClient = useQueryClient();
 
   const { owner, name } = monorepo;

@@ -8,6 +8,7 @@ import type { MonorepoRef } from "../../../../api/names";
 import type { Repo } from "@pando/contract";
 import { branchesQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { isDoc } from "../../../../ui/doc/Doc";
+import { useHeld } from "../../../../ui/held";
 import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref } from "../../../../ui/paths";
 import { ChangeBar } from "../-code/FileList";
 import { FileShown, FileTools } from "../-code/FileView";
@@ -33,7 +34,8 @@ export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: s
   const { monorepo } = useMonorepo();
   const full = monorepo.full;
   const { dir, name } = split(path);
-  const tree = useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data;
+  // Held while a moved ref's new commit is read, so the file stays on screen (ui/held.ts); the blob's oid comes from the same tree.
+  const tree = useHeld(`${repo.name}:${gitRef ?? ""}:${dir}`, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
   const commit = tree?.commit ?? "";
   // The bytes and the last commit are read at the commit the ref resolved to, so they agree.
   const { text, size } = useSuspenseQuery(codeFileQuery(monorepo, repo, commit, path)).data;

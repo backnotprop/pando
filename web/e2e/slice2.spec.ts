@@ -3,9 +3,11 @@
 // size limits, a branch's Files changed taking a push live, its branches, a
 // branch's page with its commits and co-authors, checks that Buildkite reports arriving live, a merge
 // through the page, a branch left conflicting by that merge, and the
-// monorepo's Activity tab taking a push live. Real Worker, real git.
+// monorepo's Activity tab taking a push live. Pages hold still while things
+// move under them: every frame keeps the top bar and the code when main or
+// the branch on screen moves. Real Worker, real git.
 import { expect, type Locator, test } from "@playwright/test";
-import { BASE, browserPost, ciStatus, Machine, nextSignIn } from "./seed";
+import { BASE, browserPost, ciStatus, Machine, nextSignIn, watchFrames } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -226,6 +228,32 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await file("logo.png").getByRole("link", { name: "View file" }).click();
       await expect(page).toHaveURL(`${project}/blob/logo.png?ref=${m.git(live, "rev-parse", "HEAD").trim()}`);
       await expect.poll(() => page.getByRole("img", { name: "logo.png" }).evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
+    });
+
+    await test.step("a file stays on screen while main moves under it, and while its branch takes a push: no frame without the top bar or the code", async () => {
+      const m = machine();
+      const shown = (text: string) => expect(page.locator("[data-line]").filter({ hasText: text }).first()).toBeVisible({ timeout: 30_000 });
+
+      // A merge to main (through the API, as pando merge does) that changes the file on screen.
+      await page.goto(`${project}/blob/src/colour.ts`);
+      await shown("sage");
+      let frames = await watchFrames(page);
+      const steady = m.commit("web", url, "steady", { "src/colour.ts": `${COLOUR}export const steady = true;\n` }, "Steady");
+
+      m.push(steady, url, "steady");
+      const merged = await m.api("POST", `/v1/monorepos/${full}/repos/projects-web/branches/steady/merge?force=1`, { expected_head: m.git(steady, "rev-parse", "HEAD").trim() });
+
+      expect(merged.status).toBe(200);
+      await shown("steady");
+      expect((await frames()).filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
+
+      // A push to the branch on screen.
+      await page.goto(`${project}/blob/src/colour.ts?ref=files`);
+      await shown("moss");
+      frames = await watchFrames(page);
+      m.push(m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "fern") }, "Fern"), url, "files");
+      await shown("fern");
+      expect((await frames()).filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
     });
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {

@@ -9,6 +9,7 @@ import type { CommitLine, Repo } from "@pando/contract";
 import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Empty, lnk } from "../../../../ui/controls";
+import { useHeld } from "../../../../ui/held";
 import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
 import { Clone } from "../-code/Clone";
 import { ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
@@ -96,7 +97,8 @@ function CodeReadme({ repo, commit, path, gitRef }: { repo: Repo; commit: string
 export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gitRef: string | null }) {
   const { monorepo } = useMonorepo();
   const full = monorepo.full;
-  const tree = useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data;
+  // Held while a moved ref's new commit is read (its README), so the folder stays on screen (ui/held.ts).
+  const tree = useHeld(`${repo.name}:${gitRef ?? ""}:${dir}`, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
   const last = useQuery({ ...lastCommitsQuery(monorepo, repo.name, tree?.commit ?? "", dir), enabled: !!tree }).data;
   const here = dir ? `${repo.path === "." ? monorepo.name : repo.path} / ${dir.split("/").join(" / ")}` : undefined;
   const toolbar = <Toolbar repo={repo} gitRef={gitRef} at={(ref) => codeLink(full, repo.path, dir, ref)} here={here} />;

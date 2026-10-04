@@ -7,7 +7,8 @@
 //   PATCH  /v1/orgs/{org}                   its name, description, website (owners)
 //   GET    /v1/orgs/{org}/members           its people (its people)
 //   PUT    /v1/orgs/{org}/members/{login}   add by login, or change a role (owners)
-//   DELETE /v1/orgs/{org}/members/{login}   remove someone (owners), or leave (yourself)
+//   DELETE /v1/orgs/{org}/members/{login}   remove someone (owners), or leave (yourself); their sockets
+//                                           on the org's monorepos they had only through it close
 //   POST   /v1/orgs/{org}/invites           by email: added now, or at that email's first sign-in (owners)
 //   GET    /v1/orgs/{org}/invites           invites still waiting (its people)
 //   DELETE /v1/orgs/{org}/invites/{email}   withdraw one (owners)
@@ -20,6 +21,7 @@ import { isRecord, isText, type Json, type JsonObject } from "../parse";
 import { namespaceProblem, validNamespace } from "../monorepo/names";
 import type { UserApp, UserContext as C } from "../monorepo/api";
 import { feedOrgMembership } from "../feed/membership";
+import { closeAfterOrgLeave } from "../monorepo/access";
 import { accounts, forgetCachedAuth } from "./auth";
 import type { Accounts, MemberRole, Org, OrgPatch } from "./store";
 
@@ -166,6 +168,7 @@ export function orgRoutes(app: UserApp): void {
 
     if (!out.ok) throw new HttpError(out.status, out.code, out.message);
     await changed(c, org.login, login);
+    await closeAfterOrgLeave(c.env, org.login, login);
 
     return c.body(null, 204);
   });

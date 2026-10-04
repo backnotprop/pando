@@ -30,6 +30,7 @@ import type { RefCommand } from "./pktline";
 import { FeedOut, type HelloAnswer } from "../feed/out";
 import { isOneOf, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../parse";
 import { attachmentOf, Machines, type MachineRow } from "./machines";
+import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
@@ -1925,6 +1926,11 @@ export class MonorepoObject extends DurableObject<Env> {
 
   async webSocketError(_ws: WebSocket): Promise<void> {}
 
+  /** People who lost access (monorepo/access.ts): their event sockets close with NO_ACCESS, so clients stop. */
+  closeSockets(logins: string[]): number {
+    return closeLogins(this.ctx, logins, (ws) => attachmentOf(ws)?.login);
+  }
+
   /**
    * A branch's stored fields as an event row (no Artifacts reads in the
    * object). `ahead`, `behind`, `base`, `mergeable` and `checks` are computed
@@ -2370,8 +2376,9 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.machines.list(this.feed.liveHelloSids());
   }
 
+  /** The summary line, as the home reads it for a large monorepo (whose members' feeds do not get it). */
   feedSummary(): Summary {
-    return this.feed.summary();
+    return this.feed.line();
   }
 
   /** Tests only (the crash and failure switches act only with FEED_TEST=1): the feed outbox. */

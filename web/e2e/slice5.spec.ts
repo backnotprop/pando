@@ -5,8 +5,9 @@
 // page and opens it. The repository's Members tab lists her "From {org}",
 // with no Remove. A person's own repository moves into the org from its
 // Settings, and its old address still opens it. The org's details change in
-// its Settings. The only owner can neither leave nor step down. Real Worker,
-// real D1, real browser.
+// its Settings. The only owner can neither leave nor step down. Removed from
+// the org while its repository is open, she sees she no longer has access.
+// Real Worker, real D1, real browser.
 import { expect, type Page, test } from "@playwright/test";
 import { BASE, browserPost, HARD_LOAD, nextSignIn } from "./seed";
 
@@ -212,6 +213,17 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await expect(page.getByRole("alert").filter({ hasText: "needs an owner" })).toHaveText(`${org} needs an owner. Make someone else an owner first.`);
       await expect(page.getByRole("combobox", { name: `Role of ${login}` })).toHaveValue("owner");
       expect((await page.request.get(`/v1/orgs/${org}`)).ok()).toBe(true);
+    });
+
+    await test.step("removed from the org while its repository is open: her page says she no longer has access", async () => {
+      const socket = beaPage.waitForEvent("websocket", (ws) => ws.url().includes(`/v1/monorepos/${org}/${repo}/events?topics=feed`));
+
+      await beaPage.goto(`${BASE}/${org}/${repo}`);
+      await expect(beaPage.getByRole("heading", { level: 1 })).toContainText(`${org}/${repo}`, HARD_LOAD);
+      await (await socket).waitForEvent("framereceived");
+      expect((await page.request.delete(`/v1/orgs/${org}/members/${beaLogin}`, { headers: { origin: BASE } })).status()).toBe(204);
+      await expect(beaPage.getByRole("heading", { level: 1 })).toHaveText(`You no longer have access to ${org}/${repo}.`, { timeout: 3000 });
+      await expect(beaPage.getByRole("link", { name: "Back to your repositories" })).toBeVisible();
     });
 
     expect(errors).toEqual([]);

@@ -2,29 +2,21 @@
 // TanStack Query's cache, so the home and the monorepo pages move without a
 // reload. It reconnects with backoff, resumes from the last `landed` number,
 // and refetches what it may have missed.
-import type { FeedEvent, MonorepoId, MonorepoSummary } from "@pando/contract";
+import type { MonorepoId, MonorepoSummary } from "@pando/contract";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { decodeFrame } from "../api/client";
 import { monorepoRef } from "../api/names";
 import { noteContributed } from "./contributed";
-import { applyLine } from "./lines";
+import { applyLine, byActivity } from "./lines";
 import { startMonorepoFeed } from "./monorepo";
 
 const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
 
 const PING_MS = 30_000;
 
-const byActivity = (a: MonorepoSummary, b: MonorepoSummary) =>
-  (b.last_activity_at ?? "").localeCompare(a.last_activity_at ?? "") || a.full_name.localeCompare(b.full_name);
-
 function patchLine(qc: QueryClient, id: MonorepoId, patch: Partial<MonorepoSummary>) {
   qc.setQueryData<readonly MonorepoSummary[]>(["monorepos"], (list) => list?.map((m) => (m.id === id ? { ...m, ...patch } : m)).sort(byActivity));
-}
-
-function onEvent(qc: QueryClient, e: FeedEvent) {
-  applyLine(qc, e);
-  patchLine(qc, e.monorepo_id, { last_activity_at: e.at });
 }
 
 export function startFeed(qc: QueryClient): () => void {
@@ -56,7 +48,7 @@ export function startFeed(qc: QueryClient): () => void {
       switch (f.type) {
         case "event":
           landed = Math.max(landed ?? 0, f.landed);
-          onEvent(qc, f.event);
+          applyLine(qc, f.event);
           break;
         case "caught_up":
           // A fresh hello replays nothing: lines from before it come from a refetch.
@@ -118,10 +110,13 @@ const LARGE_SOCKETS = 5;
 export const LARGE_REFETCH_MS = 60_000;
 
 /**
- * A large monorepo (over 100 members) sends no lines to the person's socket.
- * The home follows the 5 most recently active by their own feed sockets, each
- * resuming from its last line; it answers true when there are more than 5,
- * so the home reads its log again every minute for the rest.
+ * A large monorepo (over 100 members) sends no lines and no summary line to
+ * the person's socket. The home follows the 5 most recently active by their
+ * own feed sockets, each resuming from its last line (each line also moves its
+ * last activity on the list); it answers true when there are more than 5, so
+ * the home reads its log again every minute for the rest. Their lines' counts
+ * (needs you, machines, branches) are read when the home loads, and again when
+ * its tab comes back into view.
  */
 export function useLargeFeeds(lines: readonly MonorepoSummary[]): boolean {
   const qc = useQueryClient();

@@ -14,6 +14,7 @@ import type { KeyedEvent, StreamEvent } from "../monorepo/types";
 import { EVENT_STREAM } from "../monorepo/stream";
 import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
 import { addGate, timed } from "../timing";
+import { closeLogins } from "../sockets";
 import { isRecord, isText, isWholeNumber, parseJson, type Json, type JsonObject } from "../parse";
 
 // MONOREPO: the monorepo object, whose event stream gets meta.saved and
@@ -378,6 +379,12 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.createSchema(); // this instance may serve the next request
 
     return { closed: sockets.length };
+  }
+
+  // closeSockets closes the live sockets of people who lost access
+  // (monorepo/access.ts) with NO_ACCESS (4403), so their engines stop.
+  closeSockets(logins: string[]): number {
+    return closeLogins(this.ctx, logins, (ws) => attachmentOf(ws)?.login);
   }
 
   // ---- HTTP ----

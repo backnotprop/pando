@@ -351,7 +351,7 @@ Each subcommand takes the repository as `owner/name` before its other arguments,
 | --- | --- |
 | `list` | Members and their roles, then invites still waiting. |
 | `invite <email>` | Adds the person now if they have an account, else they join when they first run `pando login`. |
-| `remove <who>` | A login removes that member. An email withdraws that invite. |
+| `remove <who>` | A login removes that member; unless they have the repository through its organization, their open pages and `pando sync` stop at once. An email withdraws that invite. |
 | `invites` | Invites still waiting, with who sent them. |
 | `revoke <email>` | Withdraws the invite for that email. |
 
@@ -425,7 +425,7 @@ pando org remove <org> <login | email> | leave <org>
 | `view <org>` | Its login, name, description and website, your role, and its repositories you can open. |
 | `members [<org>]` | Its people and their roles, then invites still waiting. Default: the organization that owns the repository you are in. |
 | `add <org> <email \| login>` | Owners only. A login is added at once. An email adds the person now if they have signed in with it, else at their first `pando login`. Run again, it changes nothing. |
-| `remove <org> <login \| email>` | Owners only. A login takes that person out: their access to its repositories ends within about 15 seconds, except where they are a member of one directly. An email withdraws that invite. |
+| `remove <org> <login \| email>` | Owners only. A login takes that person out: their access to its repositories ends within about 15 seconds, except where they are a member of one directly, and their open pages and `pando sync` there stop at once. An email withdraws that invite. |
 | `leave <org>` | Takes you out. An organization keeps at least one owner. |
 
 | Flag | What it does |
@@ -638,6 +638,8 @@ pando sync [--once]
 ```
 
 Keeps the shared files live until stopped: it sends this machine's saves and writes everyone else's. It also keeps this machine's read-only mains at the server's main. `--once` sends and receives what is waiting, then exits.
+
+If you lose access to the repository (an owner removes you, you leave the organization that owns it, or it moves out of that organization), `pando sync` stops at once and says so. The folder keeps its files.
 
 ### pando history
 

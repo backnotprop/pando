@@ -17,13 +17,29 @@ export const monoLink = (full: string) => linkOptions({ to: "/$owner/$name", par
 export const treeLink = (full: string, dir: string) =>
   dir ? linkOptions({ to: "/$owner/$name/tree/$", params: { ...split(full), _splat: dir } }) : monoLink(full);
 
-export const blobLink = (full: string, path: string, version: number | null = null) =>
-  linkOptions({ to: "/$owner/$name/blob/$", params: { ...split(full), _splat: path }, search: version ? { v: String(version) } : {} });
+/** A file page's query (api/search.ts, fileSearch). Only the keys that are set: a key present but undefined fails the route's schema. */
+interface FileQuery {
+  v?: string;
+  ref?: string;
+  plain?: string;
+}
+
+const fileQuery = (at: FileQuery, plain: boolean): FileQuery => (plain ? { ...at, plain: "1" } : at);
+
+/** `plain` opens a document (Markdown, HTML) on its code instead of its Preview (`?plain=1`). */
+export const blobLink = (full: string, path: string, version: number | null = null, plain = false) =>
+  linkOptions({ to: "/$owner/$name/blob/$", params: { ...split(full), _splat: path }, search: fileQuery(version ? { v: String(version) } : {}, plain) });
 
 export const historyLink = (full: string, path: string) => linkOptions({ to: "/$owner/$name/history/$", params: { ...split(full), _splat: path } });
 
 export const tabLink = (full: string, tab: "activity" | "machines" | "ci" | "members" | "settings") =>
   linkOptions({ to: `/$owner/$name/${tab}`, params: split(full) });
+
+/** A CI pipeline's page, and one of its builds by number (/{owner}/{name}/ci/{pipeline}/{number}). */
+export const ciPipelineLink = (full: string, pipeline: string) => linkOptions({ to: "/$owner/$name/ci/$pipeline", params: { ...split(full), pipeline } });
+
+export const ciBuildLink = (full: string, pipeline: string, number: number) =>
+  linkOptions({ to: "/$owner/$name/ci/$pipeline/$number", params: { ...split(full), pipeline, number: String(number) } });
 
 // ── A repo's code: a monorepo's projects at /{owner}/{name}/projects/{project}/...,
 // a plain repo's at /{owner}/{name}/... (its code is its page). `ref` is a
@@ -49,10 +65,13 @@ export const codeLink = (full: string, repoPath: string, dir: string, ref: strin
 
 export const repoLink = (full: string, repoPath: string) => codeLink(full, repoPath, "");
 
-export const codeBlobLink = (full: string, repoPath: string, path: string, ref: string | null) =>
-  repoPath === "."
-    ? linkOptions({ to: "/$owner/$name/blob/$", params: { ...split(full), _splat: path }, search: refOf(ref) })
-    : linkOptions({ to: "/$owner/$name/projects/$project/blob/$", params: { ...split(full), project: project(repoPath), _splat: path }, search: refOf(ref) });
+export const codeBlobLink = (full: string, repoPath: string, path: string, ref: string | null, plain = false) => {
+  const search = fileQuery(refOf(ref), plain);
+
+  return repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/blob/$", params: { ...split(full), _splat: path }, search })
+    : linkOptions({ to: "/$owner/$name/projects/$project/blob/$", params: { ...split(full), project: project(repoPath), _splat: path }, search });
+};
 
 export const codeHistoryLink = (full: string, repoPath: string, path: string, ref: string | null) =>
   repoPath === "."
@@ -81,11 +100,16 @@ export type AppLink =
   | ReturnType<typeof blobLink>
   | ReturnType<typeof historyLink>
   | ReturnType<typeof tabLink>
+  | ReturnType<typeof ciPipelineLink>
+  | ReturnType<typeof ciBuildLink>
   | ReturnType<typeof codeLink>
   | ReturnType<typeof codeBlobLink>
   | ReturnType<typeof codeHistoryLink>
   | ReturnType<typeof branchesLink>
   | ReturnType<typeof branchLink>;
+
+/** A monorepo's own project: the one named after it (projects/pando in ramos/pando); lists put it first and leave its name off. */
+export const isHomeProject = (repoPath: string | null, monorepoName: string) => repoPath?.split("/").pop() === monorepoName;
 
 /** The full address, for Copy link and Copy raw link. */
 export const absolute = (href: string) => new URL(href, location.origin).toString();

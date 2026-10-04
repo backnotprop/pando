@@ -2,14 +2,14 @@
 // address, and keeps the monorepo's own socket open while one of its pages is.
 // Each page draws its own head (-frame/heads.tsx).
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, notFound, Outlet, useLocation } from "@tanstack/react-router";
+import { createFileRoute, notFound, Outlet, redirect, useLocation } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
 import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Page } from "../../../ui/pages";
-import { blobLink, codeBlobLink, codeLink, ownerLink, treeLink } from "../../../ui/paths";
+import { blobLink, ciPipelineLink, codeBlobLink, codeLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -20,14 +20,21 @@ export const Route = createFileRoute("/$owner/$name")({
       throw notFound();
     }
   },
-  loader: async ({ context: { queryClient, monorepo } }) => {
-    try {
-      return await queryClient.ensureQueryData(monorepoQuery(monorepo));
-    } catch (error) {
-      if (error instanceof Error && isMissing(error)) throw notFound();
+  loader: async ({ context: { queryClient, monorepo }, location }) => {
+    const info = await queryClient.ensureQueryData(monorepoQuery(monorepo)).catch((error: Error) => {
+      if (isMissing(error)) throw notFound();
 
       throw error;
+    });
+
+    // An old name (a rename keeps it as an alias) leads to the same page under the current one.
+    if (info.full_name !== monorepo.full) {
+      const rest = location.pathname.split("/").slice(3).join("/");
+
+      throw redirect({ href: `/${info.full_name}${rest ? `/${rest}` : ""}${location.searchStr}`, replace: true });
     }
+
+    return info;
   },
   component: MonorepoFrame,
 });
@@ -60,6 +67,14 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   if (kind === "tree" || kind === "blob") return pathCrumbs(parts, (dir) => treeLink(full, dir));
 
   if (kind === "history") return [...pathCrumbs(parts, (dir) => treeLink(full, dir), blobLink(full, parts.join("/"))), { label: "history" }];
+
+  // ci / pando-ci / #1285
+  if (kind === "ci" && parts.length) {
+    const [pipeline = "", number] = parts;
+    const ci: Crumb = { label: "ci", link: tabLink(full, "ci"), wide: true };
+
+    return number ? [ci, { label: pipeline, link: ciPipelineLink(full, pipeline), wide: true }, { label: `#${number}` }] : [ci, { label: pipeline }];
+  }
 
   return kind ? [{ label: kind }] : [];
 }

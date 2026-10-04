@@ -4,19 +4,18 @@
 // JavaScript engine. Tokens carry CSS variables (theme.css), so one result
 // fits every theme, and the render cache, keyed by blob oid, outlives each
 // page.
-import { getFiletypeFromFileName, registerCustomCSSVariableTheme } from "@pierre/diffs";
+import { getFiletypeFromFileName } from "@pierre/diffs";
 import { File, WorkerPoolContext } from "@pierre/diffs/react";
 import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
 import workerUrl from "@pierre/diffs/worker/worker.js?worker&url";
 import { useMemo } from "react";
+import { SYNTAX_THEME } from "../../../../ui/syntax";
 import { Lines } from "./Lines";
-
-registerCustomCSSVariableTheme("pando", {});
 
 const pool = getOrCreateWorkerPoolSingleton({
   poolOptions: { workerFactory: () => new Worker(workerUrl, { type: "module" }), poolSize: 1 },
   // Owner board: a line over 1,000 characters is shown without colour.
-  highlighterOptions: { theme: "pando", tokenizeMaxLineLength: 1000 },
+  highlighterOptions: { theme: SYNTAX_THEME, tokenizeMaxLineLength: 1000 },
 });
 
 // Pierre's layout set to FileView's plain lines (the prototype's .src): the
@@ -41,7 +40,7 @@ pre, code, [data-gutter], [data-content] { background: none; }
 [data-line] { padding-inline: 0; }
 `;
 
-const options = { theme: "pando", disableFileHeader: true, unsafeCSS: LAYOUT };
+const options = { theme: SYNTAX_THEME, disableFileHeader: true, unsafeCSS: LAYOUT };
 
 /** `id` is the blob's oid: the render cache's key, with the language (one blob can sit under two names). */
 export default function Colour({ name, text, id }: { name: string; text: string; id: string | null }) {

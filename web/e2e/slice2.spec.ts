@@ -70,7 +70,14 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       made.machine = await Machine.make(page, `laptop-${id}`);
       const m = machine();
 
-      const start = { "README.md": "# web\n\nThe web project.\n", "src/a.ts": "export const a = 1;\n", "src/colour.ts": COLOUR, "src/big.ts": BIG, "logo.png": PNG };
+      const start = {
+        "README.md": "# web\n\nThe web project.\n",
+        "src/a.ts": "export const a = 1;\n",
+        "src/colour.ts": COLOUR,
+        "src/big.ts": BIG,
+        "logo.png": PNG,
+        "docs/GUIDE.md": "# Guide\n\nHow to read [the README](../README.md).\n\n```ts\nexport const answer = 42;\n```\n",
+      };
 
       m.push(m.commit("web", url, "main", start, "Start the web project"), url, "main");
       const dir = m.commit("web", url, "feature", { "src/a.ts": "export const a = 2;\n" }, "Two is better\n\nCo-authored-by: Claude <noreply@anthropic.com>");
@@ -86,8 +93,24 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
       await expect(files.getByRole("link", { name: "README.md" })).toBeVisible();
       await expect(files.getByRole("link", { name: "src" })).toBeVisible();
-      await expect(page.getByText("The web project.")).toBeVisible();
+      await expect(page.locator(".pn-doc article").getByText("The web project.")).toBeVisible();
       await expect(page.getByRole("link", { name: "2 open branches" })).toBeVisible();
+    });
+
+    await test.step("a Markdown file in the project: its Preview through the viewer, its source lines at ?plain=1", async () => {
+      await page.goto(`${project}/blob/docs/GUIDE.md`);
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Guide" })).toBeVisible();
+      // Its code fence takes the code view's palette (theme.css, --diffs-token-*), not a stock Shiki theme.
+      await expect(page.locator(".pn-doc pre code span[style*='--diffs-token-']").first()).toBeVisible();
+      await page.goto(`${project}/blob/docs/GUIDE.md?plain=1`);
+      await expect(page.getByRole("group", { name: "View" }).getByRole("link", { name: "Code" })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByText("# Guide")).toBeVisible();
+      await expect(page.locator(".pn-doc")).toHaveCount(0);
+      // A relative link in the Preview opens that file's page in the project.
+      await page.getByRole("group", { name: "View" }).getByRole("link", { name: "Preview" }).click();
+      await page.locator(".pn-doc").getByRole("link", { name: "the README" }).click();
+      await expect(page).toHaveURL(`${project}/blob/README.md`);
+      await page.goto(project);
     });
 
     await test.step("the branch picker opens the same folder on a branch, with how far ahead it is", async () => {

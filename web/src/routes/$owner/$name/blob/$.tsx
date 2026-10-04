@@ -2,16 +2,18 @@
 // History, then Raw, Copy, Copy link and Copy raw link, then the file. In a
 // monorepo these are its root files (`?v=` for an older version); in a plain
 // repo, its code (`?ref=` for a branch). The free width on the right is kept
-// for Plannotator's comment dock later.
+// for Plannotator's comment dock later. A document (Markdown, HTML) opens on
+// its Preview, through Plannotator's viewer; `?plain=1` shows its code.
 import { Routes } from "@pando/contract";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { entryQuery, fileQuery } from "../../../../api/queries";
 import { fileSearch, versionOf } from "../../../../api/search";
 import { lnk } from "../../../../ui/controls";
+import { isDoc } from "../../../../ui/doc/Doc";
 import { blobLink, historyLink, treeLink } from "../../../../ui/paths";
 import { ChangeBar, saverOf } from "../-code/FileList";
-import { FileBody, FileTools } from "../-code/FileView";
+import { FileShown, FileTools } from "../-code/FileView";
 import { PathTrail } from "../-code/PathTrail";
 import { MonorepoHead, usePlainRepo } from "../-frame/heads";
 import { plainRepo } from "../-project/Branches";
@@ -40,12 +42,13 @@ export const Route = createFileRoute("/$owner/$name/blob/$")({
   component: function File() {
     const repo = usePlainRepo();
     const path = Route.useParams()._splat ?? "";
+    const plain = Route.useSearch().plain === "1";
 
-    return repo ? <ProjectFile repo={repo} path={path} gitRef={Route.useLoaderDeps().ref} /> : <RootFile path={path} />;
+    return repo ? <ProjectFile repo={repo} path={path} gitRef={Route.useLoaderDeps().ref} plain={plain} /> : <RootFile path={path} plain={plain} />;
   },
 });
 
-function RootFile({ path }: { path: string }) {
+function RootFile({ path, plain }: { path: string; plain: boolean }) {
   const { monorepo } = Route.useRouteContext();
   const { v } = Route.useLoaderDeps();
   const entry = useSuspenseQuery(entryQuery(monorepo, path, v)).data;
@@ -56,6 +59,7 @@ function RootFile({ path }: { path: string }) {
   const full = monorepo.full;
   const name = path.slice(path.lastIndexOf("/") + 1);
   const raw = Routes.metaRawPath(monorepo.owner, monorepo.name, path, v);
+  const views = { preview: blobLink(full, path, v), code: blobLink(full, path, v, true), plain };
   const what = entry.restored_from ? `Restored from version ${entry.restored_from}, as version ${entry.version}` : `Saved version ${entry.version}`;
 
   return (
@@ -73,8 +77,8 @@ function RootFile({ path }: { path: string }) {
         ) : null}
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           <ChangeBar who={saverOf(entry)} title={what} id={`on ${entry.machine}`} at={entry.at} history={historyLink(full, path)} />
-          <FileTools name={name} text={text} raw={raw} />
-          <FileBody name={name} text={entry.large ? null : text} size={size} id={entry.sha} raw={raw} />
+          <FileTools name={name} text={text} raw={raw} views={isDoc(name) && !entry.large && text !== null ? views : undefined} />
+          <FileShown path={path} text={entry.large ? null : text} size={size} id={entry.sha} raw={raw} views={views} fileLink={(p) => blobLink(full, p)} />
         </div>
       </div>
     </>

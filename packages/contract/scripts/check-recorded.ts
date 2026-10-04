@@ -57,6 +57,13 @@ import {
   MonorepoRenamed,
   Hook,
   MonorepoEventFrame,
+  MonorepoCreated,
+  Org,
+  OrgInviteResult,
+  OrgList,
+  OrgMember,
+  OrgMemberList,
+  Owner,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -102,6 +109,13 @@ const decoders = {
   InviteList: refuses(InviteList),
   InviteResult: refuses(InviteResult),
   MonorepoRenamed: refuses(MonorepoRenamed),
+  MonorepoCreated: refuses(MonorepoCreated),
+  Owner: refuses(Owner),
+  Org: refuses(Org),
+  OrgList: refuses(OrgList),
+  OrgMember: refuses(OrgMember),
+  OrgMemberList: refuses(OrgMemberList),
+  OrgInviteResult: refuses(OrgInviteResult),
   Hook: refuses(Hook),
   /** A 204: no body. */
   NoContent: refuses(Schema.Null),

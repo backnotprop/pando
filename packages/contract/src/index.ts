@@ -10,6 +10,8 @@ export * from "./user.ts";
 
 export * from "./monorepo.ts";
 
+export * from "./org.ts";
+
 export * from "./needs.ts";
 
 export * from "./feed.ts";

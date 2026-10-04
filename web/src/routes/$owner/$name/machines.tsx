@@ -28,8 +28,13 @@ export const Route = createFileRoute("/$owner/$name/machines")({
   component: Machines,
 });
 
-// On a phone: the machine (its name whole, on one line, 10 px from its worktrees), its worktrees, when, and connected; what it did is left out.
-const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px] phone:grid-cols-[auto_minmax(0,1fr)_52px_72px] phone:gap-2.5";
+const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px]";
+
+// On a phone: the machine (its name whole, on one line, 10 px from its worktrees), its worktrees, when, and connected;
+// what it did is left out. The table is one grid there, each row a subgrid, so the name column is the longest name's width in every row.
+const phoneTable = "phone:grid phone:grid-cols-[auto_minmax(0,1fr)_52px_72px] phone:gap-x-2.5";
+
+const phoneRow = "phone:col-span-full phone:grid phone:grid-cols-subgrid phone:gap-x-2.5";
 
 /** A worktree as a link to its branch: `cli` in the monorepo's own project (or its only one), `artifact-fs/mac-mount` in another. */
 function WorktreeLink({ w, full, home }: { w: MachineWorktree; full: string; home: string | null }) {
@@ -77,8 +82,8 @@ function Machines() {
     <>
       <MonorepoHead tab="machines" />
       {machines.length ? (
-        <div className="max-w-[1100px]">
-          <div className={`${thead} ${cols}`}>
+        <div className={`max-w-[1100px] ${phoneTable}`}>
+          <div className={`${thead} ${cols} ${phoneRow}`}>
             <span>Machine</span>
             <span>Worktrees</span>
             <span className="phone:hidden">Last</span>
@@ -88,10 +93,10 @@ function Machines() {
             </span>
             <span className="text-right">Now</span>
           </div>
-          <ul aria-label="Machines">
+          <ul aria-label="Machines" className={phoneRow}>
             {machines.map((m) => (
-              <li key={`${m.login}/${m.credential_id}`} className="border-t border-rule-faint">
-                <div className={`${row} ${cols}`}>
+              <li key={`${m.login}/${m.credential_id}`} className={`border-t border-rule-faint ${phoneRow}`}>
+                <div className={`${row} ${cols} ${phoneRow}`}>
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Avatar name={m.login} size={22} />
                     <span className="flex min-w-0 flex-col gap-0.5">

@@ -45,6 +45,7 @@ const options = { theme: SYNTAX_THEME, disableFileHeader: true, unsafeCSS: LAYOU
 // Without line numbers, as Plain draws text (the prototype's .yaml): 19 px lines, 14 px above and below, 18 px at the sides.
 const BARE = `${LAYOUT}
 :host { --diffs-line-height: 19px; --diffs-gap-block: 14px; }
+[data-file] { --diffs-grid-number-column-width: 0px; }
 [data-line] { padding-inline: 18px; }
 `;
 
@@ -56,7 +57,9 @@ const bareOptions = { theme: SYNTAX_THEME, disableFileHeader: true, disableLineN
  */
 export default function Colour({ name, text, id, numbers = true }: { name: string; text: string; id: string | null; numbers?: boolean }) {
   const lang = getFiletypeFromFileName(name);
-  const file = useMemo(() => ({ name, contents: text, lang, cacheKey: id ? `${id}.${lang}` : undefined }), [name, text, lang, id]);
+  // Drawn bare, the text's last newline ends its last line, as a <pre> shows it, rather than opening an empty one.
+  const contents = numbers ? text : text.replace(/\n$/, "");
+  const file = useMemo(() => ({ name, contents, lang, cacheKey: id ? `${id}.${lang}` : undefined }), [name, contents, lang, id]);
 
   // A kind with no grammar stays plain.
   if (lang === "text") return numbers ? <Lines text={text} /> : <Plain text={text} />;

@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
   delivery_id TEXT NOT NULL, n INTEGER NOT NULL, at TEXT NOT NULL, response_code INTEGER, error TEXT, ms INTEGER);
 CREATE INDEX IF NOT EXISTS delivery_attempts_d ON delivery_attempts (delivery_id);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS unrecorded (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo TEXT NOT NULL, identity TEXT NOT NULL, commands TEXT NOT NULL, origin TEXT, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS object_sizes (repo TEXT NOT NULL, oid TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (repo, oid));
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL, machine TEXT NOT NULL,
@@ -682,6 +684,85 @@ export class MonorepoObject extends DurableObject<Env> {
     this.queueDeliveries(events, origin);
 
     return events;
+  }
+
+  // ── Pushes Artifacts accepted but Pando did not record (C2) ─────────────
+  //
+  // When the record fails after Artifacts accepted a push, git still gets its
+  // report (the push landed) and the door stores the commands here. The next
+  // branch read (the list or one branch) reads Artifacts' refs and calls
+  // reconcile(), which writes what was missed: the branch rows, the push
+  // events and the hook deliveries, through recordPush.
+
+  /** The door could not record a push Artifacts accepted: keep it for the reconcile. */
+  markUnrecorded(repo: string, identity: Identity, commands: RefCommand[], origin: string | null): void {
+    this.sql.exec(
+      "INSERT INTO unrecorded (repo, identity, commands, origin, at) VALUES (?, ?, ?, ?, ?)",
+      repo, JSON.stringify(identity), JSON.stringify(commands), origin, now(),
+    );
+  }
+
+  /** A ref's head as recorded here: main from the repo's record, a branch from its row; null when unknown or deleted. */
+  private recordedHead(repo: string, ref: string): string | null {
+    const r = this.repoRow(repo);
+
+    if (!r || !ref.startsWith("refs/heads/")) return null;
+
+    if (ref === `refs/heads/${r.default_branch}`) return this.currentMain(repo);
+
+    return this.branchRecord(repo, ref.slice(11))?.head ?? null;
+  }
+
+  /**
+   * Write the missed pushes of a repo, given Artifacts' refs now (ref to sha).
+   * Each stored push is replayed, in order, for the refs whose record is still
+   * where that push started (a later recorded push wins). A ref a stored push
+   * named that still differs from Artifacts after that (an earlier push whose
+   * mark was lost too) is caught up from its record to Artifacts, by the last
+   * stored pusher. Returns how many ref updates were written.
+   */
+  reconcile(repo: string, refs: Record<string, string>): number {
+    const pending = this.rows<{ id: number; identity: string; commands: string; origin: string | null }>(
+      "SELECT id, identity, commands, origin FROM unrecorded WHERE repo = ? ORDER BY id", repo,
+    );
+
+    let written = 0;
+    let last: { identity: Identity; origin: string | null } | null = null;
+    const named = new Set<string>();
+
+    for (const p of pending) {
+      // SAFETY: markUnrecorded is the only writer of these columns: JSON of an Identity and of the door's RefCommands.
+      const identity = JSON.parse(p.identity) as Identity;
+      // SAFETY: as above.
+      const commands = JSON.parse(p.commands) as RefCommand[];
+      const due = commands.filter((c) => (this.recordedHead(repo, c.ref) ?? ZERO) === c.old);
+
+      for (const c of commands) named.add(c.ref);
+
+      if (due.length) {
+        this.recordPush(repo, identity, due, {}, p.origin);
+        written += due.length;
+      }
+
+      this.sql.exec("DELETE FROM unrecorded WHERE id = ?", p.id);
+
+      last = { identity, origin: p.origin };
+    }
+
+    const behind = [...named].flatMap((ref) => {
+      const recorded = this.recordedHead(repo, ref) ?? ZERO;
+      const there = refs[ref] ?? ZERO;
+
+      return recorded === there ? [] : [{ ref, old: recorded, new: there }];
+    });
+
+    if (last && behind.length) {
+      console.warn(`reconcile ${repo}: ${behind.length} ref(s) caught up to Artifacts`);
+      this.recordPush(repo, last.identity, behind, {}, last.origin);
+      written += behind.length;
+    }
+
+    return written;
   }
 
   /** A branch made by the API (createBranch): the caller is its creator. */
@@ -1464,7 +1545,7 @@ export class MonorepoObject extends DurableObject<Env> {
   ): BranchList {
     const r = this.repoRow(repo);
 
-    if (!r) return { default_branch: DEFAULT_BRANCH, default_head: null, branches: [], next_cursor: null, due: [] };
+    if (!r) return { default_branch: DEFAULT_BRANCH, default_head: null, branches: [], next_cursor: null, due: [], reconcile: false };
     const main = this.currentMain(repo);
     const mainAt = Date.parse(this.row<{ t: string | null }>("SELECT default_head_at AS t FROM repos WHERE name = ?", repo)?.t ?? "") || 0;
     const required = o.required ?? this.storedRequired(repo) ?? [];
@@ -1528,7 +1609,9 @@ export class MonorepoObject extends DurableObject<Env> {
       });
     }
 
-    return { default_branch: r.default_branch, default_head: main, branches: rows, next_cursor: next, due };
+    const reconcile = this.rows<{ id: number }>("SELECT id FROM unrecorded WHERE repo = ? LIMIT 1", repo).length > 0;
+
+    return { default_branch: r.default_branch, default_head: main, branches: rows, next_cursor: next, due, reconcile };
   }
 
   // ── Writes: the gate, and ref updates sent together ────────────────────

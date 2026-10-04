@@ -645,6 +645,14 @@ async function branchViews(
   const required = await requiredKept(c.env, c.get("info"), r);
   const ask = { names: names ?? undefined, state, limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
   let list: BranchList = await stub.branchRows(r.name, ask);
+
+  // A push Artifacts accepted was not recorded (C2): write what was missed from Artifacts' refs, then read again.
+  if (list.reconcile) {
+    const refs = await listRefs(c.env, r).catch(() => null);
+
+    if (refs && (await stub.reconcile(r.name, Object.fromEntries(refs)))) list = await stub.branchRows(r.name, ask);
+  }
+
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);
 
   if (due.length && main) {
@@ -675,7 +683,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const limit = Number(c.req.query("limit") ?? "100");
 
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) bad("limit is 1 to 500");
-  const { due: _due, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
+  const { due: _due, reconcile: _reconcile, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
 
   return c.json(list);
 });

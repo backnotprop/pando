@@ -827,6 +827,17 @@ async function linkShots(page: Page, browser: Browser, shown: Showcase) {
   const n = await issuesOnce(shown);
 
   await seedOrg(page, browser, shown);
+
+  // Two one-line descriptions (Settings), under their names in the rows and the header.
+  for (const [full, description] of [
+    ["ramos/pando", "A git platform for monorepos, built on Cloudflare Workers and Artifacts, for many agents working at once."],
+    ["plannotator/workspaces", "Shared plans and reviews for teams of agents."],
+  ] as const) {
+    const res = await page.request.patch(`/v1/monorepos/${full}`, { data: { description }, headers: { origin: BASE } });
+
+    if (!res.ok()) throw new Error(`describe ${full}: ${res.status()}`);
+  }
+
   // The summary lines (open issues, projects, open branches) tick every 10 s.
   await page.waitForTimeout(11_000);
 

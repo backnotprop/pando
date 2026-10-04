@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,7 @@ func (h *harness) pando(dir, stdin string, args ...string) (string, error) {
 	cmds := map[string]func(*Env, []string) error{
 		"login": Login, "init": Init, "clone": Clone, "worktree": Worktree, "branch": Branch,
 		"diff": Diff, "review": Review, "merge": Merge, "status": Status, "reference": Reference, "members": Members, "monorepo": Monorepo,
+		"auth": Auth,
 	}
 	err = cmds[args[0]](e, args[1:])
 	return out.String(), err
@@ -201,6 +203,29 @@ func TestMonorepoEndToEnd(t *testing.T) {
 		}
 	}
 	h.git(wt, "push", "-q")
+	// The agent name stays hidden (decisions/RULINGS.md): the trailer is
+	// written, but no list, status or help line names an agent.
+	if strings.Contains(out, "Pando-Agent") {
+		t.Errorf("worktree add names the agent:\n%s", out)
+	}
+	if out = h.ok(clone, "worktree", "list"); strings.Contains(out, "AGENT") || slices.Contains(strings.Fields(out), "agent-1") {
+		t.Errorf("worktree list names the agent:\n%s", out)
+	}
+	t.Setenv("PANDO_AGENT", "agent-1")
+	if out = h.ok(clone, "auth", "status"); !strings.Contains(out, "machine: test-box") || strings.Contains(out, "agent") {
+		t.Errorf("auth status names the agent:\n%s", out)
+	}
+	t.Setenv("PANDO_AGENT", "")
+	bin := filepath.Join(h.base, "pando")
+	if b, err := exec.Command("go", "build", "-o", bin, "pando/cmd/pando").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, b)
+	}
+	for _, args := range [][]string{{"help"}, {"worktree"}, {"worktree", "add", "-h"}} {
+		b, _ := exec.Command(bin, args...).CombinedOutput()
+		if !strings.Contains(string(b), "usage: pando") || strings.Contains(strings.ToLower(string(b)), "agent") {
+			t.Errorf("pando %s names an agent:\n%s", strings.Join(args, " "), b)
+		}
+	}
 
 	if _, err := h.pando(clone, "", "worktree", "remove", "projects/app/worktrees/agent-1-oauth"); err != nil {
 		t.Fatalf("a clean, pushed worktree should be removable: %v", err)

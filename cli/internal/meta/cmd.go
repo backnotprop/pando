@@ -227,15 +227,11 @@ func cmdHistory(args []string, stdout, stderr io.Writer) int {
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "VERSION\tWHEN\tWHO\tMACHINE\tWHAT\tCOMMIT")
 	for _, v := range h.Versions {
-		who := v.Author
-		if v.Agent != "" && !strings.Contains(who, v.Agent) {
-			who += " (" + v.Agent + ")"
-		}
 		commit := "pending"
 		if v.Commit != "" {
 			commit = v.Commit[:min(len(v.Commit), 10)]
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", v.Version, v.Time().Local().Format("2006-01-02 15:04:05"), who, v.Machine, describe(v), commit)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", v.Version, v.Time().Local().Format("2006-01-02 15:04:05"), v.Author, v.Machine, describe(v), commit)
 	}
 	tw.Flush()
 	return 0

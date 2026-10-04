@@ -30,6 +30,12 @@ async function apiIssue(m: Machine, body: Record<string, string | string[]>): Pr
   return (await res.json()).number;
 }
 
+/** What the test makes along the way: the sandbox's credential (it deletes the repository at the end) and a second tab. */
+interface Made {
+  sandbox: Machine | null;
+  tab: Page | null;
+}
+
 /** No sideways scroll at the page's width. */
 const fits = (page: Page) => expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(page.viewportSize()?.width);
 
@@ -41,12 +47,12 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
     if (m.type() === "error" && !/status of (401|409|412)/.test(m.text())) errors.push(m.text());
   });
 
-  let sandbox: Machine | null = null;
+  const made: Made = { sandbox: null, tab: null };
 
   const machine = () => {
-    if (!sandbox) throw new Error("no machine credential yet");
+    if (!made.sandbox) throw new Error("no machine credential yet");
 
-    return sandbox;
+    return made.sandbox;
   };
 
   try {
@@ -60,7 +66,7 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
     await test.step("a repository with a project, and a sandbox that acts as the person", async () => {
       await browserPost(page, "/v1/monorepos", { name });
       url = (await browserPost(page, `/v1/monorepos/${full}/repos`, { path: "projects/web" })).clone_url;
-      sandbox = await Machine.make(page, "sandbox-1", "Issue Lane", "sandbox");
+      made.sandbox = await Machine.make(page, "sandbox-1", "Issue Lane", "sandbox");
       const m = machine();
 
       m.push(m.commit("web", url, "main", { "README.md": "# web\n", "src/login.ts": "export const ttl = 15;\n" }, "Start the web project"), url, "main");
@@ -159,13 +165,13 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       await expect(page.getByRole("list", { name: "Issues" }).getByRole("link", { name: "Login fails after token refresh" })).toBeVisible();
     });
 
-    let other: Page | null = null;
-
     await test.step("a branch whose commit says Fixes #1, merged on its page: the issue open in another tab closes live", async () => {
       const m = machine();
 
       m.push(m.commit("web", url, "fix-login", { "src/login.ts": "export const ttl = 15;\nexport const early = true;\n" }, "Set the cookie before the body (fixes #1)"), url, "fix-login");
-      other = await page.context().newPage();
+      const other = await page.context().newPage();
+
+      made.tab = other;
       await other.goto(`${issues}/1`);
       // The commit's link shows in the Development box within about a second of the push.
       await expect(other.getByRole("region", { name: "Development" }).getByRole("link", { name: "fix-login" })).toBeVisible({ timeout: 30_000 });
@@ -183,7 +189,7 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
     });
 
     await test.step("reopened here; closed as not planned with a comment from the other tab, live here", async () => {
-      const there = other;
+      const there = made.tab;
 
       if (!there) throw new Error("no second tab");
       await page.goto(`${issues}/1`);
@@ -276,6 +282,6 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
 
     expect(errors).toEqual([]);
   } finally {
-    await sandbox?.api("DELETE", `/v1/monorepos/${full}?confirm=${full}`);
+    await made.sandbox?.api("DELETE", `/v1/monorepos/${full}?confirm=${full}`);
   }
 });

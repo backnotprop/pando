@@ -410,3 +410,10 @@ html[data-theme^="cloudflare-"] {
   --label-teal: oklch(var(--lb-l) var(--lb-c) 176);
   --label-blue: oklch(var(--lb-l) var(--lb-c) 252);
 }
+/* Black Rainbow's Foxfire is pink (about 328) and its Rust a red: its labels
+   take its spectrum's stronger chroma, and pink turns violet, away from both. */
+html[data-theme="black-rainbow"] {
+  --lb-c: 0.13;
+  --label-purple: oklch(var(--lb-l) var(--lb-c) 268);
+  --label-pink: oklch(var(--lb-l) 0.1 298);
+}

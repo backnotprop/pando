@@ -107,8 +107,9 @@ export function warmGrammars(pool: ReturnType<typeof codePool>): Promise<void> {
 
 // The plain lines' metrics (-code/Lines.tsx, the prototype's .src): the mono
 // face at 12.5/20, 12px above and below, a 52px gutter with the number 18px
-// from the code, no backgrounds, and the numbers scrolling sideways with the
-// code (not pinned over it).
+// from the code (wider for a file of 10,000 lines or more: its digits, 18px,
+// and 3px before them), no backgrounds, and the numbers scrolling sideways
+// with the code (not pinned over it).
 export const CODE_LAYOUT = `
 :host {
   color-scheme: inherit;
@@ -119,7 +120,7 @@ export const CODE_LAYOUT = `
   --diffs-tab-size: 8;
   --diffs-fg-number-override: var(--ash);
 }
-[data-file], [data-diff] { --diffs-grid-number-column-width: 52px; }
+[data-file], [data-diff] { --diffs-grid-number-column-width: max(52px, calc(var(--diffs-min-number-column-width-default, 4ch) + 21px)); }
 pre, code, [data-gutter], [data-content] { background: none; }
 [data-gutter] { position: relative; }
 [data-column-number] { box-sizing: border-box; padding: 0 18px 0 0; border-right: 0; }

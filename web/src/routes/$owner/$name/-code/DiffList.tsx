@@ -28,7 +28,7 @@ const DIFF = `
   --diffs-bg-separator-override: var(--loam);
 }
 [data-line], [data-no-newline], [data-gutter-buffer], [data-column-number] { --mix-dark: 85%; --mix-light: 90%; }
-[data-separator-content] { padding-inline: 52px 0; }
+[data-separator-content] { padding-inline: max(52px, calc(var(--diffs-min-number-column-width-default, 4ch) + 21px)) 0; }
 `;
 
 /** The header the page draws for each file: its height, which the list's layout counts on. */

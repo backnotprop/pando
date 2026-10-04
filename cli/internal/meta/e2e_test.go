@@ -1873,9 +1873,10 @@ func TestE2EApplyFromMainAndReferences(t *testing.T) {
 	}
 }
 
-// Many machines, each its own person, save inside one quiet window.
-// META_COMMIT_SHAPE=window: one commit, the last saver its author, the
-// others Co-authored-by. Default ("author"): one commit per person.
+// Many machines, each its own person, save inside one quiet window. The
+// default grouping ("window", the owner's choice, 2026-10-04): one commit,
+// the last saver its author, the others Co-authored-by.
+// META_COMMIT_GROUPING=author: one commit per person.
 func TestE2ECommitWindow(t *testing.T) {
 	env := artifactsEnv(t, "e2e-window-")
 	server, mono := env.server, env.mono
@@ -1883,7 +1884,7 @@ func TestE2ECommitWindow(t *testing.T) {
 	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
 	shape := os.Getenv("PANDO_META_TEST_SHAPE")
 	if shape == "" {
-		shape = "author"
+		shape = "window"
 	}
 	const n = 10
 	var ms []*machine

@@ -359,15 +359,17 @@ about one commit a minute, git at most about 62 seconds behind for it
 
 Which paths share a commit is one Worker setting, `META_COMMIT_GROUPING`:
 
-- `author` (the default today): paths due within 2 seconds of each other
-  that share an author, machine and agent go in one commit.
-- `window` (ARCHITECTURE C7; waiting for the owner's answer to round 2,
-  question 8): everything due goes in one commit, whoever saved it. The
-  last saver is its author; every other person is a `Co-authored-by:` line,
-  and each agent and machine gets its own `Pando-Agent:` and
-  `Pando-Machine:` line. Measured on Artifacts, ten people saving inside one
-  window: one commit, everything committed 11 s after the saves, against ten
-  commits and 25 s with `author`.
+- `window` (the default, the owner's choice, 2026-10-04; `wrangler.jsonc`
+  sets it): everything due goes in one commit, whoever saved it. The last
+  saver is its author; every other person is a `Co-authored-by:` line, and
+  each agent and machine gets its own `Pando-Agent:` and `Pando-Machine:`
+  line. Measured on Artifacts, ten people saving inside one window: one
+  commit, everything committed 11 s after the saves, against ten commits
+  and 25 to 27 s with `author`.
+- `author`: paths due within 2 seconds of each other that share an author,
+  machine and agent go in one commit. It falls behind past about 0.7
+  different savers a second, and can keep a file saved often waiting
+  behind other people's commits.
 
 - A commit holds at most 1,000 files and about 24 MiB, so a big first
   upload becomes several commits.

@@ -1498,10 +1498,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!due.length) return this.scheduleCommit();
 
     // Paths due together share a commit, up to COMMIT_FILES files and about
-    // COMMIT_BYTES bytes: all of them ("window"), or those with the first
-    // one's author, machine and agent ("author", the default).
+    // COMMIT_BYTES bytes: all of them ("window", the default), or those with
+    // the first one's author, machine and agent ("author").
     const first = this.row(due[0].version);
-    const window = this.env.META_COMMIT_GROUPING === "window";
+    const window = this.env.META_COMMIT_GROUPING !== "author";
     const key = (r: VersionRow) => (window ? "" : JSON.stringify([r.author, r.machine, r.agent]));
     const rows: VersionRow[] = [];
     let bytes = 0;

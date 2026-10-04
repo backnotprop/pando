@@ -18,10 +18,11 @@ export interface CommitEnv {
   /** The monorepo object, which holds the repo's write token (absent in the live lane's test Worker). */
   MONOREPO?: DurableObjectNamespace<import("../monorepo/object").MonorepoObject>;
   // How meta layer saves become commits (meta-sync.md, "Commits after quiet"):
-  // "author" (default): what is due together and shares an author, machine
-  //   and agent is one commit;
-  // "window": everything due is one commit; the last saver is its author and
-  //   the others are Co-authored-by trailers (ARCHITECTURE C7, owner question 8).
+  // "window" (the default, the owner's choice, 2026-10-04): everything due is
+  //   one commit; the last saver is its author and the others are
+  //   Co-authored-by trailers;
+  // "author": what is due together and shares an author, machine and agent
+  //   is one commit.
   META_COMMIT_GROUPING?: string;
   // A path is committed after 10 s with no save, or at the latest this many
   // ms after its first save not yet in git (default 60000: a file saved every

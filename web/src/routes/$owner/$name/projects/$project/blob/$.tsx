@@ -9,6 +9,6 @@ export const Route = createFileRoute("/$owner/$name/projects/$project/blob/$")({
   component: function File() {
     const { repo } = Route.useRouteContext();
 
-    return <ProjectFile repo={repo} path={Route.useParams()._splat ?? ""} gitRef={Route.useLoaderDeps().ref} />;
+    return <ProjectFile repo={repo} path={Route.useParams()._splat ?? ""} gitRef={Route.useLoaderDeps().ref} plain={Route.useSearch().plain === "1"} />;
   },
 });

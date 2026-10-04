@@ -14,5 +14,8 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"],
+  // Checked by tsconfig.doc.json: it imports @plannotator/ui, whose sources
+  // TypeScript would check under this file's noUncheckedIndexedAccess.
+  "exclude": ["src/ui/doc/PlannotatorDoc.tsx"]
 }

@@ -57,6 +57,13 @@ const worker = process.env.PANDO_DEV_WORKER ?? "http://localhost:8871";
 
 export default defineConfig({
   plugins: [sfFonts(), tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), tailwindcss()],
+  resolve: {
+    // Plannotator's HTML viewer loads its bridge script as a file
+    // (bridgeScriptUrl, src/ui/doc/PlannotatorDoc.tsx; the app's CSP allows no
+    // inline script), so the package's 185 KB inline copy is left out of the
+    // chunk (its README, "The bridge script as an asset").
+    alias: [{ find: /^\.\/bridge-script$/, replacement: "@plannotator/ui/components/html-viewer/bridge-script.lite" }],
+  },
   server: {
     proxy: {
       "/v1": { target: worker, ws: true, changeOrigin: true, headers: { origin: worker } },

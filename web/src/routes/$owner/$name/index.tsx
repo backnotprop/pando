@@ -1,7 +1,7 @@
 // A monorepo opens on its code: the root folder with Clone, its README (or
 // AGENTS.md), and a quiet side column (what needs you here, the projects, the
 // latest activity). A plain repo opens on its code at a ref, as a project does.
-import type { NeedRow } from "@pando/contract";
+import { type NeedRow, Routes } from "@pando/contract";
 import { useQueries, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { refSearch } from "../../../api/search";
@@ -11,7 +11,7 @@ import { activityQuery, fileQuery, headsQuery, latestQuery, monorepoQuery, needs
 import { MiniActivity } from "../../../ui/activity";
 import { Empty, Lnk, SectionHead } from "../../../ui/controls";
 import { RepoIcon } from "../../../ui/Icons";
-import { branchLink, repoLink, tabLink, treeLink } from "../../../ui/paths";
+import { blobLink, branchLink, repoLink, tabLink, treeLink } from "../../../ui/paths";
 import { NeedState } from "../../-home/NeedsList";
 import { Clone } from "./-code/Clone";
 import { FileList, Readme, versionBar } from "./-code/FileList";
@@ -48,7 +48,7 @@ function useOpenCounts(monorepo: MonorepoRef, repos: readonly Repo[]) {
 function ReadmeFor({ monorepo, path }: { monorepo: MonorepoRef; path: string }) {
   const text = useSuspenseQuery(fileQuery(monorepo, path, null)).data.text;
 
-  return text === null ? null : <Readme name={path} text={text} />;
+  return text === null ? null : <Readme path={path} text={text} raw={Routes.metaRawPath(monorepo.owner, monorepo.name, path, null)} fileLink={(p) => blobLink(monorepo.full, p)} />;
 }
 
 function Side({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonly Repo[]; open: (number | undefined)[] }) {

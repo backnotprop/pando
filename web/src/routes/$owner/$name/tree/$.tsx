@@ -1,12 +1,13 @@
 // One folder of the root files, as a list with `..` to go up, and its README.
 // `projects/` lists the monorepo's code repos. In a plain repo, a folder of
 // its code at a ref.
+import { Routes } from "@pando/contract";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { fileQuery, headsQuery, treeQuery } from "../../../../api/queries";
 import { refSearch } from "../../../../api/search";
 import { Empty } from "../../../../ui/controls";
-import { tabLink, treeLink } from "../../../../ui/paths";
+import { blobLink, tabLink, treeLink } from "../../../../ui/paths";
 import { FileList, Readme, type Row, versionBar } from "../-code/FileList";
 import { folderRows, newest, projectRows, readmeOf } from "../-code/rows";
 import { MonorepoHead, usePlainRepo } from "../-frame/heads";
@@ -64,7 +65,7 @@ function FolderReadme({ path }: { path: string }) {
   const { monorepo } = Route.useRouteContext();
   const text = useSuspenseQuery(fileQuery(monorepo, path, null)).data.text;
 
-  return text === null ? null : <Readme name={path.slice(path.lastIndexOf("/") + 1)} text={text} />;
+  return text === null ? null : <Readme path={path} text={text} raw={Routes.metaRawPath(monorepo.owner, monorepo.name, path, null)} fileLink={(p) => blobLink(monorepo.full, p)} />;
 }
 
 function Folder() {

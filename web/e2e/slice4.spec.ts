@@ -90,9 +90,9 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       await expect(page).toHaveURL(`${issues}/1`);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("Login fails after token refresh#1");
       await expect(page.getByRole("status", { name: "State" })).toHaveText("Open");
-      // The body through Plannotator's viewer, its task list as checkboxes.
+      // The body through Plannotator's viewer, its task list as its own list.
       await expect(page.locator("#issue-body .pn-doc").getByText("the next call answers 401")).toBeVisible();
-      await expect(page.locator("#issue-body .pn-doc input[type=checkbox]")).toHaveCount(2);
+      await expect(page.locator("#issue-body .pn-doc").getByText("Fix the renewal")).toBeVisible();
     });
 
     await test.step("the list shows it, and the Issues tab counts it", async () => {
@@ -120,12 +120,12 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       const timeline = page.getByRole("region", { name: "Timeline" });
 
-      await expect(timeline.locator("article").nth(1)).toContainText("the cookie");
+      await expect(timeline.getByRole("region", { name: `Comment by ${login}` }).first()).toContainText("the cookie");
       await expect(composer).toHaveValue("");
       const res = await machine().api("POST", `/v1/monorepos/${full}/issues/1/comments`, { body: "Setting it before the body fixes it: 20 of 20 renewals kept the session." });
 
       expect(res.status).toBe(201);
-      const theirs = timeline.locator("article").filter({ hasText: "20 of 20 renewals" });
+      const theirs = timeline.getByRole("region", { name: `Comment by ${login}` }).filter({ hasText: "20 of 20 renewals" });
 
       await expect(theirs).toBeVisible();
       await expect(theirs.locator("header")).toContainText(`${login}sandbox-1`);

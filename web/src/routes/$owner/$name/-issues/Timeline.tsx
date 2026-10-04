@@ -115,7 +115,7 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
   const href = absolute(`/${monorepo.full}/issues/${n}${isBody ? "" : `#${anchor}`}`);
 
   return (
-    <article id={anchor} className={`relative mb-[18px] rounded-[10px] border border-rootline bg-soil ${fresh ? "arrived" : ""}`}>
+    <section id={anchor} aria-label={isBody ? "Description" : `Comment by ${said.author}`} className={`relative mb-[18px] rounded-[10px] border border-rootline bg-soil ${fresh ? "arrived" : ""}`}>
       <header className="flex min-h-[42px] items-center gap-2.5 rounded-t-[10px] border-b border-rule-faint bg-loam px-3.5 py-2 text-[13.5px] text-ash">
         <Avatar name={said.author} size={20} />
         <span className="fox-cool font-semibold text-bark">{said.author}</span>
@@ -201,7 +201,7 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
           />
         </div>
       )}
-    </article>
+    </section>
   );
 }
 

@@ -2,11 +2,11 @@
 // files at a ref, its branches and a branch's page. Keys sit under
 // ["m", owner, name, "r", repo], so a line on the monorepo's socket can
 // refresh one repo's data.
-import { type CiBuild, type CiJob, type Repo, type RepoName, Routes } from "@pando/contract";
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { type BranchDiffLine, type ChangedFile, type CiBuild, type CiJob, decodeBranchDiffLine, type Repo, type RepoName, Routes } from "@pando/contract";
+import { infiniteQueryOptions, queryOptions, experimental_streamedQuery as streamedQuery } from "@tanstack/react-query";
 import type * as Schema from "effect/Schema";
 import { codeRawHref } from "../ui/paths";
-import { get, getText, isMissing } from "./client";
+import { get, getLines, getText, isMissing } from "./client";
 import type { MonorepoRef } from "./names";
 
 /** Reads a route the contract names: its path and the schema of its answer. */
@@ -32,13 +32,49 @@ export const branchQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
 export const commitsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({ queryKey: [...repoKey(m, repo), "branch", branch, "commits"], queryFn: () => read(Routes.branchCommits(m.owner, m.name, repo, branch)) });
 
+type DiffLine = typeof BranchDiffLine.Type;
+
+/** Files changed as far as it has come: its start (the ends, how many files), its files in path order, its end, or why it stopped. */
+export interface FilesSoFar {
+  start: Extract<DiffLine, { type: "start" }> | null;
+  files: readonly ChangedFile[];
+  end: Extract<DiffLine, { type: "end" }> | null;
+  error: string | null;
+}
+
+const NONE_YET: FilesSoFar = { start: null, files: [], end: null, error: null };
+
+function withLines(so: FilesSoFar, lines: readonly DiffLine[]): FilesSoFar {
+  const next = { ...so, files: [...so.files] };
+
+  for (const line of lines) {
+    if (line.type === "start") next.start = line;
+    else if (line.type === "file") next.files.push(line);
+    else if (line.type === "end") next.end = line;
+    else next.error = line.message;
+  }
+
+  return next;
+}
+
 /**
  * Files changed: the branch's head against its merge base with main, each file
- * with its patch. Read again when a row brings a new head (live/rows.ts); the
- * browser revalidates it by its ETag (main and head), a 304 when nothing moved.
+ * with its patch, streamed so a branch of thousands of files draws its first
+ * ones at once (the data grows as lines arrive). Read again when a row brings a
+ * new head (live/rows.ts), keeping what shows until the new answer is whole;
+ * the browser revalidates it by its ETag (main and head), a 304 when nothing
+ * moved.
  */
 export const branchDiffQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
-  queryOptions({ queryKey: [...repoKey(m, repo), "branch", branch, "diff"], queryFn: () => read(Routes.branchDiff(m.owner, m.name, repo, branch)) });
+  queryOptions({
+    queryKey: [...repoKey(m, repo), "branch", branch, "diff"],
+    queryFn: streamedQuery({
+      streamFn: ({ signal }) => getLines(Routes.branchDiffStream(m.owner, m.name, repo, branch).path, decodeBranchDiffLine, signal),
+      reducer: withLines,
+      initialValue: NONE_YET,
+      refetchMode: "replace",
+    }),
+  });
 
 export const reviewsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({

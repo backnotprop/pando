@@ -2126,25 +2126,39 @@ paths:
       description: |
         Computed in the Worker from Artifacts reads, with no clone: the merge
         base, a walk of the two trees that skips equal subtrees, the changed
-        blobs only, and a Myers line diff. Exact renames (the same blob moved)
-        show as `renamed`; there is no similarity rename detection.
+        blobs only, and a line diff (patience, then bounded Myers between its
+        anchors, as `git diff --patience`). Exact renames (the same blob
+        moved) show as `renamed`; there is no similarity rename detection.
 
         `max_bytes` bounds the bytes of hunk lines returned. Files past the
         budget keep their entry with `patch_omitted: budget`. A text file over
-        1 MiB on either side, or one whose diff is too big to compute, has
-        `patch_omitted: too_large` and null counts.
+        8 MiB on either side has `patch_omitted: too_large` and null counts.
 
-        **Files changed** (`patches=1`, the web's branch page): the answer is
-        a `BranchDiff`, each file with its own unified patch in git's format
-        (`patch`, ready for a diff view such as @pierre/diffs' `processFile`),
-        or null when left out: a binary (a NUL in the first 8,000 bytes), a
-        text file over 1 MiB on either side, a diff too big to compute (an
-        edit script over 20,000), or past 2 MiB of patches in all. At most
-        1,000 files are listed (`too_many_files`, with `files_total`). Main
-        and the head come from Pando's stored heads; the answer is kept by
-        (main, head), which never changes, so a repeat costs no Artifacts read,
-        and `ETag` is the two shas (a repeat with `If-None-Match` is a 304).
-        `format`, `hunks`, `max_bytes` and `paths` do not apply.
+        **Files changed** (`patches=1`): the answer is a `BranchDiff`, each
+        file with its own unified patch in git's format (`patch`, ready for a
+        diff view such as @pierre/diffs' `processFile`), or null when left
+        out: a binary (a NUL in the first 8,000 bytes), a text file over 8 MiB
+        on either side, or past 2 MiB of patches in all. At most 1,000 files
+        are listed (`too_many_files`, with `files_total`). Main and the head
+        come from Pando's stored heads; the answer is kept by (main, head),
+        which never changes, so a repeat costs no Artifacts read, and `ETag`
+        is the two shas (a repeat with `If-None-Match` is a 304). `format`,
+        `hunks`, `max_bytes` and `paths` do not apply.
+
+        **Files changed, streamed** (`patches=1&stream=1`, the web's branch
+        page, for a branch of any size): `application/x-ndjson`, one
+        `BranchDiffLine` a line, each sent as soon as it is known: `start`
+        (the ends, the merge base, `files_total`, `too_many_files`), then one
+        `file` per changed file (a `DiffFile` with its `patch`) in a file tree's order
+        (folders before files at each level, by name), then `end` (`stats`,
+        `truncated`); `error` if the diff fails after its start. At most 5,000
+        files, and 32 MiB of patches in all. Each pair of blobs diffed is kept
+        in R2, so the next head of a branch reads only the pairs a push
+        changed; the whole answer is kept by (main, head) once streamed, and
+        streamed from there after with the same `ETag` and 304. An answer
+        being computed has no `ETag` (`Cache-Control: no-store`): it may stop
+        part way, with an `error` line, and the next request goes on from the
+        pairs already kept.
       tags: [branches]
       parameters:
         - name: format
@@ -2169,6 +2183,10 @@ paths:
           in: query
           description: "`1`: Files changed, a `BranchDiff` (see above)."
           schema: { type: string, enum: ["0", "1"], default: "0" }
+        - name: stream
+          in: query
+          description: "`1` with `patches=1`: Files changed as NDJSON, a `BranchDiffLine` a line (see above)."
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: |
@@ -2183,6 +2201,8 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/Diff"
                   - $ref: "#/components/schemas/BranchDiff"
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/BranchDiffLine" }
             text/x-patch:
               schema: { type: string }
         "304": { description: "`patches=1` with `If-None-Match` naming this (main, head)." }
@@ -4067,6 +4087,43 @@ components:
         files:
           type: array
           items: { $ref: "#/components/schemas/DiffFile" }
+    BranchDiffLine:
+      description: "One line of the streamed Files changed (`patches=1&stream=1`), by `type`."
+      oneOf:
+        - type: object
+          required: [type, base_branch, base, head, merge_base, files_total, too_many_files]
+          properties:
+            type: { type: string, enum: [start] }
+            base_branch: { type: string }
+            base: { type: string }
+            head: { type: string }
+            merge_base: { type: string }
+            files_total: { type: integer, description: Every changed file, listed or not. }
+            too_many_files: { type: boolean, description: More than 5,000 files changed; the first 5,000 in tree order are listed. }
+        - allOf:
+            - { $ref: "#/components/schemas/DiffFile" }
+            - type: object
+              required: [type, patch]
+              properties:
+                type: { type: string, enum: [file] }
+                patch: { type: [string, "null"], description: "This file's unified patch in git's format; null when `patch_omitted` is set." }
+        - type: object
+          required: [type, truncated, stats]
+          properties:
+            type: { type: string, enum: [end] }
+            truncated: { type: boolean, description: "Some patches were left out past 32 MiB in all (`patch_omitted: budget`)." }
+            stats:
+              type: object
+              properties:
+                files: { type: integer }
+                additions: { type: integer }
+                deletions: { type: integer }
+        - type: object
+          required: [type, code, message]
+          properties:
+            type: { type: string, enum: [error] }
+            code: { type: string }
+            message: { type: string }
     BranchDiff:
       type: object
       required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]

@@ -9,10 +9,10 @@ import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from 
 import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
-import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
+import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
-import { filePatch, toPatch, treeDiff, type BranchDiff, type ShownFile } from "./diff";
+import { type DiffPlan, filePatch, fileDiffs, hunkBytes, isDropped, type PairCache, type PairDiff, planDiff, statsOf, toPatch, treeDiff, type BranchDiff, type ShownFile } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
 import type { BranchList } from "./views";
@@ -897,28 +897,23 @@ const SHOWN_FILES_MAX = 1_000;
 const SHOWN_PATCH_BYTES = 2 << 20;
 
 /**
+ * Files changed, streamed (`?patches=1&stream=1`): at most this many files and
+ * this many bytes of patches in all (owner limits). The patches are kept whole
+ * in memory to store the answer in R2 once streamed, so the byte budget stays
+ * well inside a Worker's 128 MB.
+ */
+const STREAM_FILES_MAX = 5_000;
+
+const STREAM_PATCH_BYTES = 32 << 20;
+
+/**
  * Files changed (`?patches=1`): each file with its own unified patch, for the
  * web's diff view. Main and the head come from the stored heads; the answer
  * is kept by (main, head), since their merge base never changes, and read
  * through the edge cache. ETag: the two shas.
  */
 async function filesChanged(c: C, r: RepoRecord, branch: string): Promise<Response> {
-  const stub = c.get("stub");
-  let [head, main] = await Promise.all([stub.refHead(r.name, branch), stub.refHead(r.name, r.default_branch)]);
-
-  if (!head || !main) {
-    const refs = branchesOf(await listRefs(c.env, r));
-    head ??= refs.get(branch) ?? null;
-    main ??= refs.get(r.default_branch) ?? null;
-  }
-
-  if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
-
-  // A merged branch keeps its changes, as GitHub keeps a merged pull request's: against main just before the merge (the
-  // merge commit's first parent), not today's main, which holds the head.
-  main = (await stub.mergedFrom(r.name, branch, head)) ?? main;
-
-  if (!main) throw new HttpError(409, "no_main", `${r.default_branch} does not exist yet`);
+  const { head, main } = await diffEnds(c, r, branch);
   const tag = `${main}.${head}`;
   const headers = { etag: `"${tag}"`, "cache-control": "private, no-cache" };
 
@@ -952,7 +947,173 @@ async function filesChanged(c: C, r: RepoRecord, branch: string): Promise<Respon
   return c.json(answer satisfies typeof Contract.BranchDiff.Encoded, 200, headers);
 }
 
+/** The branch's head and the main it is compared against (a merged branch: main just before its merge). */
+async function diffEnds(c: C, r: RepoRecord, branch: string): Promise<{ head: string; main: string }> {
+  const stub = c.get("stub");
+  let [head, main] = await Promise.all([stub.refHead(r.name, branch), stub.refHead(r.name, r.default_branch)]);
+
+  if (!head || !main) {
+    const refs = branchesOf(await listRefs(c.env, r));
+    head ??= refs.get(branch) ?? null;
+    main ??= refs.get(r.default_branch) ?? null;
+  }
+
+  if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
+  main = (await stub.mergedFrom(r.name, branch, head)) ?? main;
+
+  if (!main) throw new HttpError(409, "no_main", `${r.default_branch} does not exist yet`);
+
+  return { head, main };
+}
+
+/**
+ * Files changed, streamed (`?patches=1&stream=1`), for a large branch: NDJSON,
+ * one line as soon as each part is known. A "start" line (the ends, the merge
+ * base, how many files changed), then one "file" line per file in path order
+ * (a ShownFile: its row and its patch), then an "end" line (stats, whether
+ * patches were left out for the budget); an "error" line if the diff fails
+ * after the start. The files come in a file tree's order (folders first), as
+ * the web's tree lists them. Kept in R2 by (main, head) once complete, and
+ * streamed from there after, with the two shas as its ETag; an answer being
+ * computed has none (no-store), since it may stop part way.
+ */
+/**
+ * Two blobs' diff, kept in R2 by repo and blobs (`pairs/`), so a branch's next
+ * head, another branch or a reload reads only pairs not diffed before. Writes
+ * go on in the background; `writes` holds them until they land.
+ */
+function pairCache(env: Env, artifacts: string, writes: Promise<unknown>[]): PairCache | undefined {
+  const bucket = env.CACHE;
+
+  if (!bucket) return undefined;
+  const key = (a: string | null, b: string | null) => `pairs/${artifacts}/${a ?? "none"}..${b ?? "none"}.json`;
+
+  return {
+    get: async (a, b) => {
+      const kept = await bucket.get(key(a, b));
+
+      return kept ? kept.json<PairDiff>() : null;
+    },
+    put: (a, b, d) => {
+      writes.push(bucket.put(key(a, b), JSON.stringify(d)).catch(() => {}));
+    },
+  };
+}
+
+/** The streamed diff's reader went away: the work stops, quietly. */
+class ReaderLeft extends Error {}
+
+async function filesChangedStream(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  const { head, main } = await diffEnds(c, r, branch);
+  const tag = `${main}.${head}`;
+  const type = "application/x-ndjson; charset=utf-8";
+  const stored = `answers/${r.artifacts_name}/${files.answerKey("diff", head, main)}.ndjson`;
+
+  // Only a whole answer carries the ETag (and its 304): one being computed may stop part way, and must not be kept.
+  if (await c.env.CACHE?.head(stored)) {
+    const kept = { etag: `"${tag}"`, "cache-control": "private, no-cache" };
+
+    if (files.matchesEtag(c.req.header("if-none-match") ?? null, tag)) return new Response(null, { status: 304, headers: kept });
+    const body = await c.env.CACHE?.get(stored);
+
+    if (body) return new Response(body.body, { headers: { ...kept, "content-type": type } });
+  }
+
+  const headers = { "cache-control": "no-store", "content-type": type };
+
+  // The merge base first, so a branch with no shared history is an HTTP error, not a broken stream.
+  const mergeBase = await withRepo(c.env, r.artifacts_name, async (repo) => (await compareWith(commitReader(repo), main, head)).mergeBase);
+
+  if (!mergeBase) throw new HttpError(409, "no_merge_base", `${branch} shares no history with ${r.default_branch}`);
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const lines: Uint8Array[] = [];
+  const writes: Promise<unknown>[] = [];
+  const cache = pairCache(c.env, r.artifacts_name, writes);
+
+  // Lines are written as they are made, never waiting on the reader: a response nobody reads (a page that left before
+  // it came) would otherwise hold the work forever. The bytes are kept for R2 anyway, so the queue costs nothing more.
+  // Once the reader goes away (the page closed, the read cancelled), the stream errors and the work stops.
+  const left = { yes: false };
+
+  writer.closed.catch(() => {
+    left.yes = true;
+  });
+
+  const send = (line: typeof Contract.BranchDiffLine.Encoded) => {
+    if (left.yes) throw new ReaderLeft();
+    const bytes = encoder.encode(JSON.stringify(line) + "\n");
+
+    lines.push(bytes);
+    writer.write(bytes).catch(() => {});
+  };
+
+  // The plan, then the files from where the last attempt stopped: a dropped Artifacts session (it fails every read on it)
+  // is opened again, up to three times in all, and the pairs already diffed come back from R2.
+  let plan: DiffPlan | null = null;
+  let sent = 0;
+  let used = 0;
+  const listed: ShownFile[] = [];
+
+  const attempt = () =>
+    withRepo(c.env, r.artifacts_name, async (repo) => {
+      if (!plan) {
+        const read = commitReader(repo);
+        const [from, to] = await Promise.all([read(mergeBase), read(head)]);
+
+        plan = await planDiff(repo, from.tree, to.tree, { paths: [], maxFiles: STREAM_FILES_MAX, order: "tree" });
+        send({ type: "start", base_branch: r.default_branch, base: main, head, merge_base: mergeBase, files_total: plan.files_total, too_many_files: plan.too_many_files });
+      }
+
+      const rest = { ...plan, pairs: plan.pairs.slice(sent) };
+
+      for await (const { hunks, ...f } of fileDiffs(repo, rest, { hunks: true, maxBytes: STREAM_PATCH_BYTES - used }, cache)) {
+        const shown: ShownFile = { ...f, patch: f.patch_omitted ? null : filePatch(f, hunks ?? []) };
+
+        used += hunks ? hunkBytes(hunks) : 0;
+        listed.push({ ...shown, patch: null });
+        send({ type: "file", ...shown });
+        sent++;
+      }
+    });
+
+  const run = timed("api", { route: "diff-stream", repo: r.name, artifacts: r.artifacts_name }, async () => {
+    for (let tries = 1; ; tries++) {
+      try {
+        await attempt();
+        break;
+      } catch (err) {
+        if (tries === 3 || !(err instanceof Error) || !isDropped(err)) throw err;
+        console.warn({ msg: "pando.diff-stream", repo: r.name, resumed_after: sent, error: err.message });
+      }
+    }
+
+    send({ type: "end", truncated: listed.some((f) => f.patch_omitted === "budget"), stats: statsOf(listed) });
+    writer.close().catch(() => {});
+  })
+    // The whole answer kept for (main, head), and every pair diffed.
+    .then(() => Promise.all([c.env.CACHE?.put(stored, new Blob(lines), { httpMetadata: { contentType: type } }), ...writes]))
+    .catch((err: Error) => {
+      if (err instanceof ReaderLeft) return Promise.all(writes);
+      console.error("diff stream failed", err);
+
+      if (!left.yes) {
+        send({ type: "error", code: "diff_failed", message: err.message });
+        writer.close().catch(() => {});
+      }
+
+      return Promise.all(writes);
+    });
+
+  c.executionCtx.waitUntil(run);
+
+  return new Response(readable, { headers });
+}
+
 async function diff(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  if (c.req.query("patches") === "1" && c.req.query("stream") === "1") return filesChangedStream(c, r, branch);
+
   if (c.req.query("patches") === "1") return filesChanged(c, r, branch);
   const format = c.req.query("format") ?? "json";
 

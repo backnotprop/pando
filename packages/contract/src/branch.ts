@@ -124,7 +124,7 @@ export const ChangedFile = Schema.Struct({
   /** Null for a binary or a file too large to diff. */
   additions: Schema.NullOr(Count),
   deletions: Schema.NullOr(Count),
-  /** Why `patch` is null: a binary, over 1 MiB a side or too big to diff, or past 2 MiB of patches in all. */
+  /** Why `patch` is null: a binary, over 8 MiB a side, or past the budget of patches in all (2 MiB; 32 MiB streamed). */
   patch_omitted: Schema.optionalKey(Schema.Literals(["binary", "too_large", "budget"])),
   /** This file's unified patch in git's format (for @pierre/diffs' processFile); null when `patch_omitted` is set. */
   patch: Schema.NullOr(Schema.String),
@@ -155,6 +155,37 @@ export const BranchDiff = Schema.Struct({
 });
 
 export interface BranchDiff extends Schema.Schema.Type<typeof BranchDiff> {}
+
+/**
+ * GET .../branches/{branch}/diff?patches=1&stream=1: Files changed for a large
+ * branch, as NDJSON, one line as each part is known: "start", then one "file"
+ * per changed file in path order (at most 5,000), then "end"; "error" if the
+ * diff fails after its start. Patches stop at 32 MiB in all.
+ */
+export const BranchDiffLine = Schema.Union([
+  Schema.Struct({
+    type: Schema.tag("start"),
+    base_branch: Schema.String,
+    base: Sha,
+    head: Sha,
+    merge_base: Sha,
+    /** Every changed file, listed or not. */
+    files_total: Count,
+    /** More than 5,000 files changed: the first 5,000 by path are listed. */
+    too_many_files: Schema.Boolean,
+  }),
+  Schema.Struct({ type: Schema.tag("file"), ...ChangedFile.fields }),
+  Schema.Struct({
+    type: Schema.tag("end"),
+    /** Some patches were left out past the budget (`patch_omitted: budget`). */
+    truncated: Schema.Boolean,
+    /** Of the listed files. */
+    stats: Schema.Struct({ files: Count, additions: Count, deletions: Count }),
+  }),
+  Schema.Struct({ type: Schema.tag("error"), code: Schema.String, message: Schema.String }),
+]);
+
+export type BranchDiffLine = typeof BranchDiffLine.Type;
 
 export const ReviewComment = Schema.Struct({
   path: Schema.String,

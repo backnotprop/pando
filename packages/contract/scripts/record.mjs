@@ -519,6 +519,19 @@ try {
     record(file, schema, route, r.status, r.json);
   }
 
+  // Files changed streamed (NDJSON, one BranchDiffLine a line): its start, a file and its end, each recorded as a line.
+  {
+    const res = await fetch(`${BASE}${repoPath}/branches/feat%2Fready/diff?patches=1&stream=1`, { headers: { authorization: `Bearer ${secret}` } });
+    const lines = (await res.text()).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+    for (const type of ["start", "file", "end"]) {
+      const line = lines.find((l) => l.type === type);
+
+      if (!line) throw new Error(`the streamed Files changed has no ${type} line`);
+      record(`branch-diff-stream-${type}.json`, "BranchDiffLine", `GET .../branches/{branch}/diff?patches=1&stream=1 (a ${type} line)`, res.status, line);
+    }
+  }
+
   // Merges: the forced one from before; a refused one (ci/test failed: 412 with checks); a clean one.
   record("merge-forced.json", "MergeResult", "POST .../branches/{branch}/merge?force=1", merged.status, merged.json);
   r = await call("POST", `${repoPath}/branches/feat%2Ffailing/merge?force=0`, secret, { expected_head: failingHead });

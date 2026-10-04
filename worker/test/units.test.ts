@@ -8,6 +8,7 @@ import { pandoTrailers } from "../src/monorepo/views";
 import { compareWith, walkAhead, walkStart, type CommitInfo, type CommitReader, type Frontier } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
 import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection, refusal } from "../src/monorepo/pktline";
+import { diffLines, type Hunk } from "../src/monorepo/linediff";
 import { coAuthorEmails } from "../src/monorepo/trailers";
 import type { StatusRecord } from "../src/monorepo/types";
 import { hasCode, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../src/parse";
@@ -592,6 +593,76 @@ describe("closing keywords (issues/refs.ts)", () => {
   it("skips code, and a revert", async () => {
     expect(await refs("Use `fixes #1` here\n```\nfixes #2\n```\nfixes #3")).toEqual([3]);
     expect(await refs('Revert "Fix login (fixes #34)"\n\nThis reverts commit 3f9a2c1.')).toEqual([]);
+  });
+});
+
+describe("the line diff (monorepo/linediff.ts)", () => {
+  /** Applies hunks to a text, checking every kept and removed line, as git apply would. */
+  function apply(old: string, hunks: Hunk[]): string {
+    const lines = old.length ? old.split(/(?<=\n)/) : [];
+    const out: string[] = [];
+    let i = 0;
+
+    for (const h of hunks) {
+      for (const stop = h.old_lines === 0 ? h.old_start : h.old_start - 1; i < stop; ) out.push(lines[i++] ?? "");
+
+      for (let k = 0; k < h.lines.length; k++) {
+        const line = h.lines[k] ?? "";
+        const text = line.slice(1) + (h.lines[k + 1] === "\\ No newline at end of file" ? "" : "\n");
+
+        if (line[0] === "+") out.push(text);
+        else if (line[0] === " " || line[0] === "-") {
+          expect(lines[i]).toBe(text);
+
+          if (line[0] === " ") out.push(text);
+          i++;
+        }
+      }
+    }
+
+    while (i < lines.length) out.push(lines[i++] ?? "");
+
+    return out.join("");
+  }
+
+  it("writes git's hunks: numbering, context, removals before additions, and the no-newline marker", () => {
+    expect(diffLines("", "")).toEqual([]);
+    expect(diffLines("", "a\n")).toEqual([{ old_start: 0, old_lines: 0, new_start: 1, new_lines: 1, lines: ["+a"] }]);
+    expect(diffLines("a\n", "")).toEqual([{ old_start: 1, old_lines: 1, new_start: 0, new_lines: 0, lines: ["-a"] }]);
+    expect(diffLines("a", "a\n")).toEqual([{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, lines: ["-a", "\\ No newline at end of file", "+a"] }]);
+    expect(diffLines("a\nb\nc\n", "a\nc\n")).toEqual([{ old_start: 1, old_lines: 3, new_start: 1, new_lines: 2, lines: [" a", "-b", " c"] }]);
+    const ten = Array.from({ length: 16 }, (_, i) => `${i + 1}\n`);
+    const changed = ten.map((l, i) => (i === 2 ? "X\n" : i === 11 ? "Y\n" : l));
+
+    // Two changes more than six kept lines apart are two hunks, each with three lines of context.
+    expect(diffLines(ten.join(""), changed.join("")).map((h) => [h.old_start, h.old_lines, h.new_start, h.new_lines])).toEqual([
+      [1, 6, 1, 6],
+      [9, 7, 9, 7],
+    ]);
+  });
+
+  it("gives hunks that apply, for many random edits", () => {
+    let seed = 1;
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+
+    for (let t = 0; t < 1000; t++) {
+      const a = Array.from({ length: Math.floor(rand() * 40) }, () => `${"abcde"[Math.floor(rand() * 5)]}\n`).join("") + (rand() < 0.3 ? "z" : "");
+      const b = [...a].map((ch) => (ch !== "\n" && rand() < 0.15 ? "abcde"[Math.floor(rand() * 5)] : ch)).join("") + (rand() < 0.2 ? "q\nr" : "");
+
+      expect(apply(a, diffLines(a, b))).toBe(b);
+    }
+  });
+
+  it("diffs 10,000 changed lines of 100,000 in well under a second (jsdiff took seconds)", () => {
+    const rows = Array.from({ length: 100_000 }, (_, i) => `${i},row\n`);
+    const a = rows.join("");
+    const b = rows.map((r, i) => (i % 10 === 0 ? `${i},changed\n` : r)).join("");
+    const start = performance.now();
+    const hunks = diffLines(a, b);
+
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(hunks.reduce((n, h) => n + h.lines.filter((l) => l[0] === "+").length, 0)).toBe(10_000);
+    expect(apply(a, hunks)).toBe(b);
   });
 });
 

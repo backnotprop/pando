@@ -1,0 +1,14 @@
+{
+  "schema": "BranchDiffLine",
+  "route": "GET .../branches/{branch}/diff?patches=1&stream=1 (a end line)",
+  "status": 200,
+  "body": {
+    "type": "end",
+    "truncated": false,
+    "stats": {
+      "files": 1,
+      "additions": 1,
+      "deletions": 0
+    }
+  }
+}

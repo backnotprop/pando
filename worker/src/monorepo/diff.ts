@@ -1,9 +1,13 @@
 // The branch diff (GitHub's three-dot diff): from the merge base's tree to the
 // head's tree, read through the Artifacts binding with no clone. Equal
-// subtrees are skipped; only changed blobs are read; text is diffed with
-// Myers (jsdiff), bounded by a byte budget.
+// subtrees are skipped; only changed blobs are read; text is diffed line by
+// line (linediff.ts: patience, then bounded Myers), bounded by a byte budget.
+// The files come out in path order as they are diffed (`fileDiffs`), so a
+// route can stream them.
 
-import { structuredPatch } from "diff";
+import { diffLines, type Hunk } from "./linediff";
+
+export type { Hunk } from "./linediff";
 
 export interface DiffOptions {
   hunks: boolean;
@@ -11,14 +15,6 @@ export interface DiffOptions {
   paths: string[];
   /** List at most this many files (in path order); the rest are counted in `files_total` only. */
   maxFiles?: number;
-}
-
-export interface Hunk {
-  old_start: number;
-  old_lines: number;
-  new_start: number;
-  new_lines: number;
-  lines: string[];
 }
 
 export interface DiffFile {
@@ -46,11 +42,14 @@ export interface DiffResult {
   too_many_files: boolean;
 }
 
-const MAX_TEXT_BYTES = 1 << 20; // per side
+/** A side larger than this is listed without its diff (owner limit; it was 1 MiB). */
+export const MAX_TEXT_BYTES = 8 << 20;
 
-const MAX_EDIT_LENGTH = 20_000;
+/** Blob reads in flight at once: Artifacts answers each in about 50 to 300 ms. */
+const CONCURRENCY = 16;
 
-const CONCURRENCY = 6;
+/** Text read and diffed at once, in bytes: a few large files take turns, so a request never holds more than this. */
+const BYTES_IN_FLIGHT = 24 << 20;
 
 interface Entry {
   path: string;
@@ -73,7 +72,7 @@ function wanted(path: string, isDir: boolean, filters: string[]): boolean {
 }
 
 async function readTree(repo: ArtifactsRepo, sha: string): Promise<Map<string, ArtifactsTreeEntry>> {
-  const entries = await repo.readTree(sha);
+  const entries = await again((attempt) => within(repo.readTree(sha), `tree ${sha}`, READ_TIMEOUT_MS * attempt));
 
   if (!entries) throw new Error(`tree ${sha} not found`);
 
@@ -148,42 +147,102 @@ async function walk(
 
 interface BlobRead {
   size: number;
-  /** The whole blob, only when it is at most MAX_TEXT_BYTES. */
-  bytes: Uint8Array | null;
-  binary: boolean;
+  blob: Blob;
 }
 
-/** Read a blob, but never more than its first 8,000 bytes when it is large. */
+/**
+ * A blob's handle and size; its bytes are read once, later. A blob that comes
+ * over RPC is a stream: read twice (a head, then the whole), the second read
+ * waits until the session gives up (minutes); never read, it must be cancelled.
+ */
 async function readBlobFor(repo: ArtifactsRepo, e: Entry | null): Promise<BlobRead | null> {
   if (!e || e.type === "gitlink") return null;
-  const blob = await repo.readBlob(e.sha);
+  const blob = await again((attempt) => within(repo.readBlob(e.sha), `blob ${e.sha}`, READ_TIMEOUT_MS * attempt));
 
   if (!blob) throw new Error(`blob ${e.sha} not found`);
-  const head = new Uint8Array(await blob.slice(0, 8000).arrayBuffer());
-  const binary = head.includes(0);
-  const bytes = !binary && blob.size <= MAX_TEXT_BYTES ? new Uint8Array(await blob.arrayBuffer()) : null;
 
-  return { size: blob.size, bytes, binary };
+  return { size: blob.size, blob };
 }
+
+/**
+ * Whether an Artifacts failure is the connection's, not the data's: its RPC
+ * sometimes drops a call under load ("Network connection lost", retryable),
+ * or the whole session, failing every stream on it ("... RPC stub was
+ * disposed without calling close()").
+ */
+export function isDropped(err: Error): boolean {
+  return ("retryable" in err && err.retryable === true) || /connection lost|disposed without calling close/i.test(err.message);
+}
+
+/**
+ * Artifacts answers a tree or a blob in well under a second, and a blob's
+ * bytes at 1 MiB in a second or two (the slowest seen: 1.4 MB in 2.4 s). Now
+ * and then a read never answers (seen on wrangler dev: a stream held for
+ * minutes; the 4.7 MB side of the fixture's csv, first read after its push,
+ * every run): past these it counts as dropped, and is read again, with twice
+ * and three times as long.
+ */
+const READ_TIMEOUT_MS = 10_000;
+
+const BYTES_TIMEOUT_MS_PER_MIB = 2_000;
+
+/** `read`, or a dropped-connection error once it has had no answer for `ms` (the hung call itself cannot be cancelled). */
+function within<T>(read: Promise<T>, what: string, ms = READ_TIMEOUT_MS): Promise<T> {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+
+  const hung = new Promise<never>((_, fail) => {
+    timers.push(setTimeout(() => fail(new Error(`${what}: no answer in ${ms / 1000} s (connection lost)`)), ms));
+  });
+
+  return Promise.race([read, hung]).finally(() => timers.forEach(clearTimeout));
+}
+
+/** A read the connection dropped is tried again, up to three times in all; `read` is told which try it is (a slow read gets longer each time). */
+async function again<T>(read: (attempt: number) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read(attempt);
+    } catch (err) {
+      if (attempt === 3 || !(err instanceof Error) || !isDropped(err)) throw err;
+      console.warn({ msg: "pando.artifacts-retry", attempt, error: err.message });
+      await new Promise((go) => setTimeout(go, 200 * attempt));
+    }
+  }
+}
+
+/** git's test for binary: a NUL in the first 8,000 bytes. */
+const BINARY_TEST = 8000;
+
+/** The first BINARY_TEST bytes of a blob not read whole; its stream is cancelled after. */
+async function headOf(blob: Blob): Promise<Uint8Array> {
+  const reader = blob.stream().getReader();
+  const head = new Uint8Array(BINARY_TEST);
+  let n = 0;
+
+  try {
+    while (n < BINARY_TEST) {
+      const { value, done } = await within(reader.read(), "a blob's first bytes");
+
+      if (done) break;
+      head.set(value.subarray(0, BINARY_TEST - n), n);
+      n += Math.min(value.byteLength, BINARY_TEST - n);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  return head.subarray(0, n);
+}
+
+const isBinary = (bytes: Uint8Array) => bytes.subarray(0, BINARY_TEST).includes(0);
+
+/** A side's bytes, read once (none for a missing side). */
+const bytesOf = async (x: BlobRead | null) =>
+  x ? new Uint8Array(await within(x.blob.arrayBuffer(), "a blob's bytes", READ_TIMEOUT_MS + (x.size / (1 << 20)) * BYTES_TIMEOUT_MS_PER_MIB)) : new Uint8Array(0);
 
 const decoder = new TextDecoder();
 
-/** Hunks with git's numbering (a hunk with no lines on a side starts one line earlier). */
-function lineDiff(oldText: string, newText: string): Hunk[] | null {
-  const p = structuredPatch("a", "b", oldText, newText, undefined, undefined, { context: 3, maxEditLength: MAX_EDIT_LENGTH });
-
-  if (!p) return null;
-
-  return p.hunks.map((h) => ({
-    old_start: h.oldLines === 0 ? h.oldStart - 1 : h.oldStart,
-    old_lines: h.oldLines,
-    new_start: h.newLines === 0 ? h.newStart - 1 : h.newStart,
-    new_lines: h.newLines,
-    lines: h.lines,
-  }));
-}
-
-function hunkBytes(hunks: Hunk[]): number {
+export function hunkBytes(hunks: Hunk[]): number {
   let n = 0;
 
   for (const h of hunks) for (const l of h.lines) n += l.length + 1;
@@ -191,23 +250,38 @@ function hunkBytes(hunks: Hunk[]): number {
   return n;
 }
 
-async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>): Promise<void> {
-  let i = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(n, items.length) }, async () => {
-      while (i < items.length) await fn(items[i++]);
-    }),
-  );
+/** What a diff will cover: every changed file in path order (renames paired), before any blob is read. */
+export interface DiffPlan {
+  pairs: { old: Entry | null; new: Entry | null; status: DiffFile["status"] }[];
+  /** Every changed file, listed or not. */
+  files_total: number;
+  too_many_files: boolean;
 }
 
-export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: string, opts: DiffOptions): Promise<DiffResult> {
+/** A file tree's order: at each level folders before files, each by name (as the web's tree and Plannotator's draw it). */
+export function treeOrder(a: string, b: string): number {
+  const x = a.split("/");
+  const y = b.split("/");
+  let i = 0;
+
+  while (i < x.length - 1 && i < y.length - 1 && x[i] === y[i]) i += 1;
+  const folderX = i < x.length - 1;
+  const folderY = i < y.length - 1;
+
+  if (folderX !== folderY) return folderX ? -1 : 1;
+
+  return (x[i] ?? "").localeCompare(y[i] ?? "");
+}
+
+/** `order`: git's path order (the default), or a file tree's (treeOrder), which the streamed Files changed uses. */
+export async function planDiff(repo: ArtifactsRepo, fromTree: string, toTree: string, opts: Pick<DiffOptions, "paths" | "maxFiles"> & { order?: "path" | "tree" }): Promise<DiffPlan> {
   const removed: Entry[] = [];
   const added: Entry[] = [];
   const changed: [Entry, Entry][] = [];
   await walk(repo, fromTree, toTree, "", opts.paths, removed, added, changed);
 
   // Exact renames: a removed blob that reappears, unchanged, at a new path.
-  const pairs: { old: Entry | null; new: Entry | null; status: DiffFile["status"] }[] = [];
+  const pairs: DiffPlan["pairs"] = [];
   const addedBySha = new Map<string, Entry[]>();
 
   for (const e of added) addedBySha.set(e.sha, [...(addedBySha.get(e.sha) ?? []), e]);
@@ -225,14 +299,84 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
   for (const e of added) if (!renamedTo.has(e)) pairs.push({ old: null, new: e, status: "added" });
 
   for (const [a, b] of changed) pairs.push({ old: a, new: b, status: "modified" });
-  pairs.sort((x, y) => ((x.new ?? x.old)!.path < (y.new ?? y.old)!.path ? -1 : 1));
+  const pathOf = (p: DiffPlan["pairs"][number]) => (p.new ?? p.old)!.path;
+
+  pairs.sort(opts.order === "tree" ? (x, y) => treeOrder(pathOf(x), pathOf(y)) : (x, y) => (pathOf(x) < pathOf(y) ? -1 : 1));
 
   const filesTotal = pairs.length;
   const tooMany = opts.maxFiles !== undefined && pairs.length > opts.maxFiles;
 
   if (tooMany) pairs.length = opts.maxFiles!;
 
-  const files: DiffFile[] = pairs.map((p) => ({
+  return { pairs, files_total: filesTotal, too_many_files: tooMany };
+}
+
+/** A gate on bytes held at once: a read waits until its size fits under the limit (one oversize read goes alone). */
+function byteGate(limit: number) {
+  let held = 0;
+  const waiting: (() => void)[] = [];
+
+  return async <T>(bytes: number, fn: () => Promise<T>): Promise<T> => {
+    while (held > 0 && held + bytes > limit) await new Promise<void>((go) => waiting.push(go));
+    held += bytes;
+
+    try {
+      return await fn();
+    } finally {
+      held -= bytes;
+
+      for (const go of waiting.splice(0)) go();
+    }
+  };
+}
+
+/** What diffing two blobs found: binary, too large, or the hunks and their counts. Two blobs always give the same. */
+export interface PairDiff {
+  omitted?: "binary" | "too_large";
+  additions: number | null;
+  deletions: number | null;
+  hunks: Hunk[] | null;
+}
+
+/** Where pairs already diffed are kept (R2, by repo and the two blobs), so a branch's next head reads only what changed. */
+export interface PairCache {
+  get(oldSha: string | null, newSha: string | null): Promise<PairDiff | null>;
+  put(oldSha: string | null, newSha: string | null, diff: PairDiff): void;
+}
+
+async function diffPair(repo: ArtifactsRepo, p: DiffPlan["pairs"][number], gate: ReturnType<typeof byteGate>): Promise<PairDiff> {
+  const [a, b] = await Promise.all([readBlobFor(repo, p.old), readBlobFor(repo, p.new)]);
+  const large = (x: BlobRead | null) => (x?.size ?? 0) > MAX_TEXT_BYTES;
+
+  // A side too large to diff: binary if a large side's head says so, else too large; nothing else is read.
+  if (large(a) || large(b)) {
+    const heads = await Promise.all([a, b].map((x) => (x && large(x) ? headOf(x.blob) : x?.blob.stream().cancel().then(() => null))));
+
+    return { omitted: heads.some((h) => h && isBinary(h)) ? "binary" : "too_large", additions: null, deletions: null, hunks: null };
+  }
+
+  return gate((a?.size ?? 0) + (b?.size ?? 0), async () => {
+    const [ba, bb] = await Promise.all([bytesOf(a), bytesOf(b)]);
+
+    if (isBinary(ba) || isBinary(bb)) return { omitted: "binary", additions: null, deletions: null, hunks: null };
+    const hunks = diffLines(decoder.decode(ba), decoder.decode(bb));
+    let additions = 0;
+    let deletions = 0;
+
+    for (const h of hunks) {
+      for (const l of h.lines) {
+        if (l[0] === "+") additions++;
+        else if (l[0] === "-") deletions++;
+      }
+    }
+
+    return { additions, deletions, hunks };
+  });
+}
+
+/** One file's row and hunks: binary, too large, or its diff (from the cache when the two blobs were diffed before). */
+async function diffOne(repo: ArtifactsRepo, p: DiffPlan["pairs"][number], gate: ReturnType<typeof byteGate>, cache: PairCache | undefined): Promise<{ file: DiffFile; hunks: Hunk[] | null }> {
+  const file: DiffFile = {
     path: (p.new ?? p.old)!.path,
     old_path: p.status === "renamed" ? p.old!.path : undefined, // left out of the JSON unless renamed
     status: p.status,
@@ -243,85 +387,92 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
     binary: false,
     additions: 0,
     deletions: 0,
-  }));
+  };
 
-  // Read and diff the changed blobs. Renames with the same blob need no read.
-  const computed = new Map<DiffFile, Hunk[]>();
-  await pool(
-    files.map((f, i) => [f, pairs[i]] as const),
-    CONCURRENCY,
-    async ([f, p]) => {
-      if (f.status === "renamed") return;
+  // Renames with the same blob need no read.
+  if (p.status === "renamed") return { file, hunks: [] };
 
-      if (p.old?.type === "gitlink" || p.new?.type === "gitlink") {
-        f.additions = f.deletions = null;
+  if (p.old?.type === "gitlink" || p.new?.type === "gitlink") {
+    file.additions = file.deletions = null;
 
-        return;
-      }
-
-      const [a, b] = await Promise.all([readBlobFor(repo, p.old), readBlobFor(repo, p.new)]);
-
-      if (a?.binary || b?.binary) {
-        f.binary = true;
-        f.additions = f.deletions = null;
-        f.patch_omitted = "binary";
-
-        return;
-      }
-
-      if ((a?.size ?? 0) > MAX_TEXT_BYTES || (b?.size ?? 0) > MAX_TEXT_BYTES) {
-        f.additions = f.deletions = null;
-        f.patch_omitted = "too_large";
-
-        return;
-      }
-
-      const hunks = lineDiff(a?.bytes ? decoder.decode(a.bytes) : "", b?.bytes ? decoder.decode(b.bytes) : "");
-
-      if (!hunks) {
-        f.additions = f.deletions = null;
-        f.patch_omitted = "too_large";
-
-        return;
-      }
-
-      let add = 0;
-      let del = 0;
-
-      for (const h of hunks) {
-        for (const l of h.lines) {
-          if (l[0] === "+") add++;
-          else if (l[0] === "-") del++;
-        }
-      }
-
-      f.additions = add;
-      f.deletions = del;
-      computed.set(f, hunks);
-    },
-  );
-
-  // Spend the byte budget in path order.
-  let used = 0;
-  let truncated = false;
-
-  for (const f of files) {
-    const hunks = computed.get(f);
-
-    if (!hunks) continue;
-    const size = hunkBytes(hunks);
-
-    if (used + size > opts.maxBytes) {
-      f.patch_omitted = "budget";
-      truncated = true;
-      continue;
-    }
-
-    used += size;
-
-    if (opts.hunks) f.hunks = hunks;
+    return { file, hunks: null };
   }
 
+  let d = await cache?.get(file.old_sha, file.new_sha).catch(() => null);
+
+  if (!d) {
+    // A blob's bytes are a stream read once: a dropped read starts the pair over.
+    d = await again(() => diffPair(repo, p, gate));
+    cache?.put(file.old_sha, file.new_sha, d);
+  }
+
+  file.additions = d.additions;
+  file.deletions = d.deletions;
+
+  if (d.omitted) {
+    file.patch_omitted = d.omitted;
+    file.binary = d.omitted === "binary";
+  }
+
+  return { file, hunks: d.hunks };
+}
+
+/**
+ * Each planned file, diffed, in path order, as soon as it and those before it
+ * are done (up to CONCURRENCY files ahead are read at once). The byte budget is
+ * spent in path order: a file past it keeps its counts and is listed with
+ * patch_omitted "budget".
+ */
+export async function* fileDiffs(repo: ArtifactsRepo, plan: DiffPlan, opts: Pick<DiffOptions, "hunks" | "maxBytes">, cache?: PairCache): AsyncGenerator<DiffFile> {
+  const gate = byteGate(BYTES_IN_FLIGHT);
+  const started: Promise<{ file: DiffFile; hunks: Hunk[] | null }>[] = [];
+  let next = 0;
+
+  const fill = () => {
+    while (next < plan.pairs.length && started.length < CONCURRENCY) {
+      const job = diffOne(repo, plan.pairs[next++]!, gate, cache);
+
+      // A failure is raised in order, when its file's turn comes; until then it must not count as unhandled.
+      job.catch(() => {});
+      started.push(job);
+    }
+  };
+
+  let used = 0;
+
+  fill();
+
+  while (started.length) {
+    const { file, hunks } = await started.shift()!;
+
+    fill();
+
+    if (hunks && file.patch_omitted === undefined) {
+      const size = hunkBytes(hunks);
+
+      if (used + size > opts.maxBytes) file.patch_omitted = "budget";
+      else {
+        used += size;
+
+        if (opts.hunks) file.hunks = hunks;
+      }
+    }
+
+    yield file;
+  }
+}
+
+export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: string, opts: DiffOptions): Promise<DiffResult> {
+  const plan = await planDiff(repo, fromTree, toTree, opts);
+  const files: DiffFile[] = [];
+
+  for await (const f of fileDiffs(repo, plan, opts)) files.push(f);
+
+  return { files, truncated: files.some((f) => f.patch_omitted === "budget"), stats: statsOf(files), files_total: plan.files_total, too_many_files: plan.too_many_files };
+}
+
+/** Files and lines changed, over the files listed. */
+export function statsOf(files: readonly Pick<DiffFile, "additions" | "deletions">[]): DiffResult["stats"] {
   const stats = { files: files.length, additions: 0, deletions: 0 };
 
   for (const f of files) {
@@ -329,7 +480,7 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
     stats.deletions += f.deletions ?? 0;
   }
 
-  return { files, truncated, stats, files_total: filesTotal, too_many_files: tooMany };
+  return stats;
 }
 
 /** Every file that differs between two trees: its path and new blob (null when deleted). */

@@ -329,7 +329,7 @@ try {
   const FC = `${B1}-files`;
   git(["checkout", "-qb", FC], boDir);
   writeFileSync(join(boDir, "bin.dat"), Buffer.from([0, 1, 2, 3, 0, 255, 254, 0]));
-  write(boDir, "big.txt", "x".repeat(1_200_000) + "\n");
+  write(boDir, "big.txt", "x".repeat(8_500_000) + "\n");
   git(["add", "-A"], boDir);
   git(["commit", "-qm", "a binary and a large file"], boDir);
   check("bo pushes a branch with a binary and a large file", git(["push", "-q", "origin", FC], boDir, B).ok);
@@ -346,7 +346,7 @@ try {
     `${r.status} ${(fc?.files ?? []).map((f) => `${f.path}:${f.status}`).join(", ")}`,
   );
   check(
-    "a binary and a file over 1 MiB are listed without a patch",
+    "a binary and a file over 8 MiB are listed without a patch",
     shown["bin.dat"]?.binary === true && shown["bin.dat"].patch === null && shown["bin.dat"].patch_omitted === "binary" && shown["big.txt"]?.patch === null && shown["big.txt"].patch_omitted === "too_large",
     `${shown["bin.dat"]?.patch_omitted} ${shown["big.txt"]?.patch_omitted}`,
   );

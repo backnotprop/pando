@@ -1,5 +1,6 @@
 // Accounts on D1 (C8): users, their credentials (hashed), monorepos, members
-// and invites, for the whole Pando instance.
+// and invites, and organizations with their people and invites, for the whole
+// Pando instance.
 //
 // Authentication reads from the nearest read replica (the Sessions API).
 // Anything a replica cannot confirm (an unknown credential, an ended session,
@@ -11,6 +12,11 @@
 // Identity is GitHub-like (decisions/RULINGS.md): a person is a user; a
 // machine or a cloud sandbox holds a credential for that user, and git and
 // every agent there act as the user.
+//
+// Organizations (profile SPEC section 5): an org is a namespace whose
+// monorepos every one of its people can open and push to; its owners own them
+// all. A person's role in a monorepo is the higher of their own row in
+// `members` and, when an org owns it, their row in `org_members`.
 
 import { HttpError, now } from "../http";
 import { newMonorepoId, RESERVED_NAMESPACES } from "../monorepo/names";
@@ -71,6 +77,39 @@ export interface Member {
   added_by: string | null;
   /** The newest last_used_at of any of their credentials (written at most once a minute); null if never. */
   last_active_at: string | null;
+  /** Where their access comes from: their own row, the org that owns the monorepo, or both. */
+  via: "direct" | "org" | "both";
+}
+
+/** A person in an org. */
+export type OrgMember = Omit<Member, "via">;
+
+/** An org's header; `role` (the asker's) and `members` (a count, for its people) depend on who asks. */
+export interface Org {
+  type: "org";
+  login: string;
+  name: string | null;
+  description: string | null;
+  website: string | null;
+  created_at: string;
+  role: MemberRole | null;
+  members: number | null;
+}
+
+/** What an owner may change on an org; null clears a field. */
+export interface OrgPatch {
+  name?: string | null;
+  description?: string | null;
+  website?: string | null;
+}
+
+/** A person's answer to GET /v1/users/{name}. */
+export interface Profile {
+  type: "user";
+  login: string;
+  name: string | null;
+  picture_url: string | null;
+  created_at: string;
 }
 
 /** A path's owner and monorepo name, lower case (names.ts monorepoRef). */
@@ -78,6 +117,8 @@ export interface MonorepoRef {
   owner: string;
   name: string;
 }
+
+export type OwnerType = "user" | "org";
 
 /** A monorepo as the API shows it. `id` is permanent; `owner/name` is its current label. */
 export interface MonorepoInfo {
@@ -87,6 +128,8 @@ export interface MonorepoInfo {
   full_name: string;
   kind: "monorepo" | "repo";
   created_at: string;
+  /** Whose namespace `owner` is: a person's or an org's. */
+  owner_type: OwnerType;
 }
 
 export interface MonorepoEntry extends MonorepoInfo {
@@ -150,7 +193,12 @@ interface AuthRow {
   user_email: string | null;
   user_picture_url: string | null;
   user_created_at: string;
+  /** Their own row in the monorepo. */
   role: MemberRole | null;
+  /** Their row in the org that owns it, if an org does. */
+  org_role: MemberRole | null;
+  /** 1 when an org owns the monorepo. */
+  m_org: number | null;
   m_id: string | null;
   m_owner: string | null;
   m_name: string | null;
@@ -163,23 +211,85 @@ const RESOLVE = `COALESCE(
   (SELECT id FROM monorepos WHERE owner = ?2 AND name = ?3),
   (SELECT monorepo_id FROM monorepo_aliases WHERE owner = ?2 AND name = ?3))`;
 
-// One round trip: the credential, its user, the monorepo and the role in it.
+// One round trip, on every request: the credential, its user, the monorepo,
+// and the caller's role in it from both places (their own row; their row in
+// the org that owns it, a primary-key miss when a person owns it). The higher
+// of the two is taken in higherRole, by name, not by how the strings sort.
 const AUTH_SQL = `
 SELECT c.id, c.login, c.name, c.kind, c.created_at, c.last_used_at, c.expires_at,
        u.name AS user_name, u.email AS user_email, u.picture_url AS user_picture_url, u.created_at AS user_created_at,
        (SELECT role FROM members WHERE monorepo_id = m.id AND login = c.login) AS role,
+       (SELECT role FROM org_members WHERE org = m.owner AND login = c.login) AS org_role,
+       EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) AS m_org,
        m.id AS m_id, m.owner AS m_owner, m.name AS m_name, m.kind AS m_kind, m.created_at AS m_created_at
 FROM credentials c
 JOIN users u ON u.login = c.login
 LEFT JOIN monorepos m ON m.id = ${RESOLVE}
 WHERE c.hash = ?1 AND c.revoked_at IS NULL`;
 
-const MONOREPO_COLS = "m.id, m.owner, m.name, m.owner || '/' || m.name AS full_name, m.kind, m.created_at";
+const MONOREPO_COLS = `m.id, m.owner, m.name, m.owner || '/' || m.name AS full_name, m.kind, m.created_at,
+  CASE WHEN EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) THEN 'org' ELSE 'user' END AS owner_type`;
 
+/** True for a monorepo (?1) an org owns: it needs no owner row of its own, its org's owners own it. */
+const ORG_OWNED = "EXISTS (SELECT 1 FROM monorepos mo JOIN orgs o ON o.login = mo.owner WHERE mo.id = ?1)";
+
+/**
+ * Everyone who can open monorepo ?1: their own rows and the owning org's
+ * people, one row each (?2: one login, or null for all). The role is the
+ * higher of the two; added_at and added_by come from their own row when they
+ * have one.
+ */
 const MEMBER_SQL = `
-SELECT m.login, u.name, u.picture_url, m.role, m.added_at, m.added_by,
-       (SELECT MAX(last_used_at) FROM credentials WHERE login = m.login) AS last_active_at
-FROM members m LEFT JOIN users u ON u.login = m.login`;
+WITH d AS (SELECT login, role, added_at, added_by FROM members WHERE monorepo_id = ?1),
+     o AS (SELECT om.login, om.role, om.added_at, om.added_by FROM org_members om JOIN monorepos mo ON mo.owner = om.org WHERE mo.id = ?1)
+SELECT w.login, u.name, u.picture_url,
+       CASE WHEN d.role = 'owner' OR o.role = 'owner' THEN 'owner' ELSE 'member' END AS role,
+       CASE WHEN d.login IS NULL THEN o.added_at ELSE d.added_at END AS added_at,
+       CASE WHEN d.login IS NULL THEN o.added_by ELSE d.added_by END AS added_by,
+       (SELECT MAX(last_used_at) FROM credentials WHERE login = w.login) AS last_active_at,
+       CASE WHEN d.login IS NULL THEN 'org' WHEN o.login IS NULL THEN 'direct' ELSE 'both' END AS via
+FROM (SELECT login FROM d UNION SELECT login FROM o) w
+LEFT JOIN d ON d.login = w.login
+LEFT JOIN o ON o.login = w.login
+LEFT JOIN users u ON u.login = w.login
+WHERE ?2 IS NULL OR w.login = ?2
+ORDER BY w.login`;
+
+/** An org's people (?1), or one of them (?2). */
+const ORG_MEMBER_SQL = `
+SELECT om.login, u.name, u.picture_url, om.role, om.added_at, om.added_by,
+       (SELECT MAX(last_used_at) FROM credentials WHERE login = om.login) AS last_active_at
+FROM org_members om LEFT JOIN users u ON u.login = om.login
+WHERE om.org = ?1 AND (?2 IS NULL OR om.login = ?2)
+ORDER BY om.login`;
+
+/** An org (o) as asked about by ?2: its header, the asker's role, and its people's count. */
+const ORG_COLS = `o.login, o.name, o.description, o.website, o.created_at,
+  (SELECT role FROM org_members WHERE org = o.login AND login = ?2) AS role,
+  (SELECT COUNT(*) FROM org_members WHERE org = o.login) AS members`;
+
+/** An ORG_COLS row. */
+interface OrgRow {
+  login: string;
+  name: string | null;
+  description: string | null;
+  website: string | null;
+  created_at: string;
+  role: MemberRole | null;
+  members: number;
+}
+
+/** The count of its people is shown to its people only. */
+function orgOf(r: OrgRow): Org {
+  return { type: "org", ...r, members: r.role ? r.members : null };
+}
+
+/** The higher of two roles: owner over member, by name. */
+function higherRole(a: MemberRole | null, b: MemberRole | null): MemberRole | null {
+  if (a === "owner" || b === "owner") return "owner";
+
+  return a ?? b;
+}
 
 function fail(status: number, code: string, message: string): never {
   throw new HttpError(status, code, message);
@@ -217,7 +327,10 @@ export function* loginsFor(email: string, name: string | null): Generator<string
 function monorepoOf(r: AuthRow): MonorepoInfo | null {
   if (!r.m_id) return null;
 
-  return { id: r.m_id, owner: r.m_owner!, name: r.m_name!, full_name: `${r.m_owner}/${r.m_name}`, kind: r.m_kind!, created_at: r.m_created_at! };
+  return {
+    id: r.m_id, owner: r.m_owner!, name: r.m_name!, full_name: `${r.m_owner}/${r.m_name}`, kind: r.m_kind!, created_at: r.m_created_at!,
+    owner_type: r.m_org ? "org" : "user",
+  };
 }
 
 /** Run a write after the response is sent (Workers' waitUntil), or now where there is none. */
@@ -350,7 +463,7 @@ export class Accounts {
     const auth: Auth = {
       user: { login: row.login, name: row.user_name, email: row.user_email, picture_url: row.user_picture_url, created_at: row.user_created_at },
       credential: { id: row.id, name: row.name, kind: row.kind, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at },
-      role: monorepo ? row.role : null,
+      role: monorepo ? higherRole(row.role, row.org_role) : null,
       monorepo: monorepo ? monorepoOf(row) : null,
     };
 
@@ -425,11 +538,18 @@ export class Accounts {
   // ── Monorepos and members ────────────────────────────────────────────────
 
   /**
-   * A new monorepo owner/name with a new id and its creator as owner. Null if
-   * the name is taken in that namespace. An old name of another monorepo is
-   * taken over, and reported.
+   * A new monorepo owner/name with a new id and its creator as owner (in an
+   * org too, so they can rename or delete what they made). Null if the name
+   * is taken in that namespace. An old name of another monorepo is taken
+   * over, and reported.
    */
-  async claimMonorepo(owner: string, name: string, kind: "monorepo" | "repo", login: string): Promise<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null } | null> {
+  async claimMonorepo(
+    owner: string,
+    name: string,
+    kind: "monorepo" | "repo",
+    login: string,
+    ownerType: OwnerType,
+  ): Promise<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null } | null> {
     const id = newMonorepoId();
     const at = now();
 
@@ -452,7 +572,7 @@ export class Accounts {
     const was = isAliasHit(row) ? row : undefined;
 
     return {
-      info: { id, owner, name, full_name: `${owner}/${name}`, kind, created_at: at },
+      info: { id, owner, name, full_name: `${owner}/${name}`, kind, created_at: at, owner_type: ownerType },
       replaced_alias: was ? { full_name: `${owner}/${name}`, pointed_to: was.pointed_to } : null,
     };
   }
@@ -468,27 +588,40 @@ export class Accounts {
   }
 
   /**
-   * Rename or transfer: the label moves, the id stays. The old name becomes
-   * an alias; an alias the new name had (to another monorepo) is dropped and
-   * reported.
+   * Rename or transfer (by `by`, an owner of it): the label moves, the id
+   * stays. The old name becomes an alias; an alias the new name had (to
+   * another monorepo) is dropped and reported. A transfer goes to an org `by`
+   * is in, or to a person who is already an owner of it (their own row, or an
+   * owner of the org that owns it); that person gets their own owner row, so
+   * a person's monorepo always has one.
    */
-  async renameMonorepo(id: string, to: MonorepoRef): Promise<Outcome<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null }>> {
+  async renameMonorepo(id: string, to: MonorepoRef, by: string): Promise<Outcome<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null }>> {
     return this.guard(async () => {
       const cur = await this.row<MonorepoInfo>(`SELECT ${MONOREPO_COLS} FROM monorepos m WHERE m.id = ?1`, id);
 
       if (!cur) fail(404, "not_found", "no such monorepo");
 
       if (cur.owner === to.owner && cur.name === to.name) fail(400, "bad_request", `${cur.full_name} already has that name`);
+      let toType: OwnerType = cur.owner_type;
 
       if (to.owner !== cur.owner) {
-        // A transfer, for now to a person who is already an owner of it (organizations come later).
-        const role = (await this.row<{ role: MemberRole }>("SELECT role FROM members WHERE monorepo_id = ?1 AND login = ?2", id, to.owner))?.role;
+        toType = (await this.orgRow(to.owner, by)) ? "org" : "user";
 
-        if (role !== "owner") fail(400, "bad_owner", `${to.owner} must be a person who is already an owner of ${cur.full_name} (organizations come later)`);
+        if (toType === "org" && !(await this.orgRole(to.owner, by))) fail(403, "not_your_namespace", `${by} is not in ${to.owner}: move it to an organization you are in`);
+
+        if (toType === "user" && (await this.members(id, to.owner))[0]?.role !== "owner") {
+          fail(400, "bad_owner", `${to.owner} must be a person who is already an owner of ${cur.full_name}, or an organization you are in`);
+        }
       }
 
       const at = now();
       const done = "EXISTS (SELECT 1 FROM monorepos WHERE id = ?1 AND owner = ?2 AND name = ?3)";
+
+      // Checked again in the write, so a membership removed meanwhile can't slip through.
+      const allowed = `owner = ?2 OR CASE WHEN EXISTS (SELECT 1 FROM orgs WHERE login = ?2)
+        THEN EXISTS (SELECT 1 FROM org_members WHERE org = ?2 AND login = ?4)
+        ELSE EXISTS (SELECT 1 FROM members WHERE monorepo_id = ?1 AND login = ?2 AND role = 'owner')
+          OR EXISTS (SELECT 1 FROM org_members WHERE org = owner AND login = ?2 AND role = 'owner') END`;
 
       const [alias, moved] = await this.batch([
         this.st(
@@ -497,8 +630,16 @@ export class Accounts {
           to.owner, to.name,
         ),
         this.st(
-          "UPDATE monorepos SET owner = ?2, name = ?3 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM monorepos WHERE owner = ?2 AND name = ?3)",
-          id, to.owner, to.name,
+          `UPDATE monorepos SET owner = ?2, name = ?3 WHERE id = ?1 AND (${allowed})
+             AND NOT EXISTS (SELECT 1 FROM monorepos WHERE owner = ?2 AND name = ?3)`,
+          id, to.owner, to.name, by,
+        ),
+        // A person given a monorepo owns it by a row of their own.
+        this.st(
+          `INSERT INTO members (monorepo_id, login, role, added_at, added_by) SELECT ?1, ?2, 'owner', ?4, ?5
+           WHERE ?6 = 'user' AND ${done} AND ?2 <> ?7
+           ON CONFLICT (monorepo_id, login) DO UPDATE SET role = 'owner'`,
+          id, to.owner, to.name, at, by, toType, cur.owner,
         ),
         this.st(
           `INSERT INTO monorepo_aliases (owner, name, monorepo_id, created_at) SELECT ?4, ?5, ?1, ?6 WHERE ${done}
@@ -508,48 +649,62 @@ export class Accounts {
         this.st(`DELETE FROM monorepo_aliases WHERE owner = ?2 AND name = ?3 AND ${done}`, id, to.owner, to.name),
       ]);
 
-      if (moved.meta.changes !== 1) fail(409, "monorepo_exists", `${to.owner}/${to.name} exists`);
+      if (moved.meta.changes !== 1) {
+        if (await this.row("SELECT 1 AS x FROM monorepos WHERE owner = ?1 AND name = ?2", to.owner, to.name)) fail(409, "monorepo_exists", `${to.owner}/${to.name} exists`);
+        fail(409, "bad_owner", `${to.owner} can no longer take ${cur.full_name} (a membership changed meanwhile)`);
+      }
+
       const row = alias.results[0];
       const was = isAliasHit(row) ? row : undefined;
 
       return {
-        info: { ...cur, owner: to.owner, name: to.name, full_name: `${to.owner}/${to.name}` },
+        info: { ...cur, owner: to.owner, name: to.name, full_name: `${to.owner}/${to.name}`, owner_type: toType },
         // Its own old name coming back is no loss; another monorepo's is.
         replaced_alias: was && was.monorepo_id !== id ? { full_name: `${to.owner}/${to.name}`, pointed_to: was.pointed_to } : null,
       };
     });
   }
 
-  /** The caller's monorepos, or only those named `name` (any owner), their own namespace first. */
-  async monoreposOf(login: string, name?: string): Promise<MonorepoEntry[]> {
+  /**
+   * The caller's monorepos (their own rows, and every monorepo of the orgs
+   * they are in), or only those named `name` (any owner) or under `owner`;
+   * their own namespace first.
+   */
+  async monoreposOf(login: string, name?: string, owner?: string): Promise<MonorepoEntry[]> {
     return this.rows<MonorepoEntry>(
-      `SELECT ${MONOREPO_COLS}, b.role FROM members b JOIN monorepos m ON m.id = b.monorepo_id
-       WHERE b.login = ?1 AND (?2 IS NULL OR m.name = ?2)
+      `SELECT ${MONOREPO_COLS}, CASE WHEN MAX(a.role = 'owner') = 1 THEN 'owner' ELSE 'member' END AS role
+       FROM (SELECT monorepo_id AS id, role FROM members WHERE login = ?1
+             UNION ALL
+             SELECT mo.id, om.role FROM org_members om JOIN monorepos mo ON mo.owner = om.org WHERE om.login = ?1) a
+       JOIN monorepos m ON m.id = a.id
+       WHERE (?2 IS NULL OR m.name = ?2) AND (?3 IS NULL OR m.owner = ?3)
+       GROUP BY m.id
        ORDER BY m.owner <> ?1, m.owner, m.name`,
-      login, name ?? null,
+      login, name ?? null, owner ?? null,
     );
   }
 
-  async members(monorepoId: string): Promise<Member[]> {
-    return this.rows<Member>(`${MEMBER_SQL} WHERE m.monorepo_id = ?1 ORDER BY m.login`, monorepoId);
+  /** Everyone who can open the monorepo (or only `login`), with where their access comes from. */
+  async members(monorepoId: string, login: string | null = null): Promise<Member[]> {
+    return this.rows<Member>(MEMBER_SQL, monorepoId, login);
   }
 
   async putMember(monorepoId: string, login: string, role: MemberRole, by: string): Promise<Outcome<Member>> {
     return this.guard(async () => {
       if (!(await this.getUser(login))) fail(404, "not_found", `no user ${login}`);
 
-      // One statement, so two demotions at once cannot leave no owner.
+      // One statement, so two demotions at once cannot leave no owner. An org's monorepo needs none of its own.
       const changed = await this.run(
         `INSERT INTO members (monorepo_id, login, role, added_at, added_by) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT (monorepo_id, login) DO UPDATE SET role = excluded.role
          WHERE NOT (members.role = 'owner' AND excluded.role <> 'owner'
-                    AND (SELECT COUNT(*) FROM members WHERE monorepo_id = ?1 AND role = 'owner') = 1)`,
+                    AND (SELECT COUNT(*) FROM members WHERE monorepo_id = ?1 AND role = 'owner') = 1 AND NOT ${ORG_OWNED})`,
         monorepoId, login, role, now(), by,
       );
 
       if (!changed) fail(409, "last_owner", "a monorepo keeps at least one owner");
 
-      return (await this.row<Member>(`${MEMBER_SQL} WHERE m.monorepo_id = ?1 AND m.login = ?2`, monorepoId, login))!;
+      return (await this.members(monorepoId, login))[0];
     });
   }
 
@@ -557,13 +712,16 @@ export class Accounts {
     return this.guard(async () => {
       const removed = await this.run(
         `DELETE FROM members WHERE monorepo_id = ?1 AND login = ?2
-           AND (role <> 'owner' OR (SELECT COUNT(*) FROM members WHERE monorepo_id = ?1 AND role = 'owner') > 1)`,
+           AND (role <> 'owner' OR (SELECT COUNT(*) FROM members WHERE monorepo_id = ?1 AND role = 'owner') > 1 OR ${ORG_OWNED})`,
         monorepoId, login,
       );
 
       if (removed) return true;
 
-      if (!(await this.row("SELECT 1 AS x FROM members WHERE monorepo_id = ?1 AND login = ?2", monorepoId, login))) fail(404, "not_found", `${login} is not a member`);
+      if (!(await this.row("SELECT 1 AS x FROM members WHERE monorepo_id = ?1 AND login = ?2", monorepoId, login))) {
+        fail(404, "not_found", `${login} is not a member of their own here (access through an organization is managed there)`);
+      }
+
       fail(409, "last_owner", "a monorepo keeps at least one owner");
     });
   }
@@ -572,7 +730,8 @@ export class Accounts {
 
   /**
    * After WorkOS proved who signed in: find or make the Pando user, accept any
-   * invites for a verified email, and give the machine a credential.
+   * invites for a verified email (monorepos' and orgs', in one batch), and
+   * give the machine a credential. `joined`: the monorepos they gained.
    */
   async signIn(who: SignedIn, cred: NewCredentialRow): Promise<{ user: User; credential: Credential; joined: { id: string; full_name: string }[] }> {
     const email = who.email.toLowerCase();
@@ -600,7 +759,17 @@ export class Accounts {
         email,
       );
 
-      if (invites.length) {
+      const orgInvites = await this.rows<{ org: string; role: MemberRole; invited_by: string }>("SELECT org, role, invited_by FROM org_invites WHERE email = ?1", email);
+
+      // The org's monorepos come with it.
+      const gained = orgInvites.length
+        ? await this.rows<{ id: string; full_name: string }>(
+            "SELECT m.id, m.owner || '/' || m.name AS full_name FROM org_invites i JOIN monorepos m ON m.owner = i.org WHERE i.email = ?1",
+            email,
+          )
+        : [];
+
+      if (invites.length || orgInvites.length) {
         const at = now();
         await this.batch([
           ...invites.map((inv) =>
@@ -609,9 +778,21 @@ export class Accounts {
               inv.monorepo_id, login, inv.role, at, inv.invited_by,
             ),
           ),
+          ...orgInvites.map((inv) =>
+            this.st(
+              "INSERT INTO org_members (org, login, role, added_at, added_by) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (org, login) DO NOTHING",
+              inv.org, login, inv.role, at, inv.invited_by,
+            ),
+          ),
           this.st("DELETE FROM invites WHERE email = ?1", email),
+          this.st("DELETE FROM org_invites WHERE email = ?1", email),
         ]);
-        joined.push(...invites.map((inv) => ({ id: inv.monorepo_id, full_name: inv.full_name })));
+        const seen = new Set<string>();
+
+        for (const j of [...invites.map((inv) => ({ id: inv.monorepo_id, full_name: inv.full_name })), ...gained]) {
+          if (!seen.has(j.id)) joined.push(j);
+          seen.add(j.id);
+        }
       }
     }
 
@@ -684,5 +865,153 @@ export class Accounts {
 
   async revokeInvite(monorepoId: string, email: string): Promise<boolean> {
     return (await this.run("DELETE FROM invites WHERE monorepo_id = ?1 AND email = ?2", monorepoId, email.toLowerCase())) > 0;
+  }
+
+  // ── Organizations ────────────────────────────────────────────────────────
+
+  /** Whose namespace `name` is, as `viewer` sees it: a person, an org, or null for neither. */
+  async owner(name: string, viewer: string): Promise<Profile | Org | null> {
+    const org = await this.getOrg(name, viewer);
+
+    if (org) return org;
+    const user = await this.getUser(name);
+
+    return user ? { type: "user", login: user.login, name: user.name, picture_url: user.picture_url, created_at: user.created_at } : null;
+  }
+
+  private async orgRow(login: string, viewer: string): Promise<OrgRow | null> {
+    return this.row<OrgRow>(`SELECT ${ORG_COLS} FROM orgs o WHERE o.login = ?1`, login, viewer);
+  }
+
+  /** An org as `viewer` sees it, or null when there is none. */
+  async getOrg(login: string, viewer: string): Promise<Org | null> {
+    const r = await this.orgRow(login, viewer);
+
+    return r ? orgOf(r) : null;
+  }
+
+  /** The person's role in an org, or null. */
+  async orgRole(org: string, login: string): Promise<MemberRole | null> {
+    return (await this.row<{ role: MemberRole }>("SELECT role FROM org_members WHERE org = ?1 AND login = ?2", org, login))?.role ?? null;
+  }
+
+  /** The orgs a person is in, with their role, by login. */
+  async orgsOf(login: string): Promise<Org[]> {
+    const rows = await this.rows<OrgRow>(`SELECT ${ORG_COLS} FROM org_members me JOIN orgs o ON o.login = me.org WHERE me.login = ?2 ORDER BY o.login`, null, login);
+
+    return rows.map(orgOf);
+  }
+
+  /**
+   * A new org: its namespace, its row and its creator's owner row in one
+   * batch, so of two creates of one name at once, one wins. False when the
+   * name is taken (a person's or an org's).
+   */
+  async createOrg(login: string, name: string | null, by: string): Promise<boolean> {
+    const at = now();
+
+    const [, made] = await this.batch([
+      this.st("INSERT INTO namespaces (name, kind, created_at) VALUES (?1, 'org', ?2) ON CONFLICT (name) DO NOTHING", login, at),
+      this.st(
+        `INSERT INTO orgs (login, name, created_at, created_by) SELECT ?1, ?3, ?2, ?4
+         WHERE (SELECT kind FROM namespaces WHERE name = ?1) = 'org'
+           AND NOT EXISTS (SELECT 1 FROM orgs WHERE login = ?1) AND NOT EXISTS (SELECT 1 FROM users WHERE login = ?1)`,
+        login, at, name, by,
+      ),
+      this.st(
+        `INSERT INTO org_members (org, login, role, added_at, added_by) SELECT ?1, ?3, 'owner', ?2, NULL
+         WHERE EXISTS (SELECT 1 FROM orgs WHERE login = ?1 AND created_by = ?3 AND created_at = ?2)
+         ON CONFLICT (org, login) DO NOTHING`,
+        login, at, by,
+      ),
+    ]);
+
+    return made.meta.changes === 1;
+  }
+
+  /** Change an org's details; fields left out are kept. */
+  async updateOrg(login: string, patch: OrgPatch): Promise<void> {
+    const fields = (["name", "description", "website"] as const).filter((k) => patch[k] !== undefined);
+
+    if (!fields.length) return;
+    await this.run(`UPDATE orgs SET ${fields.map((k, i) => `${k} = ?${i + 2}`).join(", ")} WHERE login = ?1`, login, ...fields.map((k) => patch[k]));
+  }
+
+  /** An org's people (or one of them), by login. */
+  async orgMembers(org: string, login: string | null = null): Promise<OrgMember[]> {
+    return this.rows<OrgMember>(ORG_MEMBER_SQL, org, login);
+  }
+
+  /** The ids of the monorepos an org owns. */
+  async orgMonorepos(org: string): Promise<string[]> {
+    return (await this.rows<{ id: string }>("SELECT id FROM monorepos WHERE owner = ?1", org)).map((r) => r.id);
+  }
+
+  /** Add a person to an org, or change their role. One statement, so two demotions at once cannot leave no owner. */
+  async putOrgMember(org: string, login: string, role: MemberRole, by: string): Promise<Outcome<OrgMember>> {
+    return this.guard(async () => {
+      if (!(await this.getUser(login))) fail(404, "not_found", `no user ${login}`);
+
+      const changed = await this.run(
+        `INSERT INTO org_members (org, login, role, added_at, added_by) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (org, login) DO UPDATE SET role = excluded.role
+         WHERE NOT (org_members.role = 'owner' AND excluded.role <> 'owner'
+                    AND (SELECT COUNT(*) FROM org_members WHERE org = ?1 AND role = 'owner') = 1)`,
+        org, login, role, now(), by,
+      );
+
+      if (!changed) fail(409, "last_owner", "an organization keeps at least one owner");
+
+      return (await this.orgMembers(org, login))[0];
+    });
+  }
+
+  /** Take a person out of an org (an owner's doing, or their own leaving). */
+  async removeOrgMember(org: string, login: string): Promise<Outcome<true>> {
+    return this.guard(async () => {
+      const removed = await this.run(
+        `DELETE FROM org_members WHERE org = ?1 AND login = ?2
+           AND (role <> 'owner' OR (SELECT COUNT(*) FROM org_members WHERE org = ?1 AND role = 'owner') > 1)`,
+        org, login,
+      );
+
+      if (removed) return true as const;
+
+      if (!(await this.orgRole(org, login))) fail(404, "not_found", `${login} is not in ${org}`);
+      fail(409, "last_owner", "an organization keeps at least one owner: make someone else an owner first");
+    });
+  }
+
+  /** Add to an org by email: a signed-in user with that email now; anyone else when they first sign in. */
+  async orgInvite(org: string, email: string, role: MemberRole, by: string): Promise<Outcome<{ status: "added"; member: OrgMember } | { status: "invited"; invite: Invite }>> {
+    return this.guard(async () => {
+      const e = email.toLowerCase();
+      const user = await this.row<{ login: string }>("SELECT login FROM users WHERE lower(email) = ?1 AND workos_id IS NOT NULL", e);
+
+      if (user) {
+        const out = await this.putOrgMember(org, user.login, role, by);
+
+        if (!out.ok) fail(out.status, out.code, out.message);
+
+        return { status: "added" as const, member: out.value };
+      }
+
+      const invite = await this.row<Invite>(
+        `INSERT INTO org_invites (org, email, role, invited_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (org, email) DO UPDATE SET role = excluded.role, invited_by = excluded.invited_by
+         RETURNING email, role, invited_by, created_at`,
+        org, e, role, by, now(),
+      );
+
+      return { status: "invited" as const, invite: invite! };
+    });
+  }
+
+  async orgInvites(org: string): Promise<Invite[]> {
+    return this.rows<Invite>("SELECT email, role, invited_by, created_at FROM org_invites WHERE org = ?1 ORDER BY created_at", org);
+  }
+
+  async revokeOrgInvite(org: string, email: string): Promise<boolean> {
+    return (await this.run("DELETE FROM org_invites WHERE org = ?1 AND email = ?2", org, email.toLowerCase())) > 0;
   }
 }

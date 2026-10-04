@@ -1,0 +1,16 @@
+{
+  "schema": "MonorepoRenamed",
+  "route": "PATCH /v1/monorepos/{owner}/{monorepo} {owner: <org>}",
+  "status": 200,
+  "body": {
+    "id": "m_b03271178f23aa74",
+    "owner": "org-mutvywkn",
+    "name": "rec-mutvywkn-renamed",
+    "full_name": "org-mutvywkn/rec-mutvywkn-renamed",
+    "kind": "monorepo",
+    "created_at": "2026-10-04T13:58:15.941Z",
+    "owner_type": "org",
+    "role": "owner",
+    "replaced_alias": null
+  }
+}

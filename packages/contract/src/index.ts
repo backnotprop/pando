@@ -4,6 +4,8 @@
 // decodes real recorded responses (recorded/) against these schemas.
 export * from "./ids.ts";
 
+export * from "./namespaces.ts";
+
 export * from "./errors.ts";
 
 export * from "./user.ts";

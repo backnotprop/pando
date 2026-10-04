@@ -4,7 +4,10 @@
 // A monorepo is `owner/name` (NAMESPACES.md): the name is unique within its
 // owner, and a permanent id keys everything stored (objects, Artifacts, R2,
 // queues). Monorepos made before namespaces keep their old name as their id.
+import { RESERVED_NAMESPACES } from "@pando/contract/names";
 import { hasControl } from "../http";
+
+export { RESERVED_NAMESPACES };
 
 export const ZERO = "0".repeat(40);
 
@@ -16,11 +19,6 @@ const SLUG_RE = /^[a-z0-9](?:[a-z0-9._]|-(?!-))*$/;
 
 /** A namespace (a login or an org): 1 to 39 of a-z, 0-9 and single hyphens, no hyphen at either end. */
 const NAMESPACE_RE = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/;
-
-/** A namespace takes the first URL segment: never one of the Worker's own paths or the web app's top-level pages. */
-export const RESERVED_NAMESPACES = new Set([
-  "v1", "healthz", "login", "logout", "settings", "assets", "fonts", "new", "api", "app", "static", "orgs", "users", "docs",
-]);
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 

@@ -5,14 +5,14 @@ import { concat, sha1, type GitObject } from "./objects";
 
 const TYPE_CODE = { commit: 1, tree: 2, blob: 3 } as const;
 
-async function deflate(data: Uint8Array): Promise<Uint8Array> {
+export async function deflate(data: Uint8Array): Promise<Uint8Array> {
   // "deflate" in the Compression Streams standard is the zlib format git uses.
   const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("deflate"));
 
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-function objectHeader(type: number, size: number): Uint8Array {
+export function objectHeader(type: number, size: number): Uint8Array {
   const bytes: number[] = [];
   let b = (type << 4) | (size & 0x0f);
   size = Math.floor(size / 16);

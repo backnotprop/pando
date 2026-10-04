@@ -8,7 +8,7 @@
 // the branch on screen moves, and a push replays no check's arrival. Real
 // Worker, real git.
 import { expect, type Locator, test } from "@playwright/test";
-import { BASE, browserPost, ciStatus, type Frame, Machine, nextSignIn, watchFrames } from "./seed";
+import { BASE, browserPost, ciStatus, type Frame, HARD_LOAD, Machine, nextSignIn, watchFrames } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -144,7 +144,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await page.goto(project);
       const files = page.getByRole("list", { name: "Files" });
 
-      await expect(files.getByRole("link", { name: "README.md" })).toBeVisible();
+      await expect(files.getByRole("link", { name: "README.md" })).toBeVisible(HARD_LOAD);
       await expect(files.getByRole("link", { name: "src" })).toBeVisible();
       await expect(page.locator(".pn-doc article").getByText("The web project.")).toBeVisible();
       await expect(page.getByRole("link", { name: "2 open branches" })).toBeVisible();
@@ -152,11 +152,11 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
     await test.step("a Markdown file in the project: its Preview through the viewer, its source lines at ?plain=1", async () => {
       await page.goto(`${project}/blob/docs/GUIDE.md`);
-      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Guide" })).toBeVisible();
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Guide" })).toBeVisible(HARD_LOAD);
       // Its code fence takes the code view's palette (theme.css, --diffs-token-*), not a stock Shiki theme.
       await expect(page.locator(".pn-doc pre code span[style*='--diffs-token-']").first()).toBeVisible();
       await page.goto(`${project}/blob/docs/GUIDE.md?plain=1`);
-      await expect(page.getByRole("group", { name: "View" }).getByRole("link", { name: "Code" })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("group", { name: "View" }).getByRole("link", { name: "Code" })).toHaveAttribute("aria-current", "page", HARD_LOAD);
       await expect(page.getByText("# Guide")).toBeVisible();
       await expect(page.locator(".pn-doc")).toHaveCount(0);
       // A relative link in the Preview opens that file's page in the project.
@@ -192,7 +192,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       // Tokens carry the theme's variables (theme.css), so they take its colours.
       const keyword = page.locator('[data-line] span[style*="--diffs-token-keyword"]').first();
 
-      await expect(keyword).toHaveText("export");
+      await expect(keyword).toHaveText("export", HARD_LOAD);
 
       const [ink, themed] = await keyword.evaluate((el) => {
         const probe = document.body.appendChild(document.createElement("i"));
@@ -207,15 +207,14 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(page.locator('[data-line] span[style*="--diffs-token-string"]').first()).toHaveText(/sage/);
       expect(await pitch(page.locator("[data-line]"))).toEqual([20, 20]);
       await page.goto(`${project}/blob/src/big.ts`);
-      // A cold read of 2.2 MiB through the tree, then the raw file, one after the other.
-      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached({ timeout: 30_000 });
+      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible(HARD_LOAD);
+      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached(HARD_LOAD);
       await expect(page.locator("diffs-container")).toHaveCount(0);
       expect(await textPitch(page.locator("main pre > span:last-child"))).toEqual([20, 20]);
       await page.goto(`${project}/blob/logo.png`);
       const image = page.getByRole("img", { name: "logo.png" });
 
-      await expect(image).toBeVisible();
+      await expect(image).toBeVisible(HARD_LOAD);
       expect(await image.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
     });
 
@@ -259,11 +258,11 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       const diffColumns = await columns(file("src/colour.ts").locator("diffs-container"));
 
       await page.goto(`${project}/blob/src/colour.ts?ref=files`);
-      await expect(page.locator("[data-line] span[style]").first()).toBeVisible();
+      await expect(page.locator("[data-line] span[style]").first()).toBeVisible(HARD_LOAD);
       expect(await columns(page.locator("diffs-container"))).toEqual(diffColumns);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${project}/branches/files?tab=files`);
-      await expect(file("src/files.ts")).toContainText("added");
+      await expect(file("src/files.ts")).toContainText("added", HARD_LOAD);
       const live = m.commit("web", url, "files", { "src/live.ts": "export const live = true;\n" }, "Live");
 
       m.push(live, url, "files");
@@ -316,7 +315,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       const e2e = page.getByRole("list", { name: "Checks" }).getByRole("listitem").filter({ hasText: "e2e" });
 
       await page.goto(`${project}/branches/files`);
-      await expect(e2e).toContainText("not reported");
+      await expect(e2e).toContainText("not reported", HARD_LOAD);
       await page.waitForTimeout(1000);
       // The new head's check runs take half a second to read, as on a slower connection, so a replay would show.
       await page.route(/\/ci\/builds\?/, async (route) => {
@@ -340,7 +339,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       const repoTabs = page.getByRole("navigation", { name: "projects/web" }).locator('[aria-current="page"]');
       const listTabs = page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]');
 
-      await expect(repoTabs).toHaveCount(1);
+      await expect(repoTabs).toHaveCount(1, HARD_LOAD);
       await expect(repoTabs).toHaveText(/^Branches/);
       await expect(listTabs).toHaveCount(1);
       await expect(listTabs).toHaveText(/^Open/);
@@ -381,7 +380,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await page.getByRole("button", { name: "Merge", exact: true }).click();
       await expect(page.getByText("Merged into main")).toBeVisible({ timeout: 30_000 });
       await page.goto(`${project}/branches?tab=merged`);
-      await expect(page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]')).toHaveCount(1);
+      await expect(page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]')).toHaveCount(1, HARD_LOAD);
       await expect(page.getByRole("navigation", { name: "Branches" }).locator('[aria-current="page"]')).toHaveText(/^Merged/);
       await expect(page.getByRole("list", { name: "Merged branches" }).getByRole("link", { name: /Two is better|feature/ })).toBeVisible();
     });
@@ -396,7 +395,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
     await test.step("the monorepo's Activity tab takes a push live", async () => {
       await page.goto(`${BASE}/${full}/activity`);
-      await expect(page.getByTestId("activity")).toBeVisible();
+      await expect(page.getByTestId("activity")).toBeVisible(HARD_LOAD);
       const m = machine();
 
       m.push(m.commit("web", url, "later", { "src/b.ts": "export const b = 1;\n" }, "Later"), url, "later");

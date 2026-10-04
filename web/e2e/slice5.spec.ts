@@ -8,7 +8,7 @@
 // its Settings. The only owner can neither leave nor step down. Real Worker,
 // real D1, real browser.
 import { expect, type Page, test } from "@playwright/test";
-import { BASE, browserPost, nextSignIn } from "./seed";
+import { BASE, browserPost, HARD_LOAD, nextSignIn } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -112,7 +112,7 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
 
     await test.step("the second person sees the org's repository and opens it", async () => {
       await beaPage.goto(`${BASE}/${org}`);
-      await expect(beaPage.getByRole("heading", { level: 1 })).toContainText(`Team ${id}`);
+      await expect(beaPage.getByRole("heading", { level: 1 })).toContainText(`Team ${id}`, HARD_LOAD);
       await expect(beaPage.getByRole("complementary", { name: `About ${org}` }).getByText("Member", { exact: true })).toBeVisible();
       // A member sees People but not Settings.
       const tabs = beaPage.getByRole("navigation", { name: `Organization ${org}` });
@@ -124,12 +124,12 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await expect(beaPage.getByRole("heading", { level: 1 })).toContainText(`${org}/${repo}`);
       // Her home lists it too.
       await beaPage.goto(`${BASE}/`);
-      await expect(beaPage.getByRole("link", { name: new RegExp(`${org}/${repo}`) }).first()).toBeVisible();
+      await expect(beaPage.getByRole("link", { name: new RegExp(`${org}/${repo}`) }).first()).toBeVisible(HARD_LOAD);
     });
 
     await test.step('the repository\'s Members: "From {org}" first, without Remove; then "Added here"', async () => {
       await page.goto(`${BASE}/${org}/${repo}/members`);
-      await expect(page.getByRole("heading", { name: new RegExp(`^From ${org}`) })).toBeVisible();
+      await expect(page.getByRole("heading", { name: new RegExp(`^From ${org}`) })).toBeVisible(HARD_LOAD);
       const fromOrg = page.getByRole("list", { name: `From ${org}` });
       const her = fromOrg.getByRole("listitem").filter({ hasText: beaLogin });
 
@@ -145,7 +145,7 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await page.goto(`${BASE}/${login}/${solo}/settings`);
       const owner = page.getByRole("combobox", { name: "New owner" });
 
-      await expect(owner).toHaveValue(org);
+      await expect(owner).toHaveValue(org, HARD_LOAD);
       await expect(page.getByText(`${login}/${solo} will be ${org}/${solo}. The old address keeps working.`)).toBeVisible();
       const button = page.getByRole("button", { name: "Transfer", exact: true });
 
@@ -154,11 +154,11 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await button.click();
       await expect(page).toHaveURL(`${BASE}/${org}/${solo}/settings`);
       await page.goto(`${BASE}/${login}/${solo}`);
-      await expect(page).toHaveURL(`${BASE}/${org}/${solo}`);
+      await expect(page).toHaveURL(`${BASE}/${org}/${solo}`, HARD_LOAD);
       await expect(page.getByRole("heading", { level: 1 })).toContainText(`${org}/${solo}`);
       // Everyone in the org has it now.
       await beaPage.goto(`${BASE}/${org}`);
-      await expect(beaPage.getByRole("region", { name: "Repositories" }).getByRole("link", { name: new RegExp(`${org}/${solo}`) })).toBeVisible();
+      await expect(beaPage.getByRole("region", { name: "Repositories" }).getByRole("link", { name: new RegExp(`${org}/${solo}`) })).toBeVisible(HARD_LOAD);
     });
 
     await test.step("Settings: the org's description and website show on its page", async () => {

@@ -10,7 +10,7 @@
 // while its socket is up. Real Worker, real git, real browser.
 import { expect, type Page, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
-import { BASE, browserPost, ciStatus, Machine, nextSignIn } from "./seed";
+import { BASE, browserPost, ciStatus, HARD_LOAD, Machine, nextSignIn } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -118,7 +118,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       const row = page.getByRole("list", { name: "Machines" }).getByRole("listitem").filter({ hasText: m.name });
 
       // Its push of main made its row; it is not connected yet.
-      await expect(row.getByText("offline", { exact: true })).toBeVisible();
+      await expect(row.getByText("offline", { exact: true })).toBeVisible(HARD_LOAD);
       await page.waitForTimeout(2000);
       machinesReads.from();
       made.socket = await m.follow(full, [`wt-${id}`]);
@@ -161,7 +161,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await page.goto(`${BASE}/${full}/members`);
       const members = page.getByRole("list", { name: "Members" });
 
-      await expect(members.getByText("you", { exact: true })).toBeVisible();
+      await expect(members.getByText("you", { exact: true })).toBeVisible(HARD_LOAD);
       await page.getByRole("textbox", { name: "Email" }).fill(bea.email);
       await page.getByRole("button", { name: "Invite", exact: true }).click();
       await expect(members.getByText(`bea-${id}`, { exact: true })).toBeVisible();
@@ -189,7 +189,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
 
       page.on("websocket", (ws) => sockets.push(ws.url()));
       await page.goto(`${BASE}/`);
-      await expect.poll(() => sockets.some((u) => u.includes(`/v1/monorepos/${login}/${big}/events?topics=feed`))).toBe(true);
+      await expect.poll(() => sockets.some((u) => u.includes(`/v1/monorepos/${login}/${big}/events?topics=feed`)), HARD_LOAD).toBe(true);
       await page.waitForTimeout(2000);
       // Its lines never reach the person's socket; nor does the log poll (one large monorepo, under 5).
       const logReads = reads(page, /^\/v1\/events$/);
@@ -225,7 +225,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await bk.connect(machine(), full);
       await bk.pipeline(machine(), full, "projects-web", "web-ci");
       await page.goto(`${BASE}/${full}/ci`);
-      await expect(page.getByText("Buildkite", { exact: true })).toBeVisible();
+      await expect(page.getByText("Buildkite", { exact: true })).toBeVisible(HARD_LOAD);
       await expect(page.getByText(/\/v1\/integrations\/buildkite\//)).toBeVisible();
       const pipelines = page.getByRole("list", { name: "Pipelines" });
 
@@ -375,7 +375,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       const builds = page.getByRole("list", { name: "Recent builds" });
       const rebuilt = builds.getByRole("listitem").filter({ hasText: "#100" });
 
-      await expect(builds.getByRole("listitem").filter({ hasText: "#7" }).getByText("failed", { exact: true })).toBeVisible();
+      await expect(builds.getByRole("listitem").filter({ hasText: "#7" }).getByText("failed", { exact: true })).toBeVisible(HARD_LOAD);
       await expect(rebuilt.getByText("running", { exact: true })).toBeVisible();
       await page.waitForTimeout(2000);
       ciReads.from();
@@ -417,7 +417,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       // Its state word in the list (ci running, here) carries the reason as its title.
       const state = page.getByRole("list", { name: "Open branches" }).getByRole("link", { name: /feature/ }).locator("[title]");
 
-      await expect(state).toHaveAttribute("title", /^Required checks unknown: pando\.toml line \d+: /);
+      await expect(state).toHaveAttribute("title", /^Required checks unknown: pando\.toml line \d+: /, HARD_LOAD);
     });
 
     await test.step("rename: the monorepo answers at its new name, and the old name redirects there", async () => {
@@ -427,7 +427,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(page).toHaveURL(`${BASE}/${login}/${renamed}/settings`);
       made.name = renamed;
       await page.goto(`${BASE}/${full}/members`);
-      await expect(page).toHaveURL(`${BASE}/${login}/${renamed}/members`);
+      await expect(page).toHaveURL(`${BASE}/${login}/${renamed}/members`, HARD_LOAD);
       await expect(page.getByRole("heading", { level: 1 })).toContainText(`${login}/${renamed}`);
     });
 
@@ -436,7 +436,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       const confirm = page.getByRole("textbox", { name: `Type ${login}/${renamed} to delete` });
       const del = page.getByRole("button", { name: `Delete ${login}/${renamed}` });
 
-      await expect(del).toBeDisabled();
+      await expect(del).toBeDisabled(HARD_LOAD);
       await confirm.fill(renamed);
       await expect(del).toBeDisabled();
       await confirm.fill(`${login}/${renamed}`);

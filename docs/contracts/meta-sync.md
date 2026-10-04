@@ -45,6 +45,7 @@ The object refuses, and the client never sends:
 | Credentials | a reference pointer (`.pando/references/**.toml`) whose `url` carries a user or password | `credentials` | 400 |
 | Bad path | empty, absolute, `\`, NUL, `.` or `..` segments, empty segments, longer than 1,024 bytes | `bad_path` | 400 |
 | Bad sha | `sha` does not match `bytes` | `bad_sha` | 400 |
+| File and folder of one name | a file named like a live folder (`notes` beside `notes/a.md`: "notes is a folder here"), or a path inside a live file (`notes/a.md` beside a file `notes`: "notes is a file here"). Git holds no such pair, so the second is refused (saves, renames and restores) and stays on its machine. Case-only twins (`Notes.md` beside `notes.md`) are allowed, as git allows them (the owner's choice, 2026-10-04) | `file_folder` | 409 |
 
 The client also skips everything inside a folder with its own `.git` (a
 directory or a file): such a folder is a repo or a reference, and only its
@@ -218,7 +219,14 @@ above:
   out as a save on top of the version it was last synced to (a newer remote
   change makes a fresh conflict, never a silent overwrite).
 - **Refused.** A refused change is dropped and not retried until the file
-  changes again.
+  changes again. `pando sync` logs why ("the server refused notes/a.md:
+  notes is a file here (file_folder)").
+- **Case-only twins.** Two paths that differ only in case (`Notes.md`,
+  `notes.md`) are two files on the server, in git and on Linux. A Mac's file
+  system keeps one file for both, so there they overwrite each other: on a
+  case-insensitive file system, `pando sync` names each such pair once, in
+  a one-line warning ("warning: Notes.md and notes.md differ only in case;
+  ... Rename one.").
 - **`pando sync --once`** sends and receives what is waiting, then exits.
   It exits 0 only when every change here is in Pando. It exits 3 when some
   are not, and names each path with why: frozen after a conflict (its edits

@@ -535,6 +535,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const target = this.versionAt(path, intField(b?.version));
 
     if (!target) return fail(404, "not_found", `${path} has no version at or before ${b?.version}`);
+    const clash = target.deleted ? null : this.fileFolderClash(path);
+
+    if (clash) return fail(clash.status, clash.reason, clash.message);
 
     // From here to the broadcast nothing awaits, so no other change interleaves.
     const author = request.headers.get("x-pando-author") ?? (name(b?.author) || "unknown");
@@ -805,6 +808,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       const badPointer = checkPointer(path, bytes);
 
       if (badPointer) return refuse(path, badPointer);
+      const clash = this.fileFolderClash(path);
+
+      if (clash) return refuse(path, clash);
       const base = intField(msg.base_version, -1);
       const cur = this.current(path);
 
@@ -852,7 +858,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const badFrom = checkPath(from);
 
     if (badFrom) return refuse(msg.from, badFrom);
-    const badTo = checkPath(path);
+    const badTo = checkPath(path) ?? this.fileFolderClash(path, from);
 
     if (badTo) return refuse(msg.path, badTo);
     const base = intField(msg.base_version, -1);
@@ -885,6 +891,29 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.broadcast(this.changeMessage(this.row(version)), att.id);
 
     return true;
+  }
+
+  /**
+   * A file named like a live folder, or a path inside a live file: git holds
+   * no such pair, and every commit would fail (CODE-VS-MODEL M5). The second
+   * of the pair is refused; case-only twins (Notes.md, notes.md) are allowed,
+   * as git allows them (the owner's choice, 2026-10-04). `moving`: a
+   * rename's own `from`, gone once it lands.
+   */
+  private fileFolderClash(path: string, moving = ""): Refusal | null {
+    const parts = path.split("/");
+
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      const cur = this.current(dir);
+
+      if (dir !== moving && cur && !cur.deleted) return { reason: "file_folder", status: 409, message: `${dir} is a file here` };
+    }
+
+    // Every path inside the folder sorts between "<path>/" and "<path>0" ("0" follows "/").
+    const inside = this.sql.exec("SELECT 1 FROM files WHERE deleted = 0 AND path > ? AND path < ? AND path != ? LIMIT 1", `${path}/`, `${path}0`, moving).toArray();
+
+    return inside.length ? { reason: "file_folder", status: 409, message: `${path} is a folder here` } : null;
   }
 
   private baseMatches(cur: Current | null, base: number): boolean {

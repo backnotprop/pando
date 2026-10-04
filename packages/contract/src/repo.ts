@@ -18,8 +18,10 @@ export const Repo = Schema.Struct({
   default_branch: Schema.String,
   /** The git door URL to clone. */
   clone_url: Schema.String,
-  /** Read from `.pando/pando.toml` on main; only when the repo is fetched alone (getRepo). */
-  required_checks: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Read from `.pando/pando.toml` on main; only when the repo is fetched alone (getRepo). Null while unknown (checks_unknown says why). */
+  required_checks: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+  /** With required_checks: why they are unknown (pando.toml unreadable or broken), else null. */
+  checks_unknown: Schema.optionalKey(Schema.NullOr(Schema.String)),
   created_at: Timestamp,
   created_by: Schema.NullOr(Login),
 });

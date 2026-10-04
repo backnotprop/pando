@@ -193,10 +193,13 @@ export interface StatusRecord {
 
 export interface Checks {
   sha: string | null;
-  state: "success" | "pending" | "failure" | "error" | "missing";
-  required: string[];
+  state: "success" | "pending" | "failure" | "error" | "missing" | "unknown";
+  /** Null while unknown: pando.toml could not be read or does not parse. */
+  required: string[] | null;
   missing: string[];
   statuses: StatusRecord[];
+  /** Why the required checks are unknown, in plain words; null otherwise. */
+  checks_unknown: string | null;
 }
 
 /** What a refusal carries in its error body beside code and message (api-v1.yaml, errors). */

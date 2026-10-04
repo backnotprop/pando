@@ -130,7 +130,7 @@ function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch;
   const { monorepo, info } = useMonorepo();
   // Read from Pando's stored builds, not only when a status names a service: a job shows the moment it is queued.
   const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch.name, branch.head), refetchInterval: fallback(live) }).data?.runs;
-  const names = [...new Set([...checks.required, ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
+  const names = [...new Set([...(checks.required ?? []), ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
   const words = names.map((name) => checkWord(checks.statuses.find((x) => x.context === name), runs?.get(name)));
   const clock = useSeconds(words.includes("running"));
   const arrived = useArrivals(runs ? names.map((name, i) => ({ key: name, state: words[i] ?? "" })) : undefined);
@@ -274,6 +274,8 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
       <p key={line} className={`${big} text-bark-dim ${arrives}`}>
         {s.text === "no ci yet" ? (
           "No ci has reported"
+        ) : s.text === "checks unknown" ? (
+          "Required checks unknown"
         ) : s.text === "checking" ? (
           "Checking main"
         ) : (

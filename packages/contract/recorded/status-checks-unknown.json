@@ -1,0 +1,13 @@
+{
+  "schema": "Checks",
+  "route": "GET .../repos/{repo}/commits/{ref}/status (pando.toml broken)",
+  "status": 200,
+  "body": {
+    "sha": "64765adf2483293755eff204c6e5902537a796ba",
+    "state": "unknown",
+    "required": null,
+    "missing": [],
+    "statuses": [],
+    "checks_unknown": "pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force"
+  }
+}

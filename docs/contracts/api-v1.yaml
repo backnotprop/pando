@@ -52,7 +52,15 @@ info:
     Required checks: the server reads `required_checks` from
     `.pando/pando.toml` on main. In a monorepo
     that is the meta layer's main, table `[repos."<repo path>"]`; in a plain
-    repo, the repo's own main, table `[repos."."]`.
+    repo, the repo's own main, table `[repos."."]`. No main or no file means
+    no required checks. When Artifacts fails to read it, or it does not
+    parse, they are unknown, and only the merge fails closed: reads (the
+    repo, the branch list, a branch, a commit's status, CI) answer as usual
+    with the list null and `checks_unknown` saying why (for a bad file,
+    "pando.toml line N: <what is wrong>"), checks `state` is `unknown`; an
+    unforced merge is refused with 503 `checks_unknown` and that reason, a
+    forced one goes through as forced. Nothing is kept, so the next request
+    reads it again.
 
     Identity works like GitHub's. A person has a user account and belongs to
     monorepos as `owner` or `member`. A machine signs in once
@@ -1495,7 +1503,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "503":
-          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries."
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries. `checks_unknown` (an unforced merge): .pando/pando.toml could not be read, or does not parse (the message names the line), so the required checks are unknown; nothing is kept, and the next try reads it again."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -2044,7 +2052,8 @@ paths:
                         repo: { type: string }
                         path: { type: string }
                         checks:
-                          type: array
+                          type: [array, "null"]
+                          description: Null while unknown (pando.toml unreadable or broken).
                           items: { type: string }
         "403": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/ci/connections:
@@ -2877,9 +2886,12 @@ components:
           type: string
           description: "The git door URL: `https://<host>/<owner>/<monorepo>/<name>.git`, or `https://<host>/<owner>/<name>.git` for a plain repo."
         required_checks:
-          type: array
-          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists.
+          type: [array, "null"]
+          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists. Null while unknown.
           items: { type: string }
+        checks_unknown:
+          type: [string, "null"]
+          description: With required_checks, why they are unknown (pando.toml unreadable or broken); else null.
         created_at: { type: string, format: date-time }
         created_by: { type: string }
     Branch:
@@ -2970,8 +2982,8 @@ components:
         default_branch: { type: [string, "null"] }
         hook_id: { type: [string, "null"], description: "The buildkite hook that starts its builds on push, if any." }
         required_checks:
-          type: array
-          description: Its repo's required checks (from `.pando/pando.toml`).
+          type: [array, "null"]
+          description: Its repo's required checks (from `.pando/pando.toml`); null while unknown.
           items: { type: string }
         last_build:
           oneOf:
@@ -3062,17 +3074,21 @@ components:
         created_at: { type: string, format: date-time }
     Checks:
       type: object
-      required: [sha, state, required, statuses]
+      required: [sha, state, required, statuses, checks_unknown]
       description: GitHub's combined status, plus the required contexts and which are missing.
       properties:
         sha: { type: [string, "null"] }
         state:
           type: string
-          enum: [success, pending, failure, error, missing]
-          description: "`success` when the merge gate passes; `missing` when a required context has not reported."
+          enum: [success, pending, failure, error, missing, unknown]
+          description: "`success` when the merge gate passes; `missing` when a required context has not reported; `unknown` while the required checks are (an unforced merge is refused)."
         required:
-          type: array
+          type: [array, "null"]
+          description: Null while unknown.
           items: { type: string }
+        checks_unknown:
+          type: [string, "null"]
+          description: "Why the required checks are unknown, in plain words: \"Pando couldn't read this monorepo's required checks; try again\", or \"pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force\". Null otherwise."
         missing:
           type: array
           items: { type: string }

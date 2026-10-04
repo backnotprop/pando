@@ -163,21 +163,25 @@ describe("the merge gate", () => {
   });
 
   it("passes with no statuses and no required checks", () => {
-    expect(combine(A, [], []).state).toBe("success");
+    expect(combine(A, { list: [], unknown: null }, []).state).toBe("success");
   });
   it("uses the latest status per context", () => {
-    expect(combine(A, [], [st("ci", "failure"), st("ci", "success")]).state).toBe("success");
+    expect(combine(A, { list: [], unknown: null }, [st("ci", "failure"), st("ci", "success")]).state).toBe("success");
   });
   it("reports a missing required check", () => {
-    const c = combine(A, ["ci"], [st("lint", "success")]);
+    const c = combine(A, { list: ["ci"], unknown: null }, [st("lint", "success")]);
     expect(c.state).toBe("missing");
     expect(c.missing).toEqual(["ci"]);
   });
   it("ignores contexts that are not required", () => {
-    expect(combine(A, ["ci"], [st("ci", "success"), st("lint", "failure")]).state).toBe("success");
+    expect(combine(A, { list: ["ci"], unknown: null }, [st("ci", "success"), st("lint", "failure")]).state).toBe("success");
   });
   it("is pending while a reported check is pending", () => {
-    expect(combine(A, [], [st("ci", "pending")]).state).toBe("pending");
+    expect(combine(A, { list: [], unknown: null }, [st("ci", "pending")]).state).toBe("pending");
+  });
+  it("is unknown, with the reason, while the required checks are", () => {
+    const c = combine(A, { list: null, unknown: "pando.toml line 3: expected comma" }, [st("ci", "success")]);
+    expect([c.state, c.required, c.checks_unknown]).toEqual(["unknown", null, "pando.toml line 3: expected comma"]);
   });
 });
 

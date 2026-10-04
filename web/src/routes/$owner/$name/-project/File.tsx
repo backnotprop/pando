@@ -7,9 +7,12 @@ import { notFound } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Repo } from "@pando/contract";
 import { branchesQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
+import { openBranchesQuery } from "../../../../api/queries";
 import { isDoc } from "../../../../ui/doc/Doc";
+import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref } from "../../../../ui/paths";
-import { ChangeBar } from "../-code/FileList";
+import { loadColourViews } from "../-code/coloured";
+import { BarSpace, ChangeBar } from "../-code/FileList";
 import { FileShown, FileTools } from "../-code/FileView";
 import { PathTrail } from "../-code/PathTrail";
 import { RepoHead, useMonorepo } from "../-frame/heads";
@@ -19,6 +22,11 @@ const split = (path: string) => ({ dir: path.includes("/") ? path.slice(0, path.
 
 export async function loadFile(qc: QueryClient, m: MonorepoRef, repo: Repo, path: string, ref: string | null) {
   const { dir, name } = split(path);
+  // The Branches tab's count, read alongside the tree (quicker than it), so the tab never draws without it.
+  const open = qc.prefetchQuery(openBranchesQuery(m, repo.name));
+
+  // The coloured view and its worker load alongside the reads, so a file opened first, or by its address, is not left plain.
+  void loadColourViews();
   const tree = await qc.ensureQueryData(codeTreeQuery(m, repo.name, ref, dir));
 
   if (!tree?.entries.some((e) => e.name === name && e.type !== "dir")) throw notFound();
@@ -26,19 +34,23 @@ export async function loadFile(qc: QueryClient, m: MonorepoRef, repo: Repo, path
   // The page waits for the bytes only; the last commit and the picker fill in as they arrive.
   void qc.prefetchQuery(lastCommitsQuery(m, repo.name, tree.commit, dir));
   void qc.prefetchInfiniteQuery(branchesQuery(m, repo.name, "open"));
-  await qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, path));
+  await Promise.all([qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, path)), open]);
 }
 
 export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: string; gitRef: string | null; plain: boolean }) {
   const { monorepo } = useMonorepo();
   const full = monorepo.full;
   const { dir, name } = split(path);
-  const tree = useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data;
+  // Held while a moved ref's new commit is read, so the file stays on screen (ui/held.ts); the blob's oid comes from the same tree.
+  const at = `${repo.name}:${gitRef ?? ""}:${dir}`;
+  const tree = useHeld(at, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
   const commit = tree?.commit ?? "";
   // The bytes and the last commit are read at the commit the ref resolved to, so they agree.
   const { text, size } = useSuspenseQuery(codeFileQuery(monorepo, repo, commit, path)).data;
   const oid = tree?.entries.find((e) => e.name === name)?.oid ?? null;
-  const last = useQuery(lastCommitsQuery(monorepo, repo.name, commit, dir)).data?.entries[name] ?? null;
+  // The last answer for this ref and folder stays while a moved ref's is read (ui/held.ts).
+  const lastCommits = useLastAnswer(at, useQuery(lastCommitsQuery(monorepo, repo.name, commit, dir)).data);
+  const last = lastCommits?.entries[name] ?? null;
   const views = { preview: codeBlobLink(full, repo.path, path, gitRef), code: codeBlobLink(full, repo.path, path, gitRef, true), plain };
 
   return (
@@ -52,7 +64,9 @@ export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: s
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           {last ? (
             <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} sha at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
-          ) : null}
+          ) : lastCommits?.complete ? null : (
+            <BarSpace />
+          )}
           <FileTools name={name} text={text} raw={codeRawHref(full, repo.path, path, gitRef)} views={isDoc(name) && text !== null ? views : undefined} />
           <FileShown
             path={path}

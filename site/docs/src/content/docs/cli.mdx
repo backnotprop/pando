@@ -15,9 +15,9 @@ usage: pando <command> [args]
   pando login [--server <url>] [--bootstrap | --with-credential]   sign this machine in (in the browser)
   pando logout [--server <url>]                                   sign this machine out
   pando auth status                                               who this machine is signed in as
-  pando init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder
+  pando init [folder] [--name <name>] [--owner <org>] [--yes] [--dry-run]   make a Pando repo or monorepo from a folder
   pando clone <owner/name | name> [folder] [--text-only]         set up a Pando repo or monorepo on this machine
-  pando worktree add <repo> <branch> | list | remove <path> | follow | mount   one branch, one folder
+  pando worktree add <repo> <branch> [--issue n] | list | remove <path> | follow | mount   one branch, one folder
   pando branch list [--repo <path>] [--all]                       branches with ahead, behind and checks
   pando branch view [<branch>] [--commits]                        one branch: checks, merge, reviews, head commit
   pando diff [<branch>] [--json | --patch] [paths...]             the branch diff against main
@@ -27,11 +27,23 @@ usage: pando <command> [args]
   pando status                                                    this folder, its worktrees and references
   pando status <pending|success|failure|error> [--context ci] [--target-url u] [--description d]
                                                                   in a CI build: a check on its commit (PANDO_STATUS_TOKEN)
+  pando issue list [--state s] [--label l] [--assignee a] [--search w]   a monorepo's issues, newest first
+  pando issue view <n> [--comments]                               one issue: its body, branches and timeline
+  pando issue create --title t [--body b] [--label l] [--key k]   open an issue
+  pando issue comment <n> --body b [--key k]                      comment on one
+  pando issue close <n> [--reason not-planned] | reopen <n>       close or reopen one
+  pando issue edit <n> [--title t] [--body b] [--base-version v]   edit, label, assign one
+  pando issue link | unlink <n> [<branch>]                        merging the branch closes the issue
+  pando issue react <n> <reaction> [--comment id] [--remove]      +1, -1, laugh, hooray, confused, heart, rocket, eyes
   pando monorepo list | view [<owner/name>]                       your monorepos; one with its repos and members
   pando monorepo rename <new-name>                                rename one (owners); the old name keeps working
+  pando monorepo transfer <owner/name> <new-owner> [--yes]        move one to an org, or back to a person (owners)
   pando monorepo delete <owner/name> [--yes]                      delete one (owners)
   pando members list | invite <email> [--owner] | remove <who>    who belongs to a monorepo
   pando members invites | revoke <email>                          invites still waiting; withdraw one
+  pando org create <login> [--name n] | list | view <org>         organizations: a namespace many people share
+  pando org members [<org>] | add <org> <email | login> [--owner]   who is in one; add someone (owners)
+  pando org remove <org> <login | email> | leave <org>            take someone out (owners), or leave
   pando mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)
   pando ci connect --org <slug> | status | disconnect --org <slug>   a monorepo's Buildkite connection [--monorepo <owner/name>]
   pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>   the pipeline a push starts
@@ -97,7 +109,7 @@ Shows the server, where the credential comes from, this machine's name, and who 
 ### pando init
 
 ```sh
-pando init [folder] [--name <name>] [--yes] [--dry-run]
+pando init [folder] [--name <name>] [--owner <org>] [--yes] [--dry-run]
 ```
 
 Makes a Pando repository from a folder (default: the current folder), and you become its owner. A git repo becomes a plain repository. Any other folder becomes a repository with projects: each git repo under `projects/` becomes one of its projects, other git repos inside it become [references](/references/), and the rest of the folder becomes its shared files. Run it again after a failure: it skips what is done.
@@ -105,6 +117,7 @@ Makes a Pando repository from a folder (default: the current folder), and you be
 | Flag | What it does |
 | --- | --- |
 | `--name <name>` | The name on the server. Default: the folder's name, in lower case. |
+| `--owner <org>` | Make it in an [organization](#organizations) you are in, as `org/name`. Default: your own account. |
 | `--yes` | Take the default answer to every question. |
 | `--dry-run` | Show what would happen and change nothing. |
 | `--server <url>` | The Pando server. Default: the configured one. |
@@ -140,7 +153,7 @@ One branch, one folder. See [Worktrees](/worktrees/).
 ### pando worktree
 
 ```sh
-pando worktree add <repo> <branch> | list | remove <path> | follow | mount
+pando worktree add <repo> <branch> [--issue n] | list | remove <path> | follow | mount
 ```
 
 | Subcommand | What it does |
@@ -154,6 +167,7 @@ pando worktree add <repo> <branch> | list | remove <path> | follow | mount
 | Flag | What it does |
 | --- | --- |
 | `--kind <kind>` | With `add`: `fuse` (Linux with ArtifactFS), `fskit` (a Mac with Pando.app on) or `sparse` (a plain sparse checkout, everywhere). Default: the first of these this machine can use. |
+| `--issue <n>` | With `add`: link the branch to issue `n`, so merging it closes the issue. A wrong number stops before anything is made. |
 | `--json` | With `list`: print JSON. |
 | `--force` | With `remove`: remove even with uncommitted or unpushed work, which is lost. |
 | `--once` | With `follow`: move the mains once and stop. |
@@ -226,13 +240,82 @@ With no `-m`, opens the branch diff in Plannotator (it must be installed). Appro
 pando merge [<branch>] [--force]
 ```
 
-Lands the branch on main with a merge commit. It stops when checks are not green, when the branch and main both changed a file in different ways (Pando merges whole files, with no line-by-line merge), or, run in the branch's worktree, when the branch on the server is not what you pushed. This machine's read-only main then follows within a moment.
+Lands the branch on main with a merge commit, and names the issues the merge closes (each closes about a second later). It stops when checks are not green, when the branch and main both changed a file in different ways (Pando merges whole files, with no line-by-line merge), or, run in the branch's worktree, when the branch on the server is not what you pushed. This machine's read-only main then follows within a moment.
 
 | Flag | What it does |
 | --- | --- |
 | `--force` | Merge past red or missing checks. The merge is recorded as forced. |
 | `--wait` | Return only once this machine's read-only main has the merge. For scripts. |
 | `--repo <path>` | The repo. Default: the one you are in. |
+
+## Issues
+
+A repository has one list of issues, numbered `#1`, `#2`, ... An issue can be about one of its projects. A branch is linked to an issue by "Fixes #12" in its title, its description or one of its commits, or by `pando issue link`; merging the branch into main closes the issue.
+
+### pando issue
+
+```sh
+pando issue list [--state s] [--label l] [--assignee a] [--search w]
+pando issue view <n> [--comments]
+pando issue create --title t [--body b] [--label l] [--key k]
+pando issue comment <n> --body b [--key k]
+pando issue close <n> [--reason not-planned] | reopen <n>
+pando issue edit <n> [--title t] [--body b] [--base-version v]
+pando issue link | unlink <n> [<branch>]
+pando issue react <n> <reaction> [--comment id] [--remove]
+```
+
+A number can be written `12` or `#12`.
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | The issues, newest first, and how many are open and closed for the same filters. |
+| `view <n>` | One issue: its state, who opened it and from which machine, labels, assignees, project, tasks, the branches linked to it, its reactions, then its body as written (Markdown). With `--comments`, then its timeline: comments and events, oldest first. |
+| `create --title <title>` | Opens an issue. |
+| `comment <n>` | Comments on an issue. |
+| `close <n>` | Closes it, as completed or as not planned. |
+| `reopen <n>` | Opens it again. A later merge that names it closes it again. |
+| `edit <n>` | Changes its title, body or project, and adds or removes labels and assignees, in one call. |
+| `link <n> [<branch>]` | Links a branch (default: the branch of the worktree you are in), so merging it closes the issue. |
+| `unlink <n> [<branch>]` | Takes that link away. A closing keyword in the branch's title or commits still links it. |
+| `react <n> <reaction>` | One of GitHub's eight reactions: `+1`, `-1`, `laugh`, `hooray`, `confused`, `heart`, `rocket`, `eyes` (or the emoji). |
+
+| Flag | What it does |
+| --- | --- |
+| `--state <state>` | With `list`: `open` (the default), `closed` or `all`. |
+| `--label <label>` | With `list`: issues with this label; repeat it, and every one must match. With `create`: a label to put on it; repeat it. |
+| `--assignee <login>` | With `list`: issues assigned to this person, `@me`, or `none`. With `create`: assign this member, or `@me`; repeat it. |
+| `--author <login>` | With `list`: issues opened by this person, or `@me`. |
+| `--project <path>` | With `list`: issues about this project, or `none`. With `create` and `edit`: the project it is about (`none` with `edit` takes it away). |
+| `--search <words>` | With `list`: these words in the title or body. |
+| `--sort <order>` | With `list`: `created` (the default), `updated` or `comments`. |
+| `--limit <n>` | With `list`: how many issues. Default 30. |
+| `--comments` | With `view`: also print the timeline. |
+| `--title <title>` | With `create` and `edit`: the title, 1 to 256 characters. |
+| `--body <text>`, `--body-file <file>` | With `create`, `comment` and `edit`: the text, Markdown, at most 65,536 characters. `--body-file -` reads standard input. |
+| `--key <key>` | With `create` and `comment`: an idempotency key, up to 64 characters. Run again with the same key, the command makes nothing new and answers the first issue or comment. |
+| `--reason <reason>` | With `close`: `completed` (the default) or `not-planned`. |
+| `--comment <text>` | With `close` and `reopen`: comment first. |
+| `--base-version <v>` | With `edit` and a body: the `body_version` your text was written from. If someone changed the body since, the edit is refused (`edited`) and nothing is overwritten. |
+| `--add-label`, `--remove-label <label>` | With `edit`: repeat them. |
+| `--add-assignee`, `--remove-assignee <login>` | With `edit`: members, or `@me`; repeat them. |
+| `--repo <path>` | With `link` and `unlink`: the branch's project. Default: the one you are in. |
+| `--comment <id>` | With `react`: react to that comment (`ic_...`, from `view --comments`) instead of the issue. |
+| `--remove` | With `react`: take your reaction back. |
+| `--json` | Print the API's answer: [list](/api/issues/listIssues/), [view](/api/issues/getIssue/) (with `--comments`, the issue with its [timeline](/api/issues/issueTimeline/) under `timeline`), [create](/api/issues/createIssue/), [comment](/api/issues/addIssueComment/), close, reopen, edit, link and unlink ([the issue now](/api/issues/updateIssue/)), react ([its reactions now](/api/issues/addIssueReaction/)). A refusal prints the API's error object on stderr. |
+| `--monorepo <owner/name>` | The repository. Default: the one you are in. |
+
+Labels are made and changed by owners in the web's Settings, or with [`pando api`](#pando-api) on `/monorepos/{owner}/{monorepo}/labels`.
+
+A task, start to end:
+
+```sh
+n=$(pando issue create --title "Merge refuses when pando.toml has a trailing comma" \
+      --body-file report.md --label bug --project projects/pando --key task-41 --json | jq .number)
+pando worktree add projects/pando toml-error-line --issue "$n"
+# work, commit, git push
+pando merge          # This merge closes #41 (each within about a second).
+```
 
 ## References
 
@@ -302,6 +385,7 @@ git also runs `pando credential` as its credential helper for Pando URLs. You ne
 ```sh
 pando monorepo list | view [<owner/name>]
 pando monorepo rename <new-name>
+pando monorepo transfer <owner/name> <new-owner> [--yes]
 pando monorepo delete <owner/name> [--yes]
 ```
 
@@ -310,14 +394,46 @@ pando monorepo delete <owner/name> [--yes]
 | `list` | Your repositories, with your role in each. |
 | `view [<owner/name>]` | The repository you name, or the one you are in: its id, your role, how many members, and each project with main's head and its clone URL. |
 | `rename <new-name>` | Owners only. Renames the repository within its owner. The old `owner/name` keeps leading to it, for the API and for git, until it is given to another repository. Run in the repository's folder, the folder takes the new name and its git remotes the new clone URLs. A `pando sync` already running keeps the old name until it restarts. |
+| `transfer <owner/name> <new-owner>` | Owners only. Moves the repository to an [organization](#organizations) you are in, or back to a person who is already its owner directly. Its own members stay; the organization's people gain it, and the old owner's lose it. The old `owner/name` keeps leading to it, for the API and for git. You type its full name to confirm. Run in the repository's folder, the folder and its git remotes follow, as with `rename`. Run again, it changes nothing. |
 | `delete <owner/name>` | Owners only. Deletes every project in it, their history, and its shared files. There is no undo. You type the full name to confirm. Folders on this machine stay. |
 
 | Flag | What it does |
 | --- | --- |
 | `--monorepo <owner/name>` | With `rename`: the repository. Default: the one you are in. |
-| `--json` | With `view`: print `{"monorepo", "repos", "members"}`, the API's answers for the [repository](/api/monorepos/getMonorepo/), its [projects](/api/repos/listRepos/) and [members](/api/monorepos/listMembers/). With `rename`: the API's [answer](/api/monorepos/renameMonorepo/). |
-| `--yes` | Delete without typing the name. For scripts. |
+| `--json` | With `view`: print `{"monorepo", "repos", "members"}`, the API's answers for the [repository](/api/monorepos/getMonorepo/), its [projects](/api/repos/listRepos/) and [members](/api/monorepos/listMembers/). With `rename` and `transfer`: the API's [answer](/api/monorepos/renameMonorepo/). |
+| `--yes` | Delete or transfer without typing the name. For scripts. |
 | `--server <url>` | The Pando server. Default: the configured one. |
+
+## Organizations
+
+An organization is a namespace many people share, like a person's login: its repositories are `org/name`. Everyone in it can open and push to every repository it owns; its owners own them all. People are added at once, or by email at their first sign-in.
+
+### pando org
+
+```sh
+pando org create <login> [--name n] | list | view <org>
+pando org members [<org>] | add <org> <email | login> [--owner]
+pando org remove <org> <login | email> | leave <org>
+```
+
+| Subcommand | What it does |
+| --- | --- |
+| `create <login>` | Makes an organization; you are its first owner. The login follows the rule for people's logins (lower-case letters, digits and single dashes, at most 39) and shares their namespace, so a person's login can't be taken. Run again, it changes nothing. |
+| `list` | The organizations you are in, with your role and how many people each has. |
+| `view <org>` | Its login, name, description and website, your role, and its repositories you can open. |
+| `members [<org>]` | Its people and their roles, then invites still waiting. Default: the organization that owns the repository you are in. |
+| `add <org> <email \| login>` | Owners only. A login is added at once. An email adds the person now if they have signed in with it, else at their first `pando login`. Run again, it changes nothing. |
+| `remove <org> <login \| email>` | Owners only. A login takes that person out: their access to its repositories ends within about 15 seconds, except where they are a member of one directly. An email withdraws that invite. |
+| `leave <org>` | Takes you out. An organization keeps at least one owner. |
+
+| Flag | What it does |
+| --- | --- |
+| `--name <name>` | With `create`: its display name, up to 100 characters. |
+| `--owner` | With `add`: as an owner. Default: member. |
+| `--json` | Print the API's answer: [create](/api/orgs/createOrg/), [list](/api/orgs/listMyOrgs/), [view](/api/orgs/getOrg/), [members](/api/orgs/listOrgMembers/), and add ([by login](/api/orgs/putOrgMember/) or [by email](/api/orgs/orgInvite/)). |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+An organization's display name (up to 100 characters), description (up to 160) and website (an `https` address, up to 2,048) are changed by its owners in the web, or with [`pando api`](#pando-api): `pando api -X PATCH /orgs/<org> -f description="..."`. Make a repository in one with `pando init --owner <org>`, or move one in with `pando monorepo transfer`.
 
 ## CI
 
@@ -374,7 +490,7 @@ Builds as Pando has them from Buildkite's webhooks, newest first. Name a build b
 | `--job <job>` | With `log`: one job, by its key, name or id. |
 | `--follow` | With `log`: keep printing the job's log as it grows, until the job finishes. It follows one job. |
 | `--json` | Print the API's answer: [list](/api/ci/listCiBuilds/), [view](/api/ci/getCiBuild/), [log](/api/ci/getCiJobLog/) (an array, one answer per job), [rebuild](/api/ci/rebuildCiBuild/), [cancel](/api/ci/cancelCiBuild/). |
-| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
+| `--monorepo <owner/name>` | The repository. Default: the one you are in. |
 
 ### pando ci job retry
 
@@ -390,7 +506,7 @@ Runs a job again in Buildkite, with the build's first environment, so it can sti
 pando ci run <pipeline> [--branch b]
 ```
 
-Starts a build of the pipeline for the head of a branch as Pando has it (default: its repo's main), with fresh tokens, the way a push starts one. It takes `--monorepo` and `--json` (the API's [answer](/api/ci/startCiBuild/)).
+Starts a build of the pipeline for the head of a branch as Pando has it (default: its project's main), with fresh tokens, the way a push starts one. It takes `--monorepo` and `--json` (the API's [answer](/api/ci/startCiBuild/)).
 
 ### pando status in a CI build
 
@@ -434,7 +550,7 @@ A repo's web hooks: on a push, a new branch or a merge, Pando POSTs JSON to a UR
 | `--since <seq>` | With `redeliver`: send again every delivery after this seq. |
 | `--repo <path>` | The repo. Default: the one you are in, or the only one. |
 | `--json` | Print the API's answer: [list](/api/hooks/listHooks/), [create](/api/hooks/createHook/), [deliveries](/api/hooks/listDeliveries/), [redeliver](/api/hooks/redeliver/) or, with `--since`, [replay](/api/hooks/replayHook/). |
-| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
+| `--monorepo <owner/name>` | The repository. Default: the one you are in. |
 
 ## Machines and activity
 
@@ -446,7 +562,7 @@ A repo's web hooks: on a push, a new branch or a merge, Pando POSTs JSON to a UR
 pando machine list
 ```
 
-Each machine (a credential: a laptop, a cloud sandbox) that acted in the monorepo or is connected to it, latest activity first: whose it is, its kind, whether it is connected now and since when, how many worktrees it has open, and its last action. It takes `--monorepo` and `--json` (the API's [answer](/api/worktrees/listMachines/)).
+Each machine (a credential: a laptop, a cloud sandbox) that acted in the repository or is connected to it, latest activity first: whose it is, its kind, whether it is connected now and since when, how many worktrees it has open, and its last action. It takes `--monorepo` and `--json` (the API's [answer](/api/worktrees/listMachines/)).
 
 ### pando activity
 
@@ -458,7 +574,7 @@ What happened, newest first, one line each, as the home page shows it: pushes, n
 
 | Flag | What it does |
 | --- | --- |
-| `--monorepo <owner/name>` | One monorepo's lines. |
+| `--monorepo <owner/name>` | One repository's lines. |
 | `--all` | Every repository's lines, even inside a repository's folder. |
 | `--limit <n>` | How many lines. Default 30. |
 | `--json` | Print the API's [answer](/api/monorepos/listActivity/), its pages joined. |
@@ -471,7 +587,7 @@ What happened, newest first, one line each, as the home page shows it: pushes, n
 pando api <path> [-X method] [-f k=v] [-F k=v] [--paginate]
 ```
 
-Calls any route of the [API](/api/) with this machine's credential, like `gh api`, and prints the answer: indented on a terminal, on one line in a pipe. The path may leave out `/v1`. In the path, `{owner}` and `{monorepo}` stand for the monorepo you are in (or `--monorepo`), `{repo}` for the repo you are in (or `--repo`), and `{branch}` for the branch of the worktree you are in.
+Calls any route of the [API](/api/) with this machine's credential, like `gh api`, and prints the answer: indented on a terminal, on one line in a pipe. The path may leave out `/v1`. In the path, `{owner}` and `{monorepo}` stand for the repository you are in (or `--monorepo`), `{repo}` for the project you are in (or `--repo`), and `{branch}` for the branch of the worktree you are in.
 
 ```sh
 pando api /monorepos/{owner}/{monorepo}/repos/{repo}/branches --paginate
@@ -488,16 +604,16 @@ pando api -X PATCH /monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch} 
 | `-H 'Name: value'` | A request header. Repeat it. |
 | `--paginate` | Follow a list's cursor (`next_cursor`, or `next` in the activity log) and print every page as one answer: the lists end to end, the cursor null. `GET` only. |
 | `-i` | Print the status line and the headers first. |
-| `--monorepo <owner/name>` | The monorepo for `{owner}` and `{monorepo}`. |
+| `--monorepo <owner/name>` | The repository for `{owner}` and `{monorepo}`. |
 | `--repo <path>` | The repo for `{repo}`: its path, or its name in URLs. |
 
 It exits 0 on a 2xx or 3xx answer; a 3xx with no body (an artifact's download) prints where it leads. Any other answer puts the API's error body on stderr and exits 1. A full URL is refused: the credential goes only to the server you signed in to. There is no `--jq`; pipe the output to `jq`.
 
 ## For scripts and agents
 
-- **`--json` is the API's JSON.** Each command above links the answer it prints, and the [API reference](/api/) holds every field. Three commands put several answers together under fixed keys: `branch view` (`branch`, `reviews`, `commits`), `monorepo view` (`monorepo`, `repos`, `members`), and `ci build log` (an array, one answer per job). A list read in several pages comes out as one answer, the lists end to end. On a terminal the JSON is indented; in a pipe it is one line.
-- **Exit codes.** 0 when the command worked. 1 when it did not, with one line on stderr that says why and ends with the API's code and HTTP status, as in `pando: no pipeline nope here (not_found, HTTP 404)`. 2 when the command was used wrongly, with its usage.
-- **Running a write again.** The API takes no idempotency key, so a write retried after a lost answer may happen twice. These are safe to run again; a second run changes nothing (a delete or revoke already done answers `not_found`): `pando hook create` and `pando ci pipeline add` (they look first, and add nothing when it is there), `pando monorepo rename`, `pando members invite`, `revoke` and `remove`, `pando hook delete`, `pando ci build cancel` and `pando merge`. These are not: `pando ci run` and `pando ci build rebuild` start another build (look with `pando ci build list --branch <b>` first); `pando review -m` posts another review; `pando credential create` makes another credential; `pando hook redeliver` sends again (the receiver sees the same `X-Pando-Delivery` id and can drop it). `pando ci job retry` with a job's key retries that job's newest run, so once a first retry has finished, a second runs it again; name the job by its id to retry it once.
+- **`--json` is the API's JSON.** Each command above links the answer it prints, and the [API reference](/api/) holds every field. A few commands put several answers together under fixed keys: `branch view` (`branch`, `reviews`, `commits`), `monorepo view` (`monorepo`, `repos`, `members`), `issue view --comments` (the issue, with its timeline under `timeline`), and `ci build log` (an array, one answer per job). A list read in several pages comes out as one answer, the lists end to end. On a terminal the JSON is indented; in a pipe it is one line.
+- **Exit codes.** 0 when the command worked. 1 when it did not, with one line on stderr that says why and ends with the API's code and HTTP status, as in `pando: no pipeline nope here (not_found, HTTP 404)`; `pando issue` with `--json` prints the API's error object there instead. 2 when the command was used wrongly, with its usage.
+- **Running a write again.** Only issues and comments take an idempotency key: `pando issue create` and `pando issue comment` always send one (`--key`, else one made for the run), and try again with it after a network error or a 502, 503 or 504, so a lost answer never makes a second issue. An agent that may run the command again after a crash passes its own stable `--key`, such as its task id. The rest of the API takes none, so another write retried after a lost answer may happen twice. These are safe to run again; a second run changes nothing (a delete or revoke already done answers `not_found`): every other `pando issue` subcommand (states, labels, assignees, links and reactions are set, not added twice; a body edit with `--base-version` is refused, not repeated), `pando hook create` and `pando ci pipeline add` (they look first, and add nothing when it is there), `pando monorepo rename` and `transfer`, `pando org create`, `add`, `remove` and `leave`, `pando members invite`, `revoke` and `remove`, `pando hook delete`, `pando ci build cancel` and `pando merge`. These are not: `pando ci run` and `pando ci build rebuild` start another build (look with `pando ci build list --branch <b>` first); `pando review -m` posts another review; `pando credential create` makes another credential; `pando hook redeliver` sends again (the receiver sees the same `X-Pando-Delivery` id and can drop it). `pando ci job retry` with a job's key retries that job's newest run, so once a first retry has finished, a second runs it again; name the job by its id to retry it once.
 
 ## Shared files
 

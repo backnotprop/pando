@@ -10,6 +10,7 @@ import type { Repo } from "@pando/contract";
 import { activityQuery, fileQuery, headsQuery, latestQuery, monorepoQuery, needsQuery, openBranchesQuery, reposQuery, treeQuery } from "../../../api/queries";
 import { MiniActivity } from "../../../ui/activity";
 import { Empty, Lnk, SectionHead } from "../../../ui/controls";
+import { useHeld } from "../../../ui/held";
 import { RepoIcon } from "../../../ui/Icons";
 import { blobLink, branchLink, repoLink, tabLink, treeLink } from "../../../ui/paths";
 import { NeedState } from "../../-home/NeedsList";
@@ -126,7 +127,8 @@ function CodeRoot() {
 }
 
 function Root({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonly Repo[]; open: (number | undefined)[] }) {
-  const tree = useSuspenseQuery(treeQuery(monorepo, "")).data;
+  // Held while a save's new head is read (its latest version, its README), so the page never blanks (ui/held.ts).
+  const tree = useHeld(monorepo.full, useSuspenseQuery(treeQuery(monorepo, "")).data);
   const latest = useSuspenseQuery(latestQuery(monorepo, tree.head)).data;
   const readme = readmeOf("", tree.files);
   const full = monorepo.full;

@@ -1,0 +1,48 @@
+{
+  "schema": "Issue",
+  "route": "POST .../issues (labels, an assignee, a project, a task list)",
+  "status": 201,
+  "body": {
+    "number": 1,
+    "title": "Login fails after token refresh",
+    "state": "open",
+    "state_reason": null,
+    "project": "projects-web",
+    "project_path": "projects/web",
+    "labels": [
+      {
+        "name": "area/web",
+        "color": "teal",
+        "description": "The web app"
+      },
+      {
+        "name": "bug",
+        "color": "orange",
+        "description": "Something isn't working"
+      }
+    ],
+    "assignees": [
+      "rec-mutxvkul"
+    ],
+    "author": "rec-mutxvkul",
+    "comments": 0,
+    "tasks": {
+      "done": 1,
+      "total": 2
+    },
+    "linked_branches": 0,
+    "created_at": "2026-10-04T14:52:08.812Z",
+    "updated_at": "2026-10-04T14:52:08.812Z",
+    "closed_at": null,
+    "closed_by": null,
+    "closed_by_merge": null,
+    "body": "Steps:\n\n- [x] sign in\n- [ ] wait an hour",
+    "body_version": 1,
+    "machine": "ana-mbp",
+    "links": [],
+    "participants": [
+      "rec-mutxvkul"
+    ],
+    "reactions": []
+  }
+}

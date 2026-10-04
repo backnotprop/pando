@@ -6,7 +6,7 @@ import type { FullName } from "@pando/contract";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { MonorepoSummary } from "@pando/contract";
-import { activityQuery, monoreposQuery, needsQuery } from "../../api/queries";
+import { activityQuery, assignedQuery, meQuery, monoreposQuery, needsQuery } from "../../api/queries";
 import { LARGE_REFETCH_MS, useLargeFeeds } from "../../live/feed";
 import { ActivityList } from "../../ui/activity";
 import { Avatar } from "../../ui/Avatar";
@@ -17,7 +17,7 @@ import { Page } from "../../ui/pages";
 import { monoLink } from "../../ui/paths";
 import { since, useNow } from "../../ui/time";
 import { HomeFoot } from "./HomeFoot";
-import { NeedsList } from "./NeedsList";
+import { type AssignedRow, NeedsList } from "./NeedsList";
 
 /** "2 projects, 5 open branches": shown once the summary carries both counts. */
 function Line({ m }: { m: MonorepoSummary }) {
@@ -102,11 +102,36 @@ function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current
   );
 }
 
+/**
+ * The open issues assigned to you, one row per repository, most recently
+ * updated first: as Needs you read them, then as each repository's summary
+ * line moves them live (the person's socket's `summary` frame).
+ */
+function useAssigned(lines: readonly MonorepoSummary[], inMonorepo: FullName | null): AssignedRow[] {
+  const me = useQuery(meQuery).data?.login;
+  const read = useQuery(assignedQuery(inMonorepo)).data ?? [];
+
+  if (!me) return [];
+
+  const rows = new Map(read.map((r) => [r.monorepo_id, r]));
+
+  for (const m of lines) {
+    if (m.assigned === null || (inMonorepo && m.full_name !== inMonorepo)) continue;
+    const mine = m.assigned[me];
+
+    if (mine) rows.set(m.id, { monorepo: m.full_name, monorepo_id: m.id, ...mine });
+    else rows.delete(m.id);
+  }
+
+  return [...rows.values()].sort((a, b) => b.newest.updated_at.localeCompare(a.newest.updated_at));
+}
+
 export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner: string | null }) {
   const all = useQuery(monoreposQuery).data ?? [];
   const mine = owner ? all.filter((m) => m.owner === owner) : all;
   const ownedHere = (full: string) => !owner || full.startsWith(`${owner}/`);
   const needs = (useQuery(needsQuery(inMonorepo)).data ?? []).filter((n) => ownedHere(n.monorepo));
+  const assigned = useAssigned(all, inMonorepo).filter((a) => ownedHere(a.monorepo));
   // Large monorepos' lines come by their own sockets; past 5 of them, the log is read again each minute.
   const beyond = useLargeFeeds(all);
   const activity = useInfiniteQuery({ ...activityQuery(inMonorepo), refetchInterval: beyond ? LARGE_REFETCH_MS : false });
@@ -131,8 +156,8 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
           <HomeFoot />
         </aside>
         <section aria-label="Needs you and activity">
-          <SectionHead title="Needs you" count={needs.length} />
-          {needs.length ? <NeedsList rows={needs} /> : <Empty>Nothing needs you{inMonorepo ? ` in ${inMonorepo}` : ""}.</Empty>}
+          <SectionHead title="Needs you" count={needs.length + assigned.length} />
+          {needs.length || assigned.length ? <NeedsList rows={needs} assigned={assigned} /> : <Empty>Nothing needs you{inMonorepo ? ` in ${inMonorepo}` : ""}.</Empty>}
           <div className="mt-10 mb-2 flex items-center gap-3">
             <h2 className="text-[14px] leading-5 font-semibold">Activity</h2>
             <Filter lines={mine} current={inMonorepo} />

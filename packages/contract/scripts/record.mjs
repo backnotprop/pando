@@ -693,6 +693,99 @@ try {
   r = await call("POST", `${repoPath}/branches/feat%2Fclash/merge`, secret, { expected_head: clashHead });
   record("merge-checks-unknown.json", "ErrorBody", "POST .../branches/{branch}/merge (pando.toml broken: 503 checks_unknown)", r.status, r.json);
 
+  // Issues: a label; an issue with labels, an assignee, a project and a task list; a comment and reactions; a stale
+  // edit (409); its timeline after a rename, a label off, a close and a reopen; a merge that closes another (forced:
+  // pando.toml is broken above); the lists; their row frames and activity lines; Needs you with the assignment.
+  const issuesPath = `${base}/issues`;
+  const issueSocket = openSocket(`${base}/events?topics=issues`, secret);
+
+  sockets.push(issueSocket);
+  await waitFor(() => issueSocket.open, 10_000);
+  r = await call("POST", `${base}/labels`, secret, { name: "area/web", color: "teal", description: "The web app" });
+  record("label.json", "Label", "POST .../labels", r.status, r.json);
+  r = await call("POST", issuesPath, secret, { title: "Login fails after token refresh", body: "Steps:\n\n- [x] sign in\n- [ ] wait an hour", labels: ["bug", "area/web"], assignees: [login], project: "projects-web" }, { "idempotency-key": "rec-1" });
+  record("issue.json", "Issue", "POST .../issues (labels, an assignee, a project, a task list)", r.status, r.json);
+
+  const n1 = r.json?.number;
+  const n2 = (await call("POST", issuesPath, secret, { title: "Fixed by a merge" })).json?.number;
+
+  r = await call("POST", `${issuesPath}/${n1}/comments`, secret, { body: "Seen on staging too." }, { "idempotency-key": "rec-c1" });
+  record("comment.json", "IssueComment", "POST .../issues/{n}/comments", r.status, r.json);
+
+  const commentId = r.json?.id;
+
+  r = await call("PUT", `${issuesPath}/${n1}/reactions/%2B1`, secret);
+  record("reactions.json", "ReactionsAnswer", "PUT .../issues/{n}/reactions/{content}", r.status, r.json);
+  await call("PUT", `${issuesPath}/${n1}/comments/${commentId}/reactions/heart`, secret);
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { body: "Steps:\n\n- [x] sign in\n- [x] wait an hour", base_version: 1 });
+  r = await call("PATCH", `${issuesPath}/${n1}`, secret, { body: "An older edit", base_version: 1 });
+  record("issue-edited-409.json", "ErrorBody", "PATCH .../issues/{n} (a stale base_version: 409 edited with current)", r.status, r.json);
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { title: "Login fails an hour after sign-in", remove_labels: ["area/web"] });
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { state: "closed", state_reason: "not_planned" });
+  await call("PATCH", `${issuesPath}/${n1}`, secret, { state: "open" });
+  r = await call("GET", `${issuesPath}/${n1}/timeline`, secret);
+  record("timeline.json", "Timeline", "GET .../issues/{n}/timeline", r.status, r.json);
+  git(["checkout", "-q", "main"], src);
+  git(["pull", "-q", clone, "main"], src);
+  git(["checkout", "-qb", "fix/login"], src);
+
+  const fixHead = commit(src, "login.txt", "fixed\n", `Keep the session (fixes #${n2})`);
+
+  git(["push", "-q", clone, "fix/login"], src);
+  r = await call("POST", `${repoPath}/branches/fix%2Flogin/merge?force=1`, secret, { expected_head: fixHead });
+  record("merge-closing.json", "MergeResult", "POST .../branches/{branch}/merge (closes an issue)", r.status, r.json);
+
+  const closedIssue = await waitFor(async () => {
+    const x = await call("GET", `${issuesPath}/${n2}`, secret);
+
+    return x.json?.state === "closed" ? x : null;
+  }, 15_000);
+
+  if (!closedIssue) throw new Error("the merge never closed its issue");
+  record("issue-closed-by-merge.json", "Issue", "GET .../issues/{n} (closed by a merge, a branch linked from a commit)", closedIssue.status, closedIssue.json);
+  r = await call("GET", `${issuesPath}?state=all`, secret);
+  record("issues.json", "IssueList", "GET .../issues?state=all", r.status, r.json);
+  r = await call("GET", `${issuesPath}?state=closed&linked=projects-web:fix%2Flogin`, secret);
+  record("issues-closed-filtered.json", "IssueList", "GET .../issues?state=closed&linked=<repo>:<branch>", r.status, r.json);
+  r = await call("GET", `${issuesPath}/${n1}/comments/${commentId}`, secret);
+  record("comment-get.json", "IssueComment", "GET .../issues/{n}/comments/{id} (with a reaction)", r.status, r.json);
+  r = await call("GET", `${base}/labels`, secret);
+  record("labels.json", "LabelList", "GET .../labels", r.status, r.json);
+  await waitFor(() => ["issue.opened", "issue.commented", "issue.closed", "issue.reopened", "issue.updated", "label.updated"].every((k) => issueSocket.frames.some((f) => f.kind === k)), 10_000);
+
+  const issueFrames = [];
+  const issueKept = new Set();
+
+  for (const frame of issueSocket.frames) {
+    const key = frame.type === "event" ? `${frame.kind}|${frame.items?.[0]?.kind ?? ""}|${frame.reactions ? "r" : ""}${frame.comment ? "c" : ""}` : frame.type;
+
+    if (issueKept.has(key)) continue;
+
+    issueKept.add(key);
+    issueFrames.push(frame);
+  }
+
+  record("issue-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=issues (WebSocket)", 101, issueFrames);
+  await waitFor(() => ["issue.opened", "issue.commented", "issue.closed", "issue.reopened"].every((k) => live.frames.some((f) => f.type === "event" && f.event?.kind === k)), 15_000);
+
+  const activityIssueFrames = [];
+
+  for (const k of ["issue.opened", "issue.commented", "issue.closed", "issue.reopened", "merged"]) {
+    const f = live.frames.findLast((x) => x.type === "event" && x.event?.kind === k);
+
+    if (f) activityIssueFrames.push(f);
+  }
+
+  record("activity-issue-frames.json", "ActivityFrame[]", "GET /v1/events (WebSocket): issue lines, and a merge closing one", 101, activityIssueFrames);
+
+  const needsIssues = await waitFor(async () => {
+    const x = await call("GET", "/v1/branches", secret);
+
+    return x.json?.issues?.length ? x : null;
+  }, 20_000);
+
+  if (needsIssues) record("needs-issues.json", "NeedsPage", "GET /v1/branches (an issue assigned to the person)", needsIssues.status, needsIssues.json);
+
   // Settings: rename, last (the old name keeps working; the cleanup deletes by the new one).
   r = await call("PATCH", base, secret, { name: `${name}-renamed` });
   record("renamed.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {name}", r.status, r.json);

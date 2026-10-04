@@ -2,14 +2,14 @@
 // address, and keeps the monorepo's own socket open while one of its pages is.
 // Each page draws its own head (-frame/heads.tsx).
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, notFound, Outlet, redirect, useLocation } from "@tanstack/react-router";
+import { createFileRoute, notFound, Outlet, redirect, useMatches } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
 import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Page } from "../../../ui/pages";
-import { blobLink, ciPipelineLink, codeBlobLink, codeLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -50,6 +50,9 @@ function pathCrumbs(parts: string[], folder: (dir: string) => Crumb["link"], las
 function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   const [kind = "", ...parts] = rest;
   const repoPath = plain ? "." : `projects/${parts[0] ?? ""}`;
+
+  // issues / #34, issues / new
+  if (kind === "issues" && parts[0]) return [{ label: "issues", link: issuesLink(full), wide: true }, { label: parts[0] === "new" ? "new" : `#${parts[0]}` }];
 
   if (kind === "projects" && !plain) {
     const [, sub = "", ...path] = parts;
@@ -93,7 +96,9 @@ function codeCrumbs(full: string, repoPath: string, kind: string, path: string[]
 function MonorepoFrame() {
   const { monorepo } = Route.useRouteContext();
   const info = Route.useLoaderData();
-  const { pathname } = useLocation();
+  // The breadcrumb follows the page on screen (its rendered match), not the address being loaded: while a link's page
+  // is read, the old page stays, and so does its breadcrumb.
+  const pathname = useMatches({ select: (matches) => matches.at(-1)?.pathname ?? "" });
   const queryClient = useQueryClient();
 
   const { owner, name } = monorepo;

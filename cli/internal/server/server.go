@@ -20,9 +20,10 @@ type Monorepo struct {
 	ID        string `json:"id"`
 	Owner     string `json:"owner"`
 	Name      string `json:"name"`
-	FullName  string `json:"full_name"` // owner/name
-	Kind      string `json:"kind"`      // "monorepo" or "repo"
-	Role      string `json:"role"`      // the caller's: "owner" or "member"
+	FullName  string `json:"full_name"`  // owner/name
+	Kind      string `json:"kind"`       // "monorepo" or "repo"
+	OwnerType string `json:"owner_type"` // "user" or "org"
+	Role      string `json:"role"`       // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
 	// ReplacedAlias is set by a rename that took another monorepo's old name.
 	ReplacedAlias *ReplacedAlias `json:"replaced_alias,omitempty"`
@@ -252,6 +253,9 @@ type MergeResult struct {
 	MergeBase  string `json:"merge_base"`
 	Forced     bool   `json:"forced"`
 	MergedBy   string `json:"merged_by"`
+	// Closes is the open issues this merge closes, decided as it lands; each
+	// closes about a second later.
+	Closes []int `json:"closes"`
 }
 
 // WorktreeIn is the body of putWorktree.
@@ -295,7 +299,9 @@ type Server interface {
 	ListCredentials(ctx context.Context) ([]Credential, error)
 	RevokeCredential(ctx context.Context, id string) error
 
-	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
+	// CreateMonorepo makes a monorepo in owner's namespace: an org the
+	// caller is in, or "" for the caller's own.
+	CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error)
 	// ListMonorepos lists the caller's monorepos; with a name, only those
 	// named so (any owner), the caller's own namespace first.
 	ListMonorepos(ctx context.Context, name string) ([]Monorepo, error)
@@ -350,13 +356,15 @@ func MonorepoPath(full string) string {
 	return "/v1/monorepos/" + strings.Join(parts, "/")
 }
 
-// APIError is a non-2xx answer: {"error": {"code", "message", ...}}.
+// APIError is a non-2xx answer: {"error": {"code", "message", ...}}. Body
+// is the answer as it came (--json prints it).
 type APIError struct {
 	Status  int
 	Code    string
 	Message string
 	Paths   []string
 	Checks  *Checks
+	Body    []byte
 }
 
 func (e *APIError) Error() string {

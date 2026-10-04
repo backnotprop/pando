@@ -24,16 +24,21 @@ export const monoreposQuery = queryOptions({
   queryFn: () => get(Routes.listMonorepoSummaries.response, Routes.listMonorepoSummaries.path).then((r) => r.monorepos),
 });
 
-/** "Needs you", across the person's monorepos or in one. */
-export const needsQuery = (inMonorepo: FullName | null) =>
+/** "Needs you", across the person's monorepos or in one: its branches, and the open issues assigned to the person. */
+const needsPageQuery = (inMonorepo: FullName | null) =>
   queryOptions({
     queryKey: ["needs", inMonorepo],
     queryFn: () => {
       const route = Routes.listNeeds(inMonorepo);
 
-      return get(route.response, route.path).then((r) => r.branches);
+      return get(route.response, route.path);
     },
   });
+
+export const needsQuery = (inMonorepo: FullName | null) => queryOptions({ ...needsPageQuery(inMonorepo), select: (p) => p.branches });
+
+/** The open issues assigned to the person, per monorepo (Needs you's issue rows). */
+export const assignedQuery = (inMonorepo: FullName | null) => queryOptions({ ...needsPageQuery(inMonorepo), select: (p) => p.issues });
 
 /** The activity log, newest first, a page at a time. */
 export const activityQuery = (inMonorepo: FullName | null) =>

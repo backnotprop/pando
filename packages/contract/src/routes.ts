@@ -6,6 +6,7 @@ import { BranchCommits, BranchDiff, BranchList, MergeResult, ReviewList, Branch 
 import { Checks } from "./checks.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
 import { HistoryPage, LastCommits, TreePage } from "./files.ts";
+import { Issue, IssueComment, IssueList, Label, LabelList, ReactionsAnswer, Timeline, type IssueState, type ReactionContent } from "./issue.ts";
 import { FullName, Login, MonorepoName, RepoName } from "./ids.ts";
 import { MonorepoEntry, MonorepoList, MonorepoRenamed, MonorepoSummaryList } from "./monorepo.ts";
 import { Org, OrgInviteResult, OrgList, OrgMember, OrgMemberList, Owner } from "./org.ts";
@@ -117,7 +118,8 @@ export const monorepoFeedSocketPath = (owner: Login, name: MonorepoName, feedSin
 
 /**
  * A monorepo's event socket for row updates (open it with `Upgrade: websocket`): `topics` such as
- * `kind:branch.updated` or `repo:<repo>` (at most 10; ROW_KINDS lists the row kinds), `since` the highest `seq` seen.
+ * `kind:branch.updated` or `repo:<repo>` (at most 10; ROW_KINDS lists the row kinds), `issues` (every issue and
+ * label event) or `issue:<n>` (one issue's), `since` the highest `seq` seen.
  */
 export const monorepoEventsSocketPath = (owner: Login, name: MonorepoName, topics: readonly string[], since: number | null): string => {
   const params = new URLSearchParams({ topics: topics.join(",") });
@@ -362,6 +364,112 @@ export const connectCi = (owner: Login, name: MonorepoName) => ({ method: "POST"
 /** DELETE .../ci/connections/{connection} (204, owners). */
 export const disconnectCi = (owner: Login, name: MonorepoName, connection: string) =>
   ({ method: "DELETE", path: `${ciBase(owner, name)}/connections/${encodeURIComponent(connection)}` }) as const;
+
+// ── Issues ──────────────────────────────────────────────────────────────────
+
+const issuesBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/issues`;
+
+const issueBase = (owner: Login, name: MonorepoName, n: number): string => `${issuesBase(owner, name)}/${n}`;
+
+/** listIssues' filters, each optional. `assignee` and `author` take `@me`; `assignee` and `project` take `none`. */
+export interface IssueFilters {
+  state?: IssueState | "all";
+  /** Every one must match. */
+  labels?: readonly string[];
+  assignee?: string;
+  author?: string;
+  /** A repo's name, or `none`. */
+  project?: string;
+  /** `<repo>:<branch>`: the issues that branch is linked to. */
+  linked?: string;
+  /** Words in titles and bodies (the last one a prefix), up to 10. */
+  q?: string;
+  sort?: "created" | "updated" | "comments";
+  order?: "desc" | "asc";
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET .../issues: a page (default the 30 newest open) and the open and closed counts for the same filters. */
+export const listIssues = (owner: Login, name: MonorepoName, f: IssueFilters = {}) => {
+  const params = new URLSearchParams();
+
+  for (const [k, v] of [["state", f.state], ["assignee", f.assignee], ["author", f.author], ["project", f.project], ["linked", f.linked], ["q", f.q], ["sort", f.sort], ["order", f.order], ["cursor", f.cursor]] as const) {
+    if (v !== undefined) params.set(k, v);
+  }
+
+  for (const label of f.labels ?? []) params.append("label", label);
+
+  if (f.limit !== undefined) params.set("limit", String(f.limit));
+
+  return { path: `${issuesBase(owner, name)}${query(params)}`, response: IssueList };
+};
+
+/**
+ * POST .../issues {title, body?, labels?, assignees?, project?, link?: [{repo, branch}]} (201). Send an
+ * `Idempotency-Key` header: a retry with the same key answers the first issue (200, `Pando-Replayed: true`).
+ */
+export const createIssue = (owner: Login, name: MonorepoName) => ({ method: "POST", path: issuesBase(owner, name), response: Issue }) as const;
+
+/** GET .../issues/{n}. */
+export const getIssue = (owner: Login, name: MonorepoName, n: number) => ({ path: issueBase(owner, name, n), response: Issue });
+
+/**
+ * PATCH .../issues/{n}: any of title, body (with base_version), project, state, state_reason, add_labels,
+ * remove_labels, add_assignees, remove_assignees, link, unlink ([{repo, branch}]). 409 `edited` (ErrorBody with
+ * `current`) when base_version is not the body's version now.
+ */
+export const updateIssue = (owner: Login, name: MonorepoName, n: number) => ({ method: "PATCH", path: issueBase(owner, name, n), response: Issue }) as const;
+
+/** GET .../issues/{n}/timeline: oldest first; `cursor` is a page's next_cursor; `last` (instead) the newest N. */
+export const issueTimeline = (owner: Login, name: MonorepoName, n: number, page: { cursor?: string; limit?: number; last?: number } = {}) => {
+  const params = new URLSearchParams();
+
+  if (page.cursor !== undefined) params.set("cursor", page.cursor);
+
+  if (page.limit !== undefined) params.set("limit", String(page.limit));
+
+  if (page.last !== undefined) params.set("last", String(page.last));
+
+  return { path: `${issueBase(owner, name, n)}/timeline${query(params)}`, response: Timeline };
+};
+
+/** POST .../issues/{n}/comments {body} (201), with an `Idempotency-Key` header as createIssue. */
+export const addIssueComment = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${issueBase(owner, name, n)}/comments`, response: IssueComment }) as const;
+
+/** GET .../issues/{n}/comments/{id}: one comment, whole (a live event leaves a body over 16 KB out). */
+export const getIssueComment = (owner: Login, name: MonorepoName, n: number, id: string) => ({ path: `${issueBase(owner, name, n)}/comments/${encodeURIComponent(id)}`, response: IssueComment });
+
+/** PATCH .../issues/{n}/comments/{id} {body, base_version?}: the author only; 409 `edited` as updateIssue. */
+export const updateIssueComment = (owner: Login, name: MonorepoName, n: number, id: string) =>
+  ({ method: "PATCH", path: `${issueBase(owner, name, n)}/comments/${encodeURIComponent(id)}`, response: IssueComment }) as const;
+
+/** DELETE .../issues/{n}/comments/{id} (204): the author, or an owner. */
+export const deleteIssueComment = (owner: Login, name: MonorepoName, n: number, id: string) =>
+  ({ method: "DELETE", path: `${issueBase(owner, name, n)}/comments/${encodeURIComponent(id)}` }) as const;
+
+/** PUT (add yours) or DELETE (remove yours) .../issues/{n}/reactions/{content}: the issue's reactions now. */
+export const issueReaction = (owner: Login, name: MonorepoName, n: number, content: ReactionContent, method: "PUT" | "DELETE") =>
+  ({ method, path: `${issueBase(owner, name, n)}/reactions/${encodeURIComponent(content)}`, response: ReactionsAnswer }) as const;
+
+/** PUT or DELETE .../issues/{n}/comments/{id}/reactions/{content}: the comment's reactions now. */
+export const commentReaction = (owner: Login, name: MonorepoName, n: number, id: string, content: ReactionContent, method: "PUT" | "DELETE") =>
+  ({ method, path: `${issueBase(owner, name, n)}/comments/${encodeURIComponent(id)}/reactions/${encodeURIComponent(content)}`, response: ReactionsAnswer }) as const;
+
+const labelsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/labels`;
+
+/** GET .../labels: by name, each with its open issues. */
+export const listLabels = (owner: Login, name: MonorepoName) => ({ path: labelsBase(owner, name), response: LabelList });
+
+/** POST .../labels {name, color, description?} (201, owners). */
+export const createLabel = (owner: Login, name: MonorepoName) => ({ method: "POST", path: labelsBase(owner, name), response: Label }) as const;
+
+/** PATCH .../labels/{label} {name?, color?, description?} (owners): a rename moves the label on every issue. */
+export const updateLabel = (owner: Login, name: MonorepoName, label: string) =>
+  ({ method: "PATCH", path: `${labelsBase(owner, name)}/${encodeURIComponent(label)}`, response: Label }) as const;
+
+/** DELETE .../labels/{label} (204, owners): removed from every issue. */
+export const deleteLabel = (owner: Login, name: MonorepoName, label: string) => ({ method: "DELETE", path: `${labelsBase(owner, name)}/${encodeURIComponent(label)}` }) as const;
 
 // ── Owners and organizations ───────────────────────────────────────────────
 

@@ -11,8 +11,9 @@ import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import type { MonorepoRef } from "../api/names";
-import { type CheckRuns, branchDiffQuery, branchQuery, repoKey, reports } from "../api/projects";
+import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
+import { applyIssueFrame, touchLinkedIssues } from "./issues";
 import { keepOpen } from "./socket";
 
 /** While the socket is down, the page's data is read this often instead. */
@@ -130,14 +131,28 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
         qc.setQueryData(branchQuery(m, repo, branch.name).queryKey, branch);
       }
 
-      // A new head: its Files changed is read again (a 304 by its ETag when the files did not move).
-      if (f.row.head !== before) void qc.invalidateQueries({ queryKey: branchDiffQuery(m, f.row.repo, f.row.name).queryKey, exact: true });
+      // A new head: its Files changed is read again (a 304 by its ETag when the files did not move), and its commits, so the page's
+      // commit counts move with the head rather than with the activity line that follows.
+      if (f.row.head !== before) {
+        void qc.invalidateQueries({ queryKey: branchDiffQuery(m, f.row.repo, f.row.name).queryKey, exact: true });
+        void qc.invalidateQueries({ queryKey: commitsQuery(m, f.row.repo, f.row.name).queryKey, exact: true });
+      }
+
+      touchLinkedIssues(qc, m, f.row.repo, f.row.name);
 
       break;
     }
 
     case "status":
       // The branches at that commit follow as branch.updated, with their checks and gate.
+      break;
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened":
+    case "issue.updated":
+    case "label.updated":
+      applyIssueFrame(qc, m, f);
       break;
   }
 }

@@ -1,0 +1,63 @@
+{
+  "schema": "NeedsPage",
+  "route": "GET /v1/branches (an issue assigned to the person)",
+  "status": 200,
+  "body": {
+    "branches": [
+      {
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/clash",
+        "title": null,
+        "head": "0bd1cd3c887cb71282a51c9ff963b80764c0fb7b",
+        "author": "rec-mutxvkul",
+        "pushed_machine": "ana-mbp",
+        "state": "conflicts",
+        "checks": {
+          "state": "success",
+          "failing": [],
+          "failing_apps": {}
+        },
+        "updated_at": "2026-10-04T14:51:50.216Z"
+      },
+      {
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/failing",
+        "title": null,
+        "head": "32326fabe5a269cf60fba75537d3beb9ff52add2",
+        "author": "rec-mutxvkul",
+        "pushed_machine": "ana-mbp",
+        "state": "failing",
+        "checks": {
+          "state": "failure",
+          "failing": [
+            "ci/test"
+          ],
+          "failing_apps": {
+            "ci/test": null
+          }
+        },
+        "updated_at": "2026-10-04T14:51:49.061Z"
+      }
+    ],
+    "issues": [
+      {
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "count": 1,
+        "newest": {
+          "number": 1,
+          "title": "Login fails an hour after sign-in",
+          "updated_at": "2026-10-04T14:52:08.840Z"
+        }
+      }
+    ],
+    "truncated": false,
+    "skipped": []
+  }
+}

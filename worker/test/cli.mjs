@@ -9,6 +9,14 @@
 //   pando monorepo  rename (the folder follows), view by the new name
 //   pando members   invites and revoke
 //   pando activity  --json; pando branch view; pando hook; pando machine list
+//   pando issue     create and comment with --key (once each), list, view,
+//                   edit with --base-version (a stale one refused), close
+//                   and reopen, react, link and unlink; worktree add --issue,
+//                   then push and pando merge: "closes #N", and it closes
+//   pando org       create (twice), list, view, add by login and by email,
+//                   members, remove, leave (the last owner can't);
+//                   monorepo transfer into the org and back (the folder
+//                   follows, an org member gains it); init --owner
 //
 //   PANDO_URL=http://localhost:8854 node test/cli.mjs
 //
@@ -18,7 +26,7 @@
 // nothing reaches the owner's git config, ~/.pando or the keychain.
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -167,11 +175,13 @@ const bin = join(work, "pando");
  */
 const pando = (args, o = {}) =>
   new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd: o.cwd ?? work, env: { ...process.env, ...SAFE } });
+    const child = spawn(bin, args, { cwd: o.cwd ?? work, env: { ...process.env, ...SAFE, ...o.env } });
     const out = { status: null, stdout: "", stderr: "" };
     child.stdout.on("data", (d) => (out.stdout += d));
     child.stderr.on("data", (d) => (out.stderr += d));
     child.on("close", (code) => resolve({ ...out, status: code }));
+    // A spawn that cannot start (its folder is missing) is a failed run, not a crash before the cleanup.
+    child.on("error", (err) => resolve({ ...out, status: -1, stderr: out.stderr + String(err.message) }));
     child.stdin.end(o.input ?? "");
   });
 
@@ -188,6 +198,9 @@ const RENAMED = `cli2-${id}`;
 let S = null;
 
 let full = null;
+
+// Other repositories a check made, deleted at the end.
+const made = [];
 
 try {
   S = (await call("POST", "/v1/users", BOOT, { login: LOGIN, credential_name: "cli-box" })).json?.credential?.secret;
@@ -374,6 +387,110 @@ try {
   r = await pando(["members", "revoke", LOGIN], { cwd: mono });
   check("revoke takes an email only (remove takes a login)", r.status === 2, said(r));
 
+  // ── pando issue ──
+  const ijson = async (args, o = {}) => {
+    const run = await pando([...args, "--json"], { cwd: o.cwd ?? mono, input: o.input });
+
+    return { run, j: parsed(run) };
+  };
+
+  let { run: ir, j: ij } = await ijson(["issue", "create", "--title", "Login fails after token refresh", "--body", "Steps:\n- [ ] sign in\n- [x] wait", "--label", "bug", "--key", `task-${id}`]);
+  const n1 = ij?.number;
+  check("pando issue create --key: opened, with its label and tasks", ir.status === 0 && n1 >= 1 && ij.labels?.[0]?.name === "bug" && ij.tasks?.total === 2 && ij.author === LOGIN, said(ir));
+  r = await pando(["issue", "create", "--title", "Login fails after token refresh", "--key", `task-${id}`], { cwd: mono });
+  const listed = parsed(await pando(["issue", "list", "--state", "all", "--json", "--limit", "100"], { cwd: mono }));
+  check("the same create with the same --key (a retry): the first issue, nothing new", r.status === 0 && r.stdout.includes(`#${n1} Login fails after token refresh was opened already`) && listed?.issues?.filter((i) => i.title === "Login fails after token refresh").length === 1, said(r));
+  r = await pando(["issue", "create", "--body", "no title"], { cwd: mono });
+  check("create with no --title: a usage error, exit 2", r.status === 2, said(r));
+  r = await pando(["issue", "list"], { cwd: mono });
+  check("pando issue list: the counts, then a row per issue", r.status === 0 && new RegExp(`${full}: \\d+ open, \\d+ closed`).test(r.stdout) && new RegExp(`#${n1}\\s+Login fails after token refresh\\s+open\\s+bug`).test(r.stdout), said(r));
+  check("issue list --json: the API's IssueList, with counts", listed?.counts?.open >= 1 && "next_cursor" in listed, JSON.stringify(listed?.counts));
+
+  ({ run: ir, j: ij } = await ijson(["issue", "view", `#${n1}`]));
+  const v1 = ij?.body_version;
+  check("pando issue view --json: the issue, with body_version", ir.status === 0 && ij?.number === n1 && Number.isInteger(v1) && ij.body.includes("sign in"), said(ir));
+  r = await pando(["issue", "view", String(n1)], { cwd: mono });
+  check("pando issue view: state, author, labels, tasks, then the body", r.status === 0 && r.stdout.startsWith(`#${n1} Login fails after token refresh  open`) && /labels\s+bug/.test(r.stdout) && /tasks\s+1 of 2 done/.test(r.stdout) && r.stdout.includes("- [ ] sign in"), said(r));
+
+  ({ run: ir, j: ij } = await ijson(["issue", "comment", String(n1), "--body", "Seen it on staging too.", "--key", `c-${id}`]));
+  const c1 = ij?.id;
+  r = await pando(["issue", "comment", String(n1), "--body", "Seen it on staging too.", "--key", `c-${id}`], { cwd: mono });
+  ({ j: ij } = await ijson(["issue", "view", String(n1), "--comments"]));
+  const comments = (ij?.timeline?.items ?? []).filter((x) => x.kind === "comment");
+  check("pando issue comment --key twice: one comment; view --comments --json has it under timeline", (c1 ?? "").startsWith("ic_") && /on #\d+ already/.test(r.stdout) && comments.length === 1 && comments[0].comment.id === c1, said(r));
+
+  r = await pando(["issue", "edit", String(n1), "--body-file", "-", "--base-version", String(v1)], { cwd: mono, input: "Steps, rewritten.\n" });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue edit --body-file - --base-version: the body moves one version", r.status === 0 && ij?.body === "Steps, rewritten.\n" && ij.body_version === v1 + 1, said(r));
+  r = await pando(["issue", "edit", String(n1), "--body", "an overwrite", "--base-version", String(v1), "--json"], { cwd: mono });
+  let refusal = null;
+
+  try {
+    refusal = JSON.parse(r.stderr);
+  } catch {}
+
+  check("a stale --base-version with --json: exit 1, the API's error object (edited, with current)", r.status === 1 && refusal?.error?.code === "edited" && refusal.error.current?.body === "Steps, rewritten.\n", said(r));
+  r = await pando(["issue", "edit", String(n1), "--body", "an overwrite", "--base-version", String(v1)], { cwd: mono });
+  check("... and without --json: one line, the code, and the version now", r.status === 1 && /\(edited, HTTP 409\)/.test(r.stderr) && r.stderr.includes(`version ${v1 + 1} now`) && r.stderr.trim().split("\n").length === 1, said(r));
+  r = await pando(["issue", "edit", String(n1), "--add-assignee", "@me", "--add-label", "enhancement", "--remove-label", "bug"], { cwd: mono });
+  ({ j: ij } = await ijson(["issue", "list", "--assignee", "@me", "--label", "enhancement"]));
+  check("edit --add-assignee @me --add-label --remove-label; list --assignee @me --label finds it", r.status === 0 && ij?.issues?.length === 1 && ij.issues[0].number === n1 && ij.issues[0].labels.map((l) => l.name).join() === "enhancement", said(r));
+
+  ({ run: ir, j: ij } = await ijson(["issue", "close", String(n1), "--reason", "not-planned", "--comment", "Duplicate of an older report."]));
+  check("pando issue close --reason not-planned --comment: closed as not planned, the comment first", ir.status === 0 && ij?.state === "closed" && ij.state_reason === "not_planned" && ij.comments === 2, said(ir));
+  r = await pando(["issue", "close", String(n1), "--reason", "not-planned"], { cwd: mono });
+  check("closing it again (a retry) changes nothing", r.status === 0 && /is closed as not planned/.test(r.stdout), said(r));
+  r = await pando(["issue", "reopen", String(n1)], { cwd: mono });
+  check("pando issue reopen", r.status === 0 && r.stdout.includes(`#${n1} Login fails after token refresh is open.`), said(r));
+
+  r = await pando(["issue", "react", String(n1), "heart"], { cwd: mono });
+  await pando(["issue", "react", String(n1), "heart"], { cwd: mono });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue react heart, twice: one heart, by this person", r.status === 0 && ij?.reactions?.length === 1 && ij.reactions[0].content === "heart" && ij.reactions[0].count === 1 && ij.reactions[0].by[0] === LOGIN, said(r));
+  ({ run: ir, j: ij } = await ijson(["issue", "react", String(n1), "👍", "--comment", c1]));
+  check("react with the emoji, on a comment (--comment id)", ir.status === 0 && ij?.reactions?.[0]?.content === "+1", said(ir));
+  ({ run: ir, j: ij } = await ijson(["issue", "react", String(n1), "heart", "--remove"]));
+  check("react --remove takes it back", ir.status === 0 && Array.isArray(ij?.reactions) && ij.reactions.length === 0, said(ir));
+  r = await pando(["issue", "react", String(n1), "thumbs"], { cwd: mono });
+  check("a reaction that is not one of the eight: exit 2", r.status === 2, said(r));
+
+  // A task, start to end: an issue, a worktree linked to it, a push, the merge that closes it.
+  ({ run: ir, j: ij } = await ijson(["issue", "create", "--title", "Name the line in the pando.toml error", "--project", "projects/app", "--key", `task2-${id}`]));
+  const n2 = ij?.number;
+  check("create --project projects/app", ij?.project_path === "projects/app" && n2 > n1, said(ir));
+  r = await pando(["worktree", "add", "projects/app", "fix-line", "--issue", String(n2)], { cwd: mono });
+  check("pando worktree add --issue: the worktree, and the branch linked", r.status === 0 && r.stdout.includes(`Linked fix-line to #${n2} Name the line in the pando.toml error: merging it closes #${n2}.`), said(r));
+  r = await pando(["worktree", "add", "projects/app", "fix-nope", "--issue", "999"], { cwd: mono });
+  check("--issue with no such issue: stops before anything is made", r.status === 1 && /issue #999/.test(r.stderr) && !existsSync(join(app, "worktrees", "fix-nope")), said(r));
+  const wt = join(app, "worktrees", "fix-line");
+  r = await pando(["issue", "link", String(n1)], { cwd: wt });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue link <n> in a worktree: its branch, linked", r.status === 0 && ij?.links?.some((l) => l.branch === "fix-line" && l.sources.includes("link")), said(r));
+  r = await pando(["issue", "unlink", String(n1)], { cwd: wt });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue unlink: gone again (so this merge leaves it open)", r.status === 0 && !ij?.links?.some((l) => l.branch === "fix-line"), said(r));
+
+  // (No worktree when the server serves no issues: the checks above say so, and this part fails without throwing.)
+  if (existsSync(wt)) writeFileSync(join(wt, "line.go"), "package main\n");
+
+  git(["add", "-A"], wt);
+  git(["commit", "-qm", "Name the line"], wt);
+  // As a person's git push from the worktree: the helper list cleared (git() does), then pando as the helper.
+  const pushed = git(["-c", `credential.helper=!'${bin}' credential`, "push", "-q"], wt);
+  check("a commit pushed from the worktree", pushed.status === 0, scrub(pushed.stderr));
+  r = await pando(["merge", "--force"], { cwd: wt });
+  check(`pando merge says it closes #${n2}, from the merge's answer`, r.status === 0 && r.stdout.includes(`This merge closes #${n2} (`), said(r));
+
+  const closed = await waitFor(async () => {
+    const v = parsed(await pando(["issue", "view", String(n2), "--json"], { cwd: mono }));
+
+    return v?.state === "closed" ? v : null;
+  }, 15_000);
+
+  check("about a second later it is closed, as completed, by that merge", closed?.state_reason === "completed" && closed.closed_by_merge?.branch === "fix-line", JSON.stringify(closed?.closed_by_merge));
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("the unlinked issue stays open", ij?.state === "open");
+
   // ── pando monorepo rename, then by the new name ──
   r = await pando(["monorepo", "rename", RENAMED], { cwd: mono });
   const renamed = `${LOGIN}/${RENAMED}`;
@@ -387,7 +504,8 @@ try {
   j = parsed(r);
   check("pando monorepo view <new name> --json: {monorepo, repos, members}", j?.monorepo?.full_name === renamed && j.repos?.[0]?.path === "projects/app" && j.members?.[0]?.login === LOGIN, said(r));
   r = await pando(["monorepo", "view", renamed]);
-  check("pando monorepo view: kind, role, repos with main's head", r.status === 0 && r.stdout.startsWith(`${renamed}  monorepo  (you are owner)`) && new RegExp(`projects/app\\s+${mainSha.slice(0, 7)}`).test(r.stdout), said(r));
+  const mainNow = (await call("GET", `/v1/monorepos/${renamed}/heads`, S)).json?.heads?.find((h) => h.path === "projects/app")?.head ?? mainSha;
+  check("pando monorepo view: kind, role, repos with main's head", r.status === 0 && r.stdout.startsWith(`${renamed}  monorepo  (you are owner)`) && new RegExp(`projects/app\\s+${mainNow.slice(0, 7)}`).test(r.stdout), said(r));
   r = await pando(["api", `/monorepos/${LOGIN}/${NAME}`]);
   check("the old name still leads to it", parsed(r)?.full_name === renamed, said(r));
   const remote = git(["remote", "get-url", "pando"], app).stdout.trim();
@@ -409,17 +527,96 @@ try {
   r = await pando(["activity", "--all", "--json", "--limit", "5"], { cwd: mono });
   check("--all: every monorepo's lines, this one's among them", r.status === 0 && (parsed(r)?.events ?? []).some((e) => e.monorepo === renamed), said(r));
 
+  // ── pando org, monorepo transfer, init --owner ──
+  const ORG = `org-${id}`;
+  const ANA = `ana-${id}`;
+  const A = (await call("POST", "/v1/users", BOOT, { login: ANA, credential_name: "ana-box" })).json?.credential?.secret;
+  const anaEnv = { PANDO_HOME: join(work, "ana-home"), PANDO_MACHINE: "ana-box" };
+  r = await pando(["login", "--server", URL_, "--with-credential"], { input: A + "\n", env: anaEnv });
+  check("a second person, ana, signed in on her own PANDO_HOME", !!A && r.status === 0, said(r));
+  ({ run: ir, j: ij } = await ijson(["org", "create", ORG, "--name", "Cli Org"]));
+  check("pando org create --name: made, and you are its owner", ir.status === 0 && ij?.login === ORG && ij.name === "Cli Org" && ij.role === "owner", said(ir));
+  r = await pando(["org", "create", ORG]);
+  check("create it again (a retry): it is yours already, nothing new", r.status === 0 && r.stdout.includes(`${ORG} exists already, and you own it`), said(r));
+  r = await pando(["org", "create", LOGIN]);
+  check("an org can't take a person's login (one namespace)", r.status === 1 && /namespace_taken/.test(r.stderr), said(r));
+  ({ run: ir, j: ij } = await ijson(["org", "list"]));
+  check("pando org list --json: it, with your role", ij?.orgs?.some((o) => o.login === ORG && o.role === "owner"), said(ir));
+  r = await pando(["org", "add", ORG, ANA]);
+  check("pando org add <org> <login>: in at once", r.status === 0 && r.stdout.includes(`${ANA} is a member of ${ORG}`), said(r));
+  const bob = `bob-${id}@example.com`;
+  r = await pando(["org", "add", ORG, bob]);
+  check("pando org add <org> <email> (no account yet): invited", r.status === 0 && r.stdout.includes(`Invited ${bob} to ${ORG}`), said(r));
+  ({ run: ir, j: ij } = await ijson(["org", "members", ORG]));
+  check("pando org members --json: both people, with their roles", ij?.members?.some((m) => m.login === LOGIN && m.role === "owner") && ij.members.some((m) => m.login === ANA && m.role === "member"), said(ir));
+  r = await pando(["org", "members", ORG]);
+  check("pando org members: a table, then the invite still waiting", r.status === 0 && /^PERSON\s+NAME\s+ROLE/m.test(r.stdout) && r.stdout.includes(bob), said(r));
+
+  r = await pando(["monorepo", "transfer", full, ORG], { cwd: mono });
+  check("transfer without --yes, not at a terminal: refused, nothing moved", r.status === 1 && /--yes/.test(r.stderr), said(r));
+  const before = full;
+  r = await pando(["monorepo", "transfer", full, ORG, "--yes"], { cwd: mono });
+  const inOrg = `${ORG}/${RENAMED}`;
+  check("pando monorepo transfer <owner/name> <org> --yes: moved, and the folder follows", r.status === 0 && r.stdout.includes(`Moved ${before} to ${inOrg}`) && /Everyone in .* can open and push to it now/.test(r.stdout) && /This folder now uses/.test(r.stdout), said(r));
+  full = inOrg;
+  r = await pando(["api", "/monorepos/{owner}/{monorepo}"], { cwd: app });
+  check("the folder's {owner}/{monorepo} is the org's now; the old name still leads to it", parsed(r)?.full_name === inOrg && parsed(await pando(["api", `/monorepos/${before}`]))?.full_name === inOrg, said(r));
+  check("the checkout's git remote points at the org's clone URL", git(["remote", "get-url", "pando"], app).stdout.trim().endsWith(`/${ORG}/${RENAMED}/projects-app.git`));
+  const anaSees = await waitFor(async () => parsed(await pando(["monorepo", "view", inOrg, "--json"], { env: anaEnv }))?.monorepo?.full_name === inOrg, 20_000);
+  check("ana, in the org, can open it with no row of her own", anaSees);
+  r = await pando(["monorepo", "transfer", inOrg, ORG, "--yes"], { cwd: mono });
+  check("the same transfer again (a retry): owned by the org already", r.status === 0 && r.stdout.includes("is owned by " + ORG + " already"), said(r));
+  r = await pando(["org", "members"], { cwd: mono });
+  check("pando org members with no org, in the folder: the org that owns it", r.status === 0 && r.stdout.includes(ANA), said(r));
+  r = await pando(["org", "view", ORG]);
+  check("pando org view: name, your role, how many people, its repositories", r.status === 0 && r.stdout.startsWith(`${ORG}  Cli Org`) && /you are\s+owner; 2 people/.test(r.stdout) && r.stdout.includes(inOrg), said(r));
+  r = await pando(["monorepo", "transfer", inOrg, LOGIN, "--yes"], { cwd: mono });
+  full = `${LOGIN}/${RENAMED}`;
+  check("transfer back to a person who owns it directly", r.status === 0 && r.stdout.includes(`Moved ${inOrg} to ${full}`), said(r));
+
+  const plain = join(work, `plain-${id}`);
+  mkdirSync(plain);
+  writeFileSync(join(plain, "README.md"), "plain\n");
+  git(["init", "-q"], plain);
+  git(["add", "-A"], plain);
+  git(["commit", "-qm", "first"], plain);
+  r = await pando(["init", "--yes", "--owner", ORG, "--name", `plain-${id}`], { cwd: plain });
+  const orgRepo = `${ORG}/plain-${id}`;
+
+  if (r.status === 0) made.push(orgRepo);
+
+  check("pando init --owner <org>: made in the org", r.status === 0 && r.stdout.includes(`Pando repo ${orgRepo} is set up`), said(r));
+  const plain2 = join(work, `plain2-${id}`);
+  mkdirSync(plain2);
+  writeFileSync(join(plain2, "README.md"), "plain\n");
+  git(["init", "-q"], plain2);
+  git(["add", "-A"], plain2);
+  git(["commit", "-qm", "first"], plain2);
+  r = await pando(["init", "--yes", "--owner", `nope-${id}`, "--name", `plain2-${id}`], { cwd: plain2 });
+  check("init --owner an org you are not in: refused, nothing made", r.status === 1 && /not in the organization/.test(r.stderr), said(r));
+
+  r = await pando(["org", "remove", ORG, bob]);
+  check("pando org remove <org> <email>: the invite withdrawn", r.status === 0 && r.stdout.includes(`Withdrew the invite for ${bob}`), said(r));
+  r = await pando(["org", "leave", ORG], { env: anaEnv });
+  check("ana: pando org leave", r.status === 0 && r.stdout.includes(`You left ${ORG}`), said(r));
+  await pando(["org", "add", ORG, ANA]);
+  r = await pando(["org", "remove", ORG, ANA]);
+  ({ j: ij } = await ijson(["org", "members", ORG]));
+  check("pando org remove <org> <login> (after adding her back)", r.status === 0 && !ij?.members?.some((m) => m.login === ANA), said(r));
+  r = await pando(["org", "leave", ORG]);
+  check("the only owner can't leave: exit 1, last_owner, and what to do", r.status === 1 && /last_owner/.test(r.stderr) && /--owner/.test(r.stderr), said(r));
+
   // The help: the new commands, no agent name, never "meta layer".
   r = await pando(["help"]);
   const help = r.stderr;
-  check("pando help lists the new commands", ["pando api <path>", "pando ci build list", "pando ci job retry", "pando ci run <pipeline>", "pando branch view", "pando monorepo rename", "pando members invites", "pando hook list", "pando machine list", "pando activity"].every((x) => help.includes(x)));
+  check("pando help lists the new commands", ["pando api <path>", "pando ci build list", "pando ci job retry", "pando ci run <pipeline>", "pando branch view", "pando monorepo rename", "pando members invites", "pando hook list", "pando machine list", "pando activity", "pando issue list", "pando issue react", "--issue n", "pando org create", "pando monorepo transfer", "--owner <org>"].every((x) => help.includes(x)));
   check("... and never says meta layer or agent", !/meta layer|agent/i.test(help));
 } catch (cause) {
   check("no exception", false, describeError(cause));
 } finally {
-  if (full) {
-    const r = await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, S);
-    check(`delete ${full}`, r.status === 204, String(r.status));
+  for (const name of [full, ...made].filter(Boolean)) {
+    const r = await call("DELETE", `/v1/monorepos/${name}?confirm=${name}`, S);
+    check(`delete ${name}`, r.status === 204, String(r.status));
   }
 
   server.close();

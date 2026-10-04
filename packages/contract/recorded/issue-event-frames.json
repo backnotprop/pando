@@ -1,0 +1,555 @@
+{
+  "schema": "MonorepoEventFrame[]",
+  "route": "GET .../events?topics=issues (WebSocket)",
+  "status": 101,
+  "body": [
+    {
+      "type": "caught_up",
+      "seq": 56
+    },
+    {
+      "type": "event",
+      "seq": 57,
+      "at": "2026-10-04T14:52:08.808Z",
+      "kind": "label.updated",
+      "collection": "labels",
+      "key": "area/web",
+      "op": "upsert",
+      "repo": null,
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "name": "area/web",
+        "color": "teal",
+        "description": "The web app"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 58,
+      "at": "2026-10-04T14:52:08.812Z",
+      "kind": "issue.opened",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails after token refresh",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          },
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 0,
+        "tasks": {
+          "done": 1,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.812Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 1,
+      "items": []
+    },
+    {
+      "type": "event",
+      "seq": 60,
+      "at": "2026-10-04T14:52:08.821Z",
+      "kind": "issue.commented",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails after token refresh",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          },
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 1,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.821Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 1,
+      "items": [
+        {
+          "id": 1,
+          "at": "2026-10-04T14:52:08.821Z",
+          "actor": "rec-mutxvkul",
+          "machine": "ana-mbp",
+          "kind": "comment",
+          "comment": {
+            "id": "ic_05230732a9fc7ce8",
+            "body": "Seen on staging too.",
+            "body_version": 1,
+            "author": "rec-mutxvkul",
+            "machine": "ana-mbp",
+            "created_at": "2026-10-04T14:52:08.821Z",
+            "updated_at": "2026-10-04T14:52:08.821Z",
+            "reactions": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "seq": 61,
+      "at": "2026-10-04T14:52:08.825Z",
+      "kind": "issue.updated",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails after token refresh",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          },
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 1,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.821Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 1,
+      "items": [],
+      "reactions": [
+        {
+          "content": "+1",
+          "count": 1,
+          "by": [
+            "rec-mutxvkul"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "seq": 62,
+      "at": "2026-10-04T14:52:08.827Z",
+      "kind": "issue.updated",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails after token refresh",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          },
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 1,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.821Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 1,
+      "items": [],
+      "comment": {
+        "id": "ic_05230732a9fc7ce8",
+        "body": "Seen on staging too.",
+        "body_version": 1,
+        "author": "rec-mutxvkul",
+        "machine": "ana-mbp",
+        "created_at": "2026-10-04T14:52:08.821Z",
+        "updated_at": "2026-10-04T14:52:08.821Z",
+        "reactions": [
+          {
+            "content": "heart",
+            "count": 1,
+            "by": [
+              "rec-mutxvkul"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "event",
+      "seq": 63,
+      "at": "2026-10-04T14:52:08.829Z",
+      "kind": "issue.updated",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails after token refresh",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          },
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 2,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.829Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 2,
+      "items": []
+    },
+    {
+      "type": "event",
+      "seq": 64,
+      "at": "2026-10-04T14:52:08.834Z",
+      "kind": "issue.updated",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails an hour after sign-in",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 2,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.834Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 2,
+      "items": [
+        {
+          "id": 2,
+          "at": "2026-10-04T14:52:08.834Z",
+          "actor": "rec-mutxvkul",
+          "machine": "ana-mbp",
+          "kind": "renamed",
+          "from": "Login fails after token refresh",
+          "to": "Login fails an hour after sign-in"
+        },
+        {
+          "id": 3,
+          "at": "2026-10-04T14:52:08.834Z",
+          "actor": "rec-mutxvkul",
+          "machine": "ana-mbp",
+          "kind": "unlabeled",
+          "label": {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          }
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "seq": 65,
+      "at": "2026-10-04T14:52:08.837Z",
+      "kind": "issue.closed",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails an hour after sign-in",
+        "state": "closed",
+        "state_reason": "not_planned",
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 2,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.837Z",
+        "closed_at": "2026-10-04T14:52:08.837Z",
+        "closed_by": "rec-mutxvkul",
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 2,
+      "items": [
+        {
+          "id": 4,
+          "at": "2026-10-04T14:52:08.837Z",
+          "actor": "rec-mutxvkul",
+          "machine": "ana-mbp",
+          "kind": "closed",
+          "reason": "not_planned",
+          "merge": null
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "seq": 66,
+      "at": "2026-10-04T14:52:08.840Z",
+      "kind": "issue.reopened",
+      "collection": "issues",
+      "key": "1",
+      "op": "upsert",
+      "repo": "projects-web",
+      "actor": "rec-mutxvkul",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "number": 1,
+        "title": "Login fails an hour after sign-in",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 2,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.840Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 1,
+      "body_version": 2,
+      "items": [
+        {
+          "id": 5,
+          "at": "2026-10-04T14:52:08.840Z",
+          "actor": "rec-mutxvkul",
+          "machine": "ana-mbp",
+          "kind": "reopened"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "seq": 68,
+      "at": "2026-10-04T14:52:10.579Z",
+      "kind": "issue.updated",
+      "collection": "issues",
+      "key": "2",
+      "op": "upsert",
+      "repo": null,
+      "actor": null,
+      "machine": null,
+      "agent": null,
+      "row": {
+        "number": 2,
+        "title": "Fixed by a merge",
+        "state": "open",
+        "state_reason": null,
+        "project": null,
+        "project_path": null,
+        "labels": [],
+        "assignees": [],
+        "author": "rec-mutxvkul",
+        "comments": 0,
+        "tasks": null,
+        "linked_branches": 1,
+        "created_at": "2026-10-04T14:52:08.817Z",
+        "updated_at": "2026-10-04T14:52:10.579Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null
+      },
+      "number": 2,
+      "body_version": 1,
+      "items": [
+        {
+          "id": 6,
+          "at": "2026-10-04T14:52:10.579Z",
+          "actor": null,
+          "machine": null,
+          "kind": "linked",
+          "repo": "projects-web",
+          "branch": "fix/login",
+          "source": "commit",
+          "sha": "d3105238befdd2529b0945198d4203c8047b9f96",
+          "repo_path": "projects/web"
+        }
+      ]
+    }
+  ]
+}

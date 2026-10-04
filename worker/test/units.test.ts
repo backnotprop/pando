@@ -542,3 +542,25 @@ describe("parse guards (worker/src/parse.ts)", () => {
     expect(parseJson("not json")).toBe(null);
   });
 });
+
+describe("closing keywords (issues/refs.ts)", () => {
+  const refs = async (text: string) => (await import("../src/issues/refs")).closingRefs(text, ["ramos/pando"]);
+
+  it("reads every keyword, any case, with or without a colon", async () => {
+    expect(await refs("close #1 closes #2 closed #3 fix #4 fixes #5 FIXED #6 resolve #7 Resolves: #8 resolved:#9")).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+  it("takes one number per keyword, and each number once", async () => {
+    expect(await refs("Fixes #12, #14")).toEqual([12]);
+    expect(await refs("Fixes #12, fixes #14, closes #12")).toEqual([12, 14]);
+  });
+  it("takes this monorepo's own full name and ignores another's", async () => {
+    expect(await refs("fixes ramos/pando#3 and fixes Ramos/Pando#4, fixes ana/other#5")).toEqual([3, 4]);
+  });
+  it("needs the keyword as a word, and the number whole", async () => {
+    expect(await refs("prefixes #1, unfixed #2, abc#3, fixes #4abc, fixes#5, see #6")).toEqual([]);
+  });
+  it("skips code, and a revert", async () => {
+    expect(await refs("Use `fixes #1` here\n```\nfixes #2\n```\nfixes #3")).toEqual([3]);
+    expect(await refs('Revert "Fix login (fixes #34)"\n\nThis reverts commit 3f9a2c1.')).toEqual([]);
+  });
+});

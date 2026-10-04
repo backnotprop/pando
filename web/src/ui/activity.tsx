@@ -10,7 +10,7 @@ import type { FeedEvent } from "@pando/contract";
 import { lineKey, takeArrived } from "../live/arrivals";
 import { Avatar } from "./Avatar";
 import buildkiteMark from "./buildkite-mark.svg";
-import { type AppLink, blobLink, branchesLink, branchLink, historyLink, monoLink, ownerLink, repoLink } from "./paths";
+import { type AppLink, blobLink, branchesLink, branchLink, historyLink, issueLink, monoLink, ownerLink, repoLink } from "./paths";
 import { duration, since, useNow } from "./time";
 import { Older } from "./Older";
 
@@ -82,8 +82,12 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
     case "branch.deleted":
       // Its page is gone; the project's branches list is where it was.
       return { ...base, verb: "deleted", object: branch && { text: branch.text, link: e.repo_path ? branchesLink(e.monorepo, e.repo_path) : null } };
-    case "merged":
-      return { ...base, verb: "merged", tail: "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+    case "merged": {
+      const closes = e.summary?.closes ?? [];
+
+      return { ...base, verb: "merged", tail: closes.length ? `into main, closing ${closes.map((n) => `#${n}`).join(", ")}` : "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+    }
+
     case "review":
       return { ...base, verb: VERDICTS[e.summary?.verdict ?? "comment"] };
     case "status": {
@@ -126,6 +130,24 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
         verb: deleted ? "deleted" : "saved",
         object: { text: path, link: deleted ? historyLink(e.monorepo, path) : blobLink(e.monorepo, path), path: true },
         detail: e.summary?.version ? `version ${e.summary.version}` : null,
+      };
+    }
+
+    // Issues: the number as the object (SF Pro Text, opening the issue), then its title; a close says how instead.
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened": {
+      const d = e.summary;
+      const verb = { "issue.opened": "opened", "issue.commented": "commented on", "issue.closed": "closed", "issue.reopened": "reopened" }[e.kind];
+      const how = d?.reason === "not_planned" ? "as not planned" : "as completed";
+
+      return {
+        ...base,
+        verb,
+        object: d ? { text: `#${d.number}`, link: issueLink(e.monorepo, d.number), path: true } : null,
+        tail: d ? (e.kind === "issue.closed" ? how : d.title) : null,
+        detail: d?.excerpt ?? null,
       };
     }
   }

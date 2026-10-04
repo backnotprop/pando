@@ -48,6 +48,14 @@ export const MonorepoRenamed = MonorepoEntry.pipe(Schema.fieldsAssign({ replaced
 export interface MonorepoRenamed extends Schema.Schema.Type<typeof MonorepoRenamed> {}
 
 /** Branches that need someone, by state. */
+/** Open issues assigned to one person in one monorepo: how many, and the most recently updated. */
+export const AssignedIssues = Schema.Struct({
+  count: Count,
+  newest: Schema.Struct({ number: Count, title: Schema.String, updated_at: Timestamp }),
+});
+
+export interface AssignedIssues extends Schema.Schema.Type<typeof AssignedIssues> {}
+
 export const NeedCounts = Schema.Struct({
   ready: Count,
   conflicts: Count,
@@ -69,6 +77,8 @@ export const FeedSummary = Schema.Struct({
   repos: Count,
   /** Open branches across those projects (not merged, not deleted, main not counted). */
   open_branches: Count,
+  /** Open issues assigned to each member, by login (none: left out): the home's "Needs you" shows the person's own; this frame moves it. */
+  assigned: Schema.Record(Schema.String, AssignedIssues),
   at: Timestamp,
 });
 
@@ -85,6 +95,7 @@ export const MonorepoSummary = MonorepoEntry.pipe(
     large: Schema.NullOr(Schema.Boolean),
     repos: Schema.NullOr(Count),
     open_branches: Schema.NullOr(Count),
+    assigned: Schema.NullOr(Schema.Record(Schema.String, AssignedIssues)),
   }),
 );
 

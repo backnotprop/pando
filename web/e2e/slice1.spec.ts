@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-import { BASE, browserPost, Machine, nextSignIn, saveRootFiles } from "./seed";
+import { BASE, browserPost, HARD_LOAD, Machine, nextSignIn, saveRootFiles } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -106,13 +106,24 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       const sf = process.env.PANDO_SF_FONTS === "1";
 
       expect(sheet).toContain("font-family:Ioskeley Mono");
-      expect((await page.request.get(mono)).headers()["content-type"]).toBe("font/woff2");
+      const woff = await page.request.get(mono);
+
+      expect(woff.headers()["content-type"]).toBe("font/woff2");
+      // A built file's name carries its hash, so it is cached a year (web/public/_headers); the page itself is always asked again.
+      expect(woff.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect((await page.request.get("/")).headers()["cache-control"]).toContain("max-age=0");
 
       for (const file of ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SFNSMono.ttf"]) {
-        const type = (await page.request.get(`/fonts/${file}`)).headers()["content-type"];
+        const res = await page.request.get(`/fonts/${file}`);
+        const type = res.headers()["content-type"];
 
-        if (sf) expect(type).toMatch(/^font\//);
-        else expect(type).not.toMatch(/^font\//);
+        if (sf) {
+          expect(type).toMatch(/^font\//);
+          // Fonts keep their names across builds: a week.
+          expect(res.headers()["cache-control"]).toBe("public, max-age=604800");
+        } else {
+          expect(type).not.toMatch(/^font\//);
+        }
       }
     });
 
@@ -138,7 +149,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
 
     await test.step("a signed-out visitor gets the sign-in page", async () => {
       await page.goto("/");
-      await expect(page).toHaveURL(`${BASE}/login?return_to=/`);
+      await expect(page).toHaveURL(`${BASE}/login?return_to=/`, HARD_LOAD);
       await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
     });
 
@@ -172,7 +183,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
 
       page.on("request", record);
       await page.goto("/");
-      await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) }).first()).toBeVisible();
+      await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) }).first()).toBeVisible(HARD_LOAD);
       await page.waitForLoadState("networkidle");
       page.off("request", record);
       expect(loaded.filter((url) => /PlannotatorDoc|bridge-script|katex|mermaid/.test(url))).toEqual([]);
@@ -194,7 +205,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       const away = await page.context().newPage();
       await away.route("**/whats-new.json", (route) => route.abort());
       await away.goto("/");
-      await expect(away.getByRole("link", { name: "Documentation" })).toBeVisible();
+      await expect(away.getByRole("link", { name: "Documentation" })).toBeVisible(HARD_LOAD);
       await expect(away.getByText("What's new")).toHaveCount(0);
       await away.close();
     });
@@ -337,7 +348,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await page.goto(`/${full}/blob/research/card.html`);
       const card = page.frameLocator(".pn-doc iframe");
 
-      await expect(card.getByRole("heading", { name: "Brand card" })).toBeVisible();
+      await expect(card.getByRole("heading", { name: "Brand card" })).toBeVisible(HARD_LOAD);
       expect(await card.locator("body").evaluate(() => ["__ran" in window, document.body.dataset.ran ?? null, document.querySelectorAll("script:not([src])").length])).toEqual([false, null, 0]);
       expect(await page.evaluate(() => "__ran" in window)).toBe(false);
       await card.getByRole("link", { name: "The notes" }).click();
@@ -348,7 +359,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
     await test.step("Raw serves the file's bytes as plain text", async () => {
       await page.goto(`/${full}/blob/decisions/RULINGS.md`);
       const raw = page.getByRole("link", { name: "Raw" });
-      await expect(raw).toHaveAttribute("href", `/${full}/raw/decisions/RULINGS.md`);
+      await expect(raw).toHaveAttribute("href", `/${full}/raw/decisions/RULINGS.md`, HARD_LOAD);
       const res = await page.request.get(`/${full}/raw/decisions/RULINGS.md`);
       expect(res.status()).toBe(200);
       expect(res.headers()["content-type"]).toMatch(/^text\/plain/);

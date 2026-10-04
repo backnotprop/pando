@@ -637,6 +637,26 @@ async function blackRainbow(page: Page) {
   await page.goto("/?theme=pando");
 }
 
+/** Avatars in each theme, dark and light where it has light: the home (monorepos, Needs you, activity) and the members page. */
+async function avatars(page: Page) {
+  if (!wanted("avatars-")) return;
+
+  const pairs = ["pando-dark", "pando-light", "plannotator-dark", "plannotator-light", "iris-dark", "iris-light", "cloudflare-dark", "cloudflare-light", "black-rainbow"];
+
+  for (const pair of pairs) {
+    for (const [name, route] of [
+      ["home", "/"],
+      ["members", "/ramos/pando/members"],
+    ] as const) {
+      await page.goto(`${route}?theme=${pair}`);
+      await settle(page);
+      await page.screenshot({ path: `${SHOTS}avatars-${pair}-${name}-1440-real.png` });
+    }
+  }
+
+  await page.goto("/?theme=pando");
+}
+
 /** The home's What's new block, close, at both widths. */
 async function whatsNew(page: Page) {
   if (!wanted("whatsnew-")) return;
@@ -771,6 +791,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
   await page.setViewportSize({ width: 1440, height: 900 });
   await themes(page);
   await blackRainbow(page);
+  await avatars(page);
   await whatsNew(page);
 
   for (const ws of shown.sockets) ws.close();

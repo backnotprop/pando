@@ -56,6 +56,20 @@ function build(sf: boolean) {
 /** data-theme on <html> the moment the app's module script was put in the page (the init script below records it). */
 const themeAtApp = (page: Page) => page.evaluate(() => document.documentElement.dataset.atApp ?? null);
 
+/** The signed-in person's avatar in the name button: its slot, its fill as shown, and the theme's colour for that slot (#rrggbb, as rgb()). */
+async function avatarOf(page: Page) {
+  return page
+    .getByRole("button", { name: login })
+    .locator("[data-slot]")
+    .evaluate((el) => {
+      const slot = el.getAttribute("data-slot") ?? "";
+      const hex = getComputedStyle(document.documentElement).getPropertyValue(`--av-${slot}-fill`).trim();
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+      return { slot, fill: getComputedStyle(el).backgroundColor, theme: `rgb(${r}, ${g}, ${b})` };
+    });
+}
+
 /** Opens the name menu and picks a theme or a mode in it. */
 async function pick(page: Page, choice: string) {
   if (!(await page.getByRole("menu").isVisible())) await page.getByRole("button", { name: login }).click();
@@ -252,6 +266,9 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       });
       await page.reload();
       expect(await themeAtApp(page)).toBe("pando-dark");
+      // An avatar's slot comes from the name; its colours from the theme (avatars.css).
+      const pandoAvatar = await avatarOf(page);
+      expect(pandoAvatar.fill).toBe(pandoAvatar.theme);
       await expect(page.locator(".pn-doc article")).toBeVisible();
 
       await pick(page, "Cloudflare");
@@ -260,6 +277,10 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-light");
       // Plannotator's viewer follows without a reload (its ThemeProvider marks <html> light).
       await expect(page.locator("html")).toHaveClass(/(^|\s)light(\s|$)/);
+      const cloudflareAvatar = await avatarOf(page);
+      expect(cloudflareAvatar.slot).toBe(pandoAvatar.slot);
+      expect(cloudflareAvatar.fill).toBe(cloudflareAvatar.theme);
+      expect(cloudflareAvatar.fill).not.toBe(pandoAvatar.fill);
       await page.keyboard.press("Escape");
 
       await page.reload();
@@ -284,6 +305,10 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await page.keyboard.press("Escape");
       await page.reload();
       expect(await themeAtApp(page)).toBe("black-rainbow");
+      const rainbowAvatar = await avatarOf(page);
+      expect(rainbowAvatar.slot).toBe(pandoAvatar.slot);
+      expect(rainbowAvatar.fill).toBe(rainbowAvatar.theme);
+      expect(new Set([pandoAvatar.fill, cloudflareAvatar.fill, rainbowAvatar.fill]).size).toBe(3);
       await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
       expect(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--diffs-token-keyword").trim())).toBe("#4379fb");
       expect(await page.evaluate(() => localStorage.getItem("pando-mode"))).toBe("system");

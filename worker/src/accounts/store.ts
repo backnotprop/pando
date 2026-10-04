@@ -130,6 +130,8 @@ export interface MonorepoInfo {
   created_at: string;
   /** Whose namespace `owner` is: a person's or an org's. */
   owner_type: OwnerType;
+  /** Its one line under the name (at most 160 characters); null when it has none. */
+  description: string | null;
 }
 
 export interface MonorepoEntry extends MonorepoInfo {
@@ -204,6 +206,7 @@ interface AuthRow {
   m_name: string | null;
   m_kind: "monorepo" | "repo" | null;
   m_created_at: string | null;
+  m_description: string | null;
 }
 
 // The monorepo a path names: by its name, else by an old name (an alias).
@@ -221,14 +224,14 @@ SELECT c.id, c.login, c.name, c.kind, c.created_at, c.last_used_at, c.expires_at
        (SELECT role FROM members WHERE monorepo_id = m.id AND login = c.login) AS role,
        (SELECT role FROM org_members WHERE org = m.owner AND login = c.login) AS org_role,
        EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) AS m_org,
-       m.id AS m_id, m.owner AS m_owner, m.name AS m_name, m.kind AS m_kind, m.created_at AS m_created_at
+       m.id AS m_id, m.owner AS m_owner, m.name AS m_name, m.kind AS m_kind, m.created_at AS m_created_at, m.description AS m_description
 FROM credentials c
 JOIN users u ON u.login = c.login
 LEFT JOIN monorepos m ON m.id = ${RESOLVE}
 WHERE c.hash = ?1 AND c.revoked_at IS NULL`;
 
 const MONOREPO_COLS = `m.id, m.owner, m.name, m.owner || '/' || m.name AS full_name, m.kind, m.created_at,
-  CASE WHEN EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) THEN 'org' ELSE 'user' END AS owner_type`;
+  CASE WHEN EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) THEN 'org' ELSE 'user' END AS owner_type, m.description`;
 
 /** True for a monorepo (?1) an org owns: it needs no owner row of its own, its org's owners own it. */
 const ORG_OWNED = "EXISTS (SELECT 1 FROM monorepos mo JOIN orgs o ON o.login = mo.owner WHERE mo.id = ?1)";
@@ -329,7 +332,7 @@ function monorepoOf(r: AuthRow): MonorepoInfo | null {
 
   return {
     id: r.m_id, owner: r.m_owner!, name: r.m_name!, full_name: `${r.m_owner}/${r.m_name}`, kind: r.m_kind!, created_at: r.m_created_at!,
-    owner_type: r.m_org ? "org" : "user",
+    owner_type: r.m_org ? "org" : "user", description: r.m_description,
   };
 }
 
@@ -572,7 +575,7 @@ export class Accounts {
     const was = isAliasHit(row) ? row : undefined;
 
     return {
-      info: { id, owner, name, full_name: `${owner}/${name}`, kind, created_at: at, owner_type: ownerType },
+      info: { id, owner, name, full_name: `${owner}/${name}`, kind, created_at: at, owner_type: ownerType, description: null },
       replaced_alias: was ? { full_name: `${owner}/${name}`, pointed_to: was.pointed_to } : null,
     };
   }
@@ -595,6 +598,13 @@ export class Accounts {
    * owner of the org that owns it); that person gets their own owner row, so
    * a person's monorepo always has one.
    */
+  /** Its one-line description (owners; the route checks): null clears it. */
+  async describeMonorepo(id: string, description: string | null): Promise<MonorepoInfo | null> {
+    await this.run("UPDATE monorepos SET description = ?2 WHERE id = ?1", id, description);
+
+    return this.row<MonorepoInfo>(`SELECT ${MONOREPO_COLS} FROM monorepos m WHERE m.id = ?1`, id);
+  }
+
   async renameMonorepo(id: string, to: MonorepoRef, by: string): Promise<Outcome<{ info: MonorepoInfo; replaced_alias: ReplacedAlias | null }>> {
     return this.guard(async () => {
       const cur = await this.row<MonorepoInfo>(`SELECT ${MONOREPO_COLS} FROM monorepos m WHERE m.id = ?1`, id);

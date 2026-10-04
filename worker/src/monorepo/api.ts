@@ -425,15 +425,40 @@ api.use("/v1/monorepos/:o/:m/*", authed);
 
 api.get("/v1/monorepos/:o/:m", (c) => c.json({ ...c.get("info"), role: c.get("identity").role } satisfies typeof Contract.MonorepoEntry.Encoded));
 
+/** A repository's description: one line, at most 160 characters; empty or null clears it. */
+function descriptionOf(v: Json): string | null {
+  if (v === null) return null;
+
+  if (!isText(v)) bad("description: one line of text, at most 160 characters");
+  const d = v.trim();
+
+  if (/[\r\n]/.test(d) || [...d].length > 160) bad("description: one line of text, at most 160 characters");
+
+  return d || null;
+}
+
 // Rename or transfer: the label moves, the id and everything stored stay. The old name keeps working (an alias).
+// Or its one-line description (`description`, owners too), alone or with a rename.
 api.patch("/v1/monorepos/:o/:m", async (c) => {
-  const by = owner(c, "rename or transfer a monorepo");
   const b = await body(c.req);
+  const renaming = b.owner !== undefined || b.name !== undefined;
+  const by = owner(c, renaming ? "rename or transfer a monorepo" : "edit a monorepo's description");
+  const acc = accounts(c.env);
+
+  if (!renaming && b.description === undefined) bad("nothing to change: send name, owner or description");
+
+  if (b.description !== undefined) {
+    const described = await acc.describeMonorepo(c.get("info").id, descriptionOf(b.description));
+
+    forgetCachedAuth();
+
+    if (!renaming && described) return c.json({ ...described, role: "owner", replaced_alias: null } satisfies typeof Contract.MonorepoRenamed.Encoded);
+  }
+
   const info = c.get("info");
   const to = monorepoRef(b.owner === undefined ? info.owner : String(b.owner), b.name === undefined ? info.name : String(b.name));
 
   if (!to) bad("name: letters, digits, '.', '_', '-'; owner: a person's login or an organization");
-  const acc = accounts(c.env);
   // A transfer changes who has it through an org: everyone before and after gets a membership message.
   const moving = to.owner !== info.owner;
   const before = moving ? await acc.members(info.id) : [];

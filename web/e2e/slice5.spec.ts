@@ -95,8 +95,40 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await page.reload();
       const list = page.getByRole("region", { name: "Repositories" });
 
-      await expect(list.getByRole("link", { name: new RegExp(`${org}/${repo}`) })).toBeVisible();
+      // On the org's own page a row names the repository alone (links R: GitHub-style rows).
+      await expect(list.getByRole("link", { name: repo, exact: true })).toBeVisible();
       await expect(page.getByText("1 repository", { exact: true })).toBeVisible();
+    });
+
+    await test.step("its row counts open issues; on the home the row leads with the owner's avatar, the org's square", async () => {
+      await browserPost(page, `/v1/monorepos/${org}/${repo}/issues`, { title: "Search misses exact names" });
+      const row = page.getByRole("region", { name: "Repositories" }).getByRole("listitem").filter({ hasText: repo });
+
+      await expect(async () => {
+        await page.reload();
+        await expect(row).toContainText("1 open issue", { timeout: 2000 });
+      }).toPass({ timeout: 30_000 });
+      await row.getByRole("link", { name: "1 open issue" }).click();
+      await expect(page).toHaveURL(`${BASE}/${org}/${repo}/issues`);
+      await page.goto(`${BASE}/`);
+      const home = page.getByRole("list", { name: "Repositories" }).getByRole("listitem").filter({ hasText: `${org}/${repo}` });
+      const avatar = await home.locator("[data-slot]").first().evaluate((el) => ({ text: el.textContent, radius: parseFloat(getComputedStyle(el).borderTopLeftRadius) }));
+
+      // The org's initials (team-…: "T" and the id's first letter), on a rounded square, not the repository's (app-…).
+      expect(avatar.text).toBe(`T${id[0]?.toUpperCase()}`);
+      expect(avatar.radius).toBeLessThan(8);
+      await page.goto(`${BASE}/${org}`);
+    });
+
+    await test.step("a one-line description set in the repository's Settings shows on the org page's row", async () => {
+      await page.goto(`${BASE}/${org}/${repo}/settings`);
+      await page.getByRole("textbox", { name: "Description" }).fill("The web app, its API and the sync engine.");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+      // The header says it too.
+      await expect(page.getByText("The web app, its API and the sync engine.", { exact: true }).first()).toBeVisible();
+      await page.goto(`${BASE}/${org}`);
+      await expect(page.getByRole("region", { name: "Repositories" }).getByRole("listitem").filter({ hasText: repo })).toContainText("The web app, its API and the sync engine.");
     });
 
     await test.step("People: add a second person by login", async () => {
@@ -120,7 +152,7 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
 
       await expect(tabs.getByRole("link", { name: "People" })).toHaveText(/2$/);
       await expect(tabs.getByRole("link", { name: "Settings" })).toHaveCount(0);
-      await beaPage.getByRole("region", { name: "Repositories" }).getByRole("link", { name: new RegExp(`${org}/${repo}`) }).click();
+      await beaPage.getByRole("region", { name: "Repositories" }).getByRole("link", { name: repo, exact: true }).click();
       await expect(beaPage).toHaveURL(`${BASE}/${org}/${repo}`);
       await expect(beaPage.getByRole("heading", { level: 1 })).toContainText(`${org}/${repo}`);
       // Her home lists it too.
@@ -159,7 +191,7 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await expect(page.getByRole("heading", { level: 1 })).toContainText(`${org}/${solo}`);
       // Everyone in the org has it now.
       await beaPage.goto(`${BASE}/${org}`);
-      await expect(beaPage.getByRole("region", { name: "Repositories" }).getByRole("link", { name: new RegExp(`${org}/${solo}`) })).toBeVisible(HARD_LOAD);
+      await expect(beaPage.getByRole("region", { name: "Repositories" }).getByRole("link", { name: solo, exact: true })).toBeVisible(HARD_LOAD);
     });
 
     await test.step("Settings: the org's description and website show on its page", async () => {

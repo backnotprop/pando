@@ -4,15 +4,16 @@
 // Each machine's row comes live on the tab's socket (machine.updated).
 import type { FeedEvent, Machine, MachineWorktree, Repo } from "@pando/contract";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import { Fragment } from "react";
 import type { MonorepoRef } from "../../../api/names";
 import { machinesQuery, monorepoQuery, reposQuery } from "../../../api/queries";
-import { describe } from "../../../ui/activity";
+import { describe, ObjectRef } from "../../../ui/activity";
 import { Avatar } from "../../../ui/Avatar";
 import { Empty, row, thead } from "../../../ui/controls";
 import { branchLink, isHomeProject, repoLink } from "../../../ui/paths";
 import { fallback, useRows } from "../../../live/rows";
+import { IssueRef, Ref } from "../../../ui/Ref";
 import { since, useNow } from "../../../ui/time";
 import { MonorepoHead, useMonorepo } from "./-frame/heads";
 
@@ -43,13 +44,13 @@ function WorktreeLink({ w, full, home }: { w: MachineWorktree; full: string; hom
   const link = w.branch === "main" ? repoLink(full, w.repo) : branchLink(full, w.repo, w.branch);
 
   return (
-    <Link {...link} className="font-mono text-[13px] text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
+    <Ref kind="object" link={link} mono>
       {label}
-    </Link>
+    </Ref>
   );
 }
 
-/** What the machine did last, as the log says it without the person: "pushed 1 commit to live". */
+/** What the machine did last, as the log says it without the person: "pushed 1 commit to live", its object a link as in the log. */
 function Last({ m, monorepo, id }: { m: Machine; monorepo: MonorepoRef; id: FeedEvent["monorepo_id"] }) {
   if (!m.last_activity) return <span />;
   const s = describe({ ...m.last_activity, monorepo: monorepo.full, monorepo_id: id, actor: m.login, machine: m.name });
@@ -60,10 +61,16 @@ function Last({ m, monorepo, id }: { m: Machine; monorepo: MonorepoRef; id: Feed
       {s.object ? (
         <>
           {" "}
-          {s.object.path ? <span className="text-bark">{s.object.text}</span> : <code className="text-[12.5px] text-bark">{s.object.text}</code>}
+          <ObjectRef s={s} obj={s.object} />
         </>
       ) : null}
       {s.tail ? ` ${s.tail}` : null}
+      {s.closes.map((n) => (
+        <Fragment key={n}>
+          {" "}
+          <IssueRef full={monorepo.full} number={n} state="closed" reason="completed" text />
+        </Fragment>
+      ))}
     </span>
   );
 }

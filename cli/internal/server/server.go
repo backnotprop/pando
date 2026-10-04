@@ -25,6 +25,8 @@ type Monorepo struct {
 	OwnerType string `json:"owner_type"` // "user" or "org"
 	Role      string `json:"role"`       // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
+	// Description is its one line (at most 160 characters); empty when it has none.
+	Description string `json:"description"`
 	// ReplacedAlias is set by a rename that took another monorepo's old name.
 	ReplacedAlias *ReplacedAlias `json:"replaced_alias,omitempty"`
 	JSON          []byte         `json:"-"` // the answer as sent, from an HTTP server: what --json prints

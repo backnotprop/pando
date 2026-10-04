@@ -13,19 +13,19 @@
         "project_path": null,
         "labels": [],
         "assignees": [],
-        "author": "rec-mutxvkul",
+        "author": "rec-muu2mhw1",
         "comments": 0,
         "tasks": null,
         "linked_branches": 1,
-        "created_at": "2026-10-04T14:52:08.817Z",
-        "updated_at": "2026-10-04T14:52:11.584Z",
-        "closed_at": "2026-10-04T14:52:11.584Z",
-        "closed_by": "rec-mutxvkul",
+        "created_at": "2026-10-04T17:05:12.853Z",
+        "updated_at": "2026-10-04T17:05:16.983Z",
+        "closed_at": "2026-10-04T17:05:16.983Z",
+        "closed_by": "rec-muu2mhw1",
         "closed_by_merge": {
           "repo": "projects-web",
           "repo_path": "projects/web",
           "branch": "fix/login",
-          "merge_commit": "c5ede19abae47e71ddd11bc135d947badbcc233e"
+          "merge_commit": "45b18812493e6c01b13f1a99d559ca822ef8ca08"
         }
       },
       {
@@ -43,17 +43,17 @@
           }
         ],
         "assignees": [
-          "rec-mutxvkul"
+          "rec-muu2mhw1"
         ],
-        "author": "rec-mutxvkul",
+        "author": "rec-muu2mhw1",
         "comments": 1,
         "tasks": {
           "done": 2,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-04T14:52:08.812Z",
-        "updated_at": "2026-10-04T14:52:08.840Z",
+        "created_at": "2026-10-04T17:05:12.847Z",
+        "updated_at": "2026-10-04T17:05:12.884Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null

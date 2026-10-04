@@ -5,7 +5,7 @@
 // adding a pipeline involves none, so it is a small form here.
 import type { CiConnection, CiPipeline } from "@pando/contract";
 import { useMutation, useQueries, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { disconnect } from "../../../../api/actions";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciQuery } from "../../../../api/ci";
@@ -14,6 +14,7 @@ import { monorepoQuery } from "../../../../api/queries";
 import buildkiteMark from "../../../../ui/buildkite-mark.svg";
 import { button, copyInCmd, CopyButton, Empty, lnk, Refusal, row, SectionHead, thead } from "../../../../ui/controls";
 import { ciPipelineLink, isHomeProject } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { ago, since, useNow } from "../../../../ui/time";
 import { AddPipeline } from "../-ci/AddPipeline";
 import { BuildList, BuildState, CommandButton, ServiceMark, serviceName } from "../-ci/parts";
@@ -110,9 +111,9 @@ function PipelineRow({ p, ran }: { p: CiPipeline; ran: ReadonlySet<string> }) {
     <div className={`${row} ${pipeCols}`}>
       <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">{p.repo_path ?? <span className="text-ash">none</span>}</span>
       <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap phone:row-start-2">
-        <Link {...ciPipelineLink(monorepo.full, p.slug)} className="hover:underline hover:decoration-ash hover:underline-offset-3">
+        <Ref kind="object" link={ciPipelineLink(monorepo.full, p.slug)}>
           {p.slug}
-        </Link>
+        </Ref>
       </span>
       <span className="min-w-0 phone:hidden">
         <Checks checks={p.required_checks} ran={ran} service={p.service} />

@@ -30,6 +30,9 @@
   --ash: #7e8476;
   --clay: #9a7b5e;
   --fox: #c4e86f;
+  /* Link: the thing a line is about (owner ruling, links R). A blue per theme, at least 4.5:1 on every ground and
+     clear of Foxfire and Rust (research/design/pando-ui-2026-10-03/links/INDEX.html, "Link colours, measured"). */
+  --link: oklch(0.78 0.08 243);
   --rust: #e07a5f;
   /* derived: menus, the faint row rules, hovers; a theme sets these from its own roles */
   --pop: #1a1f18;
@@ -45,6 +48,8 @@
   --margin: 48px;
   /* An avatar's edge: none on a dark page; light themes draw a faint one (below). Its colours: avatars.css. */
   --av-ring: transparent;
+  /* A link in running text keeps a faint underline in its own colour (WCAG 1.4.1: never colour alone). */
+  --link-line: color-mix(in srgb, var(--link) 38%, transparent);
 }
 
 @media (max-width: 640px) {
@@ -92,6 +97,7 @@ html[data-theme="pando-light"] {
   --clay: #6e5038;
   /* By day Foxfire is the highlighter behind the text, which stays ink (the arrival, below). */
   --fox: #18201b;
+  --link: oklch(0.47 0.11 250);
   --fox-fill: rgba(173, 207, 15, 0.42);
   --rust: #a8442a;
   --bark-hi: #2a332d;
@@ -109,6 +115,7 @@ html[data-theme="cloudflare-dark"] {
   --ash: #a1a1a1;
   --clay: #ff5e1e;
   --fox: #69c4d4;
+  --link: oklch(0.7 0.16 263);
   --rust: #f07f77;
   --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
   --shadow: rgba(0, 0, 0, 0.5);
@@ -124,6 +131,7 @@ html[data-theme="cloudflare-light"] {
   --ash: #696969;
   --clay: #b84c00;
   --fox: #006677;
+  --link: oklch(0.47 0.19 262);
   --rust: #a9131f;
   --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
   --shadow: rgba(0, 0, 0, 0.14);
@@ -146,6 +154,7 @@ html[data-theme="black-rainbow"] {
   --ash: #7b7b7b;
   --clay: #e8c959;
   --fox: #e48fe0;
+  --link: oklch(0.72 0.15 262);
   --rust: #e23c2e;
   --bark-hi: #ffffff;
   --shadow: rgba(0, 0, 0, 0.6);
@@ -160,6 +169,7 @@ html[data-theme="plannotator-dark"] {
   --ash: oklch(0.72 0.02 260);
   --clay: oklch(0.7 0.2 60);
   --fox: oklch(0.75 0.18 280);
+  --link: oklch(0.8 0.1 232);
   --rust: oklch(0.65 0.2 25);
   --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
   --shadow: rgba(0, 0, 0, 0.5);
@@ -174,6 +184,7 @@ html[data-theme="plannotator-light"] {
   --ash: oklch(0.4 0.02 260);
   --clay: oklch(0.6 0.22 50);
   --fox: oklch(0.5 0.25 280);
+  --link: oklch(0.5 0.15 245);
   --rust: oklch(0.5 0.25 25);
   --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
   --shadow: rgba(17, 19, 26, 0.14);
@@ -189,6 +200,7 @@ html[data-theme="iris-dark"] {
   --ash: oklch(0.72 0.02 260);
   --clay: #d58f70;
   --fox: #9496ff;
+  --link: oklch(0.8 0.1 228);
   --rust: oklch(0.65 0.2 25);
   --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
   --shadow: rgba(0, 0, 0, 0.5);
@@ -203,6 +215,7 @@ html[data-theme="iris-light"] {
   --ash: oklch(0.4 0.02 260);
   --clay: #a75841;
   --fox: #4f46e5;
+  --link: oklch(0.5 0.13 240);
   --rust: oklch(0.53 0.21 25);
   --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
   --shadow: rgba(17, 19, 26, 0.14);
@@ -292,6 +305,8 @@ html[data-theme="cloudflare-light"] {
   --color-fox: var(--fox);
   --color-rust: var(--rust);
   --color-rust-half: var(--rust-half);
+  --color-link: var(--link);
+  --color-link-line: var(--link-line);
   --color-pop: var(--pop);
   --color-pop-hi: var(--pop-hi);
   --color-rule-faint: var(--rule-faint);

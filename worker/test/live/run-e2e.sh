@@ -35,7 +35,8 @@ fi
 npx wrangler dev -c "$config" "${vars[@]}" --port "$port" --inspector-port $((port + 500)) \
   --ip 127.0.0.1 --persist-to "$state/do" >"$log" 2>&1 &
 pid=$!
-trap 'kill $pid 2>/dev/null; wait $pid 2>/dev/null; rm -rf "$state"' EXIT
+# Exit with the script's own status (go test's), not the stopped server's (143).
+trap 'code=$?; kill $pid 2>/dev/null; wait $pid 2>/dev/null || true; rm -rf "$state"; exit $code' EXIT
 
 for _ in $(seq 1 120); do
   curl -sf "http://127.0.0.1:$port/healthz" >/dev/null && break

@@ -5,8 +5,7 @@
 import { type QueryClient, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
-import type { Repo } from "@pando/contract";
-import type { CommitLine } from "../../../../api/pending";
+import type { CommitLine, Repo } from "@pando/contract";
 import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Empty, lnk } from "../../../../ui/controls";

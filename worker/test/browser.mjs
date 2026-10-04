@@ -1,7 +1,8 @@
 // Browser sign-in, end to end, against `wrangler dev` with a stand-in WorkOS
-// on this machine (worker/.dev.vars: WORKOS_API_BASE=http://127.0.0.1:8799).
+// on this machine, on PANDO_WORKOS_STANDIN_PORT (default 8799; each lane its
+// own), where worker/.dev.vars points: WORKOS_API_BASE=http://127.0.0.1:<port>.
 //
-//   PANDO_URL=http://localhost:8797 node test/browser.mjs
+//   PANDO_URL=http://localhost:8797 PANDO_WORKOS_STANDIN_PORT=8798 node test/browser.mjs
 //
 // The stand-in plays AuthKit's hosted page (it signs in whoever the test
 // names) and WorkOS's code exchange (it checks the PKCE verifier). The real
@@ -24,7 +25,7 @@ const ORIGIN = new URL(URL_).origin;
 
 const BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
 
-const STUB_PORT = 8799;
+const STUB_PORT = Number(process.env.PANDO_WORKOS_STANDIN_PORT ?? 8799);
 
 const results = [];
 

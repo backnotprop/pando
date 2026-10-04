@@ -29,6 +29,7 @@ import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
 import type { FeedMessage } from "./feed/shape";
 import { handleIntegration, isIntegrationPath } from "./ci/routes";
+import { mirrorTestRoute } from "./mirror/test-route";
 
 export { MonorepoObject } from "./monorepo/object";
 
@@ -179,6 +180,8 @@ export default {
     if (url.pathname === "/v1/_meta/test") return metaTestRoute(request, env);
 
     if (url.pathname === "/v1/_checks/test") return checksTestRoute(request, env);
+
+    if (url.pathname === "/v1/_mirror/test") return mirrorTestRoute(request, env);
 
     if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
 

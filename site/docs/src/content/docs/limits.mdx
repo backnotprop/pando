@@ -47,6 +47,13 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **One machine reports at most 1,000 worktrees.**
 - **A repo's first push to main counts up to 250 commits** in the activity.
 
+## Profiles
+
+- **The graph shows the last 12 months**, from the Sunday 52 weeks back to today.
+- **A bio is at most 160 characters;** a name and a location 100; at most 4 links, each an https address of at most 2,048 characters.
+- **Days follow the viewer's time zone at today's offset:** up to an hour off across a daylight-saving change, and half-hour zones are rounded to the hour.
+- **A repository's history and a merge are counted about 10 seconds per 1,000 commits,** in the background. A commit dated in the future counts on the day it landed.
+
 ## Hooks
 
 - **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.

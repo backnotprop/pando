@@ -34,11 +34,12 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"], ["./e2e/reads.ts"]],
   use: { baseURL: `http://localhost:${WORKER_PORT}`, viewport: { width: 1440, height: 900 }, trace: "retain-on-failure" },
-  // `e2e` is the test; `shots` makes the fidelity screenshots for review (npm run shots); `org-shots` the org screens'.
+  // `e2e` is the test; `shots` makes the fidelity screenshots for review (npm run shots); `org-shots` the org screens', `profile-shots` the profile's.
   projects: [
     { name: "e2e", testMatch: /slice\d\.spec\.ts/ },
     { name: "shots", testMatch: /fidelity\.spec\.ts/ },
     { name: "org-shots", testMatch: /orgs-shots\.spec\.ts/ },
+    { name: "profile-shots", testMatch: /profile-shots\.spec\.ts/ },
   ],
   webServer: [
     { command: "node e2e/workos.ts", url: `http://127.0.0.1:${STANDIN_PORT}/healthz`, reuseExistingServer: false },

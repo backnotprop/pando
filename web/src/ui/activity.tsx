@@ -8,7 +8,7 @@ import { lineKey, takeArrived } from "../live/arrivals";
 import { Avatar } from "./Avatar";
 import buildkiteMark from "./buildkite-mark.svg";
 import { type AppLink, blobLink, branchLink } from "./paths";
-import { since, useNow } from "./time";
+import { duration, since, useNow } from "./time";
 import { Older } from "./Older";
 
 interface Sentence {
@@ -32,10 +32,6 @@ const CHECK_STATES = { success: "passed on", failure: "failed on", error: "error
 
 /** A CI service's name; Buildkite is the only one with a mark for the contest. */
 const appName = (app: string) => (app === "buildkite" ? "Buildkite" : app);
-
-function duration(s: number): string {
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
-}
 
 export function describe(e: FeedEvent): Sentence {
   const branch = e.branch ? { text: e.branch, link: e.repo_path ? branchLink(e.monorepo, e.repo_path, e.branch) : null } : null;

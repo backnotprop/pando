@@ -27,11 +27,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -879,7 +881,7 @@ func TestE2ESyncOnce(t *testing.T) {
 		return err == nil && len(h.Versions) == 1
 	})
 
-	// An agent's sandbox: no daemon, just pando meta sync --once.
+	// An agent's sandbox: no daemon, just pando sync --once.
 	sb := env.bare(t, "sandbox")
 	sb.write("from-sandbox.md", "sandbox\n")
 	e, err := New(sb.config())
@@ -896,6 +898,80 @@ func TestE2ESyncOnce(t *testing.T) {
 		t.Errorf("sandbox has from-ana.md %q", got)
 	}
 	waitContent(t, a, "from-sandbox.md", "sandbox\n")
+}
+
+// TestE2ESyncCommand runs the pando binary itself. pando sync is the daemon:
+// the live sync and the follower of read-only mains, until SIGTERM. With
+// --once it sends and receives what is waiting, then exits. pando meta sync,
+// its old name, still works for scripts and installed services.
+func TestE2ESyncCommand(t *testing.T) {
+	env := newEnv(t)
+	bin := filepath.Join(t.TempDir(), "pando")
+	if b, err := exec.Command("go", "build", "-o", bin, "pando/cmd/pando").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, b)
+	}
+	pando := func(ctx context.Context, m *machine, args ...string) *exec.Cmd {
+		m.writeRoot(".pando/local/root.json", rootJSON(env.mono, env.server))
+		cmd := exec.CommandContext(ctx, bin, append(args, "--root", m.root)...)
+		cmd.Env = append(os.Environ(), "PANDO_MACHINE="+m.name, "PANDO_AUTHOR="+m.name+" <"+m.name+"@example.com>")
+		return cmd
+	}
+	a := env.machine(t, "ana")
+
+	d := env.bare(t, "dana")
+	var out bytes.Buffer
+	daemon := pando(context.Background(), d, "sync")
+	daemon.Stdout, daemon.Stderr = &out, &out
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- daemon.Wait() }()
+	t.Cleanup(func() { daemon.Process.Kill() })
+	a.write("to-dana.md", "ana\n")
+	waitContent(t, d, "to-dana.md", "ana\n")
+	d.write("from-dana.md", "dana\n")
+	waitContent(t, a, "from-dana.md", "dana\n")
+	// The follower runs in the same process: it holds the folder's lock.
+	lock, err := os.OpenFile(filepath.Join(config.LocalDir(d.root), "follower.lock"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("pando sync started no follower: %v", err)
+	}
+	if syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
+		t.Error("pando sync does not hold the follower lock")
+	}
+	lock.Close()
+	daemon.Process.Signal(syscall.SIGTERM)
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("pando sync after SIGTERM: %v\n%s", err, out.String())
+		}
+	case <-time.After(15 * time.Second):
+		daemon.Process.Kill()
+		<-exited
+		t.Fatalf("pando sync did not stop on SIGTERM\n%s", out.String())
+	}
+	if log := out.String(); !strings.HasPrefix(log, "pando sync: ") || !strings.Contains(log, " syncing ") || strings.Contains(log, "meta layer") {
+		t.Errorf("pando sync's log:\n%s", out.String())
+	}
+
+	for _, args := range [][]string{{"sync", "--once"}, {"meta", "sync", "--once"}} {
+		name := strings.Join(args, " ")
+		sb := env.bare(t, "sandbox")
+		file := "from-" + strings.ReplaceAll(strings.TrimSuffix(name, " --once"), " ", "-") + ".md"
+		sb.write(file, name+"\n")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		b, err := pando(ctx, sb, args...).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("pando %s: %v\n%s", name, err, b)
+		}
+		if got, _ := sb.read("from-dana.md"); got != "dana\n" {
+			t.Errorf("pando %s: from-dana.md reads %q\n%s", name, got, b)
+		}
+		waitContent(t, a, file, name+"\n")
+	}
 }
 
 // ---- a TCP proxy that can be cut ----

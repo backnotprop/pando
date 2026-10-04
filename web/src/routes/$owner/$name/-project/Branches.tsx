@@ -14,6 +14,7 @@ import { branchesLink, branchLink } from "../../../../ui/paths";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { since, useNow } from "../../../../ui/time";
 import { Older } from "../../../../ui/Older";
+import { useArrivals } from "../../../../ui/arrival";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 import { stateOf, toneClass } from "./state";
 
@@ -59,6 +60,8 @@ function Open({ repo }: { repo: Repo }) {
   const clock = useNow();
   const list = useSuspenseInfiniteQuery(branchesQuery(monorepo, repo.name, "open"));
   const branches = list.data.pages.flatMap((p) => p.branches);
+  // A branch pushed while the list is open plays the arrival.
+  const arrived = useArrivals(branches.map((b) => ({ key: b.name, state: "" })));
   // On a phone: the branch and its title, then a second line with who pushed it (in full) and when.
   const cols = "grid-cols-[minmax(0,1fr)_230px_150px_64px] narrow:grid-cols-[minmax(0,1fr)_150px_64px] phone:grid-cols-[minmax(0,1fr)_auto]";
 
@@ -74,10 +77,10 @@ function Open({ repo }: { repo: Repo }) {
       </div>
       <ul aria-label="Open branches">
         {branches.map((b) => (
-          <li key={b.name} className="border-t border-rule-faint">
+          <li key={b.name} className={`border-t border-rule-faint ${arrived(b.name) ? "arrived" : ""}`}>
             <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air focus-visible:bg-air`}>
               <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap phone:col-span-2">
-                <span className="font-mono text-[13.5px] leading-[16px] text-bark">{b.name}</span>
+                <span className="fox-cool font-mono text-[13.5px] leading-[16px] text-bark">{b.name}</span>
                 {b.title ? <span className="text-[13px] text-ash">{b.title}</span> : null}
               </span>
               <span className="min-w-0 narrow:hidden phone:block">

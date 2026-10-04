@@ -62,6 +62,21 @@ export async function post<A, I>(schema: Schema.Codec<A, I>, path: string, body:
   return decoded(schema, res, path);
 }
 
+/** A write a route names (POST or PATCH), with an optional JSON body, and its decoded answer. */
+export async function write<A, I>(route: { method: "POST" | "PATCH"; path: string; response: Schema.Codec<A, I> }, body?: Record<string, string>): Promise<A> {
+  const headers = new Headers({ accept: "application/json" });
+
+  if (body) headers.set("content-type", "application/json");
+  const res = await send(route.path, { method: route.method, headers, body: body ? JSON.stringify(body) : undefined });
+
+  return decoded(route.response, res, route.path);
+}
+
+/** A DELETE a route names: it answers 204, no body. */
+export async function remove(route: { method: "DELETE"; path: string }): Promise<void> {
+  await send(route.path, { method: route.method, headers: { accept: "application/json" } });
+}
+
 /** POST JSON where some refusals are answers, not failures (a merge's 409 and 412): either decoded body. */
 export async function postOrRefused<A, I, B, J>(
   ok: Schema.Codec<A, I>,
@@ -84,15 +99,45 @@ export async function postOrRefused<A, I, B, J>(
   return { ok: await decoded(ok, res, path), refused: null };
 }
 
-/** A file's bytes as text, or null when they are binary (a NUL in the first 8,000 bytes, git's test). */
+/** The most a file page reads; past it the page offers Raw only (owner board: code view limits). */
+export const MAX_SHOWN = 10 * 1024 * 1024;
+
+/**
+ * A file's bytes as text, and how many bytes it has. `text` is null when they
+ * are binary (a NUL in the first 8,000 bytes, git's test) or over MAX_SHOWN,
+ * which is not read past (then `size` is only how far it was read).
+ */
 export interface FileText {
   text: string | null;
+  size: number;
 }
 
 export async function getText(path: string): Promise<FileText> {
-  const bytes = new Uint8Array(await (await send(path, {})).arrayBuffer());
+  const reader = (await send(path, {})).body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
 
-  return { text: bytes.subarray(0, 8000).includes(0) ? null : new TextDecoder().decode(bytes) };
+  for (let part = await reader?.read(); part && !part.done; part = await reader?.read()) {
+    size += part.value.byteLength;
+
+    if (size > MAX_SHOWN) {
+      await reader?.cancel();
+
+      return { text: null, size };
+    }
+
+    chunks.push(part.value);
+  }
+
+  const bytes = new Uint8Array(size);
+  let at = 0;
+
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.byteLength;
+  }
+
+  return { text: bytes.subarray(0, 8000).includes(0) ? null : new TextDecoder().decode(bytes), size };
 }
 
 /** A frame from the person's socket, or null for the text `pong`, a frame this build does not know, or anything malformed. */

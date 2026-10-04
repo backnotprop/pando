@@ -21,7 +21,7 @@ func Clone(e *Env, args []string) error {
 	fs := flags("clone")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse, for worktrees/main and references (default: the mount when this machine has one)")
-	textOnly := fs.Bool("text-only", false, "keep the meta layer's large files and binaries as pointers until pando fetch (agent sandboxes)")
+	textOnly := fs.Bool("text-only", false, "keep large files and binaries outside projects/ as pointers until pando fetch (sandboxes)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -74,13 +74,13 @@ func Clone(e *Env, args []string) error {
 	if m.Kind == config.KindMonorepo {
 		switch {
 		case strings.HasPrefix(serverURL, "file://"):
-			e.printf("meta layer: none on a file:// server\n")
+			e.printf("shared files: not synced on a file:// server\n")
 		default:
 			start := time.Now()
 			if err := meta.Clone(e.Ctx, dir, meta.CloneOptions{TextOnly: *textOnly}); err != nil {
-				e.warnf("meta layer: %v", err)
+				e.warnf("shared files: %v", err)
 			} else {
-				e.printf("meta layer: downloaded in %.1fs; keep it live with pando meta sync\n", time.Since(start).Seconds())
+				e.printf("shared files: downloaded the files outside projects/ in %.1fs; keep them live with pando sync\n", time.Since(start).Seconds())
 			}
 		}
 	}

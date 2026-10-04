@@ -4,7 +4,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import type { Repo } from "@pando/contract";
+import type { Machine, Repo } from "@pando/contract";
 import { machinesQuery, membersQuery, openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Avatar } from "../../../../ui/Avatar";
 import { branchesLink, monoLink, repoLink, tabLink } from "../../../../ui/paths";
@@ -55,8 +55,8 @@ export type MonorepoTab = "code" | "activity" | "machines" | "ci" | "members" | 
 export function MonorepoHead({ tab }: { tab: MonorepoTab }) {
   const { monorepo, info } = useMonorepo();
   const full = monorepo.full;
-  const members = useQuery(membersQuery(monorepo)).data;
-  const machines = useQuery({ ...machinesQuery(monorepo), enabled: info.kind === "monorepo" }).data;
+  const members = useQuery({ ...membersQuery(monorepo), select: (l) => l.length }).data;
+  const machines = useQuery({ ...machinesQuery(monorepo), enabled: info.kind === "monorepo", select: connectedNow }).data;
 
   return (
     <>
@@ -67,19 +67,22 @@ export function MonorepoHead({ tab }: { tab: MonorepoTab }) {
         {info.kind === "monorepo" ? <Tab link={tabLink(full, "machines")} current={tab === "machines"} label="Machines" count={machines || undefined} /> : null}
         {info.kind === "monorepo" ? <Tab link={tabLink(full, "ci")} current={tab === "ci"} label="CI" /> : null}
         <Tab link={tabLink(full, "members")} current={tab === "members"} label="Members" count={members} />
-        <Tab link={tabLink(full, "settings")} current={tab === "settings"} label="Settings" />
+        {info.role === "owner" ? <Tab link={tabLink(full, "settings")} current={tab === "settings"} label="Settings" /> : null}
       </TabBar>
     </>
   );
 }
 
+/** Machines connected now: the Machines tab's count. */
+const connectedNow = (machines: readonly Machine[]) => machines.filter((x) => x.connected).length;
+
 /** A project's head (its path), or a plain repo's (its name), with the repo's tabs. */
-export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "branches"; right?: ReactNode }) {
-  const { monorepo } = useMonorepo();
+export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "branches" | "members" | "settings"; right?: ReactNode }) {
+  const { monorepo, info } = useMonorepo();
   const full = monorepo.full;
   const plain = repo.path === ".";
   const open = useQuery(openBranchesQuery(monorepo, repo.name)).data;
-  const members = useQuery({ ...membersQuery(monorepo), enabled: plain }).data;
+  const members = useQuery({ ...membersQuery(monorepo), enabled: plain, select: (l) => l.length }).data;
 
   return (
     <>
@@ -87,9 +90,16 @@ export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "bran
       <TabBar label={plain ? full : repo.path}>
         <Tab link={repoLink(full, repo.path)} current={tab === "code"} label="Code" />
         <Tab link={branchesLink(full, repo.path)} current={tab === "branches"} label="Branches" count={open} />
-        {plain ? <Tab link={tabLink(full, "members")} current={false} label="Members" count={members} /> : null}
-        {plain ? <Tab link={tabLink(full, "settings")} current={false} label="Settings" /> : null}
+        {plain ? <Tab link={tabLink(full, "members")} current={tab === "members"} label="Members" count={members} /> : null}
+        {plain && info.role === "owner" ? <Tab link={tabLink(full, "settings")} current={tab === "settings"} label="Settings" /> : null}
       </TabBar>
     </>
   );
+}
+
+/** The head of a page every monorepo and plain repo has (Members, Settings): a plain repo's carries its repo's tabs. */
+export function OwnHead({ tab }: { tab: "members" | "settings" }) {
+  const repo = usePlainRepo();
+
+  return repo ? <RepoHead repo={repo} tab={tab} /> : <MonorepoHead tab={tab} />;
 }

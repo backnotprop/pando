@@ -1,9 +1,10 @@
 // Slice 2, end to end: a project's code on main and on a branch (the picker,
-// the ahead line, a file, its history), its branches, a branch's page with its
+// the ahead line, a file, its history), code in colour within the code view's
+// size limits, its branches, a branch's page with its
 // commits and co-authors, checks that Buildkite reports arriving live, a merge
 // through the page, a branch left conflicting by that merge, and the
 // monorepo's Activity tab taking a push live. Real Worker, real git.
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { BASE, browserPost, ciStatus, Machine, nextSignIn } from "./seed";
 
 const id = Date.now().toString(36);
@@ -17,6 +18,22 @@ const full = `${login}/${name}`;
 const person = { id: `user_br_${id}`, email: `${login}@pando.invalid`, email_verified: true, first_name: "Branch", last_name: "Lane" };
 
 const project = `${BASE}/${full}/projects/web`;
+
+const COLOUR = `export const colour = "sage";
+
+export function shade(name: string): number {
+  return name.length * 2;
+}
+`;
+
+// 2.2 MiB, over the 1 MiB that is coloured: shown as plain text.
+const BIG = Array.from({ length: 80_000 }, (_, i) => `export const n${i} = ${i};\n`).join("");
+
+// A 1 by 1 PNG.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/** The distance between the first three rows' tops. */
+const pitch = (rows: Locator) => rows.evaluateAll((els) => els.slice(0, 3).map((e) => e.getBoundingClientRect().top)).then(([a = 0, b = 0, c = 0]) => [b - a, c - b]);
 
 interface Made {
   machine: Machine | null;
@@ -53,7 +70,16 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       made.machine = await Machine.make(page, `laptop-${id}`);
       const m = machine();
 
-      m.push(m.commit("web", url, "main", { "README.md": "# web\n\nThe web project.\n", "src/a.ts": "export const a = 1;\n" }, "Start the web project"), url, "main");
+      const start = {
+        "README.md": "# web\n\nThe web project.\n",
+        "src/a.ts": "export const a = 1;\n",
+        "src/colour.ts": COLOUR,
+        "src/big.ts": BIG,
+        "logo.png": PNG,
+        "docs/GUIDE.md": "# Guide\n\nHow to read [the README](../README.md).\n\n```ts\nexport const answer = 42;\n```\n",
+      };
+
+      m.push(m.commit("web", url, "main", start, "Start the web project"), url, "main");
       const dir = m.commit("web", url, "feature", { "src/a.ts": "export const a = 2;\n" }, "Two is better\n\nCo-authored-by: Claude <noreply@anthropic.com>");
 
       m.push(dir, url, "feature");
@@ -67,8 +93,24 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
       await expect(files.getByRole("link", { name: "README.md" })).toBeVisible();
       await expect(files.getByRole("link", { name: "src" })).toBeVisible();
-      await expect(page.getByText("The web project.")).toBeVisible();
+      await expect(page.locator(".pn-doc article").getByText("The web project.")).toBeVisible();
       await expect(page.getByRole("link", { name: "2 open branches" })).toBeVisible();
+    });
+
+    await test.step("a Markdown file in the project: its Preview through the viewer, its source lines at ?plain=1", async () => {
+      await page.goto(`${project}/blob/docs/GUIDE.md`);
+      await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Guide" })).toBeVisible();
+      // Its code fence takes the code view's palette (theme.css, --diffs-token-*), not a stock Shiki theme.
+      await expect(page.locator(".pn-doc pre code span[style*='--diffs-token-']").first()).toBeVisible();
+      await page.goto(`${project}/blob/docs/GUIDE.md?plain=1`);
+      await expect(page.getByRole("group", { name: "View" }).getByRole("link", { name: "Code" })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByText("# Guide")).toBeVisible();
+      await expect(page.locator(".pn-doc")).toHaveCount(0);
+      // A relative link in the Preview opens that file's page in the project.
+      await page.getByRole("group", { name: "View" }).getByRole("link", { name: "Preview" }).click();
+      await page.locator(".pn-doc").getByRole("link", { name: "the README" }).click();
+      await expect(page).toHaveURL(`${project}/blob/README.md`);
+      await page.goto(project);
     });
 
     await test.step("the branch picker opens the same folder on a branch, with how far ahead it is", async () => {
@@ -90,6 +132,37 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await page.getByRole("link", { name: "History" }).click();
       await expect(page.getByText("Two is better")).toBeVisible();
       await expect(page.getByText("Start the web project")).toBeVisible();
+    });
+
+    await test.step("code in colour at the plain lines' pitch; over 1 MiB plain with its note; an image as an image", async () => {
+      await page.goto(`${project}/blob/src/colour.ts`);
+      // Tokens carry the theme's variables (theme.css), so they take its colours.
+      const keyword = page.locator('[data-line] span[style*="--diffs-token-keyword"]').first();
+
+      await expect(keyword).toHaveText("export");
+
+      const [ink, themed] = await keyword.evaluate((el) => {
+        const probe = document.body.appendChild(document.createElement("i"));
+        probe.style.color = "var(--diffs-token-keyword)";
+        const both = [getComputedStyle(el).color, getComputedStyle(probe).color];
+        probe.remove();
+
+        return both;
+      });
+
+      expect(ink).toBe(themed);
+      await expect(page.locator('[data-line] span[style*="--diffs-token-string"]').first()).toHaveText(/sage/);
+      expect(await pitch(page.locator("[data-line]"))).toEqual([20, 20]);
+      await page.goto(`${project}/blob/src/big.ts`);
+      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible();
+      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached();
+      await expect(page.locator("diffs-container")).toHaveCount(0);
+      expect(await pitch(page.locator("pre > span"))).toEqual([20, 20]);
+      await page.goto(`${project}/blob/logo.png`);
+      const image = page.getByRole("img", { name: "logo.png" });
+
+      await expect(image).toBeVisible();
+      expect(await image.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
     });
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {

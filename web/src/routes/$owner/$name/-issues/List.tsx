@@ -20,6 +20,7 @@ import { BranchIcon, ChatIcon, CheckIcon } from "../../../../ui/Icons";
 import { DoneIcon, OpenIcon, SearchIcon, StateGlyph } from "../../../../ui/IssueIcons";
 import { type IssuesSearch, issueLink, issuesLink, newIssueLink } from "../../../../ui/paths";
 import { useNow } from "../../../../ui/time";
+import { Ref } from "../../../../ui/Ref";
 import { useMonorepo } from "../-frame/heads";
 import { Assignees, filtersOf, LabelChip, SORTS, searchOf, StateLine, useMe } from "./parts";
 import { type PickOption, Picker } from "./Picker";
@@ -185,15 +186,17 @@ function Row({ row, full }: { row: IssueRow; full: string }) {
 
   return (
     <li className={`border-t border-rule-faint first:border-t-0 ${fresh ? "arrived" : ""}`}>
-      <div className="grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-3.5 px-4 py-3 phone:grid-cols-[16px_minmax(0,1fr)] phone:px-3">
+      {/* The whole row opens the issue (as every list's row does), its title in Link (links R); its labels are links of their own, above the row's. */}
+      <div className="group relative grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-3.5 px-4 py-3 hover:bg-air phone:grid-cols-[16px_minmax(0,1fr)] phone:px-3">
+        <Link {...issueLink(full, row.number)} aria-label={`#${row.number} ${row.title}`} tabIndex={-1} className="absolute inset-0" />
         <span className="mt-0.5">
           <StateGlyph state={row.state} reason={row.state_reason} />
         </span>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[14.5px] leading-[21px]">
-            <Link {...issueLink(full, row.number)} className="fox-cool mr-0.5 text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
+            <Ref kind="name" link={issueLink(full, row.number)} above className="fox-cool mr-0.5">
               {row.title}
-            </Link>
+            </Ref>
             {row.labels.map((l) => (
               <LabelChip key={l.name} label={l} full={full} />
             ))}

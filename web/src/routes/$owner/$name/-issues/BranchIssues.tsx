@@ -9,6 +9,7 @@ import { editIssue, linkedIssuesQuery, openIssuesQuery } from "../../../../api/i
 import { lnk, Refusal, SectionHead } from "../../../../ui/controls";
 import { StateGlyph } from "../../../../ui/IssueIcons";
 import { issueLink } from "../../../../ui/paths";
+import { refClass } from "../../../../ui/Ref";
 import { useMonorepo } from "../-frame/heads";
 import { Picker } from "./Picker";
 
@@ -46,8 +47,9 @@ export function BranchIssues({ repo, b }: { repo: Repo; b: Branch }) {
                 <span className="mt-0.5">
                   <StateGlyph state={row.state} reason={row.state_reason} className="size-[15px]" />
                 </span>
-                <span className="text-bark group-hover:underline group-hover:decoration-ash group-hover:underline-offset-3">
-                  {merged && row.closed_by_merge?.branch === b.name ? "Closed " : ""}#{row.number} <span className="text-bark-dim">{row.title}</span>
+                <span>
+                  {merged && row.closed_by_merge?.branch === b.name ? <span className="text-bark-dim">Closed </span> : null}
+                  <span className={refClass("name")}>#{row.number}</span> <span className={`${refClass("object")} group-hover:underline`}>{row.title}</span>
                 </span>
                 <span className="col-start-2 text-[12.5px] text-ash">{stateWords(row, b)}</span>
               </Link>

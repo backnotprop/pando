@@ -8,7 +8,8 @@ import type { Machine, Repo } from "@pando/contract";
 import { openCountQuery } from "../../../../api/issues";
 import { machinesQuery, membersQuery, openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Avatar } from "../../../../ui/Avatar";
-import { branchesLink, issuesLink, monoLink, repoLink, tabLink } from "../../../../ui/paths";
+import { branchesLink, issuesLink, monoLink, ownerLink, repoLink, tabLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 
 const frame = getRouteApi("/$owner/$name");
@@ -37,15 +38,21 @@ function Head({ title, right }: { title: ReactNode; right?: ReactNode }) {
   );
 }
 
+/** The repository's name, as GitHub heads one (links R): its owner's avatar (a person round, an organization square), then owner / name in Link. */
 function FullName() {
-  const { monorepo } = useMonorepo();
+  const { monorepo, info } = useMonorepo();
 
   return (
     <>
-      <Avatar name={monorepo.name} org size={36} />
+      <Avatar name={monorepo.owner} org={info.owner_type === "org"} size={28} />
       <span>
-        <span className="text-ash">{monorepo.owner}/</span>
-        {monorepo.name}
+        <Ref kind="object" link={ownerLink(monorepo.owner)}>
+          {monorepo.owner}
+        </Ref>
+        <span className="px-1 text-ash">/</span>
+        <Ref kind="name" link={monoLink(monorepo.full)}>
+          {monorepo.name}
+        </Ref>
       </span>
     </>
   );

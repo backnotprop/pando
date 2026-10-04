@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { Avatar } from "../../ui/Avatar";
 import { LinkIcon, PersonIcon, RepoBookIcon } from "../../ui/Icons";
 import { orgLink, ownerLink } from "../../ui/paths";
+import { Ref } from "../../ui/Ref";
 import { Tab, TabBar } from "../../ui/TabBar";
 
 export type OrgTab = "overview" | "people" | "settings";
@@ -54,9 +55,9 @@ export function OrgHead({ org, tab, repositories }: { org: OrgProfile; tab: OrgT
             <p className="mt-2 flex flex-wrap gap-x-[18px] gap-y-1.5 text-[13.5px] text-bark-dim phone:gap-x-3.5">
               {org.website ? (
                 <Fact icon={<LinkIcon />}>
-                  <a href={org.website} rel="noreferrer" className="hover:text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
+                  <Ref kind="object" href={org.website}>
                     {host(org.website)}
-                  </a>
+                  </Ref>
                 </Fact>
               ) : null}
               {org.members === null ? null : <Fact icon={<PersonIcon />}>{plural(org.members, "person", "people")}</Fact>}

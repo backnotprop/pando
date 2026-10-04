@@ -1,38 +1,54 @@
 // The activity log: each event as one sentence, led by the person who did it
 // (or the CI service's mark for a check), as on GitHub's feed. Used by the
-// home, a monorepo's Code page (its side column) and its Activity tab. Its
-// names are links (the repository, the project, the person, the branch or
-// file, a check's own page), and the whole row goes to what the sentence is
-// about: a link stretched under the row, with the inner links above it.
+// home, a monorepo's Code page (its side column) and its Activity tab. A
+// sentence links who (a person's page, or a check's build page) and what (the
+// branch, issue or file, in Link: owner ruling, links R); its places ("in
+// projects/web", "from ana-mbp") are plain context. The whole row goes to what
+// the sentence is about: a link stretched under the row, with the sentence's
+// links above it.
 import { Link } from "@tanstack/react-router";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { FeedEvent } from "@pando/contract";
 import { lineKey, takeArrived } from "../live/arrivals";
 import { Avatar } from "./Avatar";
 import buildkiteMark from "./buildkite-mark.svg";
-import { type AppLink, blobLink, branchesLink, branchLink, historyLink, issueLink, monoLink, ownerLink, repoLink } from "./paths";
+import { type AppLink, blobLink, branchesLink, branchLink, ciBuildLink, historyLink, issueLink, monoLink, ownerLink, repoLink } from "./paths";
+import { type IssueState, IssueRef, Ref } from "./Ref";
 import { duration, since, useNow } from "./time";
 import { Older } from "./Older";
 
+/** What a line is about: a branch or a commit (SF Mono), a saved file's path, or an issue (its number, with its state glyph). */
+interface LineObject {
+  kind: "branch" | "commit" | "file" | "issue";
+  text: string;
+  link: AppLink | null;
+  /** An issue's number and its state as of the line's event. */
+  issue?: IssueState & { number: number };
+}
+
 interface Sentence {
+  /** The repository the line is in (`owner/name`). */
+  monorepo: string;
   /** Who leads the line: a person's avatar, a CI service's mark, or an empty slot. */
   person: string | null;
   app: string | null;
   actor: string;
-  /** A person's page (theirs, as an owner), or a check's own page at its CI service (`actorHref`); none for a save's author, a name not a login. */
+  /** A person's page (theirs, as an owner), or a check's build page in Pando; else (`actorHref`) the check's page at its CI service. None for a save's author, a name not a login. */
   actorLink: AppLink | null;
   actorHref: string | null;
   verb: string;
   bad: boolean;
-  /** A branch (mono, as code is) or a saved file's path (SF Pro Text, at the sentence's size). */
-  object: { text: string; link: AppLink | null; path?: boolean } | null;
+  object: LineObject | null;
   tail: string | null;
+  /** The issues a merge closed ("closing #9"), each a reference. */
+  closes: readonly number[];
   repo: string | null;
   /** The project's page, for "in projects/web". */
   repoLink: AppLink | null;
   machine: string | null;
-  /** Shown on hover: a commit title, a version, a check's time. */
+  /** Shown on hover: a commit title, a version, a check's time; `detailSha`, a merge commit (SF Mono). */
   detail: string | null;
+  detailSha?: boolean;
   /** Where the whole row goes: its object's page, else its project's, else its repository's. */
   target: AppLink;
 }
@@ -52,10 +68,11 @@ export function describe(e: FeedEvent): Sentence {
 }
 
 function sentence(e: FeedEvent): Omit<Sentence, "target"> {
-  const branch = e.branch ? { text: e.branch, link: e.repo_path ? branchLink(e.monorepo, e.repo_path, e.branch) : null } : null;
+  const branch: LineObject | null = e.branch ? { kind: "branch", text: e.branch, link: e.repo_path ? branchLink(e.monorepo, e.repo_path, e.branch) : null } : null;
   const repo = e.repo_path && e.repo_path !== "." ? e.repo_path : null;
 
   const base = {
+    monorepo: e.monorepo,
     person: e.actor,
     app: null,
     actor: e.actor ?? "someone",
@@ -64,6 +81,7 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
     bad: false,
     object: branch,
     tail: null,
+    closes: [],
     repo,
     repoLink: repo ? repoLink(e.monorepo, repo) : null,
     machine: e.machine,
@@ -81,11 +99,11 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
       return { ...base, verb: "opened", detail: e.summary?.head_title ?? null };
     case "branch.deleted":
       // Its page is gone; the project's branches list is where it was.
-      return { ...base, verb: "deleted", object: branch && { text: branch.text, link: e.repo_path ? branchesLink(e.monorepo, e.repo_path) : null } };
+      return { ...base, verb: "deleted", object: branch && { ...branch, link: e.repo_path ? branchesLink(e.monorepo, e.repo_path) : null } };
     case "merged": {
       const closes = e.summary?.closes ?? [];
 
-      return { ...base, verb: "merged", tail: closes.length ? `into main, closing ${closes.map((n) => `#${n}`).join(", ")}` : "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+      return { ...base, verb: "merged", tail: closes.length ? "into main, closing" : "into main", closes, detail: e.summary?.merge_commit?.slice(0, 7) ?? null, detailSha: true };
     }
 
     case "review":
@@ -96,7 +114,7 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
       const took = d?.duration_s == null ? null : duration(d.duration_s);
 
       // On a commit no branch is at (main's, or a deleted branch's): the branch the server names, else the commit itself (its project's page: the app has no commit page).
-      const on = base.object ?? (d?.sha ? { text: d.sha.slice(0, 7), link: base.repoLink } : null);
+      const on: LineObject | null = base.object ?? (d?.sha ? { kind: "commit", text: d.sha.slice(0, 7), link: base.repoLink } : null);
 
       return {
         ...base,
@@ -104,8 +122,9 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
         person: app ? null : e.actor,
         app,
         actor: d?.context ?? "check",
-        actorLink: null,
-        actorHref: d?.target_url && /^https?:\/\//.test(d.target_url) ? d.target_url : null,
+        // The build Pando holds for it opens here, as a branch page's checks do; a status with none opens its own page.
+        actorLink: d?.build ? ciBuildLink(e.monorepo, d.build.pipeline, d.build.number) : null,
+        actorHref: !d?.build && d?.target_url && /^https?:\/\//.test(d.target_url) ? d.target_url : null,
         verb: CHECK_STATES[d?.state ?? "pending"],
         bad: d?.state === "failure" || d?.state === "error",
         machine: null,
@@ -128,12 +147,12 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
         // A save's actor is its author's name, not a login: no page.
         actorLink: null,
         verb: deleted ? "deleted" : "saved",
-        object: { text: path, link: deleted ? historyLink(e.monorepo, path) : blobLink(e.monorepo, path), path: true },
+        object: { kind: "file", text: path, link: deleted ? historyLink(e.monorepo, path) : blobLink(e.monorepo, path) },
         detail: e.summary?.version ? `version ${e.summary.version}` : null,
       };
     }
 
-    // Issues: the number as the object (SF Pro Text, opening the issue), then its title; a close says how instead.
+    // Issues: the number as the object (with its state glyph as of the event, opening the issue), then its title; a close says how instead.
     case "issue.opened":
     case "issue.commented":
     case "issue.closed":
@@ -145,7 +164,14 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
       return {
         ...base,
         verb,
-        object: d ? { text: `#${d.number}`, link: issueLink(e.monorepo, d.number), path: true } : null,
+        object: d
+          ? {
+              kind: "issue",
+              text: `#${d.number}`,
+              link: issueLink(e.monorepo, d.number),
+              issue: { number: d.number, state: e.kind === "issue.closed" ? "closed" : "open", reason: e.kind === "issue.closed" ? (d.reason ?? "completed") : null },
+            }
+          : null,
         tail: d ? (e.kind === "issue.closed" ? how : d.title) : null,
         detail: d?.excerpt ?? null,
       };
@@ -165,57 +191,58 @@ export const CheckMark = ({ height = 10, big = false }: { height?: number; big?:
   />
 );
 
-/** A link inside a row: above the row's own link, underlined under the pointer. */
-const inner = "relative z-10 hover:underline hover:decoration-ash hover:underline-offset-3";
-
 /** The words of a row, for the row link's name. */
-const said = (s: Sentence) => [s.actor, s.verb, s.object?.text, s.tail, s.repo ? `in ${s.repo}` : null].filter(Boolean).join(" ");
+const said = (s: Sentence) =>
+  [s.actor, s.verb, s.object?.text, s.tail, s.closes.map((n) => `#${n}`).join(", "), s.repo ? `in ${s.repo}` : null].filter(Boolean).join(" ");
+
+/** What the line is about, in Link (links R), with a faint underline: it sits in running text. */
+export function ObjectRef({ s, obj }: { s: Sentence; obj: LineObject }) {
+  if (obj.kind === "issue" && obj.issue) return <IssueRef full={s.monorepo} number={obj.issue.number} state={obj.issue.state} reason={obj.issue.reason} text above className="fox-cool" />;
+
+  const mono = obj.kind === "branch" || obj.kind === "commit";
+
+  return obj.link ? (
+    <Ref kind="object" link={obj.link} text mono={mono} above className="fox-cool">
+      {obj.text}
+    </Ref>
+  ) : (
+    <span className={`fox-cool text-bark ${mono ? "font-mono text-[13px]" : ""}`}>{obj.text}</span>
+  );
+}
 
 /** The sentence. `mini` (the side column) leads with the mark and drops "in" and "from". */
 export function Sentence({ s, mini = false }: { s: Sentence; mini?: boolean }) {
   const obj = s.object;
-  const objClass = obj?.path ? "fox-cool leading-[16px] text-bark" : `fox-cool font-mono leading-[16px] text-bark ${mini ? "text-[12.5px]" : "text-[13px]"}`;
 
   return (
     <span className={`flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap phone:flex-wrap phone:whitespace-normal ${mini ? "text-[13px]" : ""}`}>
       {mini && s.app === "buildkite" ? <CheckMark /> : null}
       {s.actorLink ? (
-        <Link {...s.actorLink} className={`fox-cool text-bark ${inner}`}>
+        <Ref kind="person" link={s.actorLink} above className="fox-cool">
           {s.actor}
-        </Link>
+        </Ref>
       ) : s.actorHref ? (
-        <a href={s.actorHref} target="_blank" rel="noopener noreferrer" className={`fox-cool text-bark ${inner}`}>
+        <Ref kind="person" href={s.actorHref} above className="fox-cool">
           {s.actor}
-        </a>
+        </Ref>
       ) : (
-        <span className="fox-cool text-bark">{s.actor}</span>
+        <span className="fox-cool font-semibold text-bark">{s.actor}</span>
       )}
       <span className={`fox-cool ${s.bad ? "text-rust" : "text-bark-dim"}`}>{s.verb}</span>
-      {obj ? (
-        obj.link ? (
-          <Link {...obj.link} className={`${objClass} ${inner}`}>
-            {obj.text}
-          </Link>
-        ) : (
-          <span className={objClass}>{obj.text}</span>
-        )
-      ) : null}
+      {obj ? <ObjectRef s={s} obj={obj} /> : null}
       {s.tail ? <span className="fox-cool text-bark-dim">{s.tail}</span> : null}
-      {!mini && s.repo ? (
-        <span className="fox-cool text-ash">
-          in{" "}
-          {s.repoLink ? (
-            <Link {...s.repoLink} className={inner}>
-              {s.repo}
-            </Link>
-          ) : (
-            s.repo
-          )}
+      {s.closes.map((n, i) => (
+        <span key={n} className="fox-cool text-bark-dim">
+          <IssueRef full={s.monorepo} number={n} state="closed" reason="completed" text above />
+          {i < s.closes.length - 1 ? "," : null}
         </span>
-      ) : null}
+      ))}
+      {!mini && s.repo ? <span className="fox-cool text-ash">in {s.repo}</span> : null}
       {!mini && s.machine ? <span className="fox-cool text-ash">from {s.machine}</span> : null}
       {s.detail ? (
-        <span className="ml-2 overflow-hidden text-[12px] text-ellipsis text-ash opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 group-has-focus-visible:opacity-100 phone:hidden">
+        <span
+          className={`ml-2 overflow-hidden text-ellipsis text-ash opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 group-has-focus-visible:opacity-100 phone:hidden ${s.detailSha ? "font-mono text-[12px]" : "text-[12px]"}`}
+        >
           {s.detail}
         </span>
       ) : null}
@@ -237,10 +264,23 @@ function Lead({ s }: { s: Sentence }) {
   );
 }
 
-function Line({ e, withMonorepo, clock }: { e: FeedEvent; withMonorepo: boolean; clock: number }) {
+/** The line's repository, in its column: Bark-dim, Link under the pointer; on the owner's own page (`owner`), its name alone. */
+function RepoColumn({ full, owner }: { full: string; owner: string | null }) {
+  const [who = "", name = ""] = full.split("/");
+
+  return (
+    <span className="flex items-center gap-2 overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap phone:hidden">
+      <Link {...monoLink(full)} className="relative z-10 text-bark-dim decoration-1 underline-offset-3 hover:text-link hover:underline">
+        {who === owner ? null : <span className="text-ash">{who}/</span>}
+        {name}
+      </Link>
+    </span>
+  );
+}
+
+function Line({ e, withMonorepo, owner, clock }: { e: FeedEvent; withMonorepo: boolean; owner: string | null; clock: number }) {
   const [fresh] = useState(() => takeArrived(lineKey(e)));
   const s = describe(e);
-  const [owner, name] = e.monorepo.split("/");
 
   return (
     <li className={`border-t border-rule-faint first:border-t-0 ${fresh ? "arrived" : ""}`}>
@@ -249,13 +289,7 @@ function Line({ e, withMonorepo, clock }: { e: FeedEvent; withMonorepo: boolean;
       >
         <RowLink s={s} />
         <span className="fox-cool text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
-        {withMonorepo ? (
-          <span className="flex items-center gap-2 overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash phone:hidden">
-            <Link {...monoLink(e.monorepo)} className={inner}>
-              {owner}/<span className="text-bark-dim">{name}</span>
-            </Link>
-          </span>
-        ) : null}
+        {withMonorepo ? <RepoColumn full={e.monorepo} owner={owner} /> : null}
         <span className="flex min-w-0 items-center gap-2.5 phone:items-start">
           <Lead s={s} />
           <Sentence s={s} />
@@ -305,7 +339,8 @@ export interface OlderPages {
   load: () => void;
 }
 
-export function ActivityList({ events, withMonorepo, older }: { events: readonly FeedEvent[]; withMonorepo: boolean; older: OlderPages }) {
+/** `owner`: the page is that owner's (an organization's or a person's), so the repository column leaves the owner off. */
+export function ActivityList({ events, withMonorepo, owner = null, older }: { events: readonly FeedEvent[]; withMonorepo: boolean; owner?: string | null; older: OlderPages }) {
   const clock = useNow();
   const first = events[0];
   const list = useMakeRoom(first ? lineKey(first) : null);
@@ -314,7 +349,7 @@ export function ActivityList({ events, withMonorepo, older }: { events: readonly
     <>
       <ul ref={list} aria-label="Activity" data-testid="activity">
         {events.map((e) => (
-          <Line key={lineKey(e)} e={e} withMonorepo={withMonorepo} clock={clock} />
+          <Line key={lineKey(e)} e={e} withMonorepo={withMonorepo} owner={owner} clock={clock} />
         ))}
       </ul>
       <Older {...older} none="No older activity." />

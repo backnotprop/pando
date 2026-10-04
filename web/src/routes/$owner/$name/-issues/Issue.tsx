@@ -15,7 +15,8 @@ import { button, field, Refusal } from "../../../../ui/controls";
 import { Chevron } from "../../../../ui/Icons";
 import { DoneIcon, NotPlannedIcon, OpenIcon, ReopenIcon } from "../../../../ui/IssueIcons";
 import { MenuPopup, menuItem } from "../../../../ui/menu";
-import { newIssueLink } from "../../../../ui/paths";
+import { newIssueLink, ownerLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { Editor } from "./Editor";
@@ -105,7 +106,10 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
       <div className="mt-3.5 flex items-center gap-3 text-[14px] text-bark-dim phone:flex-wrap phone:gap-x-2.5 phone:gap-y-2 phone:text-[13.5px]">
         <StateChip issue={issue} />
         <span>
-          <span className="text-bark">{issue.author}</span> opened this {ago(issue.created_at, clock)} · {issue.comments} comment{issue.comments === 1 ? "" : "s"}
+          <Ref kind="person" link={ownerLink(issue.author)}>
+            {issue.author}
+          </Ref>{" "}
+          opened this {ago(issue.created_at, clock)} · {issue.comments} comment{issue.comments === 1 ? "" : "s"}
         </span>
       </div>
     </>

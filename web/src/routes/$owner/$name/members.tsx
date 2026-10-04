@@ -14,7 +14,8 @@ import { invitesQuery, meQuery, membersQuery } from "../../../api/queries";
 import { Avatar } from "../../../ui/Avatar";
 import { button, Empty, field, Lnk, Refusal, row, SectionHead, thead } from "../../../ui/controls";
 import { Select } from "../../../ui/dropdown";
-import { orgLink } from "../../../ui/paths";
+import { orgLink, ownerLink } from "../../../ui/paths";
+import { Ref } from "../../../ui/Ref";
 import { ago, since, useNow } from "../../../ui/time";
 import { OwnHead, useMonorepo } from "./-frame/heads";
 
@@ -78,7 +79,11 @@ function People({ people, owner, org = null, label = "Members", inOrg = false }:
               <span className="flex min-w-0 items-center gap-3">
                 <Avatar name={m.login} size={28} />
                 <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
-                  <span>{m.name ?? m.login}</span>
+                  <span>
+                    <Ref kind="person" link={ownerLink(m.login)}>
+                      {m.name ?? m.login}
+                    </Ref>
+                  </span>
                   <span className="text-[13px] text-ash">{m.login}</span>
                 </span>
               </span>

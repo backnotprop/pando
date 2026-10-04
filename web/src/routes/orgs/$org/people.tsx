@@ -15,6 +15,8 @@ import { meQuery } from "../../../api/queries";
 import { Avatar } from "../../../ui/Avatar";
 import { button, Empty, field, row, SectionHead, thead } from "../../../ui/controls";
 import { Select } from "../../../ui/dropdown";
+import { ownerLink } from "../../../ui/paths";
+import { Ref } from "../../../ui/Ref";
 import { ago, since, useNow } from "../../../ui/time";
 import { useOrg } from "../../-org/frame";
 import { OrgHead } from "../../-org/OrgHead";
@@ -87,7 +89,11 @@ function Person({ org, member, you }: { org: OrgProfile; member: OrgMember; you:
         <span className="flex min-w-0 items-center gap-3">
           <Avatar name={member.login} size={28} />
           <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
-            <span>{member.name ?? member.login}</span>
+            <span>
+              <Ref kind="person" link={ownerLink(member.login)}>
+                {member.name ?? member.login}
+              </Ref>
+            </span>
             <span className="text-[12.5px] text-ash">{member.login}</span>
           </span>
         </span>

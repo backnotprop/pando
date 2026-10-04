@@ -115,6 +115,16 @@ export async function ciStatus(member: Machine, full: string, repo: string, sha:
   if (!res.ok) throw new Error(`status ${context}: ${res.status} ${await res.text()}`);
 }
 
+/** Node's WebSocket (undici) also takes `{ headers }`; the DOM types this project loads leave that form out. */
+type NodeWebSocket = new (url: string, init: string[] | { headers: { authorization: string } }) => WebSocket;
+
+/** A JSON request body. */
+export type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonBody;
+
+export interface JsonBody {
+  readonly [key: string]: JsonValue;
+}
+
 export class Machine {
   private readonly work = mkdtempSync(join(tmpdir(), "pando-web-e2e-"));
 
@@ -132,7 +142,7 @@ export class Machine {
     return new Machine(made.secret, name, author);
   }
 
-  async api(method: string, path: string, body?: Record<string, string>): Promise<Response> {
+  async api(method: string, path: string, body?: JsonBody): Promise<Response> {
     const headers = { authorization: `Bearer ${this.secret}`, "content-type": "application/json" };
     const send = () => fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
 
@@ -142,6 +152,34 @@ export class Machine {
 
       return send();
     });
+  }
+
+  /**
+   * Follows the monorepo as `pando` does: its event socket, then hello with
+   * this machine's worktrees, so the machine counts as connected until the
+   * socket closes.
+   */
+  async follow(full: string, worktrees: string[]): Promise<WebSocket> {
+    // SAFETY: the e2e runs in Node 24, whose global WebSocket is undici's, which sends init.headers.
+    const Socket = WebSocket as NodeWebSocket;
+    const ws = new Socket(`${BASE.replace("http", "ws")}/v1/monorepos/${full}/events`, { headers: { authorization: `Bearer ${this.secret}` } });
+
+    await new Promise<void>((ok, fail) => {
+      ws.onopen = () => ws.send(JSON.stringify({ type: "hello", machine: this.name, worktrees }));
+
+      ws.onmessage = (m) => {
+        if (String(m.data).includes('"hello_ok"')) ok();
+      };
+
+      ws.onerror = () => fail(new Error("the event socket failed"));
+    });
+
+    return ws;
+  }
+
+  /** Where this machine keeps its clone of `repo`. */
+  dir(repo: string): string {
+    return join(this.work, repo);
   }
 
   /** git, keychain-safe: no system config, helpers cleared, then one that reads the secret from the environment. */

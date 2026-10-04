@@ -5,6 +5,7 @@ import { type FullName, MetaHistory, type RepoName, Routes } from "@pando/contra
 import type * as Schema from "effect/Schema";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { get, getText } from "./client";
+import * as Pending from "./pending";
 import type { MonorepoRef } from "./names";
 
 const enc = encodeURIComponent;
@@ -67,15 +68,27 @@ export const openBranchesQuery = (m: MonorepoRef, repo: RepoName) =>
     queryFn: () => read(Routes.listBranches(m.owner, m.name, repo, "open", null)).then((r) => r.branches.length),
   });
 
+/** The members, by login (the tab counts them). */
 export const membersQuery = (m: MonorepoRef) =>
-  queryOptions({ queryKey: [...key(m), "members"], queryFn: () => read(Routes.listMembers(m.owner, m.name)).then((r) => r.members.length) });
+  queryOptions({ queryKey: [...key(m), "members"], queryFn: () => read(Routes.listMembers(m.owner, m.name)).then((r) => r.members) });
 
-/** Machines connected now (the Machines tab's count). */
+/** Pending invites, oldest first. */
+export const invitesQuery = (m: MonorepoRef) =>
+  queryOptions({ queryKey: [...key(m), "invites"], queryFn: () => read(Pending.listInvites(m.owner, m.name)).then((r) => r.invites) });
+
+/**
+ * Every machine, latest activity first (the tab counts those connected now).
+ * A connect makes no activity line, so an open Machines tab asks again every
+ * 5 s (pando-ops, 2026-10-03: fine for launch).
+ */
 export const machinesQuery = (m: MonorepoRef) =>
-  queryOptions({
-    queryKey: [...key(m), "machines"],
-    queryFn: () => read(Routes.listMachines(m.owner, m.name)).then((r) => r.machines.filter((x) => x.connected).length),
-  });
+  queryOptions({ queryKey: [...key(m), "machines"], queryFn: () => read(Routes.listMachines(m.owner, m.name)).then((r) => r.machines) });
+
+/** Every credential that acts as you: machines, sandboxes, browser sessions. */
+export const credentialsQuery = queryOptions({
+  queryKey: ["credentials"],
+  queryFn: () => read(Pending.listCredentials).then((r) => r.credentials),
+});
 
 /** One folder of root files: its files, and its subfolders (with their newest save, once the API has it). */
 export const treeQuery = (m: MonorepoRef, dir: string) =>
@@ -127,4 +140,3 @@ export const fileQuery = (m: MonorepoRef, path: string, version: number | null) 
     queryFn: () => getText(Routes.metaFilePath(m.owner, m.name, path, version)),
     staleTime: version === null ? 0 : Infinity,
   });
-

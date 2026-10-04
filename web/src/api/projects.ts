@@ -2,7 +2,7 @@
 // files at a ref, its branches and a branch's page. Keys sit under
 // ["m", owner, name, "r", repo], so a line on the monorepo's socket can
 // refresh one repo's data.
-import { type RepoName, Routes } from "@pando/contract";
+import { type CiBuild, type CiJob, type RepoName, Routes } from "@pando/contract";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type * as Schema from "effect/Schema";
 import { get, getText, isMissing } from "./client";
@@ -50,12 +50,17 @@ export const worktreeQuery = (m: MonorepoRef, repoPath: string, branch: string) 
     queryFn: () => read(Routes.listWorktrees(m.owner, m.name, repoPath)).then((r) => r.worktrees.find((w) => w.branch === branch) ?? null),
   });
 
+/** The job that reports a check on the branch's head, and its build (for its page). */
 export interface CheckRun {
-  duration_s: number | null;
-  url: string | null;
+  job: CiJob;
+  build: CiBuild;
 }
 
-/** Each check's run on the branch's head, from the CI service's stored builds: its time and its link. */
+/**
+ * Each check's run on the branch's head, from the CI service's stored builds
+ * (Pando's rows, no call to the service). A job moving from queued to running
+ * changes no check, so no line says so: while one is going, ask every 5 s.
+ */
 export const checkRunsQuery = (m: MonorepoRef, repo: RepoName, branch: string, sha: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "runs", sha],
@@ -66,12 +71,13 @@ export const checkRunsQuery = (m: MonorepoRef, repo: RepoName, branch: string, s
       // Builds come newest first: the first job seen for a check is the one that reports it.
       for (const b of builds) {
         for (const j of (await read(Routes.getCiBuild(m.owner, m.name, b.id))).jobs) {
-          if (j.check && !j.retried && !runs.has(j.check)) runs.set(j.check, { duration_s: j.duration_s, url: j.web_url });
+          if (j.check && !j.retried && !runs.has(j.check)) runs.set(j.check, { job: j, build: b });
         }
       }
 
       return runs;
     },
+    refetchInterval: (q) => ([...(q.state.data?.values() ?? [])].some((r) => r.job.state === "queued" || r.job.state === "running") ? 5000 : false),
   });
 
 /** One folder at a ref (the default branch when null); null for the root of a repo with no commits yet. */

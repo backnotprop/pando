@@ -6,7 +6,7 @@ import { CopyButton } from "../../../../ui/controls";
 import { Markdown } from "../../../../ui/Markdown";
 import { absolute } from "../../../../ui/paths";
 
-const tool =
+export const tool =
   "inline-flex h-7 cursor-pointer items-center rounded-md border border-rootline bg-soil px-2.5 text-[12.5px] leading-[15px] whitespace-nowrap text-bark-dim hover:border-rule-hi hover:text-bark";
 
 /** `raw` is the Worker's raw URL for these bytes; `text` null means binary (no Copy). */

@@ -40,6 +40,12 @@ export function applyLine(qc: QueryClient, e: FeedEvent): void {
 
   const [owner, name] = e.monorepo.split("/");
 
+  // A machine did something: its row on the Machines tab.
+  if (e.machine) void qc.invalidateQueries({ queryKey: ["m", owner, name, "machines"] });
+
+  // A check moved: a CI service's builds and jobs did too.
+  if (e.kind === "status") void qc.invalidateQueries({ queryKey: ["m", owner, name, "ci"] });
+
   if (e.kind === "meta.saved") {
     void qc.invalidateQueries({ queryKey: ["m", owner, name, "meta"] });
 

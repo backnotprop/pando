@@ -4,16 +4,19 @@
 // lands exactly the head on screen (expected_head); a refusal is shown in the
 // box, in words.
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
-import type { Branch, Checks, Commit, Repo, Review } from "@pando/contract";
-import { branchQuery, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
+import type { Branch, Checks, Commit, Repo, Review, Status } from "@pando/contract";
+import { branchQuery, type CheckRun, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
-import { Empty, SectionHead, useCopy } from "../../../../ui/controls";
+import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
-import { ago, since, useNow } from "../../../../ui/time";
+import { useArrivals } from "../../../../ui/arrival";
+import { ciBuildLink } from "../../../../ui/paths";
+import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { mergeableOf, stateOf } from "./state";
 
@@ -25,11 +28,9 @@ export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, br
   ]);
 }
 
-const btn = "inline-flex h-8 cursor-pointer items-center justify-center rounded-[7px] px-3.5 text-[13.5px] leading-[16px] font-semibold whitespace-nowrap";
+const solid = button("solid");
 
-const solid = `${btn} bg-bark text-soil hover:bg-bark-hi disabled:cursor-default disabled:opacity-40`;
-
-const quiet = `${btn} text-bark shadow-[inset_0_0_0_1px_var(--ash-half)] hover:shadow-[inset_0_0_0_1px_var(--bark-dim)]`;
+const quiet = button("quiet");
 
 const big = "text-[15px] font-semibold";
 
@@ -100,47 +101,70 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
   );
 }
 
-/** Each required or reported check: its mark, its name (to its run), its state in words, how long it took. */
+/** A check's state in words: its job's, when a CI service runs it; else its status's. */
+function checkWord(s: Status | undefined, run: CheckRun | undefined): string {
+  if (run) return run.job.state;
+
+  if (!s) return "not reported";
+
+  return s.state === "success" ? "passed" : s.state === "pending" ? "running" : s.state === "failure" ? "failed" : "errored";
+}
+
+const toneOf = (word: string) => (word === "passed" ? "text-bark-dim" : word === "failed" || word === "errored" ? "font-semibold text-rust" : "text-ash");
+
+/**
+ * Each required or reported check, as GitHub lists them: its CI service's
+ * mark, its name (opening its job on the build's page), its state in words,
+ * and its time, which ticks each second while it runs. A check that moves
+ * while the page is open plays the arrival.
+ */
 function CheckRows({ repo, branch, checks }: { repo: Repo; branch: Branch; checks: Checks }) {
-  const { monorepo } = useMonorepo();
-  const fromCi = checks.statuses.some((s) => s.app);
-  const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch.name, branch.head), enabled: fromCi }).data;
-  const names = [...new Set([...checks.required, ...checks.statuses.map((s) => s.context)])];
+  const { monorepo, info } = useMonorepo();
+  // Read from Pando's stored builds, not only when a status names a service: a job shows the moment it is queued.
+  const runs = useQuery(checkRunsQuery(monorepo, repo.name, branch.name, branch.head)).data;
+  const names = [...new Set([...checks.required, ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
+  const words = names.map((name) => checkWord(checks.statuses.find((x) => x.context === name), runs?.get(name)));
+  const clock = useSeconds(words.includes("running"));
+  const arrived = useArrivals(runs ? names.map((name, i) => ({ key: name, state: words[i] ?? "" })) : undefined);
 
   if (!names.length) return <Empty>None required.</Empty>;
 
   return (
-    <div className="grid gap-2.5">
-      {names.map((name) => {
+    <ul aria-label="Checks" className="grid gap-2.5">
+      {names.map((name, i) => {
         const s = checks.statuses.find((x) => x.context === name);
-        const word = !s ? "not reported" : s.state === "success" ? "passed" : s.state === "pending" ? "running" : s.state === "failure" ? "failed" : "errored";
-        const tone = !s || s.state === "pending" ? "text-ash" : s.state === "success" ? "text-bark-dim" : "font-semibold text-rust";
         const run = runs?.get(name);
-        const url = run?.url ?? s?.target_url ?? null;
-        const took = run?.duration_s == null || s?.state === "pending" ? null : run.duration_s;
+        const word = words[i] ?? "";
+        const mark = s?.app === "buildkite" || run?.build.service === "buildkite";
+        // A monorepo's build has its page here; a plain repo's opens in the service.
+        const page = run && info.kind === "monorepo" ? ciBuildLink(monorepo.full, run.build.pipeline, run.build.number) : null;
+        const url = run?.job.web_url ?? s?.target_url ?? null;
+        const label = <code className="fox-cool text-bark">{name}</code>;
 
         return (
-          <div key={name} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px]">
+          <li key={`${name}:${word}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px] ${arrived(name) ? "arrived" : ""}`}>
             <span className="text-bark-dim">
-              {s?.app === "buildkite" ? <CheckMark /> : null}
-              {url ? (
+              {mark ? <CheckMark /> : null}
+              {page && run ? (
+                <Link {...page} search={{ job: run.job.id }} className="hover:underline hover:decoration-ash hover:underline-offset-3">
+                  {label}
+                </Link>
+              ) : url ? (
                 <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:decoration-ash hover:underline-offset-3">
-                  <code className="text-bark">{name}</code>
+                  {label}
                 </a>
               ) : (
-                <code className="text-bark">{name}</code>
+                label
               )}{" "}
-              <span className={`text-[13px] whitespace-nowrap ${tone}`}>{word}</span>
+              <span className={`fox-cool text-[13px] whitespace-nowrap ${toneOf(word)}`}>{word}</span>
             </span>
-            <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{took === null ? "" : duration(took)}</span>
-          </div>
+            <span className="fox-cool font-mono text-[12.5px] whitespace-nowrap text-ash">{run ? elapsed(run.job, clock) : ""}</span>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
-
-const duration = (s: number) => (s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`);
 
 /** What the last Merge click was told, kept until the branch changes under it. */
 interface Answer {
@@ -172,6 +196,9 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
   const moved = answer && answer.code === "head_moved" && answer.head !== b.head;
   const conflicts = mergeableOf(b) === "conflicts" || said?.code === "conflict";
   const failed = b.checks.statuses.find((x) => x.state === "failure" || x.state === "error");
+  // The box's line (waiting, failed, ready, merged) plays the arrival when it changes while the page is open.
+  const line = b.state === "merged" ? "merged" : conflicts ? "conflicts" : failed ? `failed:${failed.context}` : s.tone === "wait" ? `wait:${s.text}` : "ready";
+  const arrives = useArrivals([{ key: "line", state: line }])("line") ? "arrived fox-arrive" : "";
 
   const reviewLink = (
     <button type="button" title={`pando review ${b.name}`} className="cursor-pointer border-b border-ash-half pb-px text-bark-dim hover:border-bark hover:text-bark" onClick={() => copyReview(`pando review ${b.name}`)}>
@@ -192,7 +219,9 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
     body = (
       <>
         {/* Just merged here: it arrives in Foxfire, then cools (the prototype's one colour for arrival). */}
-        <p className={`${big} ${landing.data?.ok ? "fox-arrive" : ""}`}>Merged into main</p>
+        <p key={line} className={`${big} ${landing.data?.ok ? "fox-arrive" : ""} ${arrives}`}>
+          Merged into main
+        </p>
         <p className={`${q} mt-1.5`}>
           <code className="text-[12.5px] text-bark">{b.merge_commit?.slice(0, 7) ?? ""}</code>
           {b.merged_by ? `, by ${b.merged_by}` : ""}
@@ -206,7 +235,9 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
 
     body = (
       <>
-        <p className={`${big} text-rust`}>Conflicts with main</p>
+        <p key={line} className={`${big} text-rust ${arrives}`}>
+          Conflicts with main
+        </p>
         {paths.length ? (
           <p className={`${q} mt-1.5`}>
             {paths.map((p) => (
@@ -227,12 +258,12 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
     const force = s.tone !== "ready";
 
     const heading = failed ? (
-      <p className={`${big} text-rust`}>
+      <p key={line} className={`${big} text-rust ${arrives}`}>
         {failed.app === "buildkite" ? <CheckMark height={12} big /> : null}
         {failed.context} failed
       </p>
     ) : s.tone === "wait" ? (
-      <p className={`${big} text-bark-dim`}>
+      <p key={line} className={`${big} text-bark-dim ${arrives}`}>
         {s.text === "no ci yet" ? (
           "No ci has reported"
         ) : s.text === "checking" ? (
@@ -245,7 +276,9 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
         )}
       </p>
     ) : (
-      <p className={big}>Ready to merge</p>
+      <p key={line} className={`${big} ${arrives}`}>
+        Ready to merge
+      </p>
     );
 
     body = (

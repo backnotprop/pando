@@ -4,11 +4,11 @@
   "status": 201,
   "body": {
     "type": "org",
-    "login": "org-mutvywkn",
+    "login": "org-mutxvkul",
     "name": "Rec Org",
     "description": null,
     "website": null,
-    "created_at": "2026-10-04T13:58:40.476Z",
+    "created_at": "2026-10-04T14:52:11.855Z",
     "role": "owner",
     "members": 1
   }

@@ -1,0 +1,10 @@
+{
+  "schema": "Label",
+  "route": "POST .../labels",
+  "status": 201,
+  "body": {
+    "name": "area/web",
+    "color": "teal",
+    "description": "The web app"
+  }
+}

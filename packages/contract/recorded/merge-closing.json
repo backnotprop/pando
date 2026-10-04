@@ -1,0 +1,18 @@
+{
+  "schema": "MergeResult",
+  "route": "POST .../branches/{branch}/merge (closes an issue)",
+  "status": 200,
+  "body": {
+    "status": "merged",
+    "branch": "fix/login",
+    "head": "d3105238befdd2529b0945198d4203c8047b9f96",
+    "sha": "c5ede19abae47e71ddd11bc135d947badbcc233e",
+    "base_before": "e400847c54f7783383296e925c459470973e4651",
+    "merge_base": "e400847c54f7783383296e925c459470973e4651",
+    "forced": true,
+    "merged_by": "rec-mutxvkul",
+    "closes": [
+      2
+    ]
+  }
+}

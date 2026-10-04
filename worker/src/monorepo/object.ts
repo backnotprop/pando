@@ -244,8 +244,8 @@ export const SCAN_MAX = 5_000;
 /** Ref commands sent in one receive-pack. */
 export const REF_BATCH_MAX = 200;
 
-/** After a push, Artifacts' refs are compared with the records this long after, twice (CODE-VS-MODEL.md P1). */
-const REFS_CHECK_MS = 5 * 60_000;
+/** After a push, Artifacts' refs are compared with the records this long after, and again as long after that: 30 s and 60 s (owner ruling, CODE-VS-MODEL.md P1). */
+const REFS_CHECK_MS = 30_000;
 
 /**
  * A push kept for later (C2), one ref per row: landed 'yes' (Artifacts took
@@ -290,6 +290,12 @@ function randomId(prefix: string, bytes = 8): string {
 
 function fail(status: number, code: string, message: string, extra?: RefusalExtra): never {
   throw new HttpError(status, code, message, extra);
+}
+
+/** checkPush's answer: the refs it refuses, and whether the repo keeps pushes not yet recorded. */
+export interface PushCheck {
+  refused: PushVerdict[];
+  kept: boolean;
 }
 
 export interface PushVerdict {
@@ -708,25 +714,30 @@ export class MonorepoObject extends DurableObject<Env> {
   /**
    * The door's one rule: main moves only by a merge (creating it is allowed).
    * A push let through schedules the refs compare for its repo
-   * (`checkEveryMs`: tests only, else REFS_CHECK_MS).
+   * (`checkEveryMs`: tests only, else REFS_CHECK_MS), and says whether the
+   * repo keeps pushes not yet recorded: the door then reconciles them at once.
    */
-  checkPush(repo: string, commands: RefCommand[], checkEveryMs: number | null = null): PushVerdict[] {
+  checkPush(repo: string, commands: RefCommand[], checkEveryMs: number | null = null): PushCheck {
     const r = this.repoRow(repo);
     const main = `refs/heads/${r?.default_branch ?? DEFAULT_BRANCH}`;
 
     const refused = commands.flatMap((c) => (c.ref === main && c.old !== ZERO ? [{ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }] : []));
 
     if (!refused.length && r) this.scheduleRefsCheck(repo, checkEveryMs ?? REFS_CHECK_MS);
+    const kept = this.rows<{ id: number }>("SELECT id FROM unrecorded WHERE repo = ? LIMIT 1", repo).length > 0;
 
-    return refused;
+    return { refused, kept };
   }
 
   // ── The refs compare (CODE-VS-MODEL.md P1) ───────────────────────────────
   //
   // A push whose record and keep both failed leaves no trace here. After any
   // push, a refs job (facts outbox, FactsDrain) compares Artifacts' refs with
-  // the records twice, an interval apart (a push slower than one interval is
-  // still found), and the reconcile catches the records up.
+  // the records twice, 30 s and 60 s after (a push slower than the first is
+  // still found), and the reconcile catches the records up. Pushes close
+  // together share the checks: the next one stays the soonest due, so a
+  // repo's compare costs at most two reads per push. Kept pushes are also
+  // repaired at once by the next branch read and the next push (door.ts).
 
   private scheduleRefsCheck(repo: string, every: number): void {
     const at = Date.now() + every;

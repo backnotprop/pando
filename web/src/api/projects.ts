@@ -2,15 +2,12 @@
 // files at a ref, its branches and a branch's page. Keys sit under
 // ["m", owner, name, "r", repo], so a line on the monorepo's socket can
 // refresh one repo's data.
-import { type RepoName, Routes } from "@pando/contract";
+import { type Repo, type RepoName, Routes } from "@pando/contract";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type * as Schema from "effect/Schema";
+import { codeRawHref } from "../ui/paths";
 import { get, getText, isMissing } from "./client";
 import type { MonorepoRef } from "./names";
-
-const enc = encodeURIComponent;
-
-const base = (m: MonorepoRef, repo: RepoName) => `/v1/monorepos/${enc(m.owner)}/${enc(m.name)}/repos/${enc(repo)}`;
 
 /** Reads a route the contract names: its path and the schema of its answer. */
 const read = <A, I>(route: { path: string; response: Schema.Codec<A, I> }) => get(route.response, route.path);
@@ -104,9 +101,14 @@ export const codeHistoryQuery = (m: MonorepoRef, repo: RepoName, ref: string | n
     getNextPageParam: (page) => page.next ?? undefined,
   });
 
-/** A file's text at a ref, or null for binary bytes. */
-export const codeFileQuery = (m: MonorepoRef, repo: RepoName, ref: string | null, path: string) =>
+/**
+ * A file's text at a commit, or null for binary bytes: read from the raw URL
+ * pinned to the commit's sha, which the browser keeps (immutable) and the edge
+ * caches by blob.
+ */
+export const codeFileQuery = (m: MonorepoRef, repo: Repo, commit: string, path: string) =>
   queryOptions({
-    queryKey: [...repoKey(m, repo), "file", ref, path],
-    queryFn: () => getText(`${base(m, repo)}/files/${path.split("/").map(enc).join("/")}${ref ? `?ref=${enc(ref)}` : ""}`),
+    queryKey: [...repoKey(m, repo.name), "file", commit, path],
+    queryFn: () => getText(codeRawHref(m.full, repo.path, path, commit)),
+    staleTime: Infinity,
   });

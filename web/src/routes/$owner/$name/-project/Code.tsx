@@ -35,7 +35,7 @@ export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir:
 
   if (isBranch(ref)) void qc.prefetchQuery(branchQuery(m, repo.name, ref));
 
-  if (readme) await qc.ensureQueryData(codeFileQuery(m, repo.name, tree.commit, join(dir, readme)));
+  if (readme) await qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme)));
 }
 
 /** "web-api is 2 commits ahead of main." with its page a click away. */
@@ -85,7 +85,7 @@ export function Toolbar({ repo, gitRef, at, here }: { repo: Repo; gitRef: string
 
 function CodeReadme({ repo, commit, path }: { repo: Repo; commit: string; path: string }) {
   const { monorepo } = useMonorepo();
-  const text = useSuspenseQuery(codeFileQuery(monorepo, repo.name, commit, path)).data.text;
+  const text = useSuspenseQuery(codeFileQuery(monorepo, repo, commit, path)).data.text;
 
   return text === null ? null : <Readme name={path.slice(path.lastIndexOf("/") + 1)} text={text} />;
 }

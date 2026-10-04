@@ -32,8 +32,8 @@ function withLine(data: InfiniteData<EventsPage, string>, e: FeedEvent): Infinit
   return { ...data, pages: [{ ...first, events }, ...rest] };
 }
 
-/** ["m", owner, name, "r", repo, "branch", name] and [..., "runs", sha]: kept current by rows. */
-const rowFed = (key: readonly unknown[]) => (key[5] === "branch" && key.length === 7) || key[5] === "runs";
+/** ["m", owner, name, "r", repo, "branch", name], its diff [..., "branch", name, "diff"] and [..., "runs", sha]: kept current by rows. */
+const rowFed = (key: readonly unknown[]) => (key[5] === "branch" && (key.length === 7 || key[7] === "diff")) || key[5] === "runs";
 
 export function applyLine(qc: QueryClient, e: FeedEvent): void {
   markArrived(lineKey(e));

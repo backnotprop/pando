@@ -136,7 +136,7 @@ async function call(c: C, conn: CiRef["connection"], method: string, path: strin
   const permit = await stub.ciPermit(conn.id);
 
   if (!permit.ok) {
-    throw new HttpError(503, "ci_rate_limited", `holding to Buildkite's rate limit; try again in ${Math.ceil(permit.retry_after_ms / 1000)} s`, { retry_after_ms: permit.retry_after_ms });
+    throw new HttpError(429, "ci_rate_limited", `holding to Buildkite's rate limit; try again in ${Math.ceil(permit.retry_after_ms / 1000)} s`, { retry_after_ms: permit.retry_after_ms });
   }
 
   const headers = new Headers({ authorization: `Bearer ${token}`, accept: o.accept ?? "application/json", "user-agent": "Pando-CI/1" });
@@ -160,7 +160,11 @@ async function call(c: C, conn: CiRef["connection"], method: string, path: strin
   const text = (await res.text().catch(() => "")).slice(0, 300);
   const message = errorMessage(parseJson(text)) ?? text;
 
-  if (res.status === 429) throw new HttpError(503, "ci_rate_limited", "Buildkite's rate limit was reached; try again shortly", { retry_after_ms: wait ?? 60_000 });
+  if (res.status === 429) {
+    const after = wait ?? 60_000;
+
+    throw new HttpError(429, "ci_rate_limited", `Buildkite's rate limit was reached; try again in ${Math.ceil(after / 1000)} s`, { retry_after_ms: after });
+  }
 
   if (res.status === 401 || res.status === 403) {
     throw new HttpError(502, "ci_unauthorized", "Buildkite refused the token: BUILDKITE_API_TOKEN needs read_builds, read_build_logs, read_artifacts, read_pipelines and write_builds");
@@ -182,20 +186,24 @@ function cacheKey(c: C, ref: CiRef, what: string): string {
   return `ci/${c.get("m")}/${ref.connection.id}/${ref.build.external_id}/${what}`;
 }
 
-/** A cached detail, if complete or fresh enough. */
-async function fromCache(env: Env, key: string): Promise<{ text: string; meta: Record<string, string> } | null> {
+/**
+ * A cached detail. `fresh` when complete, or a running one younger than
+ * RUNNING_TTL_MS; an older running copy is still returned, to answer with
+ * when the service can't be asked (its rate limit).
+ */
+async function fromCache(env: Env, key: string): Promise<{ text: string; meta: Record<string, string>; fresh: boolean } | null> {
   const obj = await env.CACHE.get(key);
 
   if (!obj) return null;
   const meta = obj.customMetadata ?? {};
+  const fresh = meta.complete === "1" || Date.now() - Date.parse(meta.fetched_at ?? "") <= RUNNING_TTL_MS;
 
-  if (meta.complete !== "1" && Date.now() - Date.parse(meta.fetched_at ?? "") > RUNNING_TTL_MS) {
-    await obj.body.cancel();
+  return { text: await obj.text(), meta, fresh };
+}
 
-    return null;
-  }
-
-  return { text: await obj.text(), meta };
+/** When `cause` is the hold on the service's rate limit (Pando's permit or Buildkite's 429): the wait before asking again. Else null. */
+function heldFor(cause: unknown): number | null {
+  return cause instanceof HttpError && cause.code === "ci_rate_limited" ? (cause.extra.retry_after_ms ?? 60_000) : null;
 }
 
 async function toCache(env: Env, key: string, text: string, meta: Record<string, string>): Promise<void> {
@@ -253,6 +261,8 @@ interface Fetched<T> {
   complete: boolean;
   fetched_at: string;
   cached: boolean;
+  /** Set when this is the last copy because the service's rate limit is held: ask again after this long. */
+  retry_after_ms: number | null;
 }
 
 /**
@@ -264,14 +274,29 @@ async function listOf<T>(c: C, ref: CiRef, what: "annotations" | "artifacts", de
   const key = cacheKey(c, ref, `${what}.json`);
   const hit = await fromCache(c.env, key);
 
-  if (hit) return { list: decode(parseJson(hit.text)), truncated: hit.meta.truncated === "1", complete: hit.meta.complete === "1", fetched_at: hit.meta.fetched_at, cached: true };
-  const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/${what}?per_page=${PAGE_MAX}`);
+  const fromCopy = (h: NonNullable<typeof hit>, retryAfterMs: number | null): Fetched<T> => ({
+    list: decode(parseJson(h.text)), truncated: h.meta.truncated === "1", complete: h.meta.complete === "1", fetched_at: h.meta.fetched_at, cached: true, retry_after_ms: retryAfterMs,
+  });
+
+  if (hit?.fresh) return fromCopy(hit, null);
+  let res: Response;
+
+  try {
+    res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/${what}?per_page=${PAGE_MAX}`);
+  } catch (cause) {
+    const wait = heldFor(cause);
+
+    // The rate limit is held: the last copy, if any, says when to ask again.
+    if (hit && wait !== null) return fromCopy(hit, wait);
+    throw cause;
+  }
+
   const text = await res.text();
   const complete = settled(ref.build.finished_at);
   const fetched_at = new Date().toISOString();
   await toCache(c.env, key, text, { complete: complete ? "1" : "0", fetched_at, truncated: hasNext(res) ? "1" : "0" });
 
-  return { list: decode(parseJson(text)), truncated: hasNext(res), complete, fetched_at, cached: false };
+  return { list: decode(parseJson(text)), truncated: hasNext(res), complete, fetched_at, cached: false, retry_after_ms: null };
 }
 
 const annotationsOf = (c: C, ref: CiRef): Promise<Fetched<Annotation>> => listOf(c, ref, "annotations", decodeAnnotations);
@@ -386,13 +411,29 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const key = cacheKey(c, ref, `log/${job.external_id}`);
     const hit = await fromCache(c.env, key);
 
-    if (hit) {
-      const complete = hit.meta.complete === "1";
+    const fromCopy = (h: NonNullable<typeof hit>, retryAfterMs: number | null) => {
+      const complete = h.meta.complete === "1";
 
-      return c.json({ job: job.external_id, content: hit.text, bytes: Number(hit.meta.bytes), total_bytes: Number(hit.meta.total_bytes), truncated: hit.meta.truncated === "1", complete, fetched_at: hit.meta.fetched_at, cached: true }, 200, cacheHeader(complete));
+      return c.json(
+        { job: job.external_id, content: h.text, bytes: Number(h.meta.bytes), total_bytes: Number(h.meta.total_bytes), truncated: h.meta.truncated === "1", complete, fetched_at: h.meta.fetched_at, cached: true, retry_after_ms: retryAfterMs },
+        200,
+        cacheHeader(complete),
+      );
+    };
+
+    if (hit?.fresh) return fromCopy(hit, null);
+    let res: Response;
+
+    try {
+      res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(job.external_id)}/log`, { accept: "text/plain" });
+    } catch (cause) {
+      const wait = heldFor(cause);
+
+      // The rate limit is held: the last copy, if any, says when to ask again.
+      if (hit && wait !== null) return fromCopy(hit, wait);
+      throw cause;
     }
 
-    const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(job.external_id)}/log`, { accept: "text/plain" });
     const { bytes, total } = await tail(res, LOG_TAIL_BYTES);
     const content = new TextDecoder().decode(bytes);
     const complete = settled(job.finished_at);
@@ -400,19 +441,19 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const truncated = total > bytes.length;
     await toCache(c.env, key, content, { complete: complete ? "1" : "0", fetched_at, bytes: String(bytes.length), total_bytes: String(total), truncated: truncated ? "1" : "0" });
 
-    return c.json({ job: job.external_id, content, bytes: bytes.length, total_bytes: total, truncated, complete, fetched_at, cached: false }, 200, cacheHeader(complete));
+    return c.json({ job: job.external_id, content, bytes: bytes.length, total_bytes: total, truncated, complete, fetched_at, cached: false, retry_after_ms: null }, 200, cacheHeader(complete));
   });
 
   api.get(`${base}/builds/:build/annotations`, async (c) => {
     const a = await annotationsOf(c, await refOf(c));
 
-    return c.json({ annotations: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached }, 200, cacheHeader(a.complete));
+    return c.json({ annotations: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms }, 200, cacheHeader(a.complete));
   });
 
   api.get(`${base}/builds/:build/artifacts`, async (c) => {
     const a = await artifactsOf(c, await refOf(c));
 
-    return c.json({ artifacts: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached }, 200, cacheHeader(a.complete));
+    return c.json({ artifacts: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms }, 200, cacheHeader(a.complete));
   });
 
   api.get(`${base}/builds/:build/artifacts/:artifact/download`, async (c) => {

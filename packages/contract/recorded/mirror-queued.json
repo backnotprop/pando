@@ -1,0 +1,11 @@
+{
+  "schema": "MirrorQueued",
+  "route": "POST .../mirror/run",
+  "status": 202,
+  "body": {
+    "queued": [
+      "projects-app"
+    ],
+    "skipped": []
+  }
+}

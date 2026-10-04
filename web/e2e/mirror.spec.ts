@@ -8,7 +8,7 @@
 // on; a row in trouble with Retry; then at 390: the rows, Disconnect, and the
 // dialog as a sheet. Real Worker, real git, real browser.
 //
-//   PANDO_E2E_WORKER_PORT=8833 PANDO_E2E_STANDIN_PORT=8832 PANDO_E2E_INSPECTOR_PORT=9333 \
+//   PANDO_E2E_WORKER_PORT=8841 PANDO_E2E_STANDIN_PORT=8842 PANDO_E2E_INSPECTOR_PORT=9331 \
 //   PANDO_E2E_GITHUB_PORT=8836 npx playwright test --project=mirror
 import { createPublicKey } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";

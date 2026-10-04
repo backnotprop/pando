@@ -1,0 +1,17 @@
+{
+  "schema": "GithubRepos",
+  "route": "GET .../mirror/github-repos",
+  "status": 200,
+  "body": {
+    "account": "backnotprop",
+    "repos": [
+      {
+        "id": 1001,
+        "full_name": "backnotprop/app",
+        "private": false,
+        "url": "https://github.com/backnotprop/app"
+      }
+    ],
+    "add_url": "http://127.0.0.1:8835/web/settings/installations/101"
+  }
+}

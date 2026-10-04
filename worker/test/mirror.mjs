@@ -102,7 +102,16 @@ if (!up) {
   throw new Error("wrangler dev did not start");
 }
 
-const call = (method, path, secret, body) => request(URL_, method, path, { secret, body });
+// A write sent on a kept-alive socket the server had closed (while git ran here) never reached it: send it again once.
+const call = async (method, path, secret, body) => {
+  try {
+    return await request(URL_, method, path, { secret, body });
+  } catch (err) {
+    if (!/ECONNRESET|socket|other side closed/i.test(String(err?.cause ?? err))) throw err;
+
+    return request(URL_, method, path, { secret, body });
+  }
+};
 
 // The contract's recordings of the mirror's answers (packages/contract/recorded, checked by check-recorded.ts).
 const RECORDED = new URL("../../packages/contract/recorded/", import.meta.url);
@@ -297,7 +306,8 @@ try {
   const p0 = standin.pushes("backnotprop/app");
   const t1 = Date.now();
 
-  for (let i = 0; i < 10; i++) sha = (await call("POST", `/v1/monorepos/${O}/${M}/repos/${APP}/branches/burst${i}/merge?force=1`, S)).json?.sha ?? sha;
+  for (let i = 0; i < 10; i++) await call("POST", `/v1/monorepos/${O}/${M}/repos/${APP}/branches/burst${i}/merge?force=1`, S);
+  sha = await pandoMain();
   const m2 = await waitFor(() => onGithub("backnotprop/app") === sha, 30_000);
   const pushed = standin.pushes("backnotprop/app") - p0;
   check("10 merges: GitHub ends at the last, in fewer pushes than merges (one per spacing)", !!m2 && pushed < 10, `${pushed} pushes over ${Date.now() - t1} ms${m2 ? "" : `; the row: ${JSON.stringify(await target(APP))}`}`);

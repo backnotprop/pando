@@ -1,5 +1,7 @@
 // Records the monorepo object keeps, as the API returns them.
 
+import type { CommentView, IssueView } from "../issues/store";
+
 export type Kind = "monorepo" | "repo";
 
 export type MemberRole = "owner" | "member";
@@ -124,6 +126,17 @@ export interface StreamEvent {
   connection?: MetaConnection;
   /** Who acted, through which credential: publish() reads it for the Machines tab and never stores it. */
   via?: Via;
+  /** More socket topics than its kind, repo and collection give (issues: `issues`, `issue:<n>`, linked repos); never stored. */
+  topics?: string[];
+  /** Issue events: the issue's number, its body's version, its new timeline items, items gone, a comment changed, its reactions. */
+  number?: number;
+  body_version?: number;
+  items?: unknown[];
+  removed?: number[];
+  comment?: unknown;
+  reactions?: unknown[];
+  /** label.updated: its name before a rename. */
+  from?: string;
 }
 
 /**
@@ -173,6 +186,8 @@ export interface MergeResult {
   merge_base?: string;
   forced: boolean;
   merged_by: string;
+  /** merged: the open issues it closes, decided as it lands (each closes about a second later). */
+  closes?: number[];
 }
 
 /** Who acted through which credential (publish() receives it; it is never stored in the event's body). */
@@ -237,6 +252,8 @@ export interface RefusalExtra {
   paths?: string[];
   /** A CI service's rate limit: when to try again. */
   retry_after_ms?: number;
+  /** 409 edited: the issue or comment as it is now. */
+  current?: IssueView | CommentView;
 }
 
 /**

@@ -28,6 +28,7 @@ func validName(n string) bool {
 func Init(e *Env, args []string) error {
 	fs := flags("init")
 	name := fs.String("name", "", "the monorepo's name on the server (default: the folder's name)")
+	owner := fs.String("owner", "", "make it in this organization (default: your own account)")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
 	yes := fs.Bool("yes", false, "take the default answer to every question")
 	dry := fs.Bool("dry-run", false, "show what would happen and change nothing")
@@ -145,11 +146,18 @@ func Init(e *Env, args []string) error {
 		return fmt.Errorf("%q cannot be a monorepo name (lower-case letters, digits, '.', '_', '-'; no '--'; at most 39); pass --name", mono)
 	}
 
+	org := strings.ToLower(*owner)
+	if org != "" && !loginRe.MatchString(org) {
+		return fmt.Errorf("%q cannot be an organization's name", *owner)
+	}
 	existingFull := ""
 	if existing != nil && existing.Owner != "" && existing.Name == mono {
+		if org != "" && org != existing.Owner {
+			return fmt.Errorf("this folder is %s already; to move it to %s, run: pando monorepo transfer %s %s", existing.FullName(), org, existing.FullName(), org)
+		}
 		existingFull = existing.FullName()
 	}
-	srvc, repos, mrec, made, err := ensureMonorepo(e, serverURL, mono, existingFull, plan.Kind)
+	srvc, repos, mrec, made, err := ensureMonorepo(e, serverURL, org, mono, existingFull, plan.Kind)
 	if err != nil {
 		return err
 	}
@@ -288,7 +296,7 @@ func printPlan(e *Env, p *detect.Plan) {
 // It creates first and looks up only on 409: a lookup before the create
 // would plant a "no such monorepo" answer in the Worker's per-isolate auth
 // cache, which then answers 404 for some seconds after the create.
-func ensureMonorepo(e *Env, serverURL, name, existingFull, kind string) (srv server.Server, repos []server.Repo, m *server.Monorepo, made bool, err error) {
+func ensureMonorepo(e *Env, serverURL, owner, name, existingFull, kind string) (srv server.Server, repos []server.Repo, m *server.Monorepo, made bool, err error) {
 	tok, terr := e.Home.Token(serverURL)
 	if terr != nil && !strings.HasPrefix(serverURL, "file://") {
 		return nil, nil, nil, false, terr
@@ -302,7 +310,7 @@ func ensureMonorepo(e *Env, serverURL, name, existingFull, kind string) (srv ser
 	}
 	full := existingFull
 	if full == "" {
-		created, err := s.CreateMonorepo(e.Ctx, name, kind)
+		created, err := s.CreateMonorepo(e.Ctx, owner, name, kind)
 		if err == nil {
 			m := created.Monorepo
 			e.printf("\nMade %s %s on %s; you are its owner.\n", kind, m.Full(), config.Host(serverURL))
@@ -312,15 +320,21 @@ func ensureMonorepo(e *Env, serverURL, name, existingFull, kind string) (srv ser
 			return s, created.Repos, &m, true, nil
 		}
 		if server.StatusOf(err) != 409 {
+			if owner != "" && server.Code(err) == "not_your_namespace" {
+				return nil, nil, nil, false, fmt.Errorf("you are not in the organization %s (pando org list shows yours): %w", owner, err)
+			}
 			return nil, nil, nil, false, err
 		}
-		// It exists in this person's own namespace (a new monorepo is made
-		// there): continue with it.
-		me, err := s.Me(e.Ctx)
-		if err != nil {
-			return nil, nil, nil, false, err
+		// It exists in that namespace (the org's, else this person's own):
+		// continue with it.
+		if owner == "" {
+			me, err := s.Me(e.Ctx)
+			if err != nil {
+				return nil, nil, nil, false, err
+			}
+			owner = strings.ToLower(me.Login)
 		}
-		full = strings.ToLower(me.Login) + "/" + name
+		full = owner + "/" + name
 	}
 	got, err := s.GetMonorepo(e.Ctx, full)
 	switch {

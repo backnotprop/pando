@@ -13,13 +13,13 @@ import (
 
 // Monorepo is `pando monorepo list | view | rename | delete`.
 func Monorepo(e *Env, args []string) error {
-	usage := UsageError{"pando monorepo list | view [<owner/name>] | rename <new-name> | delete <owner/name> [--yes]"}
+	usage := UsageError{"pando monorepo list | view [<owner/name>] | rename <new-name> | transfer <owner/name> <new-owner> [--yes] | delete <owner/name> [--yes]"}
 	if len(args) == 0 {
 		return usage
 	}
 	fs := flags("monorepo")
-	yes := fs.Bool("yes", false, "delete without typing the name (scripts)")
-	asJSON := fs.Bool("json", false, "view, rename: print the API's JSON")
+	yes := fs.Bool("yes", false, "delete or transfer without typing the name (scripts)")
+	asJSON := fs.Bool("json", false, "view, rename, transfer: print the API's JSON")
 	mono := fs.String("monorepo", "", "rename: the monorepo (default: the one this folder is in)")
 	srvFlag := fs.String("server", "", "the server (default: the configured one)")
 	pos, err := parse(fs, args[1:])
@@ -45,6 +45,11 @@ func Monorepo(e *Env, args []string) error {
 			return UsageError{"pando monorepo rename <new-name> [--monorepo <owner/name>]"}
 		}
 		return monorepoRename(e, *srvFlag, *mono, pos[0], *asJSON)
+	case "transfer":
+		if len(pos) != 2 {
+			return UsageError{"pando monorepo transfer <owner/name> <new-owner> [--yes]"}
+		}
+		return monorepoTransfer(e, *srvFlag, pos[0], strings.ToLower(pos[1]), *yes, *asJSON)
 	}
 	srv, serverURL, err := e.signedIn(*srvFlag)
 	if err != nil {
@@ -238,4 +243,75 @@ func (e *Env) renameRoot(h *server.HTTP, root *config.Root, m *server.Monorepo) 
 		root.SetRepo(config.RepoEntry{Path: r.Path, Name: r.Name, CloneURL: r.CloneURL})
 	}
 	return moved, root.Save()
+}
+
+// monorepoTransfer is `pando monorepo transfer <owner/name> <new-owner>`
+// (owners): to an organization you are in, or back to a person who owns it
+// directly. The old owner/name keeps leading to it. Safe to run again: one
+// that has that owner already is left as it is, and this folder catches up.
+func monorepoTransfer(e *Env, srvFlag, mono, newOwner string, yes, asJSON bool) error {
+	if !loginRe.MatchString(newOwner) {
+		return fmt.Errorf("%q cannot be an owner: an organization's or a person's login", newOwner)
+	}
+	h, full, err := e.target(srvFlag, mono)
+	if err != nil {
+		return err
+	}
+	m, err := h.GetMonorepo(e.Ctx, full)
+	if err != nil {
+		return err
+	}
+	if m.Owner == newOwner {
+		if asJSON {
+			if err := e.printJSON(m.JSON); err != nil {
+				return err
+			}
+		} else {
+			e.printf("%s is owned by %s already.\n", m.Full(), newOwner)
+		}
+	} else {
+		if !yes {
+			if !e.isTerminal() {
+				return errors.New("transferring needs the name typed at a terminal, or --yes")
+			}
+			e.printf("This moves %s to %s. Its own members stay; %s's people gain it, and %s's lose it.\n", m.Full(), newOwner, newOwner, m.Owner)
+			e.printf("Type its full name (%s) to transfer it: ", m.Full())
+			typed, err := e.readLine()
+			if err != nil {
+				return err
+			}
+			if typed != m.Full() {
+				return errors.New("the name did not match; nothing was moved")
+			}
+		}
+		from := m.Full()
+		if m, err = h.TransferMonorepo(e.Ctx, from, newOwner); err != nil {
+			if server.Code(err) == "not_your_namespace" {
+				return fmt.Errorf("you are not in the organization %s (pando org list shows yours): %w", newOwner, err)
+			}
+			return ownerOnly(err, from, "transfer it")
+		}
+		if asJSON {
+			if err := e.printJSON(m.JSON); err != nil {
+				return err
+			}
+		} else {
+			e.printf("Moved %s to %s. The old name keeps leading to it, for the API and for git.\n", from, m.Full())
+			if m.OwnerType == "org" {
+				e.printf("Everyone in %s can open and push to it now; its owners own it.\n", newOwner)
+			}
+		}
+	}
+	root, err := e.root()
+	if err != nil || !(strings.EqualFold(root.FullName(), full) || (root.ID != "" && root.ID == m.ID)) || root.FullName() == m.Full() {
+		return nil
+	}
+	moved, err := e.renameRoot(h, root, m)
+	if err != nil {
+		return fmt.Errorf("moved on the server, but this folder still says %s: %w", root.FullName(), err)
+	}
+	if !asJSON {
+		e.printf("This folder now uses %s; %d git remote(s) point at the new clone URLs.\n", m.Full(), moved)
+	}
+	return nil
 }

@@ -207,9 +207,13 @@ func (h *HTTP) RevokeCredential(ctx context.Context, id string) error {
 	return err
 }
 
-func (h *HTTP) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
+func (h *HTTP) CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error) {
 	out := &Created{}
-	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/monorepos", body: map[string]string{"name": name, "kind": kind}}, out)
+	body := map[string]string{"name": name, "kind": kind}
+	if owner != "" {
+		body["owner"] = owner
+	}
+	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/monorepos", body: body}, out)
 	return out, err
 }
 

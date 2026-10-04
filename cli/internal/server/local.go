@@ -121,7 +121,10 @@ func (l *Local) ListCredentials(_ context.Context) ([]Credential, error) {
 
 func (l *Local) RevokeCredential(_ context.Context, _ string) error { return nil }
 
-func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
+func (l *Local) CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error) {
+	if owner != "" && owner != l.login() {
+		return nil, apiErr(403, "not_your_namespace", "a file:// server has no organizations")
+	}
 	full := l.login() + "/" + name
 	l.mu.Lock()
 	if _, err := l.load(full); err == nil {

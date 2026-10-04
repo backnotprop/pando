@@ -13,6 +13,10 @@
 //                   edit with --base-version (a stale one refused), close
 //                   and reopen, react, link and unlink; worktree add --issue,
 //                   then push and pando merge: "closes #N", and it closes
+//   pando org       create (twice), list, view, add by login and by email,
+//                   members, remove, leave (the last owner can't);
+//                   monorepo transfer into the org and back (the folder
+//                   follows, an org member gains it); init --owner
 //
 //   PANDO_URL=http://localhost:8854 node test/cli.mjs
 //
@@ -171,7 +175,7 @@ const bin = join(work, "pando");
  */
 const pando = (args, o = {}) =>
   new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd: o.cwd ?? work, env: { ...process.env, ...SAFE } });
+    const child = spawn(bin, args, { cwd: o.cwd ?? work, env: { ...process.env, ...SAFE, ...o.env } });
     const out = { status: null, stdout: "", stderr: "" };
     child.stdout.on("data", (d) => (out.stdout += d));
     child.stderr.on("data", (d) => (out.stderr += d));
@@ -194,6 +198,9 @@ const RENAMED = `cli2-${id}`;
 let S = null;
 
 let full = null;
+
+// Other repositories a check made, deleted at the end.
+const made = [];
 
 try {
   S = (await call("POST", "/v1/users", BOOT, { login: LOGIN, credential_name: "cli-box" })).json?.credential?.secret;
@@ -462,7 +469,10 @@ try {
   r = await pando(["issue", "unlink", String(n1)], { cwd: wt });
   ({ j: ij } = await ijson(["issue", "view", String(n1)]));
   check("pando issue unlink: gone again (so this merge leaves it open)", r.status === 0 && !ij?.links?.some((l) => l.branch === "fix-line"), said(r));
-  writeFileSync(join(wt, "line.go"), "package main\n");
+
+  // (No worktree when the server serves no issues: the checks above say so, and this part fails without throwing.)
+  if (existsSync(wt)) writeFileSync(join(wt, "line.go"), "package main\n");
+
   git(["add", "-A"], wt);
   git(["commit", "-qm", "Name the line"], wt);
   const pushed = git(["push", "-q"], wt);
@@ -515,17 +525,96 @@ try {
   r = await pando(["activity", "--all", "--json", "--limit", "5"], { cwd: mono });
   check("--all: every monorepo's lines, this one's among them", r.status === 0 && (parsed(r)?.events ?? []).some((e) => e.monorepo === renamed), said(r));
 
+  // ── pando org, monorepo transfer, init --owner ──
+  const ORG = `org-${id}`;
+  const ANA = `ana-${id}`;
+  const A = (await call("POST", "/v1/users", BOOT, { login: ANA, credential_name: "ana-box" })).json?.credential?.secret;
+  const anaEnv = { PANDO_HOME: join(work, "ana-home"), PANDO_MACHINE: "ana-box" };
+  r = await pando(["login", "--server", URL_, "--with-credential"], { input: A + "\n", env: anaEnv });
+  check("a second person, ana, signed in on her own PANDO_HOME", !!A && r.status === 0, said(r));
+  ({ run: ir, j: ij } = await ijson(["org", "create", ORG, "--name", "Cli Org"]));
+  check("pando org create --name: made, and you are its owner", ir.status === 0 && ij?.login === ORG && ij.name === "Cli Org" && ij.role === "owner", said(ir));
+  r = await pando(["org", "create", ORG]);
+  check("create it again (a retry): it is yours already, nothing new", r.status === 0 && r.stdout.includes(`${ORG} exists already, and you own it`), said(r));
+  r = await pando(["org", "create", LOGIN]);
+  check("an org can't take a person's login (one namespace)", r.status === 1 && /namespace_taken/.test(r.stderr), said(r));
+  ({ run: ir, j: ij } = await ijson(["org", "list"]));
+  check("pando org list --json: it, with your role", ij?.orgs?.some((o) => o.login === ORG && o.role === "owner"), said(ir));
+  r = await pando(["org", "add", ORG, ANA]);
+  check("pando org add <org> <login>: in at once", r.status === 0 && r.stdout.includes(`${ANA} is a member of ${ORG}`), said(r));
+  const bob = `bob-${id}@example.com`;
+  r = await pando(["org", "add", ORG, bob]);
+  check("pando org add <org> <email> (no account yet): invited", r.status === 0 && r.stdout.includes(`Invited ${bob} to ${ORG}`), said(r));
+  ({ run: ir, j: ij } = await ijson(["org", "members", ORG]));
+  check("pando org members --json: both people, with their roles", ij?.members?.some((m) => m.login === LOGIN && m.role === "owner") && ij.members.some((m) => m.login === ANA && m.role === "member"), said(ir));
+  r = await pando(["org", "members", ORG]);
+  check("pando org members: a table, then the invite still waiting", r.status === 0 && /^PERSON\s+NAME\s+ROLE/m.test(r.stdout) && r.stdout.includes(bob), said(r));
+
+  r = await pando(["monorepo", "transfer", full, ORG], { cwd: mono });
+  check("transfer without --yes, not at a terminal: refused, nothing moved", r.status === 1 && /--yes/.test(r.stderr), said(r));
+  const before = full;
+  r = await pando(["monorepo", "transfer", full, ORG, "--yes"], { cwd: mono });
+  const inOrg = `${ORG}/${RENAMED}`;
+  check("pando monorepo transfer <owner/name> <org> --yes: moved, and the folder follows", r.status === 0 && r.stdout.includes(`Moved ${before} to ${inOrg}`) && /Everyone in .* can open and push to it now/.test(r.stdout) && /This folder now uses/.test(r.stdout), said(r));
+  full = inOrg;
+  r = await pando(["api", "/monorepos/{owner}/{monorepo}"], { cwd: app });
+  check("the folder's {owner}/{monorepo} is the org's now; the old name still leads to it", parsed(r)?.full_name === inOrg && parsed(await pando(["api", `/monorepos/${before}`]))?.full_name === inOrg, said(r));
+  check("the checkout's git remote points at the org's clone URL", git(["remote", "get-url", "pando"], app).stdout.trim().endsWith(`/${ORG}/${RENAMED}/projects-app.git`));
+  const anaSees = await waitFor(async () => parsed(await pando(["monorepo", "view", inOrg, "--json"], { env: anaEnv }))?.monorepo?.full_name === inOrg, 20_000);
+  check("ana, in the org, can open it with no row of her own", anaSees);
+  r = await pando(["monorepo", "transfer", inOrg, ORG, "--yes"], { cwd: mono });
+  check("the same transfer again (a retry): owned by the org already", r.status === 0 && r.stdout.includes("is owned by " + ORG + " already"), said(r));
+  r = await pando(["org", "members"], { cwd: mono });
+  check("pando org members with no org, in the folder: the org that owns it", r.status === 0 && r.stdout.includes(ANA), said(r));
+  r = await pando(["org", "view", ORG]);
+  check("pando org view: name, your role, how many people, its repositories", r.status === 0 && r.stdout.startsWith(`${ORG}  Cli Org`) && /you are\s+owner; 2 people/.test(r.stdout) && r.stdout.includes(inOrg), said(r));
+  r = await pando(["monorepo", "transfer", inOrg, LOGIN, "--yes"], { cwd: mono });
+  full = `${LOGIN}/${RENAMED}`;
+  check("transfer back to a person who owns it directly", r.status === 0 && r.stdout.includes(`Moved ${inOrg} to ${full}`), said(r));
+
+  const plain = join(work, `plain-${id}`);
+  mkdirSync(plain);
+  writeFileSync(join(plain, "README.md"), "plain\n");
+  git(["init", "-q"], plain);
+  git(["add", "-A"], plain);
+  git(["commit", "-qm", "first"], plain);
+  r = await pando(["init", "--yes", "--owner", ORG, "--name", `plain-${id}`], { cwd: plain });
+  const orgRepo = `${ORG}/plain-${id}`;
+
+  if (r.status === 0) made.push(orgRepo);
+
+  check("pando init --owner <org>: made in the org", r.status === 0 && r.stdout.includes(`Pando repo ${orgRepo} is set up`), said(r));
+  const plain2 = join(work, `plain2-${id}`);
+  mkdirSync(plain2);
+  writeFileSync(join(plain2, "README.md"), "plain\n");
+  git(["init", "-q"], plain2);
+  git(["add", "-A"], plain2);
+  git(["commit", "-qm", "first"], plain2);
+  r = await pando(["init", "--yes", "--owner", `nope-${id}`, "--name", `plain2-${id}`], { cwd: plain2 });
+  check("init --owner an org you are not in: refused, nothing made", r.status === 1 && /not in the organization/.test(r.stderr), said(r));
+
+  r = await pando(["org", "remove", ORG, bob]);
+  check("pando org remove <org> <email>: the invite withdrawn", r.status === 0 && r.stdout.includes(`Withdrew the invite for ${bob}`), said(r));
+  r = await pando(["org", "leave", ORG], { env: anaEnv });
+  check("ana: pando org leave", r.status === 0 && r.stdout.includes(`You left ${ORG}`), said(r));
+  await pando(["org", "add", ORG, ANA]);
+  r = await pando(["org", "remove", ORG, ANA]);
+  ({ j: ij } = await ijson(["org", "members", ORG]));
+  check("pando org remove <org> <login> (after adding her back)", r.status === 0 && !ij?.members?.some((m) => m.login === ANA), said(r));
+  r = await pando(["org", "leave", ORG]);
+  check("the only owner can't leave: exit 1, last_owner, and what to do", r.status === 1 && /last_owner/.test(r.stderr) && /--owner/.test(r.stderr), said(r));
+
   // The help: the new commands, no agent name, never "meta layer".
   r = await pando(["help"]);
   const help = r.stderr;
-  check("pando help lists the new commands", ["pando api <path>", "pando ci build list", "pando ci job retry", "pando ci run <pipeline>", "pando branch view", "pando monorepo rename", "pando members invites", "pando hook list", "pando machine list", "pando activity", "pando issue list", "pando issue react", "--issue n"].every((x) => help.includes(x)));
+  check("pando help lists the new commands", ["pando api <path>", "pando ci build list", "pando ci job retry", "pando ci run <pipeline>", "pando branch view", "pando monorepo rename", "pando members invites", "pando hook list", "pando machine list", "pando activity", "pando issue list", "pando issue react", "--issue n", "pando org create", "pando monorepo transfer", "--owner <org>"].every((x) => help.includes(x)));
   check("... and never says meta layer or agent", !/meta layer|agent/i.test(help));
 } catch (cause) {
   check("no exception", false, describeError(cause));
 } finally {
-  if (full) {
-    const r = await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, S);
-    check(`delete ${full}`, r.status === 204, String(r.status));
+  for (const name of [full, ...made].filter(Boolean)) {
+    const r = await call("DELETE", `/v1/monorepos/${name}?confirm=${name}`, S);
+    check(`delete ${name}`, r.status === 204, String(r.status));
   }
 
   server.close();

@@ -20,9 +20,10 @@ type Monorepo struct {
 	ID        string `json:"id"`
 	Owner     string `json:"owner"`
 	Name      string `json:"name"`
-	FullName  string `json:"full_name"` // owner/name
-	Kind      string `json:"kind"`      // "monorepo" or "repo"
-	Role      string `json:"role"`      // the caller's: "owner" or "member"
+	FullName  string `json:"full_name"`  // owner/name
+	Kind      string `json:"kind"`       // "monorepo" or "repo"
+	OwnerType string `json:"owner_type"` // "user" or "org"
+	Role      string `json:"role"`       // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
 	// ReplacedAlias is set by a rename that took another monorepo's old name.
 	ReplacedAlias *ReplacedAlias `json:"replaced_alias,omitempty"`
@@ -298,7 +299,9 @@ type Server interface {
 	ListCredentials(ctx context.Context) ([]Credential, error)
 	RevokeCredential(ctx context.Context, id string) error
 
-	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
+	// CreateMonorepo makes a monorepo in owner's namespace: an org the
+	// caller is in, or "" for the caller's own.
+	CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error)
 	// ListMonorepos lists the caller's monorepos; with a name, only those
 	// named so (any owner), the caller's own namespace first.
 	ListMonorepos(ctx context.Context, name string) ([]Monorepo, error)

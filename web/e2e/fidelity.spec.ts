@@ -66,6 +66,30 @@ pando/
 - One branch, one worktree, one agent.
 `;
 
+// A code file with every syntax role (comment, keyword, string, function, constant), for the theme shots.
+const INDEX_TS = `// The Pando Worker: the one way in.
+import { credential, HttpError } from "./http";
+import { monorepoStub } from "./monorepo/stub";
+
+const MAX_BODY = 64 * 1024 * 1024;
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/healthz") return new Response("ok");
+
+    if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) {
+      throw new HttpError(413, \`bodies stop at \${MAX_BODY} bytes\`);
+    }
+
+    const who = await credential(request, env);
+
+    return monorepoStub(env, who).fetch(request);
+  },
+};
+`;
+
 const RULINGS = `# Pando: the owner's rulings in force
 
 Current truth only, revised in place when a ruling changes. History is in \`research/operational/deviations/\`. Last revised 2026-10-03.
@@ -216,7 +240,7 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
       "cli/main.go": "package main\n",
       "docs/contracts/README.md": "# Contracts\n",
       "mac/README.md": "# Pando.app\n",
-      "worker/src/index.ts": "// The Pando Worker: the one way in.\nexport default {};\n",
+      "worker/src/index.ts": INDEX_TS,
     },
     "Merge web-api at 540e076: merges use the recorded heads",
   );
@@ -430,7 +454,7 @@ async function measure(page: Page, proto: Page, file: string, marks: readonly st
  * The page's rows and columns, into <name>-<width>-rows.json, so two builds can
  * be compared (a font change must not move them): every list row (the app's
  * rows are CSS grids, code lines aside) with its top, height and each cell's
- * left edge, and the headings.
+ * left and right edges, and the headings.
  */
 async function rows(page: Page, file: string) {
   const found = await page.evaluate(() => {
@@ -448,7 +472,11 @@ async function rows(page: Page, file: string) {
           text: (el.textContent ?? "").trim().slice(0, 40),
           y: r(b.top + scrollY),
           h: r(b.height),
-          cols: [...el.children].map((c) => r(c.getBoundingClientRect().left)),
+          cols: [...el.children].map((c) => {
+            const cell = c.getBoundingClientRect();
+
+            return [r(cell.left), r(cell.right)];
+          }),
         },
       ];
     });

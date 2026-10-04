@@ -92,7 +92,17 @@ try {
   b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches/large`, S);
   check("and nothing was pushed", b.status === 404, `${b.status}`);
   g = git(["push", "-q", url, "large"], src);
-  check("pushing it again goes through", g.ok, g.out.slice(-200));
+  // A push over 1 MiB is sent once (the door cannot replay it), so one transient Artifacts refusal gets the
+  // plain "push again". Do what a person does, once: push again after a short wait. Any other failure still fails.
+  let again = false;
+
+  if (!g.ok && /push again/.test(g.out)) {
+    again = true;
+    await new Promise((res) => setTimeout(res, 2_000));
+    g = git(["push", "-q", url, "large"], src);
+  }
+
+  check("pushing it again goes through", g.ok, again ? `after one more "push again": ${g.ok ? "ok" : g.out.slice(-200)}` : g.out.slice(-200));
   b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches/large`, S);
   check("and its branch is recorded", b.status === 200, `${b.status}`);
 

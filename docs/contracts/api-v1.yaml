@@ -1331,6 +1331,18 @@ paths:
         budget keep their entry with `patch_omitted: budget`. A text file over
         1 MiB on either side, or one whose diff is too big to compute, has
         `patch_omitted: too_large` and null counts.
+
+        **Files changed** (`patches=1`, the web's branch page): the answer is
+        a `BranchDiff`, each file with its own unified patch in git's format
+        (`patch`, ready for a diff view such as @pierre/diffs' `processFile`),
+        or null when left out: a binary (a NUL in the first 8,000 bytes), a
+        text file over 1 MiB on either side, a diff too big to compute (an
+        edit script over 20,000), or past 2 MiB of patches in all. At most
+        1,000 files are listed (`too_many_files`, with `files_total`). Main
+        and the head come from Pando's stored heads; the answer is kept by
+        (main, head), which never changes, so a repeat costs no Artifacts read,
+        and `ETag` is the two shas (a repeat with `If-None-Match` is a 304).
+        `format`, `hunks`, `max_bytes` and `paths` do not apply.
       tags: [branches]
       parameters:
         - name: format
@@ -1351,19 +1363,27 @@ paths:
           in: query
           description: Path prefixes, comma-separated or repeated (`paths=src/auth/&paths=README.md`).
           schema: { type: string }
+        - name: patches
+          in: query
+          description: "`1`: Files changed, a `BranchDiff` (see above)."
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: |
-            JSON, or `text/x-patch` for `format=patch`: a unified diff with
+            JSON (a `BranchDiff` with `patches=1`), or `text/x-patch` for `format=patch`: a unified diff with
             `diff --git` headers, ready for `git apply` or
             `plannotator review --patch-file -`. In patch form, files past the
             budget are left out and the response carries
             `X-Pando-Diff-Omitted: <count>`.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Diff" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Diff"
+                  - $ref: "#/components/schemas/BranchDiff"
             text/x-patch:
               schema: { type: string }
+        "304": { description: "`patches=1` with `If-None-Match` naming this (main, head)." }
         "404": { $ref: "#/components/responses/Error" }
         "409":
           description: "`no_merge_base`: the branch shares no history with the default branch."
@@ -3080,6 +3100,33 @@ components:
         files:
           type: array
           items: { $ref: "#/components/schemas/DiffFile" }
+    BranchDiff:
+      type: object
+      required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]
+      properties:
+        base_branch: { type: string }
+        base: { type: string, description: "Main's head the diff was taken against." }
+        head: { type: string, description: The branch's head. }
+        merge_base: { type: string }
+        truncated: { type: boolean, description: "Some patches were left out past 2 MiB in all (`patch_omitted: budget`)." }
+        too_many_files: { type: boolean, description: More than 1,000 files changed; the first 1,000 by path are listed. }
+        files_total: { type: integer, description: Every changed file, listed or not. }
+        stats:
+          type: object
+          description: The listed files.
+          properties:
+            files: { type: integer }
+            additions: { type: integer }
+            deletions: { type: integer }
+        files:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/DiffFile"
+              - type: object
+                required: [patch]
+                properties:
+                  patch: { type: [string, "null"], description: "This file's unified patch in git's format; null when `patch_omitted` is set." }
     DiffFile:
       type: object
       required: [path, status, binary]

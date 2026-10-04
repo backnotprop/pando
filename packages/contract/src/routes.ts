@@ -2,7 +2,7 @@
 // GET, and the schema of its 200 body. Names are api-v1.yaml's operationIds.
 // Path segments are encoded here, so callers pass plain values; a branch's
 // `/` is sent as %2F.
-import { BranchCommits, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
+import { BranchCommits, BranchDiff, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
 import { HistoryPage, LastCommits, TreePage } from "./files.ts";
@@ -97,6 +97,18 @@ export const monorepoFeedSocketPath = (owner: Login, name: MonorepoName, feedSin
   return `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/events${query(params)}`;
 };
 
+/**
+ * A monorepo's event socket for row updates (open it with `Upgrade: websocket`): `topics` such as
+ * `kind:branch.updated` or `repo:<repo>` (at most 10; ROW_KINDS lists the row kinds), `since` the highest `seq` seen.
+ */
+export const monorepoEventsSocketPath = (owner: Login, name: MonorepoName, topics: readonly string[], since: number | null): string => {
+  const params = new URLSearchParams({ topics: topics.join(",") });
+
+  if (since !== null) params.set("since", String(since));
+
+  return `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/events${query(params)}`;
+};
+
 /** GET /{owner}/{name}/raw/{path}?v=<version>: a root file's bytes (no schema; members only). `version` null: now. Path segments keep their slashes. */
 export const metaRawPath = (owner: Login, name: MonorepoName, path: string, version: number | null): string => {
   const params = new URLSearchParams();
@@ -146,6 +158,12 @@ export const getBranch = (owner: Login, name: MonorepoName, repo: RepoName, bran
 export const branchCommits = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({
   path: `${branchBase(owner, name, repo, branch)}/commits`,
   response: BranchCommits,
+});
+
+/** GET .../branches/{branch}/diff?patches=1: Files changed, each file with its patch. Send the last ETag as If-None-Match for a 304. */
+export const branchDiff = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({
+  path: `${branchBase(owner, name, repo, branch)}/diff?patches=1`,
+  response: BranchDiff,
 });
 
 /** GET .../branches/{branch}/reviews: oldest first. */

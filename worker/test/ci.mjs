@@ -417,6 +417,8 @@ try {
   check("typecheck passed: '#1 passed in 23 s'", (await statusOf("typecheck"))?.description === "#1 passed in 23 s");
   r = await call("GET", `${ciBase}/builds/${build1}`, B);
   let jobs = r.json?.jobs ?? [];
+  const jobEvent = ((await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500&topics=kind:ci.job`, B)).json?.events ?? []).find((x) => x.row?.id === "job-ci-1");
+  check("a ci.job event carries its build's Pando id (row.build, as in .../ci/builds/{build})", jobEvent?.collection === "ci_jobs" && jobEvent.row.build === build1 && jobEvent.key === `${build1}/job-ci-1`, JSON.stringify(jobEvent?.row?.build));
   check("the build and its jobs: failed in 74 s; ci failed with exit status 1 as check ci; typecheck passed; no wait step",
     r.json?.state === "failed" && r.json.duration_s === 74 && jobs.length === 2 && jobs.find((j) => j.id === "job-ci-1")?.exit_status === 1 && jobs.find((j) => j.id === "job-ci-1")?.check === "ci" && jobs.find((j) => j.id === "job-tc-1")?.state === "passed");
   await send("job.started", JOB1("job-ci-1", "ci", "running", { started_at: iso(1000) }));

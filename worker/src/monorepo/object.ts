@@ -838,8 +838,12 @@ export class MonorepoObject extends DurableObject<Env> {
       repo, sha, s.context, s.state, s.target_url, s.description, creator, app, at,
     );
     const status: StatusRecord = { sha, ...s, creator, app, created_at: at };
-    // Branches at this commit have new checks; clients holding them refetch (the event names the sha).
     this.publish({ kind: "status", collection: "statuses", key: `${repo}/${sha}/${s.context}`, op: "upsert", repo, ...who(stamp ? null : identity), row: status });
+
+    // The branches at this commit have new checks and gate state: their full rows go out (combine() is the one rule).
+    for (const b of this.rows<{ name: string }>("SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL", repo, sha)) {
+      this.publishBranchRow(repo, b.name);
+    }
 
     return status;
   }
@@ -1518,11 +1522,16 @@ export class MonorepoObject extends DurableObject<Env> {
       f.ahead, f.behind, f.merge_base, f.mergeable, f.conflict_paths ? JSON.stringify(f.conflict_paths) : null, f.main, f.head, now(), repo, name,
     );
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
+    this.publishBranchRow(repo, name, required);
+
+    return true;
+  }
+
+  /** A branch's full row as getBranch answers it (facts, checks and gate), as `branch.updated` with `partial: false`. */
+  private publishBranchRow(repo: string, name: string, required: string[] | null = null): void {
     const row = this.branchRows(repo, { names: [name], state: "all", required }).branches[0];
 
     if (row) this.publish({ kind: "branch.updated", collection: "branches", key: `${repo}/${name}`, op: "upsert", repo, actor: null, machine: null, agent: null, row: { repo, ...row }, partial: false });
-
-    return true;
   }
 
   /** The stored dry run's conflicting paths, when its answer was "conflicts". */

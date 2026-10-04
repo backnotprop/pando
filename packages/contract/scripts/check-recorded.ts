@@ -13,6 +13,7 @@ import {
   ActivityFrame,
   Branch,
   BranchCommits,
+  BranchDiff,
   BranchList,
   Checks,
   CiBuildList,
@@ -55,6 +56,7 @@ import {
   InviteResult,
   MonorepoRenamed,
   Hook,
+  MonorepoEventFrame,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -76,6 +78,7 @@ const decoders = {
   NeedsPage: refuses(NeedsPage),
   "ActivityFrame[]": refuses(Schema.Array(ActivityFrame)),
   "MonorepoFeedFrame[]": refuses(Schema.Array(MonorepoFeedFrame)),
+  "MonorepoEventFrame[]": refuses(Schema.Array(MonorepoEventFrame)),
   MetaTree: refuses(MetaTree),
   MetaHistory: refuses(MetaHistory),
   MetaFileHeaders: refuses(MetaFileHeaders),
@@ -108,6 +111,7 @@ const decoders = {
   BranchList: refuses(BranchList),
   Branch: refuses(Branch),
   BranchCommits: refuses(BranchCommits),
+  BranchDiff: refuses(BranchDiff),
   ReviewList: refuses(ReviewList),
   Checks: refuses(Checks),
   CiBuildList: refuses(CiBuildList),

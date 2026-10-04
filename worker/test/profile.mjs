@@ -17,7 +17,8 @@
 // answer counts nothing twice; a co-author or author with no account counts
 // for nobody, an agent's line is ignored, and someone who can't open the
 // repository gets nothing; pushes alone count nothing, a branch opened counts
-// once; reviews; a repository arriving with history fills the right days
+// once; reviews; a merge of a branch longer than a page (1,200 commits)
+// counts every commit once; a repository arriving with history fills the right days
 // (merge commits and commits older than the window not counted); days follow
 // the viewer's time zone; one day's timeline; a viewer sees only work in
 // repositories they can open, and orgs they share; Edit profile and its
@@ -307,6 +308,38 @@ try {
   check("two reviews by ramos: reviews +2; ana's push of a new branch: her branches +1", r.status === 201 && r3.status === 201 && reviewed && (await waitFor(async () => (await contributions(L.ana, "ana")).json?.kinds?.branch === 1)), JSON.stringify(reviewed?.kinds));
   check("and the review came live too", !!(await waitFor(() => live.frames.find((f) => f.type === "contributed" && f.kind === "review"), 5_000)));
 
+  // ── A merge longer than a page: counted in full, a page at a time ──
+  const LONG = 1200;
+  git(["checkout", "-q", "main"], pdir);
+  git(["pull", "-q", p.url, "main"], pdir, S.ramos);
+  const base = git(["rev-parse", "HEAD"], pdir).stdout.trim();
+  const longStream = [];
+
+  // Authored over the last 20 hours, committed now (after main's tip, as a branch made on it is).
+  const committed = Math.floor(Date.now() / 1000);
+
+  for (let i = 0; i < LONG; i++) {
+    const at = Math.floor((Date.now() - (LONG - i) * 60_000) / 1000);
+    longStream.push(
+      "commit refs/heads/long", `mark :${i + 1}`, `author ramos <${E.ramos}> ${at} +0000`, `committer ramos <${E.ramos}> ${committed} +0000`,
+      "data 4", "long", i ? `from :${i}` : `from ${base}`, `M 644 inline long-${i % 20}.txt`, `data ${String(i).length}`, String(i), "",
+    );
+  }
+
+  const fi = spawnSync("git", ["fast-import", "--quiet"], { cwd: pdir, input: `${longStream.join("\n")}\n`, encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: work } });
+  g = git(["push", "-q", p.url, "long"], pdir, S.ramos);
+  const longHead = git(["rev-parse", "long"], pdir).stdout.trim();
+  const beforeLong = countIn((await contributions(L.ramos, "ramos")).json, "commit", p.full);
+  r = await call("POST", `/v1/monorepos/${p.full}/repos/${p.full.split("/")[1]}/branches/long/merge?force=1`, S.ramos, { expected_head: longHead });
+  const longAt = Date.now();
+  const longDone = await waitFor(async () => countIn((await contributions(L.ramos, "ramos")).json, "commit", p.full) >= beforeLong + LONG, 120_000);
+  const afterLong = countIn((await contributions(L.ramos, "ramos")).json, "commit", p.full);
+  check(
+    `a merge of a branch of ${LONG} commits (more than one page of 1,000) counts every one, once`,
+    fi.status === 0 && g.ok && r.status === 200 && longDone && afterLong === beforeLong + LONG,
+    `merge ${r.status}; ${beforeLong} then ${afterLong} after ${Date.now() - longAt} ms`,
+  );
+
   // ── A repository arriving with history ──
   const h = await makeRepo("ramos", `h-${id}`);
   const hdir = join(work, "h");
@@ -393,7 +426,7 @@ try {
   const own = (await contributions(L.ramos, "ramos")).json;
   check(
     "ana sees ramos's work in the repository she can open, and no word of the other",
-    asAna.status === 200 && countIn(asAna.json, "commit", p.full) === 4 && !asAna.text.includes(h.full) && asAna.json?.monorepos?.length === 1 && asAna.json.monorepos[0].full_name === p.full,
+    asAna.status === 200 && countIn(asAna.json, "commit", p.full) === 4 + LONG && !asAna.text.includes(h.full) && asAna.json?.monorepos?.length === 1 && asAna.json.monorepos[0].full_name === p.full,
     `${asAna.status} ${JSON.stringify(asAna.json?.kinds)} ${JSON.stringify(asAna.json?.monorepos?.map((m) => m.full_name))}`,
   );
   check(

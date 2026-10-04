@@ -135,35 +135,60 @@ export async function compare(env: Env, artifactsName: string, base: string, hea
   return withRepo(env, artifactsName, (repo) => compareWith(commitReader(repo), base, head));
 }
 
+/** Where a paged walk goes on: each queued commit and its paint (FROM_BASE, FROM_HEAD or both). */
+export type Frontier = { sha: string; paint: number }[];
+
 /**
- * The commits reachable from `frontier`, newest first by commit time, that
- * are not older than `since` (Unix seconds): a repository's history read back
- * to the graph's window, at most `max` at a time. `next`: where the walk goes
- * on (empty when it is done). Commits older than `since` end their line;
- * clock skew can keep one a page longer.
+ * The commits reachable from `head` and not from `base` (with `base` null:
+ * all of them), newest first by commit time, down to `since` (Unix seconds):
+ * a merge's new commits, or a repository's history, a page at a time. Git's
+ * paint-down walk as compareWith does it, with no budget: at most `max`
+ * commits are read for one page and `next` says where the walk goes on (empty
+ * when it is done). A commit is taken when it leaves the queue with only
+ * head's paint (by then every child has painted it). Commits older than
+ * `since` end their line. Clock skew can count a commit a page apart twice.
  */
-export async function walkSince(read: CommitReader, frontier: string[], since: number, max: number): Promise<{ commits: string[]; next: string[] }> {
+export async function walkAhead(read: CommitReader, start: Frontier, since: number, max: number): Promise<{ commits: string[]; next: Frontier }> {
   const queue = new Heap();
-  const seen = new Set<string>();
+  const paint = new Map<string, number>();
   const commits: string[] = [];
+  let walked = 0;
 
-  for (const sha of frontier) queue.push(sha, (await read(sha)).time);
-
-  while (queue.size && commits.length < max) {
-    const sha = queue.pop()!;
-
-    if (seen.has(sha)) continue;
-    seen.add(sha);
-    const c = await read(sha);
-
-    if (c.time < since) continue;
-    commits.push(sha);
-
-    for (const p of c.parents) if (!seen.has(p)) queue.push(p, (await read(p)).time);
+  for (const s of start) {
+    paint.set(s.sha, (paint.get(s.sha) ?? 0) | s.paint);
+    queue.push(s.sha, (await read(s.sha)).time);
   }
 
-  return { commits, next: queue.rest() };
+  const live = () => queue.rest().some((sha) => !((paint.get(sha) ?? 0) & FROM_BASE));
+
+  while (queue.size && live() && walked < max) {
+    const sha = queue.pop()!;
+    const f = paint.get(sha) ?? 0;
+    const c = await read(sha);
+    walked++;
+
+    if (c.time < since) continue;
+
+    if (f === FROM_HEAD) commits.push(sha);
+
+    for (const p of c.parents) {
+      const pf = paint.get(p) ?? 0;
+
+      if ((pf | f) !== pf) {
+        paint.set(p, pf | f);
+        queue.push(p, (await read(p)).time);
+      }
+    }
+  }
+
+  return { commits, next: live() ? queue.rest().map((sha) => ({ sha, paint: paint.get(sha) ?? 0 })) : [] };
 }
+
+/** The first page of a walk: `head` against `base` (null: a whole history). */
+export const walkStart = (base: string | null, head: string): Frontier => [
+  ...(base ? [{ sha: base, paint: FROM_BASE }] : []),
+  { sha: head, paint: FROM_HEAD },
+];
 
 /** A max-heap of commits by commit time. */
 class Heap {

@@ -5,7 +5,7 @@ import { cacheable } from "../src/accounts/auth";
 import type { Auth } from "../src/accounts/object";
 import { combine } from "../src/monorepo/checks";
 import { pandoTrailers } from "../src/monorepo/views";
-import { compareWith, type CommitInfo, type CommitReader } from "../src/monorepo/graph";
+import { compareWith, walkAhead, walkStart, type CommitInfo, type CommitReader, type Frontier } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
 import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection, refusal } from "../src/monorepo/pktline";
 import { coAuthorEmails } from "../src/monorepo/trailers";
@@ -155,6 +155,35 @@ describe("merge base, ahead and behind", () => {
 
   it("the same commit", async () => {
     expect(await compareWith(read, "m3", "m3")).toEqual({ mergeBase: "m3", ahead: 0, behind: 0, aheadCommits: [] });
+  });
+
+  /** Every page of a walk (the profile's credit), as the outbox would run them one after another. */
+  async function allPages(rd: CommitReader, start: Frontier, since: number, max: number): Promise<string[]> {
+    const out: string[] = [];
+    let at = start;
+
+    for (let i = 0; i < 100 && at.length; i++) {
+      const page = await walkAhead(rd, at, since, max);
+      out.push(...page.commits);
+      at = page.next;
+    }
+
+    return out;
+  }
+
+  it("a paged walk finds a merge's new commits, each once, whatever the page size", async () => {
+    // x merges b1 into m3: it brings b1 and itself (a merge commit, which credits skip).
+    const graph = new Map<string, CommitInfo>();
+
+    for (const sha of ["root", "m1", "b1", "m2", "y1", "y2", "m3", "z1"]) graph.set(sha, await read(sha));
+    graph.set("x", { parents: ["m3", "b1"], time: 9, tree: "t" });
+
+    for (const max of [1, 2, 3, 100]) expect((await allPages(readerOf(graph), walkStart("m3", "x"), 0, max)).sort()).toEqual(["b1", "x"]);
+  });
+
+  it("a paged history walk reads everything since the window's start, each commit once", async () => {
+    for (const max of [1, 3, 100]) expect((await allPages(read, walkStart(null, "z1"), 0, max)).sort()).toEqual(["m1", "m2", "root", "y1", "y2", "z1"]);
+    expect((await allPages(read, walkStart(null, "m3"), 4, 2)).sort()).toEqual(["m2", "m3", "y1", "y2"]);
   });
 });
 

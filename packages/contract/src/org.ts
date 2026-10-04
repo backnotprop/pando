@@ -36,14 +36,24 @@ export const Org = OrgProfile;
 
 export interface Org extends OrgProfile {}
 
-/** A person's answer to GET /v1/users/{name}: today's user fields (the profile work adds more). */
+/**
+ * A person's answer to GET /v1/users/{name}, and to PATCH /v1/user (their
+ * own): the profile's header. No email: an address is never shown to others.
+ */
 export const Profile = Schema.Struct({
   type: Schema.tag("user"),
   login: Login,
   name: Schema.NullOr(Schema.String),
+  /** At most 160 characters. */
+  bio: Schema.NullOr(Schema.String),
+  location: Schema.NullOr(Schema.String),
+  /** At most 4 https URLs, in the person's order. */
+  links: Schema.Array(Schema.String),
   /** Their picture, or null: the web draws initials. */
   picture_url: Schema.NullOr(Schema.String),
   created_at: Timestamp,
+  /** The organizations the person is in that the viewer is in too (all of them on your own), by login. */
+  orgs: Schema.Array(OrgRef),
 });
 
 export interface Profile extends Schema.Schema.Type<typeof Profile> {}

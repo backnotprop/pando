@@ -9,7 +9,8 @@ import { HistoryPage, LastCommits, TreePage } from "./files.ts";
 import { Issue, IssueComment, IssueList, Label, LabelList, ReactionsAnswer, Timeline, type IssueState, type ReactionContent } from "./issue.ts";
 import { FullName, Login, MonorepoName, RepoName } from "./ids.ts";
 import { MonorepoEntry, MonorepoList, MonorepoRenamed, MonorepoSummaryList } from "./monorepo.ts";
-import { Org, OrgInviteResult, OrgList, OrgMember, OrgMemberList, Owner } from "./org.ts";
+import { Org, OrgInviteResult, OrgList, OrgMember, OrgMemberList, Owner, Profile } from "./org.ts";
+import { ContributionPeriod, Contributions } from "./profile.ts";
 import { EventsPage } from "./feed.ts";
 import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { NeedsPage } from "./needs.ts";
@@ -477,6 +478,25 @@ const orgBase = (org: Login): string => `/v1/orgs/${encodeURIComponent(org)}`;
 
 /** GET /v1/users/{name}: whose `/{name}` is, a person (`type: "user"`) or an org (`type: "org"`); 404 for neither. */
 export const getOwner = (name: Login) => ({ path: `/v1/users/${encodeURIComponent(name)}`, response: Owner });
+
+/** PATCH /v1/user {name?, bio?, location?, links?}: your profile's header; a field left out is kept, null or "" clears it. */
+export const updateProfile = { method: "PATCH", path: "/v1/user", response: Profile } as const;
+
+/**
+ * GET /v1/users/{login}/contributions?tz=: a person's graph and timeline for
+ * the last year, as this viewer may see it. `tz`: the viewer's minutes east
+ * of UTC (-getTimezoneOffset()).
+ */
+export const getContributions = (login: Login, tz: number) => ({
+  path: `/v1/users/${encodeURIComponent(login)}/contributions${query(new URLSearchParams({ tz: String(tz) }))}`,
+  response: Contributions,
+});
+
+/** GET /v1/users/{login}/contributions?tz=&day=2026-10-03: one day of the timeline (a click on a square). */
+export const getContributionDay = (login: Login, tz: number, day: string) => ({
+  path: `/v1/users/${encodeURIComponent(login)}/contributions${query(new URLSearchParams({ tz: String(tz), day }))}`,
+  response: ContributionPeriod,
+});
 
 /** GET /v1/user/orgs: the orgs the person is in, with their role. */
 export const listMyOrgs = { path: "/v1/user/orgs", response: OrgList };

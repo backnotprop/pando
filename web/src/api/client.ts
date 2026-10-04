@@ -99,15 +99,45 @@ export async function postOrRefused<A, I, B, J>(
   return { ok: await decoded(ok, res, path), refused: null };
 }
 
-/** A file's bytes as text, or null when they are binary (a NUL in the first 8,000 bytes, git's test). */
+/** The most a file page reads; past it the page offers Raw only (owner board: code view limits). */
+export const MAX_SHOWN = 10 * 1024 * 1024;
+
+/**
+ * A file's bytes as text, and how many bytes it has. `text` is null when they
+ * are binary (a NUL in the first 8,000 bytes, git's test) or over MAX_SHOWN,
+ * which is not read past (then `size` is only how far it was read).
+ */
 export interface FileText {
   text: string | null;
+  size: number;
 }
 
 export async function getText(path: string): Promise<FileText> {
-  const bytes = new Uint8Array(await (await send(path, {})).arrayBuffer());
+  const reader = (await send(path, {})).body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
 
-  return { text: bytes.subarray(0, 8000).includes(0) ? null : new TextDecoder().decode(bytes) };
+  for (let part = await reader?.read(); part && !part.done; part = await reader?.read()) {
+    size += part.value.byteLength;
+
+    if (size > MAX_SHOWN) {
+      await reader?.cancel();
+
+      return { text: null, size };
+    }
+
+    chunks.push(part.value);
+  }
+
+  const bytes = new Uint8Array(size);
+  let at = 0;
+
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.byteLength;
+  }
+
+  return { text: bytes.subarray(0, 8000).includes(0) ? null : new TextDecoder().decode(bytes), size };
 }
 
 /** A frame from the person's socket, or null for the text `pong`, a frame this build does not know, or anything malformed. */

@@ -49,7 +49,7 @@ function RootFile({ path }: { path: string }) {
   const { monorepo } = Route.useRouteContext();
   const { v } = Route.useLoaderDeps();
   const entry = useSuspenseQuery(entryQuery(monorepo, path, v)).data;
-  const { text } = useSuspenseQuery(fileQuery(monorepo, path, v)).data;
+  const { text, size } = useSuspenseQuery(fileQuery(monorepo, path, v)).data;
 
   if (!entry) return null;
 
@@ -74,7 +74,7 @@ function RootFile({ path }: { path: string }) {
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           <ChangeBar who={saverOf(entry)} title={what} id={`on ${entry.machine}`} at={entry.at} history={historyLink(full, path)} />
           <FileTools name={name} text={text} raw={raw} />
-          <FileBody name={name} text={entry.large ? null : text} />
+          <FileBody name={name} text={entry.large ? null : text} size={size} id={entry.sha} raw={raw} />
         </div>
       </div>
     </>

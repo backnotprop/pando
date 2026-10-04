@@ -1,5 +1,5 @@
-// Branches, their commits, reviews and merges: listBranches, getBranch,
-// branchCommits, listReviews and mergeBranch (api-v1.yaml).
+// Branches, their commits, files changed, reviews and merges: listBranches,
+// getBranch, branchCommits, branchDiff, listReviews and mergeBranch (api-v1.yaml).
 import * as Schema from "effect/Schema";
 
 import { Checks } from "./checks.ts";
@@ -108,6 +108,53 @@ export const BranchCommits = Schema.Struct({
 });
 
 export interface BranchCommits extends Schema.Schema.Type<typeof BranchCommits> {}
+
+/** One changed file in Files changed, with its own unified patch. */
+export const ChangedFile = Schema.Struct({
+  path: Schema.String,
+  /** For a rename: the path on main's side. */
+  old_path: Schema.optionalKey(Schema.String),
+  status: Schema.Literals(["added", "modified", "deleted", "renamed"]),
+  /** The blob and mode on each side; null on the side the file is missing from. */
+  old_sha: Schema.NullOr(Sha),
+  new_sha: Schema.NullOr(Sha),
+  old_mode: Schema.NullOr(Schema.String),
+  new_mode: Schema.NullOr(Schema.String),
+  binary: Schema.Boolean,
+  /** Null for a binary or a file too large to diff. */
+  additions: Schema.NullOr(Count),
+  deletions: Schema.NullOr(Count),
+  /** Why `patch` is null: a binary, over 1 MiB a side or too big to diff, or past 2 MiB of patches in all. */
+  patch_omitted: Schema.optionalKey(Schema.Literals(["binary", "too_large", "budget"])),
+  /** This file's unified patch in git's format (for @pierre/diffs' processFile); null when `patch_omitted` is set. */
+  patch: Schema.NullOr(Schema.String),
+});
+
+export interface ChangedFile extends Schema.Schema.Type<typeof ChangedFile> {}
+
+/**
+ * GET .../branches/{branch}/diff?patches=1: Files changed, the branch's head
+ * against its merge base with the default branch. Kept by (base, head); the
+ * ETag is the two shas.
+ */
+export const BranchDiff = Schema.Struct({
+  base_branch: Schema.String,
+  /** The default branch's head the diff was taken against. */
+  base: Sha,
+  head: Sha,
+  merge_base: Sha,
+  /** Some patches were left out past 2 MiB in all (`patch_omitted: budget`). */
+  truncated: Schema.Boolean,
+  /** More than 1,000 files changed: the first 1,000 by path are listed. */
+  too_many_files: Schema.Boolean,
+  /** Every changed file, listed or not. */
+  files_total: Count,
+  /** Of the listed files. */
+  stats: Schema.Struct({ files: Count, additions: Count, deletions: Count }),
+  files: Schema.Array(ChangedFile),
+});
+
+export interface BranchDiff extends Schema.Schema.Type<typeof BranchDiff> {}
 
 export const ReviewComment = Schema.Struct({
   path: Schema.String,

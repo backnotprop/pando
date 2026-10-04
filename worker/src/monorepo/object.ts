@@ -936,7 +936,8 @@ export class MonorepoObject extends DurableObject<Env> {
    * keep it for the reconcile, one row per ref.
    */
   markUnrecorded(repo: string, identity: Identity, commands: RefCommand[], origin: string | null, landed: "yes" | "unknown" = "yes"): void {
-    for (const c of commands) this.keepPush(repo, identity, c, origin, landed);
+    // Branches only, as recordPush: a tag or pando init's refs/pando/* has no record to catch up.
+    for (const c of commands) if (c.ref.startsWith("refs/heads/")) this.keepPush(repo, identity, c, origin, landed);
   }
 
   /** A ref's head as recorded here: main from the repo's record, a branch from its row; null when unknown or deleted. */
@@ -984,7 +985,7 @@ export class MonorepoObject extends DurableObject<Env> {
     let written = 0;
 
     for (const k of rows) {
-      if (k.landed !== "yes" || (this.recordedHead(repo, k.ref) ?? ZERO) !== k.old) continue;
+      if (k.landed !== "yes" || !k.ref.startsWith("refs/heads/") || (this.recordedHead(repo, k.ref) ?? ZERO) !== k.old) continue;
       const events: RepoEvent[] = [];
 
       if (this.moveRef(repo, keptIdentity(k), { ref: k.ref, old: k.old, new: k.new }, {}, events)) {
@@ -993,7 +994,8 @@ export class MonorepoObject extends DurableObject<Env> {
       }
     }
 
-    const named = new Set(rows.map((k) => k.ref));
+    // Branches only (a row of another ref, kept before markUnrecorded left them out, is just deleted).
+    const named = new Set(rows.map((k) => k.ref).filter((ref) => ref.startsWith("refs/heads/")));
 
     if (all) for (const ref of Object.keys(refs)) if (ref.startsWith("refs/heads/") && ref !== main) named.add(ref);
 

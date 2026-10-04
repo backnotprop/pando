@@ -173,10 +173,27 @@ async function initInSteps(max, commits, each, large) {
   const url = full && (await call("GET", `/v1/monorepos/${full}/repos`)).json?.repos?.[0]?.clone_url;
   const refs = url ? await refsOf(url, dir) : "";
   check("main is the checkout's head, and no side ref is left", refs.includes(`${head}\trefs/heads/main`) && !refs.includes("refs/pando/"), refs.trim().split("\n").join(" | "));
+  const repo = full && (await call("GET", `/v1/monorepos/${full}/repos`)).json?.repos?.[0]?.name;
+  const b = repo ? await call("GET", `/v1/monorepos/${full}/repos/${repo}/branches?state=all`) : null;
+  check("and Pando recorded no branch for the steps", b?.status === 200 && (b.json?.branches ?? []).length === 0, JSON.stringify((b?.json?.branches ?? []).map((x) => x.name)));
   const clone = join(work, `${name}-clone`);
   const c = url ? await git(["clone", "-q", url, clone], work) : { ok: false, out: "no repo" };
   const fsck = c.ok ? await git(["fsck", "--strict"], clone) : c;
   check("a clone has the whole history, and fsck passes", c.ok && fsck.ok && (await git(["rev-list", "--count", "HEAD"], clone)).out.trim() === String(commits + 1), fsck.out.slice(-200));
+}
+
+/** A push to a side ref (as pando init's steps) whose outcome is unknown is kept, and never recorded as a branch. */
+async function sideRefUnknown() {
+  const { url, full, repo } = await plainRepo(`bpk-${id}`);
+  const src = join(work, "side-ref");
+  await newRepo(src);
+  await commitRandom(src, "a", 1, 2_000_000);
+  let g = await git(["push", url, "+HEAD:refs/pando/import"], src);
+  const b = await commitRandom(src, "b", 1, 2_000_000);
+  g = g.ok ? await git(["-c", "http.extraHeader=X-Pando-Test-Fail: 1", "push", url, `+${b}:refs/pando/import`], src) : g;
+  check("a side ref's push over 1 MiB whose Artifacts call fails: push again", !g.ok && g.out.includes("couldn't take this push right now; push again"), tail(g.out));
+  const r = await call("GET", `/v1/monorepos/${full}/repos/${repo}/branches?state=all`);
+  check("and the side ref is never recorded as a branch", r.status === 200 && (r.json?.branches ?? []).length === 0, JSON.stringify((r.json?.branches ?? []).map((x) => x.name)));
 }
 
 /** One single push of `mb` MB of fresh random content to a new repo's main, timed. */
@@ -210,6 +227,7 @@ try {
   // At 3 MiB: about 4 MB refused three times; a 10.5 MB history in steps.
   await refusals(3 * MIB, 4);
   await initInSteps(3 * MIB, 4, 1_500_000, { files: 5, each: 900_000 });
+  await sideRefUnknown();
 
   if (BIG) {
     // At the real 64 MiB: 70 MB refused; a 150 MB history in steps, its last commit 80 MB.

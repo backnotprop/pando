@@ -21,7 +21,7 @@ export function monorepoRef(owner: string, name: string): MonorepoRef {
   const n = monorepoName(name.toLowerCase());
   const f = fullName(`${owner}/${name}`.toLowerCase());
 
-  if (Result.isFailure(o) || Result.isFailure(n) || Result.isFailure(f)) throw new NotFound({ code: "not_found", message: `no monorepo ${owner}/${name}` });
+  if (Result.isFailure(o) || Result.isFailure(n) || Result.isFailure(f)) throw new NotFound({ code: "not_found", message: `no repository ${owner}/${name}` });
 
   return { owner: o.success, name: n.success, full: f.success };
 }

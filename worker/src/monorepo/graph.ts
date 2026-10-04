@@ -6,6 +6,7 @@
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { withRepo } from "./artifacts";
+import { coAuthorEmails } from "./trailers";
 
 export interface CommitInfo {
   parents: string[];
@@ -16,6 +17,8 @@ export interface CommitInfo {
   author?: { name: string; email: string };
   committer?: { name: string; email: string };
   authoredAt?: number;
+  /** The emails its Co-authored-by trailers name (read from the whole message, before it is cut). */
+  coauthors?: string[];
 }
 
 function info(c: ArtifactsCommitMetadata): CommitInfo {
@@ -23,6 +26,7 @@ function info(c: ArtifactsCommitMetadata): CommitInfo {
     parents: c.parents, time: c.committedAt, tree: c.treeHash,
     message: c.message.length > 4096 ? c.message.slice(0, 4096) : c.message,
     author: c.author, committer: c.committer, authoredAt: c.authoredAt,
+    coauthors: coAuthorEmails(c.message),
   };
 }
 
@@ -131,6 +135,36 @@ export async function compare(env: Env, artifactsName: string, base: string, hea
   return withRepo(env, artifactsName, (repo) => compareWith(commitReader(repo), base, head));
 }
 
+/**
+ * The commits reachable from `frontier`, newest first by commit time, that
+ * are not older than `since` (Unix seconds): a repository's history read back
+ * to the graph's window, at most `max` at a time. `next`: where the walk goes
+ * on (empty when it is done). Commits older than `since` end their line;
+ * clock skew can keep one a page longer.
+ */
+export async function walkSince(read: CommitReader, frontier: string[], since: number, max: number): Promise<{ commits: string[]; next: string[] }> {
+  const queue = new Heap();
+  const seen = new Set<string>();
+  const commits: string[] = [];
+
+  for (const sha of frontier) queue.push(sha, (await read(sha)).time);
+
+  while (queue.size && commits.length < max) {
+    const sha = queue.pop()!;
+
+    if (seen.has(sha)) continue;
+    seen.add(sha);
+    const c = await read(sha);
+
+    if (c.time < since) continue;
+    commits.push(sha);
+
+    for (const p of c.parents) if (!seen.has(p)) queue.push(p, (await read(p)).time);
+  }
+
+  return { commits, next: queue.rest() };
+}
+
 /** A max-heap of commits by commit time. */
 class Heap {
   private items: { sha: string; time: number }[] = [];
@@ -185,6 +219,11 @@ class Heap {
     this.inQueue.delete(top.sha);
 
     return top.sha;
+  }
+
+  /** The commits still queued, in no order. */
+  rest(): string[] {
+    return this.items.map((it) => it.sha);
   }
 
   anyLive(flags: Map<string, number>): boolean {

@@ -8,6 +8,7 @@ import { pandoTrailers } from "../src/monorepo/views";
 import { compareWith, type CommitInfo, type CommitReader } from "../src/monorepo/graph";
 import { repoNameFor, validBranchName, validMonorepoName, validRepoPath } from "../src/monorepo/names";
 import { concat, FLUSH, parseAdvertisement, parseReport, pkt, readCommandSection, refusal } from "../src/monorepo/pktline";
+import { coAuthorEmails } from "../src/monorepo/trailers";
 import type { StatusRecord } from "../src/monorepo/types";
 import { hasCode, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../src/parse";
 
@@ -562,5 +563,44 @@ describe("closing keywords (issues/refs.ts)", () => {
   it("skips code, and a revert", async () => {
     expect(await refs("Use `fixes #1` here\n```\nfixes #2\n```\nfixes #3")).toEqual([3]);
     expect(await refs('Revert "Fix login (fixes #34)"\n\nThis reverts commit 3f9a2c1.')).toEqual([]);
+  });
+});
+
+describe("Co-authored-by trailers (the profile's credit)", () => {
+  const msg = (...lines: string[]) => lines.join("\n");
+
+  it("reads every co-author of the trailer block, in any case, with or without a space", () => {
+    expect(coAuthorEmails(msg("Add x", "", "Body.", "", "Co-authored-by: Ana Lopes <ana@example.com>", "co-authored-by:Ben <BEN@Example.com>", "CO-AUTHORED-BY : Cy <cy@example.com>"))).toEqual([
+      "ana@example.com",
+      "ben@example.com",
+      "cy@example.com",
+    ]);
+  });
+
+  it("takes a missing or doubled pair of angle brackets, a name with commas, trailing spaces", () => {
+    expect(coAuthorEmails(msg("t", "", "Co-authored-by: ana@example.com", "Co-authored-by: Okafor, Ben <<ben@example.com>>   ", "Co-authored-by: Lee,  Park < lee@example.com >"))).toEqual([
+      "ana@example.com",
+      "ben@example.com",
+      "lee@example.com",
+    ]);
+  });
+
+  it("ignores a line in the body: only the last paragraph, when every line in it is a trailer", () => {
+    expect(coAuthorEmails(msg("t", "", "Co-authored-by: Ana <ana@example.com>", "", "Signed-off-by: Ben <ben@example.com>"))).toEqual([]);
+    expect(coAuthorEmails(msg("t", "", "Thanks to everyone.", "Co-authored-by: Ana <ana@example.com>"))).toEqual([]);
+  });
+
+  it("never reads the title's own paragraph", () => {
+    expect(coAuthorEmails("Co-authored-by: Ana <ana@example.com>")).toEqual([]);
+  });
+
+  it("joins folded lines, and reads beside Signed-off-by and Pando's trailers", () => {
+    expect(
+      coAuthorEmails(msg("Save 2 files", "", "Signed-off-by: Ana <ana@example.com>", "Co-authored-by: Ben Okafor", "  <ben@example.com>", "Pando-Agent: claude", "Pando-Machine: ana-mbp", "Pando-Version: 7", "")),
+    ).toEqual(["ben@example.com"]);
+  });
+
+  it("skips an empty email and counts an address once", () => {
+    expect(coAuthorEmails(msg("t", "", "Co-authored-by: Nobody <>", "Co-authored-by: Ana <ana@example.com>", "Co-authored-by: A. <ANA@example.com>"))).toEqual(["ana@example.com"]);
   });
 });

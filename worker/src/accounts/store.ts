@@ -103,13 +103,49 @@ export interface OrgPatch {
   website?: string | null;
 }
 
-/** A person's answer to GET /v1/users/{name}. */
+/** A person's answer to GET /v1/users/{name}: their profile's header, never their email. */
 export interface Profile {
   type: "user";
   login: string;
   name: string | null;
+  bio: string | null;
+  location: string | null;
+  links: string[];
   picture_url: string | null;
   created_at: string;
+  /** The orgs the person is in that the viewer is in too (all of them for the person), by login. */
+  orgs: { login: string; name: string | null }[];
+}
+
+/** What Edit profile may change; a field left out is kept, null clears it. */
+export interface ProfilePatch {
+  name?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  links?: string[];
+}
+
+/** A monorepo a viewer can open, as the profile reads it. */
+export interface Openable {
+  id: string;
+  full_name: string;
+  owner_type: OwnerType;
+  kind: "monorepo" | "repo";
+}
+
+/** A monorepo a profile may show this viewer, and when the person made it (in the window), if they did. */
+export interface Shown extends Openable {
+  created_at: string | null;
+}
+
+/**
+ * What a profile reads from D1 besides the person's counts: of the monorepos
+ * the person has counts in, and those they made in the window, the ones the
+ * viewer can open; and the person's orgs the viewer is in too.
+ */
+export interface ProfileContext {
+  shown: Shown[];
+  orgs: { org: string; name: string | null; at: string; created: boolean }[];
 }
 
 /** A path's owner and monorepo name, lower case (names.ts monorepoRef). */
@@ -229,6 +265,15 @@ WHERE c.hash = ?1 AND c.revoked_at IS NULL`;
 
 const MONOREPO_COLS = `m.id, m.owner, m.name, m.owner || '/' || m.name AS full_name, m.kind, m.created_at,
   CASE WHEN EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) THEN 'org' ELSE 'user' END AS owner_type`;
+
+/**
+ * Whether the viewer (?1) may open monorepo `m`, as a profile asks it of a
+ * person's monorepos: their own row, or a row in the org that owns it. Every
+ * reach a viewer has into someone else's work goes through here (repository
+ * visibility, when built, adds its case as one more OR).
+ */
+const VIEWER_OPENS = `(EXISTS (SELECT 1 FROM members WHERE monorepo_id = m.id AND login = ?1)
+  OR EXISTS (SELECT 1 FROM org_members WHERE org = m.owner AND login = ?1))`;
 
 /** True for a monorepo (?1) an org owns: it needs no owner row of its own, its org's owners own it. */
 const ORG_OWNED = "EXISTS (SELECT 1 FROM monorepos mo JOIN orgs o ON o.login = mo.owner WHERE mo.id = ?1)";
@@ -363,6 +408,28 @@ function isAliasHit(v: unknown): v is AliasHit {
     "pointed_to" in v &&
     (v.pointed_to === null || typeof v.pointed_to === "string")
   );
+}
+
+/** A users row as profile() selects it. */
+interface UserRow {
+  login: string;
+  name: string | null;
+  bio: string | null;
+  location: string | null;
+  links: string;
+  picture_url: string | null;
+  created_at: string;
+}
+
+/** The links column: a JSON array of strings (Edit profile is its only writer); anything else reads as none. */
+function linksOf(text: string): string[] {
+  try {
+    const v: unknown = JSON.parse(text);
+
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 export class Accounts {
@@ -748,8 +815,13 @@ export class Accounts {
     }
 
     // The picture follows WorkOS on every sign-in, a removed one too.
-    if (login) await this.run("UPDATE users SET email = ?1, name = COALESCE(?2, name), picture_url = ?3 WHERE login = ?4", email, who.name, who.picture_url, login);
-    else login = await this.newUser(email, who);
+    // A name saved in Edit profile stays; otherwise WorkOS's name is taken.
+    if (login) {
+      await this.run(
+        "UPDATE users SET email = ?1, name = CASE WHEN name_edited = 1 THEN name ELSE COALESCE(?2, name) END, picture_url = ?3 WHERE login = ?4",
+        email, who.name, who.picture_url, login,
+      );
+    } else login = await this.newUser(email, who);
     const joined: { id: string; full_name: string }[] = [];
 
     if (who.email_verified) {
@@ -871,12 +943,101 @@ export class Accounts {
 
   /** Whose namespace `name` is, as `viewer` sees it: a person, an org, or null for neither. */
   async owner(name: string, viewer: string): Promise<Profile | Org | null> {
-    const org = await this.getOrg(name, viewer);
+    return (await this.getOrg(name, viewer)) ?? this.profile(name, viewer);
+  }
 
-    if (org) return org;
-    const user = await this.getUser(name);
+  // ── Profiles ─────────────────────────────────────────────────────────────
 
-    return user ? { type: "user", login: user.login, name: user.name, picture_url: user.picture_url, created_at: user.created_at } : null;
+  /** A person's profile header as `viewer` sees it (the orgs they share), or null. */
+  async profile(login: string, viewer: string): Promise<Profile | null> {
+    const [row, orgs] = await Promise.all([
+      this.row<UserRow>("SELECT login, name, bio, location, links, picture_url, created_at FROM users WHERE login = ?1", login),
+      this.rows<{ login: string; name: string | null }>(
+        `SELECT o.login, o.name FROM org_members pm JOIN orgs o ON o.login = pm.org
+         WHERE pm.login = ?1 AND (?1 = ?2 OR EXISTS (SELECT 1 FROM org_members vm WHERE vm.org = pm.org AND vm.login = ?2))
+         ORDER BY o.login`,
+        login, viewer,
+      ),
+    ]);
+
+    if (!row) return null;
+
+    return { type: "user", ...row, links: linksOf(row.links), orgs };
+  }
+
+  /** Change a person's profile; fields left out are kept. A saved name stops sign-in refreshing it. */
+  async updateProfile(login: string, patch: ProfilePatch): Promise<void> {
+    const sets: string[] = [];
+    const args: (string | null)[] = [login];
+
+    const set = (col: string, v: string | null) => {
+      args.push(v);
+      sets.push(`${col} = ?${args.length}`);
+    };
+
+    if (patch.name !== undefined) {
+      set("name", patch.name);
+      sets.push("name_edited = 1");
+    }
+
+    if (patch.bio !== undefined) set("bio", patch.bio);
+
+    if (patch.location !== undefined) set("location", patch.location);
+
+    if (patch.links !== undefined) set("links", JSON.stringify(patch.links));
+
+    if (sets.length) await this.run(`UPDATE users SET ${sets.join(", ")} WHERE login = ?1`, ...args);
+  }
+
+  /**
+   * Who a commit credits in a monorepo: the people whose sign-in email is one
+   * of `emails` (lower case), or whose login is one of `logins` (Pando's own
+   * <login>@users.pando.invalid), and who can open the monorepo now, directly
+   * or by its org. Read on a replica.
+   */
+  async creditees(monorepoId: string, emails: string[], logins: string[]): Promise<{ login: string; email: string | null }[]> {
+    const res = await this.read<{ login: string; email: string | null }>(
+      this.db.withSession("first-unconstrained"),
+      `SELECT u.login, lower(u.email) AS email FROM users u
+       WHERE (lower(u.email) IN (SELECT value FROM json_each(?2)) OR u.login IN (SELECT value FROM json_each(?3)))
+         AND (EXISTS (SELECT 1 FROM members WHERE monorepo_id = ?1 AND login = u.login)
+              OR EXISTS (SELECT 1 FROM org_members om JOIN monorepos mo ON mo.owner = om.org WHERE mo.id = ?1 AND om.login = u.login))`,
+      monorepoId, JSON.stringify(emails), JSON.stringify(logins),
+    );
+
+    return res.results;
+  }
+
+  /**
+   * A profile's reads, both at once on a replica (see ProfileContext). The
+   * one question it asks of every monorepo: may the viewer (?1) open it
+   * (VIEWER_OPENS). `ids`: the monorepos the person (?2) has counts in;
+   * `since` (?4): the window's first instant.
+   */
+  async profileContext(person: string, viewer: string, ids: string[], since: string): Promise<ProfileContext> {
+    const on = this.db.withSession("first-unconstrained");
+
+    const [shown, orgs] = await Promise.all([
+      this.read<Shown>(
+        on,
+        `SELECT m.id, m.owner || '/' || m.name AS full_name, m.kind,
+                CASE WHEN EXISTS (SELECT 1 FROM orgs WHERE login = m.owner) THEN 'org' ELSE 'user' END AS owner_type,
+                CASE WHEN m.created_by = ?2 AND m.created_at >= ?4 THEN m.created_at END AS created_at
+         FROM monorepos m
+         WHERE (m.id IN (SELECT value FROM json_each(?3)) OR (m.created_by = ?2 AND m.created_at >= ?4)) AND ${VIEWER_OPENS}
+         ORDER BY m.created_at`,
+        viewer, person, JSON.stringify(ids), since,
+      ),
+      this.read<{ org: string; name: string | null; at: string; created: number }>(
+        on,
+        `SELECT pm.org, o.name, pm.added_at AS at, o.created_by = ?1 AS created FROM org_members pm JOIN orgs o ON o.login = pm.org
+         WHERE pm.login = ?1 AND pm.added_at >= ?3 AND (?1 = ?2 OR EXISTS (SELECT 1 FROM org_members vm WHERE vm.org = pm.org AND vm.login = ?2))
+         ORDER BY pm.added_at`,
+        person, viewer, since,
+      ),
+    ]);
+
+    return { shown: shown.results, orgs: orgs.results.map((o) => ({ ...o, created: o.created === 1 })) };
   }
 
   private async orgRow(login: string, viewer: string): Promise<OrgRow | null> {

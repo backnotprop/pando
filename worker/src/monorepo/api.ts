@@ -41,6 +41,7 @@ import type { BranchRecord, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, R
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
 import { orgRoutes } from "../accounts/org-routes";
+import { profileRoutes } from "../accounts/profile-routes";
 import { feedMembership, membersBeforeDelete } from "../feed/membership";
 import { monoreposSummary } from "../feed/routes";
 
@@ -374,6 +375,8 @@ users.post("/v1/monorepos", async (c) => {
 });
 
 orgRoutes(users);
+
+profileRoutes(users);
 
 api.route("/", users);
 

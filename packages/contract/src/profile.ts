@@ -90,6 +90,3 @@ export const Contributions = Schema.Struct({
 });
 
 export interface Contributions extends Schema.Schema.Type<typeof Contributions> {}
-
-/** A person's links on their profile: at most 4, each an https URL. */
-export const PROFILE_LIMITS = { name: 100, bio: 160, location: 100, links: 4, link: 2048 } as const;

@@ -40,11 +40,19 @@ export type FactsRequest = WithoutMonorepo<FactsMessage>;
 /** One outbox row, for the tests. */
 type FactsOutboxRow = { attempts: number; next_at: number | null; dead_at: number | null; error: string | null };
 
+/** The test switches (FACTS_TEST): fail the next `fail` drains before they run; lose the answer of the next `lose` after they ran. */
+export interface FactsTestSet {
+  fail?: number;
+  lose?: number;
+}
+
 /** The outbox as it is (FACTS_TEST): rows still to go, dead rows, and each row. */
 export interface FactsOutboxState {
   live: number;
   dead: number;
   rows: FactsOutboxRow[];
+  /** Answers still to be lost on purpose. */
+  losses_left: number;
 }
 
 export class FactsOut {
@@ -131,6 +139,9 @@ export class FactsOut {
         const out = released(await this.ctx.exports.FactsDrain.run(jobs));
         ok = out.ok;
         error = out.error;
+
+        // A lost answer: the drain did the work, and the outbox runs it again.
+        if (this.testLose()) throw new Error("facts test: a lost answer");
       } catch (err) {
         ok = rows.map(() => false);
         error = err instanceof Error ? err.message : String(err);
@@ -194,6 +205,8 @@ export class FactsOut {
 
   private testFails = 0;
 
+  private testLosses = 0;
+
   private testFail(): boolean {
     if (this.env.FACTS_TEST !== "1" || this.testFails <= 0) return false;
     this.testFails--;
@@ -201,14 +214,23 @@ export class FactsOut {
     return true;
   }
 
-  /** Make the next `fail` drains fail; and the outbox as it is. */
-  test(set: { fail?: number } = {}): FactsOutboxState {
+  private testLose(): boolean {
+    if (this.env.FACTS_TEST !== "1" || this.testLosses <= 0) return false;
+    this.testLosses--;
+
+    return true;
+  }
+
+  /** Make the next `fail` drains fail before they run, and the next `lose` lose their answer after; and the outbox as it is. */
+  test(set: FactsTestSet = {}): FactsOutboxState {
     if (this.env.FACTS_TEST === "1" && set.fail !== undefined) this.testFails = set.fail;
+
+    if (this.env.FACTS_TEST === "1" && set.lose !== undefined) this.testLosses = set.lose;
 
     const rows = this.rows<FactsOutboxRow>(
       "SELECT attempts, next_at, dead_at, error FROM facts_outbox ORDER BY id",
     );
 
-    return { live: rows.filter((r) => r.dead_at === null).length, dead: rows.filter((r) => r.dead_at !== null).length, rows };
+    return { live: rows.filter((r) => r.dead_at === null).length, dead: rows.filter((r) => r.dead_at !== null).length, rows, losses_left: this.testLosses };
   }
 }

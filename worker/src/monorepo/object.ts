@@ -19,7 +19,8 @@ import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS, type Facts } from "./facts";
-import { FactsOut, type FactsRequest } from "./facts-out";
+import { FactsOut, type FactsRequest, type FactsTestSet } from "./facts-out";
+import type { NextPage } from "./credit";
 import { HooksOut } from "./hooks-out";
 import { MetaApplyOut, type MetaApplyRow } from "./meta-apply";
 import { isMergeable, type BranchList, type BranchView } from "./views";
@@ -850,6 +851,9 @@ export class MonorepoObject extends DurableObject<Env> {
       });
 
       if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new, push: seq ? { seq, before: u.old } : undefined });
+
+      // Main arriving with its history (pando init in an existing repo, a first push): its past commits count (credit.ts).
+      if (u.old === ZERO && u.new !== ZERO) this.queueFacts({ type: "credit", repo, from: null, to: u.new });
       events.push({ ...base, event: "push", author: identity?.login ?? null, seq: seq || null });
 
       return true;
@@ -888,6 +892,9 @@ export class MonorepoObject extends DurableObject<Env> {
     const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
 
     if (opened) events.push({ ...e, event: "branch.opened" });
+
+    // A branch opened counts for the person whose sign-in pushed it.
+    if (opened && identity) this.queueFacts({ type: "credit_one", repo, login: identity.login, kind: "branch", at, key: `b:${this.info()?.id}:${repo}:${name}:${at}` });
     events.push({ ...e, event: "push" });
     this.queueFacts({ type: "branch", repo, branch: name, head: u.new, push: seq ? { seq, before: u.old } : undefined });
 
@@ -1158,6 +1165,7 @@ export class MonorepoObject extends DurableObject<Env> {
     );
     const review = { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
     this.publish({ kind: "review", collection: "reviews", key: `${repo}/${id}`, op: "upsert", repo, ...who(identity), row: review });
+    this.queueFacts({ type: "credit_one", repo, login: identity.login, kind: "review", at, key: `r:${this.info()?.id}:${id}` });
 
     return review;
   }
@@ -1432,6 +1440,8 @@ export class MonorepoObject extends DurableObject<Env> {
     this.rememberHead(a.repo, out.sha, message.split("\n")[0] || null);
     this.forgetRequiredIfConfig(a.repo);
     this.queueFacts({ type: "sweep", repo: a.repo, main: out.sha });
+    // The commits it brought to main count for their authors and co-authors (credit.ts).
+    this.queueFacts({ type: "credit", repo: a.repo, from: out.old, to: out.sha });
     // The issues it closes, decided now: the branch's links, and keywords in the message and the merged commits.
     // Each closes about a second later, in its own step (issues/store.ts applyCloses).
     const merged = { repo: a.repo, branch: a.branch };
@@ -1949,6 +1959,11 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Branch facts (facts.ts): stored, computed on change by FactsDrain ────
 
+  /** A history's next page of credits (credit.ts), from the drain that read this one. */
+  queueCredit(m: NextPage): void {
+    this.queueFacts(m);
+  }
+
   private queueFacts(m: FactsRequest): void {
     // The outbox (facts-out.ts), drained at once by RPC.
     this.factsOut.add(m);
@@ -1977,7 +1992,7 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */
-  testFactsOutbox(set: { fail?: number } = {}) {
+  testFactsOutbox(set: FactsTestSet = {}) {
     return this.factsOut.test(set);
   }
 

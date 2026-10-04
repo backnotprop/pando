@@ -66,6 +66,8 @@ export interface CommandSection {
   caps: Set<string>;
   /** Every byte read so far: the command section and the start of the pack. */
   head: Uint8Array;
+  /** Where the pack starts in `head` (the end of the command section). */
+  packAt: number;
   /** The rest of the request body. */
   rest: ReadableStreamDefaultReader<Uint8Array>;
 }
@@ -124,7 +126,7 @@ export async function readCommandSection(body: ReadableStream<Uint8Array>): Prom
     commands.push({ old: oldSha, new: newSha, ref });
   }
 
-  return { commands, caps, head: buf, rest: reader };
+  return { commands, caps, head: buf, packAt: pos, rest: reader };
 }
 
 /** A stream that yields `first`, then the rest of `reader`. */

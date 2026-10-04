@@ -318,9 +318,15 @@ try {
   await waitFor(async () => ((await issue(rn))?.state === "closed" ? true : null), 8_000);
   await patch(rn, { state: "open" });
   const dir = clones["projects/a"];
-  // git revert's own message on a commit of its own content. (A real `git revert` of the merged commit, whose tree
-  // is main's from before, is refused here by Artifacts: "stored delta chain contains a cycle"; reported apart.)
-  const hR2 = pushBranch("projects/a", "rv-undo", "rv-undo.txt", `Revert "Fix the thing (fixes #${rn})"\n\nThis reverts commit ${hR1}.`);
+  // A real `git revert` of the merged commit: its tree is main's from before, which Artifacts refused until the door
+  // sent such a push again with its trees whole (research/operational/artifacts-delta-cycle-2026-10-04.md).
+  git(["checkout", "-q", "main"], dir);
+  git(["pull", "-q", "origin", "main"], dir);
+  git(["checkout", "-qB", "rv-undo"], dir);
+  git(["revert", "--no-edit", hR1], dir);
+  const pushedRevert = git(["push", "-qf", "origin", "rv-undo"], dir);
+  const hR2 = git(["rev-parse", "HEAD"], dir).out.trim();
+  check("a real git revert of the merged commit pushes", pushedRevert.ok, pushedRevert.out.split("\n").filter(Boolean).slice(-2).join(" | "));
   r = await merge(pa, "rv-undo", hR2);
   await sleep(2_000);
   check("a git revert's merge closes nothing (its message quotes \"fixes\")", r.status === 200 && (r.json?.closes ?? []).length === 0 && (await issue(rn))?.state === "open", `${r.status} ${JSON.stringify(r.json?.closes ?? r.json?.error)}`);

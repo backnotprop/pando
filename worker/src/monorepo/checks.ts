@@ -3,20 +3,41 @@
 
 import { parse as parseToml, TomlDate, type TomlTable, type TomlValue } from "smol-toml";
 import type { Env } from "../env";
-import { isText } from "../parse";
+import { HttpError } from "../http";
+import { isRecord, isText, isWholeNumber, type Json } from "../parse";
 import { withRepo } from "./artifacts";
 import { metaArtifactsName } from "./names";
 import type { Checks, Kind, RepoRecord, StatusRecord } from "./types";
 
-// Read on every check, uncached: a merge into main can change it, and the
-// gate must see the change at once.
-async function readConfig(env: Env, artifactsName: string): Promise<TomlTable | null> {
-  try {
-    const blob = await withRepo(env, artifactsName, (repo) => repo.readFile({ ref: "main", path: ".pando/pando.toml" }));
+/** pando.toml could not be read: the required checks are unknown, never taken as none (the gate fails closed). */
+export const checksUnknown = (): HttpError => new HttpError(503, "checks_unknown", "Pando couldn't read this monorepo's required checks; try again");
 
-    return blob ? parseToml(await blob.text()) : null;
+export function isChecksUnknown(err: unknown): err is HttpError {
+  return err instanceof HttpError && err.code === "checks_unknown";
+}
+
+// Read whenever the monorepo object keeps no list: a merge into main can
+// change it, and the gate must see the change at once.
+async function readConfig(env: Env, artifactsName: string, failRead = false): Promise<TomlTable | null> {
+  let text: string | null;
+
+  try {
+    if (failRead) throw new Error("checks test: the config read failed");
+    const blob = await withRepo(env, artifactsName, (repo) => repo.readFile({ ref: "main", path: ".pando/pando.toml" }));
+    text = blob ? await blob.text() : null;
   } catch (err) {
-    // An empty repo, a missing file or a bad file all mean "no required checks".
+    // Artifacts failed: unknown. Nothing is kept, so the next read tries again.
+    console.warn(`pando.toml in ${artifactsName} not read: ${err instanceof Error ? err.message : String(err)}`);
+    throw checksUnknown();
+  }
+
+  // An empty repo (no main) or no file: no required checks.
+  if (text === null) return null;
+
+  try {
+    return parseToml(text);
+  } catch (err) {
+    // A file that is not TOML: no required checks.
     console.warn(`pando.toml in ${artifactsName}: ${err instanceof Error ? err.message : String(err)}`);
 
     return null;
@@ -28,10 +49,10 @@ function isTomlTable(v: TomlValue | undefined): v is TomlTable {
   return typeof v === "object" && !Array.isArray(v) && !(v instanceof TomlDate);
 }
 
-/** `repos."<repo path>".required_checks` from the right pando.toml (formats.md, section 2). */
-export async function requiredChecks(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
+/** `repos."<repo path>".required_checks` from the right pando.toml (formats.md, section 2); throws checks_unknown when it cannot be read. */
+export async function requiredChecks(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord, failRead = false): Promise<string[]> {
   const source = monorepo.kind === "repo" ? repo.artifacts_name : metaArtifactsName(monorepo.id);
-  const toml = await readConfig(env, source);
+  const toml = await readConfig(env, source, failRead);
   const repos = toml?.repos;
   const entry = isTomlTable(repos) ? repos[repo.path] : undefined;
   const list = isTomlTable(entry) ? entry.required_checks : undefined;
@@ -60,15 +81,35 @@ export function combine(sha: string | null, required: string[], all: StatusRecor
 /**
  * Required checks as the monorepo object keeps them (C3): read from
  * pando.toml only when the object has none, which is after a merge or main's
- * first push in the repo that holds the file.
+ * first push in the repo that holds the file. A failed read throws
+ * checks_unknown (503) and keeps nothing.
  */
 export async function requiredKept(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
   const stub = env.MONOREPO.getByName(monorepo.id);
   const kept = await stub.storedRequired(repo.name);
 
   if (kept) return kept;
-  const list = await requiredChecks(env, monorepo, repo);
+  const failRead = env.CHECKS_TEST === "1" && (await stub.takeConfigFail());
+  const list = await requiredChecks(env, monorepo, repo, failRead);
   await stub.setRequiredChecks(repo.name, list);
 
   return list;
+}
+
+/**
+ * Tests only (CHECKS_TEST=1 and the bootstrap secret): POST /v1/_checks/test
+ * {monorepo, fail} makes the next `fail` reads of pando.toml fail, as an
+ * Artifacts error would. The monorepo is its id.
+ */
+export async function checksTestRoute(request: Request, env: Env): Promise<Response> {
+  if (env.CHECKS_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+  const { credential } = await import("../http");
+  const { isBootstrap } = await import("./session");
+
+  if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
+  const b = request.method === "POST" ? await request.json<Json>().catch(() => null) : null;
+
+  if (!isRecord(b) || !isText(b.monorepo) || !isWholeNumber(b.fail)) return Response.json({ error: { code: "bad_request", message: "monorepo (its id) and fail" } }, { status: 400 });
+
+  return Response.json(await env.MONOREPO.getByName(b.monorepo).testChecks(b.fail));
 }

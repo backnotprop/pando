@@ -54,7 +54,11 @@ info:
     Required checks: the server reads `required_checks` from
     `.pando/pando.toml` on main (`formats.md`, section 2). In a monorepo
     that is the meta layer's main, table `[repos."<repo path>"]`; in a plain
-    repo, the repo's own main, table `[repos."."]`.
+    repo, the repo's own main, table `[repos."."]`. No main or no file means
+    no required checks. When Artifacts fails to read it, they are unknown:
+    the routes that need them (the repo, the branch list, a commit's status)
+    answer 503 `checks_unknown`, an unforced merge is refused the same way,
+    and nothing is kept, so the next request reads it again.
 
     Identity works like GitHub's. A person has a user account and belongs to
     monorepos as `owner` or `member`. A machine signs in once
@@ -1497,7 +1501,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "503":
-          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries."
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries. `checks_unknown` (an unforced merge): .pando/pando.toml could not be read, so the required checks are unknown; nothing is kept, and the next try reads it again."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

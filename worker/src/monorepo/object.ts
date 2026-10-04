@@ -13,7 +13,7 @@ import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoToken, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, LEASE_MS, releaseDelay, retryBusy, WAIT_MS, WRITE_SLOTS, WriteGate } from "./gate";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
-import { combine, requiredChecks } from "./checks";
+import { checksUnknown, combine, isChecksUnknown, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
@@ -869,13 +869,20 @@ export class MonorepoObject extends DurableObject<Env> {
    * when there is none. The kept list is dropped whenever main moves in the
    * repo holding pando.toml by a merge or its first push, and .pando/** never
    * changes any other way (the live layer refuses saves there), so it is
-   * never stale.
+   * never stale. Null when pando.toml could not be read: unknown, nothing
+   * kept, read again next time.
    */
-  private async checksFor(r: RepoRecord, sha: string): Promise<Checks> {
+  private async checksFor(r: RepoRecord, sha: string): Promise<Checks | null> {
     let required = this.storedRequired(r.name);
 
     if (!required) {
-      required = await requiredChecks(this.env, this.info()!, r);
+      try {
+        required = await requiredChecks(this.env, this.info()!, r, this.takeConfigFail());
+      } catch (err) {
+        if (isChecksUnknown(err)) return null;
+        throw err;
+      }
+
       this.setRequiredChecks(r.name, required);
     }
 
@@ -927,7 +934,10 @@ export class MonorepoObject extends DurableObject<Env> {
     note({ heads_from: read ? "artifacts" : "records" });
     const checks = await this.checksFor(r, head);
 
-    if (checks.state !== "success" && !a.force) {
+    // Unknown required checks refuse an unforced merge, as red ones do.
+    if (!checks && !a.force) throw checksUnknown();
+
+    if (checks && checks.state !== "success" && !a.force) {
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });
     }
 
@@ -1000,7 +1010,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
     if (out.status !== "merged") fail(502, "merge_failed", `unexpected merge result ${out.status}`);
     const at = now();
-    const forced = checks.state !== "success";
+    const forced = checks?.state !== "success";
     this.sql.exec(
       "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at, machine, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.login, forced ? 1 : 0, at, a.identity.credential_name, a.identity.agent ?? null,
@@ -1462,6 +1472,23 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Tests only (HOOKS_TEST=1): die after the next delivery's call answers, before recording it. */
   testHooksOutbox(set: { crash?: boolean } = {}) {
     return this.hooksOut.test(set);
+  }
+
+  private configFails = 0;
+
+  /** Tests only (CHECKS_TEST=1): the next `fail` reads of pando.toml fail. */
+  testChecks(fail: number) {
+    if (this.env.CHECKS_TEST === "1") this.configFails = fail;
+
+    return { fail: this.configFails };
+  }
+
+  /** Tests only: whether this read of pando.toml fails (CHECKS_TEST=1 and a failure left). */
+  takeConfigFail(): boolean {
+    if (this.env.CHECKS_TEST !== "1" || this.configFails <= 0) return false;
+    this.configFails--;
+
+    return true;
   }
 
   /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */

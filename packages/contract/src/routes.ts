@@ -8,10 +8,11 @@ import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuild
 import { HistoryPage, LastCommits, TreePage } from "./files.ts";
 import { FullName, Login, MonorepoName, RepoName } from "./ids.ts";
 import { MonorepoEntry, MonorepoList, MonorepoRenamed, MonorepoSummaryList } from "./monorepo.ts";
+import { Org, OrgInviteResult, OrgList, OrgMember, OrgMemberList, Owner } from "./org.ts";
 import { EventsPage } from "./feed.ts";
 import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { NeedsPage } from "./needs.ts";
-import { HeadList, InviteList, InviteResult, MachineList, MemberList, Repo, RepoList, WorktreeList } from "./repo.ts";
+import { HeadList, InviteList, InviteResult, MachineList, MemberList, MonorepoCreated, Repo, RepoList, WorktreeList } from "./repo.ts";
 import { CredentialList, Me, SignedOut } from "./user.ts";
 
 const query = (params: URLSearchParams): string => {
@@ -38,13 +39,30 @@ export const listMonorepos = { path: "/v1/monorepos", response: MonorepoList };
 /** GET /v1/monorepos?summary=1: the home's list, each with its line. */
 export const listMonorepoSummaries = { path: "/v1/monorepos?summary=1", response: MonorepoSummaryList };
 
-/** GET /v1/events: a page of the activity log. `inMonorepo` narrows to one `owner/name`; `cursor` is a page's `next`. */
-export const listActivity = (cursor: string | null, inMonorepo: FullName | null) => {
+/** GET /v1/monorepos?owner=: the person's monorepos under one owner. */
+export const listOwnerMonorepos = (owner: Login) => ({ path: `/v1/monorepos${query(new URLSearchParams({ owner }))}`, response: MonorepoList });
+
+/** GET /v1/monorepos?owner=&summary=1: the same, each with its line, most recently active first (an org's page). */
+export const listOwnerMonorepoSummaries = (owner: Login) => ({
+  path: `/v1/monorepos${query(new URLSearchParams({ owner, summary: "1" }))}`,
+  response: MonorepoSummaryList,
+});
+
+/** POST /v1/monorepos {name, kind?, owner?} (201): `owner` is your login (the default) or an org you are in. */
+export const createMonorepo = { method: "POST", path: "/v1/monorepos", response: MonorepoCreated } as const;
+
+/**
+ * GET /v1/events: a page of the activity log. `inMonorepo` narrows to one `owner/name`; `owner` to one owner's
+ * monorepos (an org's page; not with `inMonorepo`); `cursor` is a page's `next`.
+ */
+export const listActivity = (cursor: string | null, inMonorepo: FullName | null, owner: Login | null = null) => {
   const params = new URLSearchParams();
 
   if (cursor !== null) params.set("cursor", cursor);
 
   if (inMonorepo !== null) params.set("in", inMonorepo);
+
+  if (owner !== null) params.set("owner", owner);
 
   return { path: `/v1/events${query(params)}`, response: EventsPage };
 };
@@ -267,6 +285,12 @@ export const removeMember = (owner: Login, name: MonorepoName, login: Login) =>
 /** PATCH .../{monorepo} {name}: rename; the old name keeps leading here (an alias). */
 export const renameMonorepo = (owner: Login, name: MonorepoName) => ({ method: "PATCH", path: monorepoBase(owner, name), response: MonorepoRenamed }) as const;
 
+/**
+ * PATCH .../{monorepo} {owner} (owners): move it to an org you are in, or to a person who is already its own
+ * owner (400 `bad_owner`). The old address keeps leading here (an alias).
+ */
+export const transferMonorepo = renameMonorepo;
+
 /** DELETE .../{monorepo}?confirm=owner/name (204): the monorepo, its repos and their history. */
 export const deleteMonorepo = (owner: Login, name: MonorepoName) =>
   ({ method: "DELETE", path: `${monorepoBase(owner, name)}?${new URLSearchParams({ confirm: `${owner}/${name}` })}` }) as const;
@@ -338,3 +362,40 @@ export const connectCi = (owner: Login, name: MonorepoName) => ({ method: "POST"
 /** DELETE .../ci/connections/{connection} (204, owners). */
 export const disconnectCi = (owner: Login, name: MonorepoName, connection: string) =>
   ({ method: "DELETE", path: `${ciBase(owner, name)}/connections/${encodeURIComponent(connection)}` }) as const;
+
+// ── Owners and organizations ───────────────────────────────────────────────
+
+const orgBase = (org: Login): string => `/v1/orgs/${encodeURIComponent(org)}`;
+
+/** GET /v1/users/{name}: whose `/{name}` is, a person (`type: "user"`) or an org (`type: "org"`); 404 for neither. */
+export const getOwner = (name: Login) => ({ path: `/v1/users/${encodeURIComponent(name)}`, response: Owner });
+
+/** GET /v1/user/orgs: the orgs the person is in, with their role. */
+export const listMyOrgs = { path: "/v1/user/orgs", response: OrgList };
+
+/** POST /v1/orgs {login, name?} (201): the caller is its first owner. 409 `namespace_taken`, 400 `reserved_name`. */
+export const createOrg = { method: "POST", path: "/v1/orgs", response: Org } as const;
+
+/** GET /v1/orgs/{org}: its header, with the asker's role (null when not in it) and its people's count (for its people). */
+export const getOrg = (org: Login) => ({ path: orgBase(org), response: Org });
+
+/** PATCH /v1/orgs/{org} {name?, description?, website?} (owners). */
+export const updateOrg = (org: Login) => ({ method: "PATCH", path: orgBase(org), response: Org }) as const;
+
+/** GET /v1/orgs/{org}/members (its people). */
+export const listOrgMembers = (org: Login) => ({ path: `${orgBase(org)}/members`, response: OrgMemberList });
+
+/** PUT /v1/orgs/{org}/members/{login} {role} (owners): add a person by login, or change their role. 409 `last_owner`. */
+export const putOrgMember = (org: Login, login: Login) => ({ method: "PUT", path: `${orgBase(org)}/members/${encodeURIComponent(login)}`, response: OrgMember }) as const;
+
+/** DELETE /v1/orgs/{org}/members/{login} (204; owners, or the person to leave). 409 `last_owner`. */
+export const removeOrgMember = (org: Login, login: Login) => ({ method: "DELETE", path: `${orgBase(org)}/members/${encodeURIComponent(login)}` }) as const;
+
+/** POST /v1/orgs/{org}/invites {email, role} (owners): added now (200) or invited (201). */
+export const orgInvite = (org: Login) => ({ method: "POST", path: `${orgBase(org)}/invites`, response: OrgInviteResult }) as const;
+
+/** GET /v1/orgs/{org}/invites (its people): invites waiting for a first sign-in. */
+export const listOrgInvites = (org: Login) => ({ path: `${orgBase(org)}/invites`, response: InviteList });
+
+/** DELETE /v1/orgs/{org}/invites/{email} (204; owners). */
+export const revokeOrgInvite = (org: Login, email: string) => ({ method: "DELETE", path: `${orgBase(org)}/invites/${encodeURIComponent(email)}` }) as const;

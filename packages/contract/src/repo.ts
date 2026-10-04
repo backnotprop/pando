@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema";
 
 import { byActivityKind } from "./feed.ts";
 import { Count, FullName, Login, RepoName, Timestamp } from "./ids.ts";
-import { MemberRole } from "./monorepo.ts";
+import { MemberRole, MonorepoEntry, ReplacedAlias } from "./monorepo.ts";
 import { CredentialKind } from "./user.ts";
 
 export const Repo = Schema.Struct({
@@ -32,6 +32,15 @@ export interface Repo extends Schema.Schema.Type<typeof Repo> {}
 export const RepoList = Schema.Struct({ repos: Schema.Array(Repo) });
 
 export interface RepoList extends Schema.Schema.Type<typeof RepoList> {}
+
+/** POST /v1/monorepos (201): the new monorepo (the caller is its owner), its plain repo for kind `repo`, and any old name it took over. */
+export const MonorepoCreated = Schema.Struct({
+  monorepo: MonorepoEntry,
+  repos: Schema.Array(Repo),
+  replaced_alias: Schema.NullOr(ReplacedAlias),
+});
+
+export interface MonorepoCreated extends Schema.Schema.Type<typeof MonorepoCreated> {}
 
 /** A worktree a machine reported (pando worktree add): sparse, fuse or fskit. */
 export const Worktree = Schema.Struct({
@@ -78,16 +87,25 @@ export const HeadList = Schema.Struct({ heads: Schema.Array(RepoHead), seq: Sche
 
 export interface HeadList extends Schema.Schema.Type<typeof HeadList> {}
 
+/**
+ * Where a member's access comes from: their own row in the monorepo
+ * (`direct`), the org that owns it (`org`), or both.
+ */
+export const MemberVia = Schema.Literals(["direct", "org", "both"]);
+
+/** A person who can open the monorepo. `role` is the higher of their own row and their org role. */
 export const Member = Schema.Struct({
   login: Login,
   name: Schema.NullOr(Schema.String),
   /** Their picture, or null: the web draws initials. */
   picture_url: Schema.NullOr(Schema.String),
   role: MemberRole,
+  /** From their own row when they have one, else from their org row. */
   added_at: Timestamp,
   added_by: Schema.NullOr(Schema.String),
   /** The newest use of any of their credentials; null if none was ever used. */
   last_active_at: Schema.NullOr(Timestamp),
+  via: MemberVia,
 });
 
 export interface Member extends Schema.Schema.Type<typeof Member> {}

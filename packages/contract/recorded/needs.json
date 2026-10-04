@@ -5,14 +5,14 @@
   "body": {
     "branches": [
       {
-        "monorepo": "rec-mutbj3ey/rec-mutbj3ey",
-        "monorepo_id": "m_078095a31a492bba",
+        "monorepo": "rec-mutvywkn/rec-mutvywkn",
+        "monorepo_id": "m_b03271178f23aa74",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/clash",
         "title": null,
-        "head": "44607eb8ac75be22b725b4c9a1a33f98038b9029",
-        "author": "rec-mutbj3ey",
+        "head": "50cf3089eb5c4575a107b6a333ea2dfed24c93de",
+        "author": "rec-mutvywkn",
         "pushed_machine": "ana-mbp",
         "state": "conflicts",
         "checks": {
@@ -20,17 +20,17 @@
           "failing": [],
           "failing_apps": {}
         },
-        "updated_at": "2026-10-04T04:26:15.401Z"
+        "updated_at": "2026-10-04T13:58:25.472Z"
       },
       {
-        "monorepo": "rec-mutbj3ey/rec-mutbj3ey",
-        "monorepo_id": "m_078095a31a492bba",
+        "monorepo": "rec-mutvywkn/rec-mutvywkn",
+        "monorepo_id": "m_b03271178f23aa74",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
         "title": null,
-        "head": "808c8a8ac4d8df553dd0391295fb8f6e469af76a",
-        "author": "rec-mutbj3ey",
+        "head": "9c9ab6edd144e6208472381c0fe04891c456afc6",
+        "author": "rec-mutvywkn",
         "pushed_machine": "ana-mbp",
         "state": "failing",
         "checks": {
@@ -42,17 +42,17 @@
             "ci/test": null
           }
         },
-        "updated_at": "2026-10-04T04:26:14.752Z"
+        "updated_at": "2026-10-04T13:58:24.600Z"
       },
       {
-        "monorepo": "rec-mutbj3ey/rec-mutbj3ey",
-        "monorepo_id": "m_078095a31a492bba",
+        "monorepo": "rec-mutvywkn/rec-mutvywkn",
+        "monorepo_id": "m_b03271178f23aa74",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
         "title": null,
-        "head": "fc944df20a32dbbb3d5d73eebe2cd8d1253ebce8",
-        "author": "rec-mutbj3ey",
+        "head": "8a0b12034040273ed0f600550d5791233e66f883",
+        "author": "rec-mutvywkn",
         "pushed_machine": "ana-mbp",
         "state": "ready",
         "checks": {
@@ -60,7 +60,7 @@
           "failing": [],
           "failing_apps": {}
         },
-        "updated_at": "2026-10-04T04:26:14.400Z"
+        "updated_at": "2026-10-04T13:58:24.145Z"
       }
     ],
     "truncated": false,

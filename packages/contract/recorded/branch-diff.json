@@ -4,9 +4,9 @@
   "status": 200,
   "body": {
     "base_branch": "main",
-    "base": "4cf73c247ad875a8e043c6c1225c115a243ad088",
-    "head": "fc944df20a32dbbb3d5d73eebe2cd8d1253ebce8",
-    "merge_base": "6dda8029c1bdf13989eb26cd34a1c58493fe0866",
+    "base": "98b26bad825f440b2cf34b1bbe7f503bfd008120",
+    "head": "8a0b12034040273ed0f600550d5791233e66f883",
+    "merge_base": "f5a4c90b4685e936e93cf6b90f34497cf4f3205f",
     "truncated": false,
     "too_many_files": false,
     "files_total": 1,

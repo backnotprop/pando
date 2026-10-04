@@ -1,0 +1,53 @@
+{
+  "schema": "MonorepoSummaryList",
+  "route": "GET /v1/monorepos?owner=<org>&summary=1",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_b03271178f23aa74",
+        "owner": "org-mutvywkn",
+        "name": "rec-mutvywkn-renamed",
+        "full_name": "org-mutvywkn/rec-mutvywkn-renamed",
+        "kind": "monorepo",
+        "created_at": "2026-10-04T13:58:15.941Z",
+        "owner_type": "org",
+        "role": "owner",
+        "last_activity_at": "2026-10-04T13:58:39.154Z",
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 0,
+          "conflicts": 1,
+          "failing": 1
+        },
+        "members": 3,
+        "large": false,
+        "repos": 1,
+        "open_branches": 2
+      },
+      {
+        "id": "m_59b006ca181bfd9e",
+        "owner": "org-mutvywkn",
+        "name": "in-mutvywkn",
+        "full_name": "org-mutvywkn/in-mutvywkn",
+        "kind": "repo",
+        "created_at": "2026-10-04T13:58:40.495Z",
+        "owner_type": "org",
+        "role": "owner",
+        "last_activity_at": null,
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 0,
+          "conflicts": 0,
+          "failing": 0
+        },
+        "members": 2,
+        "large": false,
+        "repos": 1,
+        "open_branches": 0
+      }
+    ]
+  }
+}

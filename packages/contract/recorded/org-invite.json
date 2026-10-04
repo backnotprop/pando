@@ -1,0 +1,14 @@
+{
+  "schema": "OrgInviteResult",
+  "route": "POST /v1/orgs/{org}/invites (no one has signed in with it yet: invited)",
+  "status": 201,
+  "body": {
+    "status": "invited",
+    "invite": {
+      "email": "cy@example.com",
+      "role": "member",
+      "invited_by": "rec-mutvywkn",
+      "created_at": "2026-10-04T13:58:40.491Z"
+    }
+  }
+}

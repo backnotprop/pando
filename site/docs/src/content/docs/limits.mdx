@@ -16,7 +16,9 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 
 ## Branches, diffs and merges
 
-- **The branch diff skips text files over 1 MiB** on either side.
+- **The branch diff skips text files over 8 MiB** on either side. Files changed says "Too large to show" and links to the file.
+- **Files changed lists at most 5,000 files,** and shows at most 32 MiB of diffs in all. Past that, the later files are listed without their diff. A branch that changes more files says how many there are.
+- **Code with more than 12,000 lines on a side shows without colour,** in Files changed and in the code view. Colouring that much at once would stall scrolling.
 - **A branch's commit list shows its newest 250 commits.**
 - **Finding where a branch left main stops after 5,000 commits.** Past that, the answer is `too_large`.
 - **After main moves,** Pando re-checks the open branches pushed in the last 7 days, at most 100, most recently pushed first. Any other branch shows "pending", with its last known answer, for at least 30 seconds; a branch list then works out at most 25 such branches at a time.

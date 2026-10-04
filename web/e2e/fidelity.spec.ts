@@ -90,6 +90,21 @@ export default {
 };
 `;
 
+// web-api's edit to it and its new file, so the branch's Files changed shows additions, deletions and every syntax role.
+const INDEX_TS_WEB_API = INDEX_TS.replace('import { monorepoStub } from "./monorepo/stub";', 'import { gitwrite } from "./gitwrite";\nimport { monorepoStub } from "./monorepo/stub";')
+  .replace("const MAX_BODY = 64 * 1024 * 1024;", "// git packs up to 128 MiB.\nconst MAX_BODY = 128 * 1024 * 1024;")
+  .replace("return monorepoStub(env, who).fetch(request);", "return gitwrite(monorepoStub(env, who), request);");
+
+const GITWRITE_TS = `// gitwrite: a push with the object's cached write token, no mint per push.
+const TOKEN_TTL_S = 300;
+
+export async function gitwrite(stub: MonorepoStub, request: Request): Promise<Response> {
+  const token = await stub.writeToken(TOKEN_TTL_S);
+
+  return stub.fetch(new Request(request, { headers: { authorization: \`Bearer \${token}\` } }));
+}
+`;
+
 const RULINGS = `# Pando: the owner's rulings in force
 
 Current truth only, revised in place when a ruling changes. History is in \`research/operational/deviations/\`. Last revised 2026-10-03.
@@ -257,7 +272,7 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
     "pando",
     pando,
     "web-api",
-    { "worker/src/gitwrite.ts": "export {};\n" },
+    { "worker/src/gitwrite.ts": GITWRITE_TS, "worker/src/index.ts": INDEX_TS_WEB_API },
     "gitwrite pushes with the object's cached write token: no mint, info or revoke per push\n\nCo-authored-by: Claude <noreply@anthropic.com>",
   );
 
@@ -591,6 +606,57 @@ async function themes(page: Page) {
   await page.goto("/?theme=pando");
 }
 
+/** Black Rainbow (dark only, plain black): its screens and the menu at 1440, the home at 390. */
+async function blackRainbow(page: Page) {
+  if (!wanted("br-")) return;
+
+  const screens = [
+    ["home", "/"],
+    ["code-file", "/ramos/pando/projects/pando/blob/worker/src/index.ts"],
+    ["branch", "/ramos/pando/projects/pando/branches/web-api"],
+    ["files-changed", "/ramos/pando/projects/pando/branches/web-api?tab=files"],
+  ] as const;
+
+  for (const [name, route] of screens) {
+    await page.goto(`${route}${route.includes("?") ? "&" : "?"}theme=black-rainbow`);
+    await settle(page);
+    await page.screenshot({ path: `${SHOTS}br-${name}-1440-real.png` });
+  }
+
+  await page.goto("/?theme=black-rainbow");
+  await settle(page);
+  await page.getByRole("button", { name: "ramos", exact: true }).click();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${SHOTS}br-menu-1440-real.png`, clip: { x: 1440 - 360, y: 0, width: 360, height: 560 } });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?theme=black-rainbow");
+  await settle(page);
+  await page.screenshot({ path: `${SHOTS}br-home-390-real.png` });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?theme=pando");
+}
+
+/** Avatars in each theme, dark and light where it has light: the home (monorepos, Needs you, activity) and the members page. */
+async function avatars(page: Page) {
+  if (!wanted("avatars-")) return;
+
+  const pairs = ["pando-dark", "pando-light", "plannotator-dark", "plannotator-light", "iris-dark", "iris-light", "cloudflare-dark", "cloudflare-light", "black-rainbow"];
+
+  for (const pair of pairs) {
+    for (const [name, route] of [
+      ["home", "/"],
+      ["members", "/ramos/pando/members"],
+    ] as const) {
+      await page.goto(`${route}?theme=${pair}`);
+      await settle(page);
+      await page.screenshot({ path: `${SHOTS}avatars-${pair}-${name}-1440-real.png` });
+    }
+  }
+
+  await page.goto("/?theme=pando");
+}
+
 /** The home's What's new block, close, at both widths. */
 async function whatsNew(page: Page) {
   if (!wanted("whatsnew-")) return;
@@ -724,6 +790,8 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await themes(page);
+  await blackRainbow(page);
+  await avatars(page);
   await whatsNew(page);
 
   for (const ws of shown.sockets) ws.close();

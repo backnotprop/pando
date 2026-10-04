@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./avatars.css";
 
 /* Pando's tokens, taken as they are from the v3 prototype
    (research/design/pando-ui-2026-10-03/v3/prototype.html). Components use them
@@ -42,15 +43,7 @@
   --rust-half: #e07a5f80;
   --shadow: rgba(0, 0, 0, 0.5);
   --margin: 48px;
-  /* avatars: lightness and chroma per mode; the hue comes from the name */
-  --av-ground-l: 0.27;
-  --av-ground-c: 0.035;
-  --av-ink-l: 0.79;
-  --av-ink-c: 0.085;
-  --av-fill-l: 0.35;
-  --av-fill-c: 0.06;
-  --av-letter-l: 0.91;
-  --av-letter-c: 0.045;
+  /* An avatar's edge: none on a dark page; light themes draw a faint one (below). Its colours: avatars.css. */
   --av-ring: transparent;
 }
 
@@ -67,7 +60,10 @@
    mocks/SCREENS.md, "Visual rules"). Cloudflare: cloudflare-docs' colours
    (MIT, NOTICE), mapped in research/design/pando-ui-2026-10-03/themes/
    CLOUDFLARE-TOKENS.md: Foxfire is its cyan, Rust its danger red, clay its
-   orange. The rules, hovers and dim text mix from each theme's roles. */
+   orange. Black Rainbow: the owner's drawing-sheet concept
+   (research/design/themes/black-rainbow.html), plain black (no grid, owner),
+   dark only, mapped in the web-look README. The rules, hovers and dim text mix from each theme's roles. */
+html[data-theme="black-rainbow"],
 html[data-theme="pando-light"],
 html[data-theme="cloudflare-dark"],
 html[data-theme="cloudflare-light"],
@@ -133,6 +129,27 @@ html[data-theme="cloudflare-light"] {
   --shadow: rgba(0, 0, 0, 0.14);
   color-scheme: light;
 }
+/* Pure black, the grounds a touch above it (low enough that the concept's red
+   holds 4.5:1 on each), rules from its line white #dedede at 18%, ink and dim
+   as drawn. Ash is the concept's faint #6a6a6a (3.88:1 on black) lifted to
+   #7b7b7b (4.96:1 on black, 4.56:1 on the menus' ground). Rust is its red,
+   Foxfire its pink (red + blue in its key), clay the red + green of its
+   spectrum. */
+html[data-theme="black-rainbow"] {
+  --soil: #000000;
+  --air: #080808;
+  --loam: #0c0c0c;
+  --pop: #0e0e0e;
+  --rootline: #282828;
+  --bark: #e6e6e6;
+  --bark-dim: #a3a3a3;
+  --ash: #7b7b7b;
+  --clay: #e8c959;
+  --fox: #e48fe0;
+  --rust: #e23c2e;
+  --bark-hi: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.6);
+}
 html[data-theme="plannotator-dark"] {
   --soil: oklch(0.15 0.02 260);
   --air: oklch(0.22 0.02 260);
@@ -191,24 +208,7 @@ html[data-theme="iris-light"] {
   --shadow: rgba(17, 19, 26, 0.14);
   color-scheme: light;
 }
-html[data-theme="plannotator-dark"],
-html[data-theme="iris-dark"] {
-  --av-ground-c: 0.045;
-  --av-ink-l: 0.77;
-  --av-ink-c: 0.12;
-  --av-fill-l: 0.37;
-  --av-fill-c: 0.085;
-  --av-letter-c: 0.05;
-}
 html[data-theme$="-light"] {
-  --av-ground-l: 0.95;
-  --av-ground-c: 0.022;
-  --av-ink-l: 0.6;
-  --av-ink-c: 0.13;
-  --av-fill-l: 0.89;
-  --av-fill-c: 0.055;
-  --av-letter-l: 0.38;
-  --av-letter-c: 0.11;
   --av-ring: color-mix(in srgb, var(--bark) 9%, transparent);
 }
 
@@ -247,6 +247,28 @@ html[data-theme="cloudflare-dark"] {
   --diffs-token-string: #55d584;
   --diffs-token-function: #4693ff;
   --diffs-token-constant: #ffce4b;
+}
+/* Black Rainbow's own: its spectrum, never its red (Rust) or its pink
+   (Foxfire). Green as drawn; cyan and yellow are its additive mixes, green +
+   blue and red + green, as its pink is red + blue. Its blue is lifted 0.03 in
+   OKLab lightness (#3b6ff0 to #4379fb) and comments are a step above ash
+   (#818181), so both hold 4.5:1 on a diff's changed words. A diff's tints are
+   its green and blue at 0.45% of white's luminance on a changed line (Pierre
+   takes 15% of the mix targets below, in lab: #134a18 and #1e3c83) and 0.9% on
+   a changed word: dimmer than Pierre's, with the bar in the gutter still
+   marking each line. */
+html[data-theme="black-rainbow"] {
+  --diffs-token-comment: #818181;
+  --diffs-token-keyword: #4379fb;
+  --diffs-token-string: #3fc24c;
+  --diffs-token-function: #56daf9;
+  --diffs-token-constant: #e8c959;
+  --diffs-bg-addition-override: #134a18;
+  --diffs-bg-addition-number-override: #134a18;
+  --diffs-bg-deletion-override: #1e3c83;
+  --diffs-bg-deletion-number-override: #1e3c83;
+  --diffs-bg-addition-emphasis-override: #041d05;
+  --diffs-bg-deletion-emphasis-override: #07153a;
 }
 html[data-theme="cloudflare-light"] {
   --diffs-token-keyword: #4b3bdc;

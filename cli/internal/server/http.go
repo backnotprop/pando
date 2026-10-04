@@ -223,7 +223,18 @@ func (h *HTTP) ListMonorepos(ctx context.Context, name string) ([]Monorepo, erro
 
 func (h *HTTP) GetMonorepo(ctx context.Context, m string) (*Monorepo, error) {
 	out := &Monorepo{}
-	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m)}, out)
+	_, data, err := h.do(ctx, request{method: "GET", path: monoPath(m)}, out)
+	out.JSON = data
+	return out, err
+}
+
+// RenameMonorepo gives a monorepo a new name within its owner (owners). The
+// old owner/name keeps leading to it until its owner gives that name to
+// another monorepo.
+func (h *HTTP) RenameMonorepo(ctx context.Context, m, name string) (*Monorepo, error) {
+	out := &Monorepo{}
+	_, data, err := h.do(ctx, request{method: "PATCH", path: monoPath(m), body: map[string]string{"name": name}}, out)
+	out.JSON = data
 	return out, err
 }
 
@@ -283,7 +294,27 @@ func (h *HTTP) ListBranches(ctx context.Context, m, repo, state string) (*Branch
 
 func (h *HTTP) GetBranch(ctx context.Context, m, repo, b string) (*Branch, error) {
 	out := &Branch{}
-	_, _, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b)}, out)
+	_, data, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b)}, out)
+	out.JSON = data
+	return out, err
+}
+
+// ListReviews is a branch's reviews, oldest first, as the API sent them.
+func (h *HTTP) ListReviews(ctx context.Context, m, repo, b string) ([]Review, []byte, error) {
+	var out struct {
+		Reviews []Review `json:"reviews"`
+	}
+	_, data, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b) + "/reviews"}, &out)
+	return out.Reviews, data, err
+}
+
+// BranchCommits is the branch's own commits (those ahead of main), newest
+// first, at most limit (250 at most).
+func (h *HTTP) BranchCommits(ctx context.Context, m, repo, b string, limit int) (*BranchCommits, error) {
+	out := &BranchCommits{}
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	_, data, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b) + "/commits", query: q}, out)
+	out.JSON = data
 	return out, err
 }
 
@@ -406,15 +437,29 @@ type CIConnection struct {
 	LastRefused  *CIEvent `json:"last_refused"`
 }
 
+// CIBuild is a build as Pando stores it (CiBuild in api-v1.yaml). State is
+// Pando's word for every service: queued, running, blocked, passed, failed,
+// canceled, skipped.
 type CIBuild struct {
-	ID         string `json:"id"`
-	Pipeline   string `json:"pipeline"`
-	Number     int    `json:"number"`
-	State      string `json:"state"`
-	SHA        string `json:"sha"`
-	Branch     string `json:"branch"`
-	CreatedAt  string `json:"created_at"`
-	FinishedAt string `json:"finished_at"`
+	ID           string `json:"id"`
+	Service      string `json:"service"`
+	Connection   string `json:"connection"`
+	Pipeline     string `json:"pipeline"`
+	Number       int    `json:"number"`
+	Repo         string `json:"repo"`
+	RepoPath     string `json:"repo_path"`
+	State        string `json:"state"`
+	ServiceState string `json:"service_state"`
+	SHA          string `json:"sha"`
+	Branch       string `json:"branch"`
+	Message      string `json:"message"`
+	WebURL       string `json:"web_url"`
+	PushedBy     string `json:"pushed_by"`
+	CreatedAt    string `json:"created_at"`
+	StartedAt    string `json:"started_at"`
+	FinishedAt   string `json:"finished_at"`
+	DurationS    *int   `json:"duration_s"`
+	RebuiltFrom  string `json:"rebuilt_from"`
 }
 
 type CIPipeline struct {
@@ -457,41 +502,5 @@ func (h *HTTP) CIConnect(ctx context.Context, m, org, webhookToken string) (*CIC
 
 func (h *HTTP) CIDisconnect(ctx context.Context, m, id string) error {
 	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m) + "/ci/connections/" + esc(id)}, nil)
-	return err
-}
-
-// BuildkiteHook is a repo's buildkite hook: on a push, Pando starts a build of
-// that pipeline (api-v1.yaml, createHook).
-type BuildkiteHook struct {
-	ID        string   `json:"id"`
-	Type      string   `json:"type"`
-	Events    []string `json:"events"`
-	Buildkite *struct {
-		Organization string `json:"organization"`
-		Pipeline     string `json:"pipeline"`
-	} `json:"buildkite"`
-	CreatedAt string `json:"created_at"`
-	CreatedBy string `json:"created_by"`
-}
-
-func (h *HTTP) ListHooks(ctx context.Context, m, repo string) ([]BuildkiteHook, error) {
-	var out struct {
-		Hooks []BuildkiteHook `json:"hooks"`
-	}
-	_, _, err := h.do(ctx, request{method: "GET", path: repoPath(m, repo) + "/hooks"}, &out)
-	return out.Hooks, err
-}
-
-// AddBuildkiteHook needs an owner's credential.
-func (h *HTTP) AddBuildkiteHook(ctx context.Context, m, repo, org, pipeline string) (*BuildkiteHook, error) {
-	body := map[string]any{"type": "buildkite", "buildkite": map[string]string{"organization": org, "pipeline": pipeline}}
-	out := &BuildkiteHook{}
-	_, _, err := h.do(ctx, request{method: "POST", path: repoPath(m, repo) + "/hooks", body: body}, out)
-	return out, err
-}
-
-// DeleteHook needs an owner's credential.
-func (h *HTTP) DeleteHook(ctx context.Context, m, repo, id string) error {
-	_, _, err := h.do(ctx, request{method: "DELETE", path: repoPath(m, repo) + "/hooks/" + esc(id)}, nil)
 	return err
 }

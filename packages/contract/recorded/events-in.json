@@ -5,10 +5,10 @@
   "body": {
     "events": [
       {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "rec-mutvywkn/rec-mutvywkn",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 35,
-        "at": "2026-10-04T13:58:27.306Z",
+        "at": "2026-10-04T14:51:52.209Z",
         "kind": "meta.saved",
         "summary": {
           "path": "docs/deep/notes.md",
@@ -18,14 +18,14 @@
         "repo": "meta",
         "repo_path": ".",
         "branch": null,
-        "actor": "rec-mutvywkn",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       },
       {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "rec-mutvywkn/rec-mutvywkn",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "seq": 34,
-        "at": "2026-10-04T13:58:27.305Z",
+        "at": "2026-10-04T14:51:52.209Z",
         "kind": "meta.saved",
         "summary": {
           "path": "docs/guide.md",
@@ -35,11 +35,11 @@
         "repo": "meta",
         "repo_path": ".",
         "branch": null,
-        "actor": "rec-mutvywkn",
+        "actor": "rec-mutxvkul",
         "machine": "ana-mbp"
       }
     ],
-    "next": "MjAyNi0xMC0wNFQxMzo1ODoyNy4zMDVafG1fYjAzMjcxMTc4ZjIzYWE3NHwzNA",
+    "next": "MjAyNi0xMC0wNFQxNDo1MTo1Mi4yMDlafG1fNmJiMGU5ZWVhMzU5ZjQ0OHwzNA",
     "from_logs": false,
     "skipped": []
   }

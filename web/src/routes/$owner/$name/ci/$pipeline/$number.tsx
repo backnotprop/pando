@@ -3,13 +3,12 @@
 // its log, with Retry; any job opens to its log, fetched when opened), and its
 // artifacts. States come from the service's webhooks; logs, annotations and
 // artifacts are read from the service, as the server caches them.
-import type { CiBuildDetail, CiJob } from "@pando/contract";
+import { type CiBuildDetail, type CiJob, Routes } from "@pando/contract";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { cancelBuild, rebuild, retryJob } from "../../../../../api/actions";
 import { ciAnnotationsQuery, ciArtifactsQuery, ciBuildIdQuery, ciBuildQuery, ciKey, ciLogQuery, going } from "../../../../../api/ci";
-import { ciArtifactDownloadPath } from "../../../../../api/pending";
 import { monorepoQuery } from "../../../../../api/queries";
 import { Avatar } from "../../../../../ui/Avatar";
 import { button, lnk, Refusal, SectionHead } from "../../../../../ui/controls";
@@ -177,15 +176,17 @@ function Artifacts({ b }: { b: CiBuildDetail }) {
     <div className="mt-10">
       <SectionHead title="Artifacts" count={list.length} />
       <ul aria-label="Artifacts">
-        {list.map((a) => (
-          <li key={a.id} className="border-t border-rule-faint">
+        {list.map((a, i) => (
+          <li key={a.id ?? i} className="border-t border-rule-faint">
             <div className="-mx-2.5 grid min-h-[38px] grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-4 rounded-[7px] px-2.5 py-2">
-              <code className="overflow-hidden text-ellipsis whitespace-nowrap phone:[overflow-wrap:anywhere] phone:whitespace-normal">{a.path ?? a.filename ?? a.id}</code>
+              <code className="overflow-hidden text-ellipsis whitespace-nowrap phone:[overflow-wrap:anywhere] phone:whitespace-normal">{a.path ?? a.filename ?? ""}</code>
               <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{size(a.size)}</span>
               <span className="text-right">
-                <a href={ciArtifactDownloadPath(monorepo.owner, monorepo.name, b.id, a.id)} className={lnk}>
-                  Download
-                </a>
+                {a.id ? (
+                  <a href={Routes.ciArtifactDownloadPath(monorepo.owner, monorepo.name, b.id, a.id)} className={lnk}>
+                    Download
+                  </a>
+                ) : null}
               </span>
             </div>
           </li>

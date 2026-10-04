@@ -2,12 +2,12 @@
 // (its webhook and last event), the pipelines with what each project needs to
 // merge, and the recent builds. A second service adds a block and rows, not a
 // new layout. Connecting shows a secret once, so it happens in a terminal.
+import type { CiConnection, CiPipeline } from "@pando/contract";
 import { useMutation, useQueries, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { disconnect } from "../../../../api/actions";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciQuery } from "../../../../api/ci";
-import type { CiConnection, CiPipeline } from "../../../../api/pending";
 import { monorepoQuery } from "../../../../api/queries";
 import buildkiteMark from "../../../../ui/buildkite-mark.svg";
 import { button, copyInCmd, CopyButton, Empty, lnk, Refusal, row, SectionHead, thead } from "../../../../ui/controls";

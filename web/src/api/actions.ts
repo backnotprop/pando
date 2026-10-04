@@ -1,7 +1,6 @@
 // The web's writes (POST, PATCH, DELETE), each checked by the Worker for Pando's own Origin.
-import { post, postOrRefused, write } from "./client";
+import { post, postOrRefused, remove, write } from "./client";
 import type { MonorepoRef } from "./names";
-import * as Pending from "./pending";
 import { ErrorBody, type Login, type RepoName, Routes } from "@pando/contract";
 
 /** Ends this browser's session, then WorkOS's (its logout page returns to /). */
@@ -31,27 +30,27 @@ export const merge = (m: MonorepoRef, repo: RepoName, branch: string, head: stri
 // ── Slice 3: members, settings, your machines, CI ──────────────────────────
 
 /** Invites by email: a person with an account joins at once (`added`); anyone else gets an invite. */
-export const invite = (m: MonorepoRef, email: string, role: "member" | "owner") => write(Pending.invite(m.owner, m.name), { email, role });
+export const invite = (m: MonorepoRef, email: string, role: "member" | "owner") => write(Routes.invite(m.owner, m.name), { email, role });
 
-export const revokeInvite = (m: MonorepoRef, email: string) => write(Pending.revokeInvite(m.owner, m.name, email));
+export const revokeInvite = (m: MonorepoRef, email: string) => remove(Routes.revokeInvite(m.owner, m.name, email));
 
-export const removeMember = (m: MonorepoRef, login: Login) => write(Pending.removeMember(m.owner, m.name, login));
+export const removeMember = (m: MonorepoRef, login: Login) => remove(Routes.removeMember(m.owner, m.name, login));
 
 /** A new name within the same owner; the old one keeps leading here. */
-export const rename = (m: MonorepoRef, name: string) => write(Pending.renameMonorepo(m.owner, m.name), { name });
+export const rename = (m: MonorepoRef, name: string) => write(Routes.renameMonorepo(m.owner, m.name), { name });
 
 /** Deletes the monorepo, its repos and their history: the full owner/name is the confirmation. */
-export const deleteMonorepo = (m: MonorepoRef) => write(Pending.deleteMonorepo(m.owner, m.name));
+export const deleteMonorepo = (m: MonorepoRef) => remove(Routes.deleteMonorepo(m.owner, m.name));
 
-export const revokeCredential = (id: string) => write(Pending.revokeCredential(id));
+export const revokeCredential = (id: string) => remove(Routes.revokeCredential(id));
 
-export const rebuild = (m: MonorepoRef, build: string) => write(Pending.rebuild(m.owner, m.name, build));
+export const rebuild = (m: MonorepoRef, build: string) => write(Routes.rebuildCiBuild(m.owner, m.name, build));
 
-export const cancelBuild = (m: MonorepoRef, build: string) => write(Pending.cancel(m.owner, m.name, build));
+export const cancelBuild = (m: MonorepoRef, build: string) => write(Routes.cancelCiBuild(m.owner, m.name, build));
 
-export const retryJob = (m: MonorepoRef, build: string, job: string) => write(Pending.retry(m.owner, m.name, build, job));
+export const retryJob = (m: MonorepoRef, build: string, job: string) => write(Routes.retryCiJob(m.owner, m.name, build, job));
 
 /** A build of the branch's head, with fresh tokens. */
-export const newBuild = (m: MonorepoRef, pipeline: string, branch: string) => write(Pending.newBuild(m.owner, m.name, pipeline), { branch });
+export const newBuild = (m: MonorepoRef, pipeline: string, branch: string) => write(Routes.startCiBuild(m.owner, m.name, pipeline), { branch });
 
-export const disconnect = (m: MonorepoRef, connection: string) => write(Pending.disconnect(m.owner, m.name, connection));
+export const disconnect = (m: MonorepoRef, connection: string) => remove(Routes.disconnectCi(m.owner, m.name, connection));

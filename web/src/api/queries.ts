@@ -5,7 +5,6 @@ import { type FullName, MetaHistory, type RepoName, Routes } from "@pando/contra
 import type * as Schema from "effect/Schema";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { get, getText } from "./client";
-import * as Pending from "./pending";
 import type { MonorepoRef } from "./names";
 
 const enc = encodeURIComponent;
@@ -74,7 +73,7 @@ export const membersQuery = (m: MonorepoRef) =>
 
 /** Pending invites, oldest first. */
 export const invitesQuery = (m: MonorepoRef) =>
-  queryOptions({ queryKey: [...key(m), "invites"], queryFn: () => read(Pending.listInvites(m.owner, m.name)).then((r) => r.invites) });
+  queryOptions({ queryKey: [...key(m), "invites"], queryFn: () => read(Routes.listInvites(m.owner, m.name)).then((r) => r.invites) });
 
 /**
  * Every machine, latest activity first (the tab counts those connected now).
@@ -87,7 +86,7 @@ export const machinesQuery = (m: MonorepoRef) =>
 /** Every credential that acts as you: machines, sandboxes, browser sessions. */
 export const credentialsQuery = queryOptions({
   queryKey: ["credentials"],
-  queryFn: () => read(Pending.listCredentials).then((r) => r.credentials),
+  queryFn: () => read(Routes.listCredentials).then((r) => r.credentials),
 });
 
 /** One folder of root files: its files, and its subfolders (with their newest save, once the API has it). */

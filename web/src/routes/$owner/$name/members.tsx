@@ -2,13 +2,12 @@
 // they were last active; an owner invites by email and removes people. A
 // person who already has an account joins at once; anyone else is invited
 // and listed until they sign up.
-import type { Member } from "@pando/contract";
+import type { Invite, Member } from "@pando/contract";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { invite, removeMember, revokeInvite } from "../../../api/actions";
 import { invitesQuery, meQuery, membersQuery } from "../../../api/queries";
-import type { Invite } from "../../../api/pending";
 import { Avatar } from "../../../ui/Avatar";
 import { button, field, Refusal, row, SectionHead, thead } from "../../../ui/controls";
 import { ago, since, useNow } from "../../../ui/time";

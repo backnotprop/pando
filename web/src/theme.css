@@ -355,3 +355,36 @@ html[data-theme="cloudflare-light"] {
     animation: none;
   }
 }
+
+/* Issue labels: eight named colours (SPEC.md 2, Labels), a dot on a quiet
+   chip. Each theme sets them from its own lightness and chroma, and moves a
+   hue away from its Foxfire (arrival) where they would meet; none is red, so
+   a label never reads as Rust (a failure). Gray is the theme's Ash. Hues are
+   the mocks' (research/design/pando-ui-2026-10-03/issues/mocks.html). */
+:root {
+  --lb-l: 0.74;
+  --lb-c: 0.11;
+  --label-gray: var(--ash);
+  --label-orange: oklch(var(--lb-l) var(--lb-c) 54);
+  --label-yellow: oklch(var(--lb-l) var(--lb-c) 90);
+  --label-green: oklch(var(--lb-l) var(--lb-c) 162);
+  --label-teal: oklch(var(--lb-l) var(--lb-c) 189);
+  --label-blue: oklch(var(--lb-l) var(--lb-c) 225);
+  --label-purple: oklch(var(--lb-l) var(--lb-c) 270);
+  --label-pink: oklch(var(--lb-l) var(--lb-c) 315);
+}
+html[data-theme$="-light"] {
+  --lb-l: 0.58;
+  --lb-c: 0.13;
+}
+/* Plannotator's and Iris' Foxfire is violet (about 280): purple and pink step away from it. */
+html[data-theme^="plannotator-"],
+html[data-theme^="iris-"] {
+  --label-purple: oklch(var(--lb-l) var(--lb-c) 305);
+  --label-pink: oklch(var(--lb-l) var(--lb-c) 338);
+}
+/* Cloudflare's Foxfire is cyan (about 210): teal turns greener, blue deeper. */
+html[data-theme^="cloudflare-"] {
+  --label-teal: oklch(var(--lb-l) var(--lb-c) 176);
+  --label-blue: oklch(var(--lb-l) var(--lb-c) 252);
+}

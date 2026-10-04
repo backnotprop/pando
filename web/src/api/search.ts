@@ -32,3 +32,19 @@ export function versionOf(v: string | undefined): number | null {
 
   return v && Number.isSafeInteger(n) && n > 0 ? n : null;
 }
+
+/** The issues list: its filters, kept in the address (`?state=closed&label=bug,auth&assignee=@me&sort=updated&q=words`). */
+export const issuesSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    state: Schema.optionalKey(Schema.String),
+    label: Schema.optionalKey(Schema.String),
+    assignee: Schema.optionalKey(Schema.String),
+    author: Schema.optionalKey(Schema.String),
+    project: Schema.optionalKey(Schema.String),
+    q: Schema.optionalKey(Schema.String),
+    sort: Schema.optionalKey(Schema.String),
+  }),
+);
+
+/** New issue: `?project=projects-pando` fills its Project. */
+export const newIssueSearch = Schema.toStandardSchemaV1(Schema.Struct({ project: Schema.optionalKey(Schema.String) }));

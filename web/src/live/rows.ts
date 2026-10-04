@@ -12,7 +12,9 @@ import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, repoKey, reports } from "../api/projects";
+import { issueFrameOf } from "../api/pending";
 import { machinesQuery } from "../api/queries";
+import { applyIssueFrame, touchLinkedIssues } from "./issues";
 import { keepOpen } from "./socket";
 
 /** While the socket is down, the page's data is read this often instead. */
@@ -132,6 +134,7 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
 
       // A new head: its Files changed is read again (a 304 by its ETag when the files did not move).
       if (f.row.head !== before) void qc.invalidateQueries({ queryKey: branchDiffQuery(m, f.row.repo, f.row.name).queryKey, exact: true });
+      touchLinkedIssues(qc, m, f.row.repo, f.row.name);
 
       break;
     }
@@ -164,7 +167,17 @@ export function useRows(m: MonorepoRef, topics: readonly string[], sync: () => v
       frame: (data) => {
         const frame = Option.getOrNull(decodeMonorepoEventFrame(data));
 
-        if (!frame) return;
+        if (!frame) {
+          // Issues' frames, until the contract carries them (api/pending.ts).
+          const issue = issueFrameOf(data);
+
+          if (issue) {
+            seq = Math.max(seq ?? 0, issue.seq);
+            applyIssueFrame(qc, m, issue);
+          }
+
+          return;
+        }
 
         switch (frame.type) {
           case "caught_up":

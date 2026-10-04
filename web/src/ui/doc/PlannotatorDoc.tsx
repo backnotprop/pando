@@ -9,7 +9,6 @@ import { ThemeProvider, useTheme } from "@plannotator/ui/components/ThemeProvide
 import { Viewer } from "@plannotator/ui/components/Viewer";
 import { configurePlannotatorUI } from "@plannotator/ui/configure";
 import { extractFrontmatter, parseMarkdownToBlocks } from "@plannotator/ui/utils/parser";
-import { SHIKI_THEME_MAP } from "@plannotator/ui/utils/syntaxTheme";
 import DOMPurify from "dompurify";
 import { use, useEffect, useMemo } from "react";
 import { shownMode, useShownMode } from "../theme";
@@ -33,6 +32,11 @@ function rawFrom(path: string, base?: string): string {
 // cookies, nothing in localStorage. No identity, no agent tools on the page.
 const settings = new Map<string, string>();
 
+// Code fences take the code view's colours (ui/syntax.ts, the --diffs-token-*
+// palette in theme.css), not a stock Shiki theme: once that theme is
+// registered, every fence asks for it; before, the viewer keeps its default.
+let fenceTheme: string | undefined;
+
 configurePlannotatorUI({
   webmcp: { enabled: false },
   storageBackend: {
@@ -45,6 +49,7 @@ configurePlannotatorUI({
   docPreviewFetcher: () => Promise.resolve(null),
   // KaTeX and its stylesheet load together, on a document's first formula.
   mathRendererLoader: () => Promise.all([import("katex"), import("katex/dist/katex.min.css")]).then(([katex]) => katex.default),
+  fenceTheme: () => fenceTheme,
 });
 
 /** Keeps the viewer's mode on Pando's, also when the theme changes in the name menu (its code colours and diagrams follow it). */
@@ -61,18 +66,14 @@ function FollowPando() {
 
 const none = () => undefined;
 
-// Code fences take the code view's colours (ui/syntax.ts, the --diffs-token-*
-// palette in theme.css), not a stock Shiki theme. The viewer picks a fence's
-// Shiki theme from its colour theme ("plannotator" here) through this table;
-// it has no setting for it, so the entry is pointed at Pando's once the theme
-// is registered. A document with a fence waits for that (Pierre, which colours
-// the fence, loads then anyway); one without never loads it.
+// A document with a fence waits for Pando's theme to be registered (Pierre,
+// which colours the fence, loads then anyway); one without never loads it.
 let syntax: Promise<void> | null = null;
 
 const pandoFences = () =>
   (syntax ??= import("../syntax").then(
     ({ SYNTAX_THEME }) => {
-      SHIKI_THEME_MAP.plannotator = { dark: SYNTAX_THEME, light: SYNTAX_THEME };
+      fenceTheme = SYNTAX_THEME;
     },
     // If the chunk cannot load (a deploy replaced it), the document still shows; its fences stay plain.
     () => undefined,
@@ -149,7 +150,7 @@ export default function PlannotatorDoc({ path, text, raw, openFile }: DocProps) 
     <ThemeProvider defaultTheme={shownMode()} defaultColorTheme="plannotator">
       <FollowPando />
       {/\.html?$/i.test(name) ? (
-        <div className="pn-doc isolate pb-3">
+        <div className="pn-doc isolate">
           <HtmlDoc name={name} text={text} open={open} />
         </div>
       ) : (

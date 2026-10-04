@@ -87,7 +87,7 @@ function Person({ org, member, you }: { org: OrgProfile; member: OrgMember; you:
     <li className="border-t border-rule-faint">
       <div className={`${row} ${cols} min-h-[60px]`}>
         <span className="flex min-w-0 items-center gap-3">
-          <Avatar name={member.login} size={28} />
+          <Avatar name={member.login} picture={member.picture_url} size={28} />
           <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
             <span>
               <Ref kind="person" link={ownerLink(member.login)}>

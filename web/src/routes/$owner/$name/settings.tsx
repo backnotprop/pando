@@ -14,6 +14,7 @@ import { button, Empty, field, Lnk, Refusal, SectionHead } from "../../../ui/con
 import { Select } from "../../../ui/dropdown";
 import { OwnHead, useMonorepo } from "./-frame/heads";
 import { LabelsSettings } from "./-issues/LabelsSettings";
+import { Mirror } from "./-settings/Mirror";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
   loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(myOrgsQuery),
@@ -199,6 +200,7 @@ function Settings() {
           <>
             <Rename />
             <Description />
+            <Mirror />
             <LabelsSettings />
             <Transfer />
             <Delete />

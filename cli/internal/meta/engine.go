@@ -109,6 +109,39 @@ const closeDeleted websocket.StatusCode = 4404
 
 var errDeleted = errors.New("the monorepo was deleted on the server")
 
+// closeNoAccess is the close code the server sends when this user can no
+// longer open the monorepo: an owner removed them, they left the org that
+// owns it, or a transfer moved it away from that org.
+const closeNoAccess websocket.StatusCode = 4403
+
+// errNoAccess is that close, or a reconnect answered 403 not_a_member (the
+// access ended while this machine was offline).
+var errNoAccess = errors.New("you no longer have access to this monorepo")
+
+func lostAccess(err error) bool {
+	return websocket.CloseStatus(err) == closeNoAccess || errors.Is(err, errNoAccess)
+}
+
+// refusedAccess reports whether a refused upgrade is the Worker's 403
+// not_a_member (its body's first 1,024 bytes are kept by websocket.Dial).
+func refusedAccess(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusForbidden || resp.Body == nil {
+		return false
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	return body.Error.Code == "not_a_member"
+}
+
+// noAccess is why the sync stops when access ended, naming the monorepo.
+func (e *Engine) noAccess() error {
+	return fmt.Errorf("%s: %w; this folder keeps its files and stops syncing", e.cfg.Monorepo, errNoAccess)
+}
+
 type event struct {
 	gen      int
 	conn     *websocket.Conn
@@ -304,6 +337,9 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 				if websocket.CloseStatus(ev.err) == closeDeleted {
 					return errDeleted
 				}
+				if lostAccess(ev.err) {
+					return e.noAccess()
+				}
 				return fmt.Errorf("download: %w", ev.err)
 			}
 			e.handle(ctx, ev)
@@ -426,9 +462,12 @@ func (e *Engine) dial(ctx context.Context) {
 	}
 	go func() {
 		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		c, _, err := websocket.Dial(dctx, e.socketURL(), &websocket.DialOptions{HTTPHeader: header})
+		c, resp, err := websocket.Dial(dctx, e.socketURL(), &websocket.DialOptions{HTTPHeader: header})
 		cancel()
 		if err != nil {
+			if refusedAccess(resp) {
+				err = errNoAccess
+			}
 			e.post(event{gen: gen, err: err})
 			return
 		}
@@ -506,6 +545,8 @@ func (e *Engine) handle(ctx context.Context, ev event) {
 	case ev.err != nil && websocket.CloseStatus(ev.err) == closeDeleted:
 		e.fatal = errDeleted
 		e.cfg.Log.Printf("%v; this folder keeps its files and stops syncing", errDeleted)
+	case ev.err != nil && lostAccess(ev.err):
+		e.fatal = e.noAccess() // Run returns it; pando sync prints it
 	case ev.err != nil:
 		wasUp := e.conn != nil
 		e.dialing = false

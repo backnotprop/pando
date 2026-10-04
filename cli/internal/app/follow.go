@@ -30,8 +30,8 @@ import (
 // main when a default_heads frame says so. It reads heads again on every
 // reconnect, on a resync frame, and every 5 minutes as a safety net; backs
 // off after failures; and stops when the monorepo is deleted (close 4404, or
-// a reconnect answered 404) or this user is no longer a member (a reconnect
-// answered 403). A server without the stream (501), or a file:// server, is
+// a reconnect answered 404) or this user is no longer a member (close 4403,
+// or a reconnect answered 403). A server without the stream (501), or a file:// server, is
 // read every 15 s.
 // A server without /heads (404) is read through the branch list instead.
 
@@ -367,10 +367,13 @@ func (f *follower) subscribe(ctx context.Context, names []string, safety time.Du
 	}()
 
 	// ended is why the socket ended: the server's 4404 (the monorepo was
-	// deleted) stops the follower.
+	// deleted) or 4403 (this user no longer has access) stops the follower.
 	ended := func(err error) (time.Duration, error) {
-		if websocket.CloseStatus(err) == 4404 {
+		switch websocket.CloseStatus(err) {
+		case 4404:
 			return time.Since(started), errStop{"the monorepo " + f.root.FullName() + " was deleted on the server; stopped following"}
+		case 4403:
+			return time.Since(started), errStop{"you no longer have access to " + f.root.FullName() + "; stopped following"}
 		}
 		return time.Since(started), err
 	}

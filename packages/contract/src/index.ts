@@ -14,6 +14,8 @@ export * from "./monorepo.ts";
 
 export * from "./org.ts";
 
+export * from "./profile.ts";
+
 export * from "./needs.ts";
 
 export * from "./feed.ts";
@@ -29,6 +31,8 @@ export * from "./branch.ts";
 export * from "./issue.ts";
 
 export * from "./ci.ts";
+
+export * from "./mirror.ts";
 
 export * from "./files.ts";
 

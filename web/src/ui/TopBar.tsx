@@ -1,7 +1,7 @@
 // The quiet top bar: the mark (home), the breadcrumb (owner / monorepo with
-// its switcher / path), and your name, which opens a small menu (your
-// organizations and New organization, Your machines, the theme and its mode,
-// Sign out).
+// its switcher / path), and your name, which opens a small menu (Your
+// profile, your organizations and New organization, Your machines, the theme
+// and its mode, Sign out).
 import { Menu } from "@base-ui/react/menu";
 import type { MonorepoSummary } from "@pando/contract";
 import { useQueries, useQuery } from "@tanstack/react-query";
@@ -184,10 +184,12 @@ function NameMenu() {
   return (
     <Menu.Root>
       <Menu.Trigger className="ml-auto flex cursor-pointer items-center gap-2.5 rounded-md text-[13px] text-bark-dim hover:text-bark data-popup-open:text-bark">
-        <Avatar name={me.login} size={22} />
+        <Avatar name={me.login} picture={me.picture_url} size={22} />
         <span>{me.login}</span>
       </Menu.Trigger>
       <MenuPopup align="end" offset={10}>
+        <MenuLink link={ownerLink(me.login)}>Your profile</MenuLink>
+        <MenuRule />
         <MenuHeading>Your organizations</MenuHeading>
         {orgs.map((o) => (
           <MenuLink key={o.login} link={ownerLink(o.login)}>

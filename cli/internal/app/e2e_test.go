@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -381,25 +383,69 @@ func TestPlainRepoInit(t *testing.T) {
 	}
 }
 
-func TestInitRefusesAnOversizedFirstPush(t *testing.T) {
+// pando init pushes a history over one push in steps: older commits first on
+// refs/pando/import, a commit too large for one push as carrier commits, then
+// main; no push over the (lowered) limit, and the side ref gone after.
+func TestInitPushesAHistoryInSteps(t *testing.T) {
 	h := newHarness(t)
 	acme := filepath.Join(h.base, "acme")
 	os.MkdirAll(acme, 0o755)
-	os.WriteFile(filepath.Join(acme, "README.md"), []byte(strings.Repeat("acme history\n", 1000)), 0o644)
 	h.git(acme, "init", "-q", "-b", "main")
+	random := func(name string, n int) {
+		b := make([]byte, n)
+		rand.Read(b)
+		os.WriteFile(filepath.Join(acme, name), b, 0o644)
+	}
+	for i := 0; i < 6; i++ { // 6 commits of 40 kB
+		random(fmt.Sprintf("c%d.bin", i), 40_000)
+		h.git(acme, "add", "-A")
+		h.git(acme, "commit", "-q", "-m", fmt.Sprintf("commit %d", i))
+	}
+	for i := 0; i < 5; i++ { // then one commit of 200 kB
+		random(fmt.Sprintf("big%d.bin", i), 40_000)
+	}
 	h.git(acme, "add", "-A")
-	h.git(acme, "commit", "-q", "-m", "first")
+	h.git(acme, "commit", "-q", "-m", "one large commit")
 	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
-	t.Setenv("PANDO_PUSH_LIMIT", "100")
-	out, err := h.pando(acme, "", "init")
-	if err == nil || !strings.Contains(out, "over the 0.0 MB one push to Pando can carry") || !strings.Contains(out, "main is not pushed") {
-		t.Fatalf("init should refuse: %v\n%s", err, out)
+	// The server's receive-pack, wrapped to write down the bytes of each push.
+	sizes := filepath.Join(h.base, "sizes")
+	wrap := filepath.Join(h.base, "counting-receive-pack")
+	os.WriteFile(wrap, []byte(`#!/bin/sh
+f=$(mktemp)
+tee "$f" | git-receive-pack "$@"
+s=$?
+wc -c < "$f" >> '`+sizes+`'
+rm -f "$f"
+exit $s
+`), 0o755)
+	bare := filepath.Join(h.base, "server", "acme", "repos", "acme.git")
+	h.git(acme, "remote", "add", "pando", "file://"+bare)
+	h.git(acme, "config", "remote.pando.receivepack", wrap)
+	t.Setenv("PANDO_PUSH_LIMIT", "100000")
+
+	out := h.ok(acme, "init", "--name", "acme")
+	if !strings.Contains(out, "pushing it in about") || !strings.Contains(out, "pushed a step") || !strings.Contains(out, "pushed main") {
+		t.Fatalf("init:\n%s", out)
 	}
-	t.Setenv("PANDO_PUSH_LIMIT", "")
-	if out := h.ok(acme, "init"); !strings.Contains(out, "pushed main") {
-		t.Fatalf("init again, under the limit:\n%s", out)
+	if got := h.git(acme, "ls-remote", "pando"); !strings.Contains(got, h.git(acme, "rev-parse", "HEAD")+"\trefs/heads/main") || strings.Contains(got, "refs/pando/") {
+		t.Fatalf("the server's refs: %q", got)
+	}
+	h.git(strings.TrimPrefix(h.git(acme, "remote", "get-url", "pando"), "file://"), "fsck", "--strict")
+	b, _ := os.ReadFile(sizes)
+	pushes := strings.Fields(string(b))
+	for _, n := range pushes {
+		if v, _ := strconv.Atoi(n); v > 100_000+1_000 {
+			t.Fatalf("a push of %d bytes, over the limit: %v", v, pushes)
+		}
+	}
+	// 6 steps, the large commit's files in 5 shares, main (its trees only), the side refs' delete.
+	if len(pushes) != 13 {
+		t.Fatalf("%d pushes: %v\n%s", len(pushes), pushes, out)
+	}
+	if main, _ := strconv.Atoi(pushes[11]); main > 2_000 {
+		t.Fatalf("main's push carried %d bytes: the files sent ahead were sent again", main)
 	}
 }
 

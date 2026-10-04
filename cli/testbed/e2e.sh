@@ -155,7 +155,7 @@ if out=$(git push -q 2>&1); then fail "a 33 MB file was pushed"; else
 git reset -q --hard HEAD~1
 head -c 6000000 /dev/urandom > r.bin && git add r.bin && git commit -q -m "6 MB"
 if out=$(PANDO_PUSH_LIMIT=5000000 git push -q 2>&1); then fail "a push over the (lowered) limit went"; else
-  echo "$out" | grep -q "split it into several pushes" && ok "a push over the push limit is refused, with how to split (limit lowered to 5 MB)" || fail "push limit: $out"; fi
+  echo "$out" | grep -q "split it into several pushes" && ok "a push over the push limit is refused, with how to split (limit lowered to 5,000,000 bytes)" || fail "push limit: $out"; fi
 git reset -q --hard HEAD~1
 cd /work/acme
 

@@ -19,7 +19,8 @@ import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS, type Facts } from "./facts";
-import { FactsOut, type FactsRequest } from "./facts-out";
+import { FactsOut, type FactsRequest, type FactsTestSet } from "./facts-out";
+import type { NextPage } from "./credit";
 import { HooksOut } from "./hooks-out";
 import { MetaApplyOut, type MetaApplyRow } from "./meta-apply";
 import { isMergeable, type BranchList, type BranchView } from "./views";
@@ -29,6 +30,7 @@ import type { RefCommand } from "./pktline";
 import { FeedOut, type HelloAnswer } from "../feed/out";
 import { isOneOf, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../parse";
 import { attachmentOf, Machines, type MachineRow } from "./machines";
+import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
@@ -331,6 +333,9 @@ export interface MergeArgs {
 
 export type { MergeResult } from "./types";
 
+import { MirrorOut, type TargetInput } from "../mirror/out";
+import type { MirrorMode } from "../mirror/types";
+
 export class MonorepoObject extends DurableObject<Env> {
   private sql: SqlStorage;
   private locks = new Map<string, Promise<unknown>>();
@@ -352,6 +357,7 @@ export class MonorepoObject extends DurableObject<Env> {
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
   private issues: IssueStore;
+  private mirror: MirrorOut;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -380,6 +386,7 @@ export class MonorepoObject extends DurableObject<Env> {
       branchWord: (repo, branch) => this.branchWord(repo, branch),
       summaryChanged: () => this.feed.scheduleSummary(),
     });
+    this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
     const m = this.info();
@@ -482,6 +489,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.hooksOut.ensureSchema();
     this.metaApply.ensureSchema();
     this.ci.ensureSchema();
+    this.mirror?.ensureSchema();
   }
 
   private rows<T extends Row>(query: string, ...args: SqlStorageValue[]): T[] {
@@ -684,7 +692,12 @@ export class MonorepoObject extends DurableObject<Env> {
       sha, now(), title, repo, sha,
     ).rowsWritten;
 
-    if (moved) this.recordMoved(repo);
+    if (moved) {
+      this.recordMoved(repo);
+
+      // Mirror to GitHub: this main moved (mirror/out.ts).
+      if (sha) this.mirror.dirty(repo);
+    }
   }
 
   /** Count a move of one of the repo's records (a branch head or main): a reconcile that read Artifacts' refs before it reads them again. */
@@ -713,6 +726,52 @@ export class MonorepoObject extends DurableObject<Env> {
   /** The code repos (the meta layer's repo is not listed). */
   listRepos(): RepoRecord[] {
     return this.rows<Stored<RepoRecord>>("SELECT * FROM repos WHERE NOT (name = 'meta' AND artifacts_name LIKE '%--meta') ORDER BY path");
+  }
+
+  // ── Mirror to GitHub (mirror/out.ts) ─────────────────────────────────────
+
+  /** Every repo a mirror can send: the projects (or the plain repo) and the files outside projects/ when they have a repo. */
+  private mirrorRepos(): RepoRecord[] {
+    const meta = this.repoRow("meta");
+
+    return [...this.listRepos(), ...(meta ? [meta] : [])];
+  }
+
+  async mirrorState() {
+    // The files outside projects/ have a repo record once asked for (it is made lazily).
+    if (this.info()?.kind === "monorepo" && !this.repoRow("meta")) await this.getRepo("meta");
+
+    return { settings: this.mirror.settings(), targets: this.mirror.views(), repos: this.mirrorRepos(), pending: this.mirror.pending() };
+  }
+
+  mirrorLink(i: { id: number; account_login: string; account_type: "User" | "Organization"; repository_selection: "all" | "selected" }, by: string): void {
+    this.mirror.link(i, by);
+  }
+
+  mirrorSave(mode: MirrorMode, targets: TargetInput[], by: string): void {
+    this.mirror.save(mode, targets, by);
+  }
+
+  /** Targets waiting for repositories Pando creates at the callback (a JSON list), or null. */
+  mirrorSetPending(pending: string | null): void {
+    this.mirror.setPending(pending);
+  }
+
+  mirrorSetOn(on: boolean, by: string): void {
+    this.mirror.setOn(on, by);
+  }
+
+  mirrorRetry(repos: string[] | null): string[] {
+    return this.mirror.retry(repos);
+  }
+
+  mirrorDisconnect(): void {
+    this.mirror.disconnect();
+  }
+
+  /** A main moved outside this object's records (the files outside projects/, committed by the meta layer object). */
+  mirrorDirty(repo: string): void {
+    this.mirror.dirty(repo);
   }
 
   // ── Branches and pushes ──────────────────────────────────────────────────
@@ -850,6 +909,9 @@ export class MonorepoObject extends DurableObject<Env> {
       });
 
       if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new, push: seq ? { seq, before: u.old } : undefined });
+
+      // Main arriving with its history (pando init in an existing repo, a first push): its past commits count (credit.ts).
+      if (u.old === ZERO && u.new !== ZERO) this.queueFacts({ type: "credit", repo, from: null, to: u.new });
       events.push({ ...base, event: "push", author: identity?.login ?? null, seq: seq || null });
 
       return true;
@@ -888,6 +950,9 @@ export class MonorepoObject extends DurableObject<Env> {
     const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
 
     if (opened) events.push({ ...e, event: "branch.opened" });
+
+    // A branch opened counts for the person whose sign-in pushed it.
+    if (opened && identity) this.queueFacts({ type: "credit_one", repo, login: identity.login, kind: "branch", at, key: `b:${this.info()?.id}:${repo}:${name}:${at}` });
     events.push({ ...e, event: "push" });
     this.queueFacts({ type: "branch", repo, branch: name, head: u.new, push: seq ? { seq, before: u.old } : undefined });
 
@@ -936,7 +1001,8 @@ export class MonorepoObject extends DurableObject<Env> {
    * keep it for the reconcile, one row per ref.
    */
   markUnrecorded(repo: string, identity: Identity, commands: RefCommand[], origin: string | null, landed: "yes" | "unknown" = "yes"): void {
-    for (const c of commands) this.keepPush(repo, identity, c, origin, landed);
+    // Branches only, as recordPush: a tag or pando init's refs/pando/* has no record to catch up.
+    for (const c of commands) if (c.ref.startsWith("refs/heads/")) this.keepPush(repo, identity, c, origin, landed);
   }
 
   /** A ref's head as recorded here: main from the repo's record, a branch from its row; null when unknown or deleted. */
@@ -984,7 +1050,7 @@ export class MonorepoObject extends DurableObject<Env> {
     let written = 0;
 
     for (const k of rows) {
-      if (k.landed !== "yes" || (this.recordedHead(repo, k.ref) ?? ZERO) !== k.old) continue;
+      if (k.landed !== "yes" || !k.ref.startsWith("refs/heads/") || (this.recordedHead(repo, k.ref) ?? ZERO) !== k.old) continue;
       const events: RepoEvent[] = [];
 
       if (this.moveRef(repo, keptIdentity(k), { ref: k.ref, old: k.old, new: k.new }, {}, events)) {
@@ -993,7 +1059,8 @@ export class MonorepoObject extends DurableObject<Env> {
       }
     }
 
-    const named = new Set(rows.map((k) => k.ref));
+    // Branches only (a row of another ref, kept before markUnrecorded left them out, is just deleted).
+    const named = new Set(rows.map((k) => k.ref).filter((ref) => ref.startsWith("refs/heads/")));
 
     if (all) for (const ref of Object.keys(refs)) if (ref.startsWith("refs/heads/") && ref !== main) named.add(ref);
 
@@ -1158,6 +1225,7 @@ export class MonorepoObject extends DurableObject<Env> {
     );
     const review = { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
     this.publish({ kind: "review", collection: "reviews", key: `${repo}/${id}`, op: "upsert", repo, ...who(identity), row: review });
+    this.queueFacts({ type: "credit_one", repo, login: identity.login, kind: "review", at, key: `r:${this.info()?.id}:${id}` });
 
     return review;
   }
@@ -1432,6 +1500,8 @@ export class MonorepoObject extends DurableObject<Env> {
     this.rememberHead(a.repo, out.sha, message.split("\n")[0] || null);
     this.forgetRequiredIfConfig(a.repo);
     this.queueFacts({ type: "sweep", repo: a.repo, main: out.sha });
+    // The commits it brought to main count for their authors and co-authors (credit.ts).
+    this.queueFacts({ type: "credit", repo: a.repo, from: out.old, to: out.sha });
     // The issues it closes, decided now: the branch's links, and keywords in the message and the merged commits.
     // Each closes about a second later, in its own step (issues/store.ts applyCloses).
     const merged = { repo: a.repo, branch: a.branch };
@@ -1673,6 +1743,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (closesNext !== null) this.feed.armAt(closesNext);
     await this.factsOut.alarm();
     await this.hooksOut.alarm();
+    await this.mirror.alarm();
     await this.metaApply.alarm();
   }
 
@@ -1915,6 +1986,11 @@ export class MonorepoObject extends DurableObject<Env> {
 
   async webSocketError(_ws: WebSocket): Promise<void> {}
 
+  /** People who lost access (monorepo/access.ts): their event sockets close with NO_ACCESS, so clients stop. */
+  closeSockets(logins: string[]): number {
+    return closeLogins(this.ctx, logins, (ws) => attachmentOf(ws)?.login);
+  }
+
   /**
    * A branch's stored fields as an event row (no Artifacts reads in the
    * object). `ahead`, `behind`, `base`, `mergeable` and `checks` are computed
@@ -1949,6 +2025,16 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Branch facts (facts.ts): stored, computed on change by FactsDrain ────
 
+  /** A history's next page of credits (credit.ts), from the drain that read this one. */
+  queueCredit(m: NextPage): void {
+    this.queueFacts(m);
+  }
+
+  /** A commit of the shared files (the live layer's): one credit for each person whose save it carries, keyed by the commit. */
+  queueSavedCredit(sha: string, logins: string[], at: number): void {
+    for (const login of logins) this.queueFacts({ type: "credit_one", repo: "meta", login, kind: "commit", at: new Date(at).toISOString(), key: `s:${this.info()?.id}:${sha}` });
+  }
+
   private queueFacts(m: FactsRequest): void {
     // The outbox (facts-out.ts), drained at once by RPC.
     this.factsOut.add(m);
@@ -1977,7 +2063,7 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** Tests only (FACTS_TEST=1): fail the next drains; the facts outbox as it is. */
-  testFactsOutbox(set: { fail?: number } = {}) {
+  testFactsOutbox(set: FactsTestSet = {}) {
     return this.factsOut.test(set);
   }
 
@@ -2350,8 +2436,9 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.machines.list(this.feed.liveHelloSids());
   }
 
+  /** The summary line, as the home reads it for a large monorepo (whose members' feeds do not get it). */
   feedSummary(): Summary {
-    return this.feed.summary();
+    return this.feed.line();
   }
 
   /** Tests only (the crash and failure switches act only with FEED_TEST=1): the feed outbox. */

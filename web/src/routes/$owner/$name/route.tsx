@@ -1,14 +1,17 @@
 // A monorepo's frame: it finds the monorepo, draws the breadcrumb from the
 // address, and keeps the monorepo's own socket open while one of its pages is.
-// Each page draws its own head (-frame/heads.tsx).
+// When that socket says you no longer have access (removed, or out of its
+// org), the page gives way to a plain message. Each page draws its own head
+// (-frame/heads.tsx).
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, notFound, Outlet, redirect, useMatches } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
 import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
-import { Page } from "../../../ui/pages";
+import { Lnk } from "../../../ui/controls";
+import { Page, Title } from "../../../ui/pages";
 import { blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
@@ -102,9 +105,18 @@ function MonorepoFrame() {
   const queryClient = useQueryClient();
 
   const { owner, name } = monorepo;
+  // The monorepo whose socket said you no longer have access (this frame stays mounted across monorepos).
+  const [lostFull, setLostFull] = useState<string | null>(null);
 
   // One socket per monorepo, kept across its pages (the context object is new on each navigation).
-  useEffect(() => startMonorepoFeed(queryClient, monorepoRef(owner, name)), [queryClient, owner, name]);
+  useEffect(() => {
+    const ref = monorepoRef(owner, name);
+
+    return startMonorepoFeed(queryClient, ref, () => {
+      setLostFull(ref.full);
+      void queryClient.invalidateQueries({ queryKey: ["monorepos"] });
+    });
+  }, [queryClient, owner, name]);
 
   const rest = pathname
     .split("/")
@@ -120,7 +132,16 @@ function MonorepoFrame() {
 
   return (
     <Page crumbs={crumbs}>
-      <Outlet />
+      {lostFull === monorepo.full ? (
+        <>
+          <Title>You no longer have access to {monorepo.full}.</Title>
+          <p className="mt-2 text-[14px] text-bark-dim">
+            <Lnk to="/">Back to your repositories</Lnk>
+          </p>
+        </>
+      ) : (
+        <Outlet />
+      )}
     </Page>
   );
 }

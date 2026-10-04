@@ -1,0 +1,41 @@
+{
+  "schema": "Mirror",
+  "route": "GET .../mirror (not connected)",
+  "status": 200,
+  "body": {
+    "app": {
+      "configured": true
+    },
+    "connection": null,
+    "mode": "projects",
+    "on": false,
+    "started": false,
+    "paused": null,
+    "targets": [
+      {
+        "repo": "projects-app",
+        "path": "projects/app",
+        "on": false,
+        "github": null,
+        "state": "off",
+        "last": null,
+        "behind": null,
+        "waiting_since": null,
+        "next_try_at": null,
+        "problem": null
+      },
+      {
+        "repo": "meta",
+        "path": "",
+        "on": false,
+        "github": null,
+        "state": "off",
+        "last": null,
+        "behind": null,
+        "waiting_since": null,
+        "next_try_at": null,
+        "problem": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema": "Mirror",
+  "route": "GET .../mirror (each project, up to date)",
+  "status": 200,
+  "body": {
+    "app": {
+      "configured": true
+    },
+    "connection": {
+      "installation_id": 101,
+      "login": "backnotprop",
+      "type": "User",
+      "repository_selection": "selected",
+      "manage_url": "http://127.0.0.1:8835/web/settings/installations/101",
+      "connected_at": "2026-10-04T18:07:28.886Z",
+      "connected_by": "mr-muu4v9az"
+    },
+    "mode": "projects",
+    "on": true,
+    "started": true,
+    "paused": null,
+    "targets": [
+      {
+        "repo": "projects-app",
+        "path": "projects/app",
+        "on": true,
+        "github": {
+          "id": 1001,
+          "full_name": "backnotprop/app",
+          "private": false,
+          "url": "https://github.com/backnotprop/app"
+        },
+        "state": "up_to_date",
+        "last": {
+          "commit": "5e73cea22aa2d3223c10c95014d9832719366839",
+          "at": "2026-10-04T18:07:43.030Z"
+        },
+        "behind": null,
+        "waiting_since": null,
+        "next_try_at": null,
+        "problem": null
+      },
+      {
+        "repo": "meta",
+        "path": "",
+        "on": true,
+        "github": {
+          "id": 1002,
+          "full_name": "backnotprop/mr-muu4v9az-files",
+          "private": true,
+          "url": "https://github.com/backnotprop/mr-muu4v9az-files"
+        },
+        "state": "up_to_date",
+        "last": {
+          "commit": "88d7b33e0fb2017ac50d731e8d661170e7c21a46",
+          "at": "2026-10-04T18:07:43.157Z"
+        },
+        "behind": null,
+        "waiting_since": null,
+        "next_try_at": null,
+        "problem": null
+      }
+    ]
+  }
+}

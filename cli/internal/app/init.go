@@ -385,15 +385,11 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		return fmt.Errorf("the server's main is at %s, not %s; it is left as it is (push a branch and merge it)", short(f[0]), short(p.Head))
 	}
 	// The same size check a worktree's pre-push hook makes. main takes only
-	// its first push, so history over the limit goes up in pieces on a side
-	// branch first.
-	check := gitx.Cmd{Dir: p.Checkout, Stdin: strings.NewReader(fmt.Sprintf("refs/heads/%s %s refs/heads/main %s\n", p.MainBranch, p.Head, strings.Repeat("0", len(p.Head))))}
-	if _, err := check.RunShell(e.Ctx, worktree.PrePushScript(), "pando", cloneURL); err != nil {
-		var ge *gitx.Error
-		if errors.As(err, &ge) {
-			e.Stderr.Write([]byte(ge.Stderr))
-		}
-		return fmt.Errorf("main is not pushed. Push older history first on a side branch, in pieces under 100 MB: git -C %s push pando <older commit>:refs/heads/import, then run pando init again", p.Checkout)
+	// its first push, so a history over one push goes up in steps first
+	// (steps.go), and main's push carries the rest.
+	steps, err := pushSteps(e, g, p.Path, cloneURL, p.Head)
+	if err != nil {
+		return err
 	}
 	// Two failures are retried. A repo made a moment ago can be "not found"
 	// at the git door for a few seconds: retried for up to half a minute.
@@ -404,7 +400,12 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 	push := func() error {
 		// The agent header rides on this one push only; the person's own
 		// checkout keeps no Pando agent in its config.
-		args := append(worktree.AgentHeaderArgs(cloneURL, e.agentFor(nil)), "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
+		args := append(worktree.AgentHeaderArgs(cloneURL, e.agentFor(nil)), "push", "--quiet")
+		if len(steps) > 0 {
+			// Measured above with the steps left out; a pre-push hook here would count them again.
+			args = append(args, "--no-verify")
+		}
+		args = append(args, "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
 		_, err := g.Run(e.Ctx, args...)
 		return err
 	}
@@ -435,6 +436,15 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		err = push()
 	}
 	e.printf("%-44s pushed %s %s as main\n", p.Path, p.MainBranch, short(p.Head))
+	if len(steps) > 0 {
+		del := []string{"push", "--quiet", "--no-verify", "pando"}
+		for _, ref := range steps {
+			del = append(del, ":"+ref)
+		}
+		if _, err := g.Run(e.Ctx, del...); err != nil {
+			e.warnf("%s: main is pushed, but %s stays on the server (%s)", p.Path, strings.Join(steps, " and "), firstLine(err))
+		}
+	}
 	return nil
 }
 

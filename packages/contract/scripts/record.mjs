@@ -13,6 +13,7 @@
 // in through its webhook, merges (forced, refused, clean), saves and
 // restores root files, breaks pando.toml (checks unknown), records every route the contract covers and every
 // socket frame, then makes an org (with two more people), makes a repo in it and moves the monorepo into it,
+// records her profile and contributions (her own, one day, and as another viewer),
 // and deletes both monorepos, pass or fail (an org can't be deleted yet). Tokens are stripped before anything is written; credentials stay in
 // memory. Git runs with a temp HOME, no system config and no keychain.
 import { spawnSync } from "node:child_process";
@@ -237,7 +238,8 @@ const blobSha = (bytes) => createHash("sha1").update(`blob ${bytes.length}\0`).u
 try {
   mkdirSync(OUT, { recursive: true });
 
-  const user = await call("POST", "/v1/users", BOOT, { login, name: "Ana Lima", credential_name: "ana-mbp" });
+  // Her email is her commits' author email, so her merged commits count on her profile.
+  const user = await call("POST", "/v1/users", BOOT, { login, name: "Ana Lima", email: "ana@pando.invalid", credential_name: "ana-mbp" });
 
   secret = user.json?.credential?.secret ?? null;
 
@@ -813,12 +815,14 @@ try {
   // into it, where ana is an owner both ways, bo is in by the org and cy by a row of his own.
   const org = `org-${id}`;
 
-  r = await call("GET", `/v1/users/${login}`, secret);
-  record("owner-user.json", "Owner", "GET /v1/users/{name} (a person)", r.status, r.json);
+  r = await call("PATCH", "/v1/user", secret, { bio: "Plans and code.", location: "Lisbon", links: ["https://example.com/ana"] });
+  record("user-patched.json", "Profile", "PATCH /v1/user {bio, location, links}", r.status, r.json);
   r = await call("POST", "/v1/orgs", secret, { login: org, name: "Rec Org" });
   record("org.json", "Org", "POST /v1/orgs", r.status, r.json);
 
   if (r.status !== 201) throw new Error(`no org: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  r = await call("GET", `/v1/users/${login}`, secret);
+  record("owner-user.json", "Owner", "GET /v1/users/{name} (a person, in an org)", r.status, r.json);
   r = await call("PATCH", `/v1/orgs/${org}`, secret, { description: "A recorded organization", website: "https://example.com" });
   record("org-patched.json", "Org", "PATCH /v1/orgs/{org}", r.status, r.json);
   r = await call("GET", `/v1/users/${org}`, secret);
@@ -840,6 +844,7 @@ try {
   r = await call("POST", "/v1/users", BOOT, { login: `cy-${id}`, name: "Cy Ortiz" });
 
   if (r.status !== 201) throw new Error(`no third user: ${r.status}`);
+  const cySecret = r.json.credential.secret;
   await call("PUT", `/v1/monorepos/${current}/members/cy-${id}`, secret, { role: "member" });
   r = await call("PATCH", `/v1/monorepos/${current}`, secret, { owner: org });
   record("transferred.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {owner: <org>}", r.status, r.json);
@@ -856,6 +861,21 @@ try {
   record("events-owner.json", "EventsPage", "GET /v1/events?owner=<org>&limit=5", r.status, r.json);
   r = await call("DELETE", `/v1/orgs/${org}/members/bo-${id}`, secret);
   record("org-member-removed.json", "NoContent", "DELETE /v1/orgs/{org}/members/{login}", r.status, r.json);
+
+  // Her contributions: her merged commits, the branches she opened, her review and the repositories she made; then one day;
+  // then as cy, who opens the monorepo (his own row) but not the repo made in the org.
+  const contributions = await waitFor(async () => {
+    const x = await call("GET", `/v1/users/${login}/contributions?tz=-420`, secret);
+
+    return x.json?.kinds?.commit > 0 && x.json?.kinds?.review > 0 ? x : null;
+  }, 20_000);
+
+  if (contributions === null) throw new Error("her contributions never counted her commits and review");
+  record("contributions.json", "Contributions", "GET /v1/users/{login}/contributions?tz=-420 (your own)", contributions.status, contributions.json);
+  r = await call("GET", `/v1/users/${login}/contributions?tz=-420&day=${contributions.json.days.at(-1).date}`, secret);
+  record("contributions-day.json", "ContributionPeriod", "GET /v1/users/{login}/contributions?tz=-420&day=<a day>", r.status, r.json);
+  r = await call("GET", `/v1/users/${login}/contributions?tz=0`, cySecret);
+  record("contributions-other.json", "Contributions", "GET /v1/users/{login}/contributions?tz=0 (another viewer: only repositories they can open)", r.status, r.json);
   console.log(`recorded ${written.length} files for ${monorepoId}`);
 } catch (error) {
   failed = true;

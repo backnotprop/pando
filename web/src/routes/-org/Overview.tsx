@@ -43,7 +43,7 @@ function People({ org }: { org: OrgProfile }) {
       <ul aria-label={`People in ${org.login}`}>
         {people.slice(0, SIDE_PEOPLE).map((p) => (
           <li key={p.login} className="flex min-h-[34px] items-center gap-2.5 text-[14px]">
-            <Avatar name={p.login} size={22} />
+            <Avatar name={p.login} picture={p.picture_url} size={22} />
             <Ref kind="person" link={ownerLink(p.login)} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
               {p.name ?? p.login}
             </Ref>

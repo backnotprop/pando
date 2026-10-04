@@ -9,6 +9,7 @@
 //   pando monorepo  rename (the folder follows), view by the new name
 //   pando members   invites and revoke
 //   pando activity  --json; pando branch view; pando hook; pando machine list
+//   pando profile   --json; the graph's rows and the months; no such person
 //   pando issue     create and comment with --key (once each), list, view,
 //                   edit with --base-version (a stale one refused), close
 //                   and reopen, react, link and unlink; worktree add --issue,
@@ -526,6 +527,22 @@ try {
   check("pando activity: one line each, at most --limit", r.status === 0 && r.stdout.trim().split("\n").length <= 3 && new RegExp(LOGIN).test(r.stdout), said(r));
   r = await pando(["activity", "--all", "--json", "--limit", "5"], { cwd: mono });
   check("--all: every monorepo's lines, this one's among them", r.status === 0 && (parsed(r)?.events ?? []).some((e) => e.monorepo === renamed), said(r));
+
+  // ── pando profile ──
+  r = await pando(["profile", "--json"]);
+  const pj = parsed(r);
+  check("pando profile --json: your contributions as the API sent them (the branches you opened count)", r.status === 0 && pj?.login === LOGIN && pj.kinds?.branch >= 1 && pj.levels?.length === 4 && Array.isArray(pj.days), said(r));
+  r = await pando(["profile"]);
+  const plines = r.stdout.split("\n");
+  const pat = plines.findIndex((l) => /contributions? in the last year$/.test(l));
+  const grid = plines.slice(pat + 2, pat + 9);
+  check(
+    "pando profile: your login, the total, then the graph's 7 rows (Mon, Wed and Fri named), then the months",
+    r.status === 0 && plines[0].startsWith(LOGIN) && pat > 0 && grid.length === 7 && grid[1].startsWith("Mon ") && grid[3].startsWith("Wed ") && grid[5].startsWith("Fri ") && grid.every((l) => l.length > 50) && /branch(es)? opened/.test(r.stdout),
+    said(r),
+  );
+  r = await pando(["profile", `nobody-${id}`]);
+  check("pando profile <no such person>: not found, exit 1", r.status === 1 && /not_found/.test(r.stderr), said(r));
 
   // ── pando org, monorepo transfer, init --owner ──
   const ORG = `org-${id}`;

@@ -1,7 +1,7 @@
 // The Worker's environment: bindings from wrangler.jsonc plus the secrets the
 // owner sets with `wrangler secret put` (never in the repo). Secrets are
 // optional here: the Worker answers clearly when one is not set.
-type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "PANDO_STATUS_SECRET" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS" | "FEED_FANOUT_MAX" | "FEED_TICK_MS" | "FEED_TEST" | "FEED_RETRY_MS" | "DOOR_TEST" | "FILES_BUDGET" | "FACTS_RETRY_MS" | "FACTS_TEST" | "HOOKS_TEST" | "META_TEST" | "CHECKS_TEST";
+type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "PANDO_STATUS_SECRET" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS" | "FEED_FANOUT_MAX" | "FEED_TICK_MS" | "FEED_TEST" | "FEED_RETRY_MS" | "DOOR_TEST" | "FILES_BUDGET" | "FACTS_RETRY_MS" | "FACTS_TEST" | "HOOKS_TEST" | "META_TEST" | "CHECKS_TEST" | "MIRROR_TEST" | "GITHUB_APP_SLUG" | "GITHUB_APP_CLIENT_ID" | "GITHUB_APP_CLIENT_SECRET" | "GITHUB_APP_PRIVATE_KEY" | "GITHUB_API_BASE" | "GITHUB_WEB_BASE" | "GITHUB_GIT_BASE" | "MIRROR_SPACING_MS" | "MIRROR_RETRY_MS";
 
 export interface Env extends Omit<Cloudflare.Env, Secrets> {
   /** Accounts (C8): users, credentials, monorepos, members, invites. D1 with read replication. */
@@ -44,4 +44,24 @@ export interface Env extends Omit<Cloudflare.Env, Secrets> {
   FEED_TEST?: string;
   /** Tests only (C25): the outbox's retry delays in ms, comma-separated (default 1000,5000,30000,300000). */
   FEED_RETRY_MS?: string;
+  /** Mirror to GitHub (mirror/): the GitHub App's address name, github.com/apps/<slug>. Not secret. */
+  GITHUB_APP_SLUG?: string;
+  /** The GitHub App's Client ID: the JWT's issuer and the OAuth client. Not secret. */
+  GITHUB_APP_CLIENT_ID?: string;
+  /** The GitHub App's client secret: trades the one-time authorization code at connect. */
+  GITHUB_APP_CLIENT_SECRET?: string;
+  /** The GitHub App's private key, PEM as GitHub gives it (PKCS#1) or PKCS#8. Signs the JWTs that mint installation tokens. */
+  GITHUB_APP_PRIVATE_KEY?: string;
+  /** Tests only: a stand-in for api.github.com (any value not on localhost is ignored). */
+  GITHUB_API_BASE?: string;
+  /** Tests only: a stand-in for github.com's pages (authorize, install). */
+  GITHUB_WEB_BASE?: string;
+  /** Tests only: a stand-in for github.com's git (smart HTTP). */
+  GITHUB_GIT_BASE?: string;
+  /** Tests only: "1" opens /v1/_mirror/test to the bootstrap secret. Never set on a deployed Worker. */
+  MIRROR_TEST?: string;
+  /** Tests only: the least time between two runs for one GitHub repository, ms (default 10000). */
+  MIRROR_SPACING_MS?: string;
+  /** Tests only: the retry delays in ms, comma-separated (default 10000,60000,300000,1800000, then hourly). */
+  MIRROR_RETRY_MS?: string;
 }

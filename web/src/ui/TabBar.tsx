@@ -17,7 +17,7 @@ export function Tab({ link, current, label, count }: { link: AppLink; current: b
       className="flex flex-none items-baseline gap-2 border-b-[1.5px] border-transparent pb-[11px] text-[14px] text-ash hover:text-bark aria-[current=page]:border-bark aria-[current=page]:text-bark"
     >
       {label}
-      {count === undefined ? null : <span className="font-mono text-[12.5px] leading-[15px] text-ash">{count}</span>}
+      {count === undefined ? null : <span className="text-[12.5px] leading-[15px] text-ash">{count}</span>}
     </Link>
   );
 }

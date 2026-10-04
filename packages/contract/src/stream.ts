@@ -9,6 +9,7 @@ import { Status } from "./checks.ts";
 import { CiBuild, CiConnectionRow, CiJob } from "./ci.ts";
 import { Count, RepoName, Sha, Timestamp } from "./ids.ts";
 import { Machine } from "./repo.ts";
+import { IssueComment, IssueRow, Label, Reactions, TimelineItem } from "./issue.ts";
 
 /** What every event frame carries: its place in the stream, its key, and who did it (null when no person did). */
 const envelope = {
@@ -122,6 +123,35 @@ export const CiConnectionEvent = Schema.Union([
   Schema.Struct({ ...envelope, kind: Schema.Literal("ci.connection"), collection: Schema.Literal("ci_connections"), op: Schema.Literal("delete"), row: Schema.Struct({ id: Schema.String }) }),
 ]);
 
+/**
+ * An issue changed (topics `issues` and `issue:<n>`, and `repo:<repo>` for its project and its linked branches'
+ * repos). `row` is its list row (no body); `items` are the new timeline items (a comment item's body is null over
+ * 16 KB: fetch the timeline). issue.updated covers everything but opening, commenting, closing and reopening.
+ */
+export const IssueEvent = Schema.Struct({
+  ...envelope,
+  kind: Schema.Literals(["issue.opened", "issue.commented", "issue.closed", "issue.reopened", "issue.updated"]),
+  collection: Schema.Literal("issues"),
+  op: Schema.Literal("upsert"),
+  number: Count,
+  row: IssueRow,
+  /** The body's version now: a page showing the body reads it again when this moves. */
+  body_version: Count,
+  items: Schema.Array(TimelineItem),
+  /** Timeline items gone (a deleted comment's). */
+  removed: Schema.optionalKey(Schema.Array(Count)),
+  /** A comment edited, or whose reactions changed (its body null over 16 KB). */
+  comment: Schema.optionalKey(IssueComment),
+  /** The issue's own reactions, when they changed. */
+  reactions: Schema.optionalKey(Reactions),
+});
+
+/** A label made or changed (`from`: its name before a rename), or deleted (`op: delete`, the row is `{name}`). Topic `issues`. */
+export const LabelEvent = Schema.Union([
+  Schema.Struct({ ...envelope, kind: Schema.Literal("label.updated"), collection: Schema.Literal("labels"), op: Schema.Literal("upsert"), row: Label, from: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ ...envelope, kind: Schema.Literal("label.updated"), collection: Schema.Literal("labels"), op: Schema.Literal("delete"), row: Schema.Struct({ name: Schema.String }) }),
+]);
+
 /** The row kinds the web subscribes to, each a `kind:<kind>` topic. */
 export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection"] as const;
 
@@ -135,6 +165,8 @@ export const MonorepoEventFrame = Schema.Union([
   CiBuildEvent,
   CiJobEvent,
   CiConnectionEvent,
+  IssueEvent,
+  LabelEvent,
   /** The replay after `since` is done; keep the highest `seq` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), seq: Count }),
   /** More was missed than the stream replays: refetch what is on screen, then reconnect from `seq`. */

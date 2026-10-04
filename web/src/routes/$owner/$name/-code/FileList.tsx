@@ -24,8 +24,8 @@ export const saverOf = (v: MetaVersion) => v.login ?? (v.author.replace(/\s*<[^>
 
 const ICONS = { up: FolderIcon, dir: FolderIcon, project: RepoIcon, file: FileIcon };
 
-/** The bar over a list or a file: who, what, where, when, and History. */
-export function ChangeBar({ who, title, id, at, history }: { who: string; title: string; id: string; at: number; history: AppLink }) {
+/** The bar over a list or a file: who, what, where, when, and History. `id` is a commit's (`sha`, set in mono) or a word ("saved", "on ramos-mbp"). */
+export function ChangeBar({ who, title, id, sha = false, at, history }: { who: string; title: string; id: string; sha?: boolean; at: number; history: AppLink }) {
   const clock = useNow();
 
   return (
@@ -34,8 +34,8 @@ export function ChangeBar({ who, title, id, at, history }: { who: string; title:
       <span className="flex-none text-[13px] text-bark">{who}</span>
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-bark-dim phone:order-3 phone:basis-full">{title}</span>
       <span className="ml-auto flex flex-none items-center gap-4">
-        <span className="font-mono text-[12.5px] leading-[15px] text-ash phone:hidden">{id}</span>
-        <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{ago(at, clock)}</span>
+        <span className={`text-[12.5px] leading-[15px] text-ash phone:hidden ${sha ? "font-mono" : ""}`}>{id}</span>
+        <span className="text-[12.5px] whitespace-nowrap text-ash">{ago(at, clock)}</span>
         <Link {...history} className={lnk}>
           History
         </Link>
@@ -69,7 +69,7 @@ export function FileList({ bar, rows }: { bar: ReactNode; rows: readonly Row[] }
                 <Icon className={`block size-4 ${r.kind === "file" ? "text-ash" : "text-bark-dim"}`} />
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap text-bark">{r.name}</span>
                 <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-ash phone:hidden">{r.change}</span>
-                <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{r.at ? since(r.at, clock) : ""}</span>
+                <span className="text-right text-[12.5px] whitespace-nowrap text-ash">{r.at ? since(r.at, clock) : ""}</span>
               </Link>
             </li>
           );
@@ -85,7 +85,7 @@ export function Readme({ path, text, raw, fileLink }: { path: string; text: stri
 
   return (
     <section className="mt-6 overflow-hidden rounded-[10px] border border-rootline">
-      <h3 className="flex items-center gap-2 border-b border-rule-faint px-4 py-[11px] font-mono text-[13px] leading-[16px] text-bark-dim">
+      <h3 className="flex items-center gap-2 border-b border-rule-faint px-4 py-[11px] text-[13px] leading-[16px] text-bark-dim">
         <FileIcon className="inline-block size-4 text-ash" />
         <Link {...fileLink(path)} className="hover:text-bark">
           {path.slice(path.lastIndexOf("/") + 1)}

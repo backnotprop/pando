@@ -155,6 +155,8 @@ func setup(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 
 // CmdSync runs the live sync until interrupted; with --once, until this
 // machine's changes are all on the server and it has every other change.
+// --once exits 3 when some are not: a path frozen after a conflict, or a
+// change the server refused; it names each (CODE-VS-MODEL M8).
 func CmdSync(args []string, hooks Hooks) int {
 	fs, rootFlag := setup("sync", os.Stderr)
 	once := fs.Bool("once", false, "send and receive what is waiting, then exit")
@@ -178,6 +180,16 @@ func CmdSync(args []string, hooks Hooks) int {
 	if err := e.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "pando:", err)
 		return 1
+	}
+	if !*once {
+		return 0
+	}
+	if left := e.notSent(); len(left) > 0 {
+		fmt.Fprintln(os.Stderr, "pando: synced, except these, which are not in Pando:")
+		for _, l := range left {
+			fmt.Fprintln(os.Stderr, "  "+l)
+		}
+		return 3
 	}
 	return 0
 }

@@ -1,9 +1,9 @@
-// Apple's SF Pro Text for regular text, served only when the build is asked
-// to, the same switch as the web app's (web/vite.config.ts): PANDO_SF_FONTS=1
-// copies it in from the landing page's folder in the meta layer (or
-// PANDO_FONTS_DIR) and declares it on every page. It is never committed, and a
-// build without the switch ships no file of Apple's: regular text then falls
-// back to the system's.
+// Apple's SF Pro Text for regular text and SF Mono for code, served only when
+// the build is asked to, the same switch as the web app's (web/vite.config.ts):
+// PANDO_SF_FONTS=1 copies them in from the landing page's folder in the meta
+// layer (or PANDO_FONTS_DIR) and declares them on every page. They are never
+// committed, and a build without the switch ships no file of Apple's: regular
+// text then falls back to the system's, and code to Ioskeley Mono.
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AstroIntegration } from "astro";
@@ -16,7 +16,7 @@ const FONTS_FROM =
 /** Gitignored; served at /fonts/sf/ and declared by src/styles/sf-fonts.css. */
 const FONTS_TO = fileURLToPath(new URL("../public/fonts/sf", import.meta.url));
 
-const FILES = ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf"];
+const FILES = ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SFNSMono.ttf"];
 
 export function sfFonts(): AstroIntegration {
   return {

@@ -633,6 +633,91 @@ func TestE2EOfflineSavesGoOutOnReconnect(t *testing.T) {
 	t.Logf("after the network returned, ana's saves reached ben in %s", d.Round(time.Millisecond))
 }
 
+// The server accepts ana's save, but the answer is lost with the socket, and
+// ana edits the file again before she reconnects. The catch-up brings her own
+// version back: that is the lost answer, not a conflict, and her newer edit
+// goes out on top of it (CODE-VS-MODEL M3).
+func TestE2EOwnSaveAfterLostAnswer(t *testing.T) {
+	env := newEnv(t)
+	p := newProxy(t, env.server)
+	a := env.machineAt(t, "ana", p.url())
+	b := env.machine(t, "ben")
+	ctx := context.Background()
+	a.write("warm.md", "online\n")
+	waitContent(t, b, "warm.md", "online\n")
+
+	p.drop() // from here the server's answers to ana are lost
+	a.write("x.md", "first\n")
+	waitContent(t, b, "x.md", "first\n") // accepted on the server
+	p.cut()
+	time.Sleep(300 * time.Millisecond) // ana is offline; her save is back in the outbox
+	a.write("x.md", "second\n")
+	time.Sleep(500 * time.Millisecond) // her watcher sees the edit
+	p.restore()
+
+	waitFor(t, "ana's second edit on ben, or a conflict copy on ana", func() bool {
+		got, _ := b.read("x.md")
+		return got == "second\n" || len(a.conflictCopies("x.md")) > 0
+	})
+	time.Sleep(500 * time.Millisecond)
+	if copies := a.conflictCopies("x.md"); len(copies) != 0 {
+		kept, _ := os.ReadFile(copies[0])
+		t.Errorf("a conflict copy on ana, holding %q", kept)
+	}
+	if frozen, _ := ListFrozen(a.root); len(frozen) != 0 {
+		t.Errorf("frozen on ana: %+v", frozen)
+	}
+	if got, _ := a.read("x.md"); got != "second\n" {
+		t.Errorf("ana's x.md reads %q, want her newest edit", got)
+	}
+	if got, _ := b.read("x.md"); got != "second\n" {
+		t.Errorf("ben's x.md reads %q, want ana's newest edit", got)
+	}
+	h, err := env.client().History(ctx, env.p("x.md"), 10)
+	if err != nil || len(h.Versions) != 2 || h.Versions[0].Machine != "ana" || h.Versions[1].Machine != "ana" {
+		t.Errorf("x.md's history: %+v %v, want two versions by ana", h, err)
+	}
+}
+
+// Ben's save lands before ana's delete, and ana makes the file again before
+// the answer comes back. Her delete lost, but her new bytes are not lost:
+// they go to a conflict copy, as a losing save's would (CODE-VS-MODEL M4).
+func TestE2ELosingDeleteKeepsNewFile(t *testing.T) {
+	env := newEnv(t)
+	p := newProxy(t, env.server)
+	a := env.machineAt(t, "ana", p.url())
+	b := env.machine(t, "ben")
+	a.write("out.md", "v1\n")
+	waitContent(t, b, "out.md", "v1\n")
+
+	p.hold() // what the server sends ana waits in the proxy
+	b.write("out.md", "v2 from ben\n")
+	waitFor(t, "ben's save on the server", func() bool {
+		h, err := env.client().History(context.Background(), env.p("out.md"), 10)
+		return err == nil && len(h.Versions) == 2
+	})
+	os.Remove(a.path("out.md"))
+	time.Sleep(time.Second) // ana sends the delete on version 1; its stale answer waits in the proxy
+	a.write("out.md", "made again by ana\n")
+	time.Sleep(500 * time.Millisecond) // her watcher sees the new file
+	p.release()
+
+	waitContent(t, a, "out.md", "v2 from ben\n")
+	time.Sleep(500 * time.Millisecond)
+	copies := a.conflictCopies("out.md")
+	if len(copies) != 1 {
+		t.Errorf("%d conflict copies on ana, want 1", len(copies))
+	} else if kept, _ := os.ReadFile(copies[0]); string(kept) != "made again by ana\n" {
+		t.Errorf("the conflict copy holds %q", kept)
+	}
+	if frozen, _ := ListFrozen(a.root); len(frozen) != 1 || frozen[0].Path != env.p("out.md") {
+		t.Errorf("frozen on ana: %+v, want out.md", frozen)
+	}
+	if got, _ := b.read("out.md"); got != "v2 from ben\n" {
+		t.Errorf("ben's out.md reads %q", got)
+	}
+}
+
 func TestE2EHistoryAndRestore(t *testing.T) {
 	env := newEnv(t)
 	a := env.machine(t, "ana")
@@ -974,15 +1059,99 @@ func TestE2ESyncCommand(t *testing.T) {
 	}
 }
 
+// pando sync --once exits 3, naming each path, when changes here did not
+// reach Pando: a path frozen after a conflict, or a change the server
+// refused. An agent that trusts exit 0 is not misled (CODE-VS-MODEL M8).
+func TestE2ESyncOnceReportsWhatStayed(t *testing.T) {
+	env := newEnv(t)
+	bin := filepath.Join(t.TempDir(), "pando")
+	if b, err := exec.Command("go", "build", "-o", bin, "pando/cmd/pando").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, b)
+	}
+	a := env.machine(t, "ana")
+	sb := env.bare(t, "sandbox")
+	sb.writeRoot(".pando/local/root.json", rootJSON(env.mono, env.server))
+	once := func(what string) (int, string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, "sync", "--once", "--root", sb.root)
+		cmd.Env = append(os.Environ(), "PANDO_MACHINE=sandbox", "PANDO_AUTHOR=Sandbox <sandbox@example.com>")
+		out, err := cmd.CombinedOutput()
+		code := 0
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("pando sync --once, %s: exit %d\n%s", what, code, out)
+		return code, string(out)
+	}
+	history := func(p string) int {
+		h, err := env.client().History(context.Background(), env.p(p), 10)
+		if err != nil {
+			return -1
+		}
+		return len(h.Versions)
+	}
+
+	a.write("plan.md", "v1\n")
+	waitFor(t, "ana's save on the server", func() bool { return history("plan.md") == 1 })
+	if code, _ := once("first"); code != 0 {
+		t.Errorf("the first sync exits %d, want 0", code)
+	}
+
+	// Ana saves while the sandbox edits the same file: the sandbox loses the race.
+	a.write("plan.md", "v2 from ana\n")
+	waitFor(t, "ana's second save on the server", func() bool { return history("plan.md") == 2 })
+	sb.write("plan.md", "the sandbox's edit\n")
+	if code, out := once("after a conflict"); code != 3 || !strings.Contains(out, env.p("plan.md")+": frozen") {
+		t.Errorf("after a conflict: exit %d, want 3 naming %s as frozen", code, env.p("plan.md"))
+	}
+	sb.write("plan.md", "the sandbox's fix\n")
+	if code, out := once("an edit of the frozen file"); code != 3 || !strings.Contains(out, "pando resolve "+env.p("plan.md")) {
+		t.Errorf("an edit of a frozen file: exit %d, want 3 and how to resolve it", code)
+	}
+
+	// A change the server refuses: a reference pointer whose url carries a password.
+	leaky := ".pando/references/" + env.p("leaky.toml")
+	sb.writeRoot(leaky, "url = \"https://user:not-a-real-token@example.com/x.git\"\n")
+	if code, out := once("a refused pointer"); code != 3 || !strings.Contains(out, leaky+": refused") || !strings.Contains(out, "(credentials)") {
+		t.Errorf("a refused change: exit %d, want 3 naming %s and the reason", code, leaky)
+	}
+
+	// Resolved, and the pointer gone: everything is in Pando again.
+	var out strings.Builder
+	if code := cmdResolve([]string{"--root", sb.root, sb.path("plan.md")}, &out, &out); code != 0 {
+		t.Fatalf("resolve: %s", out.String())
+	}
+	os.Remove(sb.rootPath(leaky))
+	if code, _ := once("resolved"); code != 0 {
+		t.Errorf("once resolved: exit %d, want 0", code)
+	}
+	waitContent(t, a, "plan.md", "the sandbox's fix\n")
+}
+
 // ---- a TCP proxy that can be cut ----
 
+// The proxy can also stop the server's bytes on their way to the client:
+// drop loses them (an answer lost with a socket), hold keeps them until
+// release (an answer that comes late).
 type proxy struct {
-	t      *testing.T
-	ln     net.Listener
-	target string
-	mu     sync.Mutex
-	down   bool
-	conns  []net.Conn
+	t        *testing.T
+	ln       net.Listener
+	target   string
+	mu       sync.Mutex
+	down     bool
+	conns    []net.Conn
+	toClient string // "" passes the server's bytes, "drop" loses them, "hold" keeps them
+	held     []heldBytes
+}
+
+type heldBytes struct {
+	c net.Conn
+	b []byte
 }
 
 func newProxy(t *testing.T, server string) *proxy {
@@ -1021,10 +1190,33 @@ func newProxy(t *testing.T, server string) *proxy {
 			p.conns = append(p.conns, c, up)
 			p.mu.Unlock()
 			go func() { io.Copy(up, c); up.Close() }()
-			go func() { io.Copy(c, up); c.Close() }()
+			go func() { p.toClientCopy(c, up); c.Close() }()
 		}
 	}()
 	return p
+}
+
+// toClientCopy copies the server's bytes to the client, unless they are
+// dropped or held. Writes happen under the lock, so release keeps the order.
+func (p *proxy) toClientCopy(c, up net.Conn) {
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := up.Read(buf)
+		if n > 0 {
+			p.mu.Lock()
+			switch p.toClient {
+			case "drop":
+			case "hold":
+				p.held = append(p.held, heldBytes{c, append([]byte(nil), buf[:n]...)})
+			default:
+				c.Write(buf[:n])
+			}
+			p.mu.Unlock()
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (p *proxy) url() string { return "http://" + p.ln.Addr().String() }
@@ -1036,13 +1228,37 @@ func (p *proxy) cut() {
 	for _, c := range p.conns {
 		c.Close()
 	}
-	p.conns = nil
+	p.conns, p.held, p.toClient = nil, nil, ""
 }
 
 func (p *proxy) restore() {
 	p.mu.Lock()
 	p.down = false
 	p.mu.Unlock()
+}
+
+// drop loses everything the server sends from now on, until cut.
+func (p *proxy) drop() {
+	p.mu.Lock()
+	p.toClient = "drop"
+	p.mu.Unlock()
+}
+
+// hold keeps everything the server sends from now on, until release.
+func (p *proxy) hold() {
+	p.mu.Lock()
+	p.toClient = "hold"
+	p.mu.Unlock()
+}
+
+// release sends what was held, in order, and lets the server's bytes through again.
+func (p *proxy) release() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, h := range p.held {
+		h.c.Write(h.b)
+	}
+	p.held, p.toClient = nil, ""
 }
 
 // ---- commits after quiet, on real Artifacts (run-e2e.sh --artifacts) ----
@@ -1714,5 +1930,56 @@ func TestE2ECommitWindow(t *testing.T) {
 		if len(l) != n || strings.Contains(l[0].Message, "Co-authored-by") {
 			t.Errorf("author: %d commits, newest %q", len(l), l[0].Message)
 		}
+	}
+}
+
+// Ana saves a file and Ben saves it again inside one quiet window: the
+// commit carries only Ben's version, so Ben is its author, and Ana, whose
+// save is folded into it, is a Co-authored-by line. The same in either
+// grouping (CODE-VS-MODEL M7):
+//
+//	worker/test/live/run-e2e.sh --artifacts -run Credit
+//	META_COMMIT_GROUPING=window worker/test/live/run-e2e.sh --artifacts -run Credit
+func TestE2ECommitCreditsFoldedSave(t *testing.T) {
+	env := artifactsEnv(t, "e2e-credit-")
+	server, mono := env.server, env.mono
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
+
+	a.write("plan.md", "ana's plan\n")
+	waitContent(t, b, "plan.md", "ana's plan\n")
+	time.Sleep(2 * time.Second)
+	b.write("plan.md", "ana's plan\nben's line\n")
+	c := env.client()
+	deadline := time.Now().Add(45 * time.Second)
+	for {
+		h, err := c.History(context.Background(), env.p("plan.md"), 2)
+		if err == nil && len(h.Versions) == 2 && h.Versions[0].Commit != "" {
+			if h.Versions[1].Commit != h.Versions[0].Commit {
+				t.Errorf("ana's version has commit %q, ben's %q: want the one commit for both", h.Versions[1].Commit, h.Versions[0].Commit)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no commit after 45 s: %+v %v", h, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	var l []gitCommit
+	json.Unmarshal(metaRepo(t, server, mono, "log", nil), &l)
+	if len(l) != 1 {
+		t.Fatalf("%d commits, want 1", len(l))
+	}
+	t.Logf("commit (author %s):\n%s", l[0].Author.Name, l[0].Message)
+	if l[0].Author.Name != "Ben" {
+		t.Errorf("the commit's author is %s, want Ben (the last saver)", l[0].Author.Name)
+	}
+	if !strings.Contains(l[0].Message, "\nCo-authored-by: Ana <ana@example.com>\n") {
+		t.Error("Ana's folded save has no Co-authored-by line")
+	}
+	if !strings.Contains(l[0].Message, "\nPando-Machine: ana\n") || !strings.Contains(l[0].Message, "\nPando-Machine: ben\n") {
+		t.Error("the commit does not name both machines")
 	}
 }

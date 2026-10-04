@@ -6,11 +6,12 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { Repo } from "@pando/contract";
 import { branchesQuery } from "../../../../api/projects";
-import { BranchIcon, Chevron } from "../../../../ui/Icons";
+import { Caret } from "../../../../ui/dropdown";
+import { BranchIcon } from "../../../../ui/Icons";
 import type { AppLink } from "../../../../ui/paths";
 import { branchesLink } from "../../../../ui/paths";
 import { useMonorepo } from "../-frame/heads";
-import { stateOf } from "./state";
+import { stateOf, unknownWhy } from "./state";
 
 const QUIET = { ready: "text-bark-dim", bad: "text-rust", wait: "text-ash", merged: "text-ash" };
 
@@ -33,7 +34,7 @@ export function BranchPicker({ repo, gitRef, at }: { repo: Repo; gitRef: string 
       <Popover.Trigger className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-[7px] border border-rootline bg-loam pr-2.5 pl-[11px] font-mono text-[13px] leading-[16px] text-bark hover:border-rule-hi data-popup-open:border-rule-hi">
         <BranchIcon className="size-[15px] flex-none text-ash" />
         {current}
-        <Chevron className="block size-3.5" />
+        <Caret />
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="start" sideOffset={6} className="z-10">
@@ -64,7 +65,9 @@ export function BranchPicker({ repo, gitRef, at }: { repo: Repo; gitRef: string 
                   <Link key={b.name} {...at(b.name)} data-current={current === b.name || undefined} className={item}>
                     <BranchIcon className="size-3.5 flex-none text-ash" />
                     <span className="overflow-hidden font-mono text-[13px] text-ellipsis whitespace-nowrap text-bark">{b.name}</span>
-                    <span className={`ml-auto text-[12px] whitespace-nowrap ${QUIET[s.tone]}`}>{s.text}</span>
+                    <span title={unknownWhy(b) ?? undefined} className={`ml-auto text-[12px] whitespace-nowrap ${QUIET[s.tone]}`}>
+                      {s.text}
+                    </span>
                   </Link>
                 );
               })}

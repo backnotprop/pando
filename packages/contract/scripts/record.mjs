@@ -684,6 +684,8 @@ try {
   record("status-checks-unknown.json", "Checks", "GET .../repos/{repo}/commits/{ref}/status (pando.toml broken)", r.status, r.json);
   r = await call("GET", repoPath, secret);
   record("repo-checks-unknown.json", "Repo", "GET .../repos/{repo} (pando.toml broken: required_checks null, checks_unknown)", r.status, r.json);
+  r = await call("GET", `${base}/ci`, secret);
+  record("ci-checks-unknown.json", "CiOverview", "GET .../ci (pando.toml broken: required checks null)", r.status, r.json);
   r = await call("POST", `${repoPath}/branches/feat%2Fclash/merge`, secret, { expected_head: clashHead });
   record("merge-checks-unknown.json", "ErrorBody", "POST .../branches/{branch}/merge (pando.toml broken: 503 checks_unknown)", r.status, r.json);
 

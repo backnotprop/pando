@@ -30,7 +30,7 @@ export function usePlainRepo() {
 function Head({ title, right }: { title: ReactNode; right?: ReactNode }) {
   return (
     <div className="flex items-end justify-between gap-8 phone:flex-col phone:items-start phone:gap-4">
-      <h1 className="flex items-center gap-3.5 font-mono text-[24px] leading-[30px] tracking-[-.01em]">{title}</h1>
+      <h1 className="flex items-center gap-3.5 text-[24px] leading-[30px] tracking-[-.01em]">{title}</h1>
       {right}
     </div>
   );

@@ -4,12 +4,13 @@
 // through a stand-in; a branch's checks moving live as jobs report; a running
 // log growing on its build's page; the build failing there, with its
 // sanitised annotation, Retry, Rebuild and Cancel; the pipeline's page with
-// New build; the CI tab taking a build's change live; then a rename (the old
-// name redirects) and a delete with the typed confirmation. No page polls
+// New build; the CI tab taking a build's change live; a broken pando.toml
+// (required checks unknown, and why); then a rename (the old name
+// redirects) and a delete with the typed confirmation. No page polls
 // while its socket is up. Real Worker, real git, real browser.
 import { expect, type Page, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
-import { BASE, browserPost, Machine, nextSignIn } from "./seed";
+import { BASE, browserPost, ciStatus, Machine, nextSignIn } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -52,6 +53,8 @@ interface Made {
   buildkite: Buildkite | null;
   socket: WebSocket | null;
   name: string;
+  /** Other monorepos the run made, deleted at the end. */
+  others: string[];
 }
 
 test("slice 3: machines, your machines, members, CI with Buildkite, rename and delete", async ({ page, browser }) => {
@@ -63,7 +66,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
     if (m.type() === "error" && !/status of (401|404|409)/.test(m.text())) errors.push(m.text());
   });
 
-  const made: Made = { machine: null, buildkite: null, socket: null, name };
+  const made: Made = { machine: null, buildkite: null, socket: null, name, others: [] };
 
   const machine = () => {
     if (!made.machine) throw new Error("no machine credential yet");
@@ -167,6 +170,38 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(members.getByText(`bea-${id}`, { exact: true })).toHaveCount(0);
     });
 
+    await test.step("a large monorepo (the e2e's FEED_FANOUT_MAX is 1: two people make one): a push reaches the open home live, by its own socket", async () => {
+      const big = `big-${id}`;
+      const branch = `large-${id}`;
+      const m = machine();
+
+      await browserPost(page, "/v1/monorepos", { name: big });
+      made.others.push(big);
+      const appUrl = (await browserPost(page, `/v1/monorepos/${login}/${big}/repos`, { path: "projects/app" })).clone_url;
+
+      m.push(m.commit("app", appUrl, "main", { "README.md": "# app\n" }, "Start the app"), appUrl, "main");
+      await browserPost(page, `/v1/monorepos/${login}/${big}/invites`, { email: bea.email, role: "member" });
+      // The home's list says so once the person's feed has its line.
+      await expect
+        .poll(async () => (await (await page.request.get("/v1/monorepos?summary=1")).json()).monorepos.find((x: { name: string }) => x.name === big)?.large, { timeout: 60_000 })
+        .toBe(true);
+      const sockets: string[] = [];
+
+      page.on("websocket", (ws) => sockets.push(ws.url()));
+      await page.goto(`${BASE}/`);
+      await expect.poll(() => sockets.some((u) => u.includes(`/v1/monorepos/${login}/${big}/events?topics=feed`))).toBe(true);
+      await page.waitForTimeout(2000);
+      // Its lines never reach the person's socket; nor does the log poll (one large monorepo, under 5).
+      const logReads = reads(page, /^\/v1\/events$/);
+
+      logReads.from();
+      m.push(m.commit("app", appUrl, branch, { "a.txt": "a\n" }, "A large monorepo's push"), appUrl, branch);
+      await expect(page.getByTestId("activity").getByRole("link", { name: branch }).first()).toBeVisible({ timeout: 30_000 });
+      expect(logReads.seen()).toEqual([]);
+      // Back to the first monorepo's members, where the next step invites.
+      await page.goto(`${BASE}/${full}/members`);
+    });
+
     await test.step("invite an email with no account: it waits under Invited; then revoke it", async () => {
       const email = `nobody-${id}@pando.invalid`;
 
@@ -198,6 +233,23 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(pipelines.getByText("projects/web")).toBeVisible();
       await expect(page.getByText("No builds yet.")).toBeVisible();
       sha = machine().git(machine().dir("web"), "rev-parse", "HEAD").trim();
+    });
+
+    await test.step("Add pipeline: a project with none gets one from a small form (its Buildkite hook)", async () => {
+      await browserPost(page, `/v1/monorepos/${full}/repos`, { path: "projects/api" });
+      await page.reload();
+      const row = page.getByRole("list", { name: "Pipelines" }).getByRole("listitem").filter({ hasText: "projects/api" });
+
+      await row.getByRole("button", { name: "Add pipeline" }).click();
+      const form = page.getByRole("form", { name: "Add pipeline" });
+
+      await expect(form.getByRole("combobox", { name: "Project" })).toHaveValue("projects-api");
+      await form.getByRole("textbox", { name: "Pipeline" }).fill("api-ci");
+      await form.getByRole("button", { name: "Add pipeline" }).click();
+      await expect(row.getByRole("link", { name: "api-ci" })).toBeVisible();
+      const hooks = await (await machine().api("GET", `/v1/monorepos/${full}/repos/projects-api/hooks`)).json();
+
+      expect(hooks.hooks.some((h: { type: string; buildkite: { pipeline: string } | null }) => h.type === "buildkite" && h.buildkite?.pipeline === "api-ci")).toBe(true);
     });
 
     const t0 = Date.now();
@@ -333,6 +385,41 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       expect(ciReads.seen()).toEqual([]);
     });
 
+    await test.step("a check on a commit no branch is at names the commit: lint passed on <sha>", async () => {
+      const m = machine();
+      const dir = m.commit("web", url, `side-${id}`, { "s1.txt": "1\n" }, "Side one");
+
+      m.commit("web", url, `side-${id}`, { "s2.txt": "2\n" }, "Side two");
+      m.push(dir, url, `side-${id}`);
+      const first = m.git(dir, "rev-parse", "HEAD~1").trim();
+
+      await page.goto(`${BASE}/${full}/activity`);
+      await ciStatus(m, full, "projects-web", first, "lint", "success");
+      const line = page.getByTestId("activity").getByRole("listitem").filter({ hasText: "lint" }).first();
+
+      await expect(line.getByText("passed on", { exact: true })).toBeVisible({ timeout: 30_000 });
+      await expect(line.getByText(first.slice(0, 7), { exact: true })).toBeVisible();
+    });
+
+    await test.step("a broken .pando/pando.toml: the branch says its required checks are unknown, and why; only Merge anyway", async () => {
+      const m = machine();
+      const meta = `${BASE}/${full}/meta.git`;
+
+      // The meta layer's first push of main (a save there is refused: .pando/ changes only through git), with a missing comma.
+      m.push(m.commit("meta", meta, "main", { ".pando/pando.toml": '[repos."projects/web"]\nrequired_checks = ["ci" "e2e"]\n' }, "Require checks, badly"), meta, "main");
+      await page.goto(`${BASE}/${full}/projects/web/branches/feature`);
+      // ci is queued again after its Retry, so the box leads with it; the reason follows.
+      await expect(page.getByText(/^Required checks unknown: pando\.toml line \d+: .+/)).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("complementary").getByText("Required checks unknown", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Merge anyway" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Merge", exact: true })).toHaveCount(0);
+      await page.goto(`${BASE}/${full}/projects/web/branches`);
+      // Its state word in the list (ci running, here) carries the reason as its title.
+      const state = page.getByRole("list", { name: "Open branches" }).getByRole("link", { name: /feature/ }).locator("[title]");
+
+      await expect(state).toHaveAttribute("title", /^Required checks unknown: pando\.toml line \d+: /);
+    });
+
     await test.step("rename: the monorepo answers at its new name, and the old name redirects there", async () => {
       await page.goto(`${BASE}/${full}/settings`);
       await page.getByRole("textbox", { name: "Name" }).fill(renamed);
@@ -365,5 +452,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
     await made.buildkite?.close();
 
     if (made.name) await made.machine?.api("DELETE", `/v1/monorepos/${login}/${made.name}?confirm=${login}/${made.name}`);
+
+    for (const other of made.others) await made.machine?.api("DELETE", `/v1/monorepos/${login}/${other}?confirm=${login}/${other}`);
   }
 });

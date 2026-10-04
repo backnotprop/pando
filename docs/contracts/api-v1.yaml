@@ -199,6 +199,40 @@ tags:
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.
+  - name: issues
+    description: |
+      Issues, as on GitHub: one list per monorepo, numbered `#1`, `#2`, ...
+      in arrival order with no gaps (one counter, taken in one step), with an
+      optional `project` (the repo it is about). Members open, comment, edit,
+      label, assign, close and reopen any issue; owners manage labels and may
+      delete anyone's comment. Bodies and comments are Markdown, up to 65,536
+      characters; titles 1 to 256.
+
+      **Branches and merges.** A branch is linked to an issue three ways: a
+      closing keyword in its title or description ("Fixes #12"), one in a
+      commit on the branch (read with the branch's facts), or an explicit
+      `link`. Keywords are GitHub's: close, closes, closed, fix, fixes, fixed,
+      resolve, resolves, resolved, any case, an optional colon, then `#12` or
+      `owner/name#12` of this monorepo; one keyword per number; text in
+      backticks is skipped; a `git revert` commit never closes. A merge into
+      main decides, as it lands, the open issues it closes: the branch's links
+      and the keywords in its merge message and merged commits (MergeResult
+      `closes`, also on its `merged` line). Each closes about a second later,
+      in its own step, as completed, naming the merge (`issue.closed`); one a
+      person closed meanwhile is left as it is. Issues never refuse a merge.
+      A revert never reopens.
+
+      **Writes are safe to retry.** Create and comment take an
+      `Idempotency-Key` header (up to 64 characters, kept for good, per
+      person): a retry answers the first one (200, `Pando-Replayed: true`).
+      Labels, assignees, links, reactions and state are set operations. A
+      body edit with `base_version` never overwrites someone else's: a stale
+      one is 409 `edited` with `current`, the issue or comment as it is now.
+
+      **Live.** Every change is one event on the monorepo's stream (topics
+      `issues` and `issue:<n>`); `issue.opened`, `issue.commented`,
+      `issue.closed` (by a person) and `issue.reopened` are activity lines.
+      Open issues assigned to a person show in the home's "Needs you".
   - name: ci
     description: |
       CI on one model for every service:
@@ -389,11 +423,12 @@ paths:
   /v1/logout:
     get:
       operationId: logoutPage
-      summary: A one-button page that posts to /v1/logout
+      summary: Opened in a browser, goes to the app
+      description: A GET never ends a session. It sends the browser to the app (`/`), where the name menu signs out (POST).
       tags: [users]
       security: []
       responses:
-        "200": { description: HTML }
+        "303": { description: "To `/`." }
     post:
       operationId: logout
       summary: Sign out this browser (and end its WorkOS session)
@@ -655,9 +690,14 @@ paths:
   /v1/branches:
     get:
       operationId: listNeeds
-      summary: '"Needs you": open branches that are ready, conflicting or failing, across the person''s monorepos'
+      summary: '"Needs you": open branches that are ready, conflicting or failing, and issues assigned to the person, across their monorepos'
       description: |
-        From stored branch facts and statuses (no Artifacts call), asked only
+        `issues`: per monorepo, the open issues assigned to the person, read
+        from each monorepo's summary line (up to 10 s behind; the person's
+        socket's `summary` frame moves it, its `assigned`), most recently
+        updated first, with the newest one.
+
+        Branches: from stored branch facts and statuses (no Artifacts call), asked only
         of the monorepos whose counts in their summary line are not zero (up
         to 10 s behind), most recently active first, at most 50 monorepos (the
         rest in `skipped`). One state per branch, in this order:
@@ -692,11 +732,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [branches, truncated, skipped]
+                required: [branches, issues, truncated, skipped]
                 properties:
                   branches:
                     type: array
                     items: { $ref: "#/components/schemas/NeedRow" }
+                  issues:
+                    type: array
+                    items:
+                      allOf:
+                        - type: object
+                          required: [monorepo, monorepo_id]
+                          properties:
+                            monorepo: { type: string, description: "`owner/name`." }
+                            monorepo_id: { type: string }
+                        - $ref: "#/components/schemas/AssignedIssues"
                   truncated: { type: boolean }
                   skipped:
                     type: array
@@ -864,7 +914,20 @@ paths:
           alone at most once a minute per machine (every activity event
           already names its `actor` and `machine`).
 
+        - issues: `issue.opened`, `issue.commented`, `issue.closed`,
+          `issue.reopened`, `issue.updated` (everything else: title, body,
+          project, labels, assignees, links, reactions, a comment edited or
+          deleted, a merge naming a closed issue). Key `<n>`, with `number`,
+          `row` (the IssueRow), `body_version`, `items` (the new timeline
+          items; a comment's body is null over 16 KB), and when they apply
+          `removed` (item ids), `comment` (a comment edited or whose
+          reactions moved) and `reactions` (the issue's own).
+        - labels: `label.updated` (upsert, a Label, `from` its name before a
+          rename; delete, row `{name}`).
+
         Topics (`?topics=`, comma-separated, at most 10): `all` (default),
+        `issues` (every issue and label event), `issue:<n>` (one issue's;
+        also `repo:<repo>` for its project and its linked branches' repos),
         `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
         `meta` (meta_files and presence), `kind:<kind>`, `feed` (the
         activity lines as the person's feed shows them, as
@@ -894,7 +957,12 @@ paths:
         `{"type": "error", "message"}` (the socket stays open).
 
         Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
-        latest `limit` with no `since`. With `Upgrade: websocket`: events after
+        latest `limit` with no `since`, oldest first either way. The pull also
+        takes `before=<seq>` (only events before it: page back through the
+        log with the first event's seq), `repo=<repo>` (that repo's events;
+        `meta` for the meta layer's) and `kinds=<kind>,<kind>` (at most 20),
+        each answered from an index on (repo, seq) or (kind, seq), and with
+        `topics` (matched over at most 5,000 rows). With `Upgrade: websocket`: events after
         `?since=` (at most 500, else one `{"type": "resync", "seq",
         "oldest_seq"}` frame: refetch, then resume from `seq`), then
         `{"type": "caught_up", "seq"}`, then live `{"type": "event", "seq", ...}`
@@ -920,6 +988,18 @@ paths:
           in: query
           description: "With `topics` including `feed`, on a WebSocket: replay the `feed` lines numbered after this."
           schema: { type: integer, minimum: 0 }
+        - name: before
+          in: query
+          description: "JSON only: events before this seq (the latest `limit` of them, oldest first)."
+          schema: { type: integer, minimum: 1 }
+        - name: repo
+          in: query
+          description: "JSON only: one repo's events (its name as in its URL; `meta` for the meta layer)."
+          schema: { type: string }
+        - name: kinds
+          in: query
+          description: "JSON only: these kinds, comma-separated, at most 20."
+          schema: { type: string }
       responses:
         "200":
           description: A page of events
@@ -941,6 +1021,354 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listIssues
+      summary: A page of issues, and the open and closed counts for the same filters
+      description: |
+        Keyset paging: pass `next_cursor` back as `cursor`. `q` matches words
+        in titles and bodies (SQLite FTS5): each word must appear, the last as
+        a prefix, up to 10 words; comments are not searched. Results keep the
+        chosen sort.
+      tags: [issues]
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [open, closed, all], default: open } }
+        - { name: label, in: query, description: "Repeat for several: every one must match.", schema: { type: string } }
+        - { name: assignee, in: query, description: "A login, `@me`, or `none`.", schema: { type: string } }
+        - { name: author, in: query, description: "A login, or `@me`.", schema: { type: string } }
+        - { name: project, in: query, description: "A repo's name, or `none`.", schema: { type: string } }
+        - { name: linked, in: query, description: "`<repo>:<branch>`: the issues that branch is linked to (the branch page's Issues block).", schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [created, updated, comments], default: created } }
+        - { name: order, in: query, schema: { type: string, enum: [desc, asc], default: desc } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueList" }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createIssue
+      summary: Open an issue
+      description: |
+        `link`: branches to link at once (`pando worktree add --issue`). Send
+        an `Idempotency-Key`: a retry with the same key answers the first
+        issue (200, `Pando-Replayed: true`).
+      tags: [issues]
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 256 }
+                body: { type: string, maxLength: 65536 }
+                labels: { type: array, items: { type: string }, maxItems: 100 }
+                assignees: { type: array, items: { type: string }, maxItems: 10 }
+                project: { type: [string, "null"], description: "A repo's name." }
+                link: { type: array, items: { $ref: "#/components/schemas/BranchRef" } }
+      responses:
+        "201":
+          description: Opened.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "200":
+          description: "A retry with the same Idempotency-Key: the first issue (`Pando-Replayed: true`)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "400": { description: "`bad_request` (a title, an unknown label or project, a branch that does not exist) or `not_a_member` (an assignee)." }
+        "413": { description: "`too_large`: a body over 65,536 characters." }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: getIssue
+      summary: One issue, with its body, links, participants and reactions
+      tags: [issues]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateIssue
+      summary: Edit, label, assign, link, close or reopen an issue
+      description: |
+        Any of the fields, in one call; each change is its own timeline item
+        and the call is one event. Add and remove lists are set operations.
+        `state: closed` takes `state_reason` (default `completed`); setting
+        the state it already has changes nothing. `body` with `base_version`
+        is refused with 409 `edited` (and `current`) when the body moved;
+        without it the last writer wins.
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, minLength: 1, maxLength: 256 }
+                body: { type: string, maxLength: 65536 }
+                base_version: { type: integer }
+                project: { type: [string, "null"] }
+                state: { type: string, enum: [open, closed] }
+                state_reason: { type: string, enum: [completed, not_planned] }
+                add_labels: { type: array, items: { type: string } }
+                remove_labels: { type: array, items: { type: string } }
+                add_assignees: { type: array, items: { type: string } }
+                remove_assignees: { type: array, items: { type: string } }
+                link: { type: array, items: { $ref: "#/components/schemas/BranchRef" } }
+                unlink: { type: array, items: { $ref: "#/components/schemas/BranchRef" } }
+      responses:
+        "200":
+          description: The issue now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "`edited`: the body moved since `base_version`; `current` is the issue now." }
+        "413": { description: "`too_large`." }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/timeline:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: issueTimeline
+      summary: Comments and events together, oldest first
+      description: "`cursor` continues after a page; `last=N` (instead) is the newest N, oldest first. `total` counts every item."
+      tags: [issues]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: last, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Timeline" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/comments:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: addIssueComment
+      summary: Comment on an issue
+      tags: [issues]
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 65536 }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueComment" }
+        "200": { description: "A retry with the same Idempotency-Key: the first comment." }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { description: "`too_large`." }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/comments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getIssueComment
+      summary: One comment, whole (a live event leaves a body over 16 KB out)
+      tags: [issues]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueComment" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateIssueComment
+      summary: Edit your comment
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 65536 }
+                base_version: { type: integer }
+      responses:
+        "200":
+          description: The comment now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueComment" }
+        "403": { description: "`forbidden`: someone else's comment." }
+        "409": { description: "`edited`, with `current`, the comment now." }
+    delete:
+      operationId: deleteIssueComment
+      summary: Delete a comment (yours, or anyone's as an owner); it leaves the timeline
+      tags: [issues]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/reactions/{content}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: content, in: path, required: true, schema: { $ref: "#/components/schemas/ReactionContent" } }
+    put:
+      operationId: addIssueReaction
+      summary: React to an issue (once per person and reaction)
+      tags: [issues]
+      responses:
+        "200":
+          description: The issue's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+    delete:
+      operationId: removeIssueReaction
+      summary: Take your reaction back
+      tags: [issues]
+      responses:
+        "200":
+          description: The issue's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/comments/{id}/reactions/{content}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: content, in: path, required: true, schema: { $ref: "#/components/schemas/ReactionContent" } }
+    put:
+      operationId: addCommentReaction
+      summary: React to a comment
+      tags: [issues]
+      responses:
+        "200":
+          description: The comment's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+    delete:
+      operationId: removeCommentReaction
+      summary: Take your reaction back
+      tags: [issues]
+      responses:
+        "200":
+          description: The comment's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+  /v1/monorepos/{owner}/{monorepo}/labels:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listLabels
+      summary: The monorepo's labels, by name, each with its open issues
+      description: A new monorepo starts with bug (orange), enhancement (blue), documentation (teal) and question (purple). At most 500.
+      tags: [issues]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LabelList" }
+    post:
+      operationId: createLabel
+      summary: Make a label (owners)
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, color]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 50 }
+                color: { $ref: "#/components/schemas/LabelColor" }
+                description: { type: [string, "null"], maxLength: 100 }
+      responses:
+        "201":
+          description: Made.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "`label_exists`: a label with that name, ignoring case." }
+  /v1/monorepos/{owner}/{monorepo}/labels/{label}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: label, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateLabel
+      summary: Rename, recolour or describe a label (owners); a rename moves it on every issue in one step
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 50 }
+                color: { $ref: "#/components/schemas/LabelColor" }
+                description: { type: [string, "null"], maxLength: 100 }
+      responses:
+        "200":
+          description: The label now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteLabel
+      summary: Delete a label (owners); it leaves every issue, with no timeline items
+      tags: [issues]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/members:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -2732,7 +3160,7 @@ components:
         monorepo_id: { type: string, description: "The monorepo's id. Pages sort by (at, monorepo_id, seq)." }
         seq: { type: integer, description: "The monorepo's event seq. `(monorepo_id, seq)` is the line's identity." }
         at: { type: string, format: date-time }
-        kind: { type: string, enum: [push, branch.opened, branch.deleted, merged, review, status, worktree.reported, worktree.removed, meta.saved] }
+        kind: { type: string, enum: [push, branch.opened, branch.deleted, merged, review, status, worktree.reported, worktree.removed, meta.saved, issue.opened, issue.commented, issue.closed, issue.reopened] }
         repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
         repo_path: { type: [string, "null"], description: "`projects/web`; `.` for the meta layer and a plain repo." }
         branch: { type: [string, "null"] }
@@ -2748,7 +3176,8 @@ components:
               branch-facts job adds them); null when they could not be read.
               `commits_more`: true when a first push of main had more than 250.
             - branch.deleted: `before`.
-            - merged: `merge_commit`, `forced`, `title` (the branch's), `head`.
+            - merged: `merge_commit`, `forced`, `title` (the branch's), `head`,
+              `closes` (the issues it closes, as MergeResult has them).
             - review: `verdict`, `comments` (a count), `head`.
             - status: `context`, `state`, `description`, `target_url`, `sha`,
               `duration_s` (from the run's first `pending` to this state; null
@@ -2756,10 +3185,15 @@ components:
               a member posted it; `actor` is then that member, else null).
             - worktree.reported, worktree.removed: `path`, `worktree` (its id).
             - meta.saved: `path`, `version`, `deleted`.
+            - issue.opened, issue.commented, issue.closed (by a person; a
+              merge's close is on its merged line), issue.reopened:
+              `number`, `title`, `reason` (closed: completed or
+              not_planned), `excerpt` (commented: the first 140
+              characters). The line's repo is the issue's project.
     FeedSummary:
       type: object
       description: A monorepo's one line on the home.
-      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, repos, open_branches, at]
+      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, repos, open_branches, assigned, at]
       properties:
         last_activity_at: { type: [string, "null"], format: date-time, description: Its newest activity line. }
         worktrees_active: { type: integer, description: Worktrees named in the hellos of open follower sockets. }
@@ -2775,6 +3209,10 @@ components:
         large: { type: boolean, description: "More than 100 members: its lines are read on demand, not copied to feeds." }
         repos: { type: integer, description: "Its projects (code repos; the meta layer's own repo is not counted). A plain repo has 1." }
         open_branches: { type: integer, description: "Open branches across those projects (not merged, not deleted, main not counted)." }
+        assigned:
+          type: object
+          description: "Open issues assigned to each member, by login (none: left out): the home's Needs you shows the person's own."
+          additionalProperties: { $ref: "#/components/schemas/AssignedIssues" }
         at: { type: string, format: date-time, description: When the monorepo computed it. }
     MonorepoSummary:
       allOf:
@@ -2795,6 +3233,9 @@ components:
             large: { type: [boolean, "null"] }
             repos: { type: [integer, "null"] }
             open_branches: { type: [integer, "null"] }
+            assigned:
+              type: [object, "null"]
+              additionalProperties: { $ref: "#/components/schemas/AssignedIssues" }
     NeedRow:
       type: object
       required: [monorepo, monorepo_id, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]
@@ -3121,7 +3562,7 @@ components:
       required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]
       properties:
         base_branch: { type: string }
-        base: { type: string, description: "Main's head the diff was taken against." }
+        base: { type: string, description: "Main's head the diff was taken against; for a branch Pando merged at this head, main just before that merge (the merge commit's first parent), so a merged branch keeps its changes." }
         head: { type: string, description: The branch's head. }
         merge_base: { type: string }
         truncated: { type: boolean, description: "Some patches were left out past 2 MiB in all (`patch_omitted: budget`)." }
@@ -3214,6 +3655,15 @@ components:
         merge_base: { type: string }
         forced: { type: boolean }
         merged_by: { type: string }
+        closes:
+          type: array
+          items: { type: integer }
+          description: |
+            `merged`: the open issues this merge closes, decided as it lands
+            (the branch's links, the keywords in the merge message and the
+            merged commits). Each closes about a second later in its own step
+            (`issue.closed`, naming the merge); one a person closed meanwhile
+            is left as it is.
     HookEvent:
       type: string
       enum: [push, branch.opened, merged]
@@ -3332,7 +3782,7 @@ components:
         title: { type: [string, "null"] }
         description: { type: [string, "null"] }
         author: { type: [string, "null"], description: The branch's author (a user). }
-        pusher: { type: string, description: "The user who pushed; for `merged`, who merged." }
+        pusher: { type: [string, "null"], description: "The user who pushed; for `merged`, who merged. Null only when Pando found a push in Artifacts' refs whose pusher it never learned (its record and its keep both failed)." }
         seq: { type: [integer, "null"], description: "The event stream's seq for this change: drop repeats, sort by it." }
         merge_commit: { type: string, description: Only for `merged`. }
         diff_url: { type: string }
@@ -3348,3 +3798,177 @@ components:
           type: string
           description: "Posts statuses for `head` in this repo for 24 hours, stamped with the hook's `app` (see createStatus). Absent when the Worker secret PANDO_STATUS_SECRET is not set or the branch was deleted."
         status_token_expires_at: { type: string, format: date-time }
+    AssignedIssues:
+      type: object
+      required: [count, newest]
+      description: Open issues assigned to one person in one monorepo.
+      properties:
+        count: { type: integer }
+        newest:
+          type: object
+          required: [number, title, updated_at]
+          properties:
+            number: { type: integer }
+            title: { type: string }
+            updated_at: { type: string, format: date-time }
+    BranchRef:
+      type: object
+      required: [repo, branch]
+      properties:
+        repo: { type: string, description: "A repo's name." }
+        branch: { type: string }
+    LabelColor:
+      type: string
+      enum: [gray, orange, yellow, green, teal, blue, purple, pink]
+      description: Each theme sets the eight from its own tokens (no red, so a label never reads as a failure).
+    Label:
+      type: object
+      required: [name, color, description]
+      properties:
+        name: { type: string, description: "1 to 50 characters, unique ignoring case." }
+        color: { $ref: "#/components/schemas/LabelColor" }
+        description: { type: [string, "null"] }
+    LabelList:
+      type: object
+      required: [labels]
+      properties:
+        labels:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Label"
+              - type: object
+                required: [open_issues]
+                properties:
+                  open_issues: { type: integer }
+    ReactionContent:
+      type: string
+      enum: ["+1", "-1", laugh, hooray, confused, heart, rocket, eyes]
+    Reactions:
+      type: array
+      description: "Those given at least once, in GitHub's order."
+      items:
+        type: object
+        required: [content, count, by]
+        properties:
+          content: { $ref: "#/components/schemas/ReactionContent" }
+          count: { type: integer }
+          by: { type: array, items: { type: string }, description: Logins, each once. }
+    ReactionsAnswer:
+      type: object
+      required: [reactions]
+      properties:
+        reactions: { $ref: "#/components/schemas/Reactions" }
+    IssueMerge:
+      type: object
+      required: [repo, repo_path, branch, merge_commit]
+      properties:
+        repo: { type: string }
+        repo_path: { type: string }
+        branch: { type: string }
+        merge_commit: { type: string }
+    IssueRow:
+      type: object
+      description: A row of the list (no body).
+      required: [number, title, state, state_reason, project, project_path, labels, assignees, author, comments, tasks, linked_branches, created_at, updated_at, closed_at, closed_by, closed_by_merge]
+      properties:
+        number: { type: integer }
+        title: { type: string }
+        state: { type: string, enum: [open, closed] }
+        state_reason: { type: [string, "null"], enum: [completed, not_planned, null] }
+        project: { type: [string, "null"], description: "A repo's name; null for the monorepo as a whole." }
+        project_path: { type: [string, "null"] }
+        labels: { type: array, items: { $ref: "#/components/schemas/Label" } }
+        assignees: { type: array, items: { type: string } }
+        author: { type: string }
+        comments: { type: integer }
+        tasks:
+          type: [object, "null"]
+          description: "`- [ ]` and `- [x]` lines in the body; null without a task list."
+          properties:
+            done: { type: integer }
+            total: { type: integer }
+        linked_branches: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        closed_at: { type: [string, "null"], format: date-time }
+        closed_by: { type: [string, "null"] }
+        closed_by_merge:
+          oneOf:
+            - $ref: "#/components/schemas/IssueMerge"
+            - type: "null"
+    IssueLink:
+      type: object
+      required: [repo, repo_path, branch, sources, sha, linked_by, branch_state, merged_at, closed_issue]
+      properties:
+        repo: { type: string }
+        repo_path: { type: string }
+        branch: { type: string }
+        sources: { type: array, items: { type: string, enum: [link, title, commit] } }
+        sha: { type: [string, "null"], description: "`commit`: the newest commit on the branch naming the issue." }
+        linked_by: { type: [string, "null"], description: "`link`: who linked it." }
+        branch_state: { type: string, enum: [open, ready, conflicts, failing, merged, deleted] }
+        merged_at: { type: [string, "null"], format: date-time }
+        closed_issue: { type: boolean, description: This branch's merge closed the issue. }
+    Issue:
+      allOf:
+        - $ref: "#/components/schemas/IssueRow"
+        - type: object
+          required: [body, body_version, machine, links, participants, reactions]
+          properties:
+            body: { type: string }
+            body_version: { type: integer, description: Goes up by one on every body edit. }
+            machine: { type: [string, "null"], description: The machine that opened it. }
+            links: { type: array, items: { $ref: "#/components/schemas/IssueLink" } }
+            participants: { type: array, items: { type: string } }
+            reactions: { $ref: "#/components/schemas/Reactions" }
+    IssueComment:
+      type: object
+      required: [id, body, body_version, author, machine, created_at, updated_at, reactions]
+      properties:
+        id: { type: string }
+        body: { type: [string, "null"], description: "Null only in a live event, over 16 KB: read it with getIssueComment." }
+        body_version: { type: integer }
+        author: { type: string }
+        machine: { type: [string, "null"], description: The machine that wrote it. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        reactions: { $ref: "#/components/schemas/Reactions" }
+    TimelineItem:
+      type: object
+      required: [id, at, actor, machine, kind]
+      description: |
+        By `kind`, with its own fields: `comment` (`comment`), `labeled` and
+        `unlabeled` (`label`, as it was then), `assigned` and `unassigned`
+        (`assignee`), `renamed` (`from`, `to`), `project_changed` (`from`,
+        `from_path`, `to`, `to_path`), `linked` (`repo`, `repo_path`,
+        `branch`, `source`, `sha`), `unlinked` (`repo`, `repo_path`,
+        `branch`, `source`), `closed` (`reason`, `merge`: the merge that
+        closed it, or null), `reopened`, `merge_referenced` (`merge`: a merge
+        that named it after it was closed).
+      properties:
+        id: { type: integer, description: Orders items (one counter per monorepo). }
+        at: { type: string, format: date-time }
+        actor: { type: [string, "null"] }
+        machine: { type: [string, "null"] }
+        kind: { type: string, enum: [comment, labeled, unlabeled, assigned, unassigned, renamed, project_changed, linked, unlinked, closed, reopened, merge_referenced] }
+    Timeline:
+      type: object
+      required: [items, total, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TimelineItem" } }
+        total: { type: integer }
+        next_cursor: { type: [string, "null"] }
+    IssueList:
+      type: object
+      required: [issues, counts, next_cursor]
+      properties:
+        issues: { type: array, items: { $ref: "#/components/schemas/IssueRow" } }
+        counts:
+          type: object
+          required: [open, closed]
+          description: For the same filters, in either state.
+          properties:
+            open: { type: integer }
+            closed: { type: integer }
+        next_cursor: { type: [string, "null"] }

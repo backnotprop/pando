@@ -6,6 +6,7 @@
 // Cookie or Bearer; with the cookie, the socket upgrade must come from
 // Pando's own origin (accounts/auth.ts).
 
+import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { credential, HttpError, toErrorResponse } from "../http";
 import { accounts, authenticateRequest } from "../accounts/auth";
@@ -89,10 +90,10 @@ async function route(request: Request, env: Env): Promise<Response> {
       return feedStub(env, login).fetch(new Request(request, { headers }));
     }
 
-    return Response.json(await eventsPage(env, login, url));
+    return Response.json((await eventsPage(env, login, url)) satisfies typeof Contract.EventsPage.Encoded);
   }
 
-  return Response.json(await needsPage(env, login, url));
+  return Response.json((await needsPage(env, login, url)) satisfies typeof Contract.NeedsPage.Encoded);
 }
 
 /** Queue `member` messages (the consumer joins or leaves). */
@@ -187,6 +188,7 @@ export async function monoreposSummary(env: Env, login: string) {
       large: s?.large ?? null,
       repos: s?.repos ?? null,
       open_branches: s?.open_branches ?? null,
+      assigned: s?.assigned ?? null,
     };
   });
 
@@ -210,6 +212,14 @@ async function needsPage(env: Env, login: string, url: URL) {
   let targets = rows.filter((r) => !inn || r.name === inn.id);
 
   if (inn && !targets.length) throw new HttpError(404, "not_found", `no monorepo ${inn.full} among yours`);
+
+  // Issues assigned to the person: from each monorepo's summary line (no call), most recently updated first.
+  const issues = targets.flatMap((r) => {
+    const a = r.summary?.assigned[login];
+
+    return a ? [{ monorepo: r.label ?? r.name, monorepo_id: r.name, ...a }] : [];
+  }).sort((x, y) => (x.newest.updated_at < y.newest.updated_at ? 1 : -1));
+
   // Ask only monorepos whose count is not zero (or not known yet).
   targets = targets.filter((r) => !r.summary || r.pending || needs.some((n) => (r.summary!.needs?.[n] ?? 0) > 0));
   const ordered = targets.map((r) => ({ name: r.name, label: r.label ?? r.name, last: r.summary?.last_activity_at ?? null })).sort(byLast);
@@ -222,7 +232,7 @@ async function needsPage(env: Env, login: string, url: URL) {
 
   const all = lists.flat().sort((a, b) => ((a.updated_at ?? "") < (b.updated_at ?? "") ? 1 : -1));
 
-  return { branches: all.slice(0, limit), truncated: all.length > limit, skipped };
+  return { branches: all.slice(0, limit), issues, truncated: all.length > limit, skipped };
 }
 
 // ── Tests only ──────────────────────────────────────────────────────────────

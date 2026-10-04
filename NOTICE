@@ -23,6 +23,11 @@ License. Source: https://github.com/shikijs/shiki
 The TextMate grammars it bundles carry their own licences, as Shiki ships
 them (https://github.com/shikijs/textmate-grammars-themes).
 
+The web app's Cloudflare theme (web/src/theme.css) takes its colour values
+from cloudflare-docs (https://github.com/cloudflare/cloudflare-docs,
+src/styles), copyright (c) 2021 Cloudflare, Inc., licensed under the MIT
+License.
+
 The web app shows the Buildkite mark (web/src/ui/buildkite-mark.svg) beside a
 check that Buildkite ran, to say which CI service ran it. The mark is a
 trademark of Buildkite Pty Ltd, used unaltered from

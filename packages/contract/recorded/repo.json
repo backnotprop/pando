@@ -3,17 +3,17 @@
   "route": "GET .../repos/{repo} (with required_checks)",
   "status": 200,
   "body": {
-    "monorepo": "rec-mut9co6d/rec-mut9co6d",
+    "monorepo": "rec-mutuzslr/rec-mutuzslr",
     "name": "projects-web",
     "path": "projects/web",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8797/rec-mut9co6d/rec-mut9co6d/projects-web.git",
+    "clone_url": "http://localhost:8797/rec-mutuzslr/rec-mutuzslr/projects-web.git",
     "required_checks": [
       "ci/test"
     ],
     "checks_unknown": null,
-    "created_at": "2026-10-04T03:25:12.361Z",
-    "created_by": "rec-mut9co6d"
+    "created_at": "2026-10-04T13:31:02.866Z",
+    "created_by": "rec-mutuzslr"
   }
 }

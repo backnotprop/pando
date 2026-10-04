@@ -3,6 +3,7 @@
 // WebSocket, and commits changes to the meta layer's main after 10 s of quiet.
 // Owned by the live lane. The wire is docs/contracts/meta-sync.md.
 import { DurableObject } from "cloudflare:workers";
+import type * as Contract from "@pando/contract";
 import { checkBytes, checkPath, checkPointer, MAX_BYTES, type Refusal } from "./rules";
 import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
@@ -50,6 +51,12 @@ const COMMIT_FILES = 1000; // one commit holds at most this many files
 
 const COMMIT_BYTES = 24 * 1024 * 1024; // and about this many bytes (gitwrite packs in memory)
 
+// The versions a commit of path ?1 at version ?2 carries: every one since the
+// path's last version in git, up to ?2. Saves folded into a later one count,
+// whoever made them; a save replaced by a merge from main does not.
+const CARRIED = `path = ?1 AND version <= ?2 AND version > COALESCE(
+  (SELECT MAX(version) FROM versions WHERE path = ?1 AND version < ?2 AND commit_sha IS NOT NULL), 0)`;
+
 type Op = "save" | "delete" | "rename";
 
 type Source = "live" | "restore" | "main";
@@ -87,11 +94,15 @@ type VersionRow = {
   lfs_size: number | null; // and the large file's own size
 };
 
-/** Tests only (META_TEST=1): what the next event sends do. */
+/** Tests only (META_TEST=1): what the next event sends do, and the next updates from main. */
 export interface MetaOutboxTest {
   fail: number;
   lose: number;
   crash: boolean;
+  /** The next n applyFromMain calls fail before applying anything. */
+  applyFail: number;
+  /** The next n apply everything, then fail: the caller's answer is lost. */
+  applyLose: number;
 }
 
 /** The outbox as it is: rows waiting and the failed tries in a row, with the test switches. */
@@ -330,6 +341,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS applied (commit_sha TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS reserved (path TEXT NOT NULL, merge TEXT NOT NULL, PRIMARY KEY (path, merge));
     `);
   }
 
@@ -446,13 +459,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         .toArray();
     }
 
-    return json({ path, head: this.head(), versions: rows.map((r) => this.historyEntry(r)) });
+    return json({ path, head: this.head(), versions: rows.map((r) => this.historyEntry(r)) } satisfies typeof Contract.MetaHistory.Encoded);
   }
 
   private historyEntry(r: VersionRow) {
-    // A large file's version is its pointer: show the file's own size and hash.
+    // A large file's version is its pointer: show the file's own size and hash (insert() writes the two together).
     return {
-      large: r.lfs_oid ? { oid: r.lfs_oid, size: r.lfs_size } : null,
+      large: r.lfs_oid !== null && r.lfs_size !== null ? { oid: r.lfs_oid, size: r.lfs_size } : null,
       version: r.version,
       path: r.path,
       op: r.op,
@@ -521,7 +534,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const cur = this.current(path);
     const same = target.deleted ? !cur || cur.deleted : !!cur && !cur.deleted && cur.sha === target.sha;
 
-    if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 });
+    if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 } satisfies typeof Contract.Restored.Encoded);
 
     const version = this.insert({
       path,
@@ -541,7 +554,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.broadcast(this.changeMessage(this.row(version)));
     await this.scheduleCommit();
 
-    return json({ path, version, sha: target.deleted ? null : target.sha, restored_from: target.version });
+    return json({ path, version, sha: target.deleted ? null : target.sha, restored_from: target.version } satisfies typeof Contract.Restored.Encoded);
   }
 
   // pando init's first upload. "start" opens a window, only on an empty meta
@@ -1105,7 +1118,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- tests only (META_TEST=1) ----
 
-  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false };
+  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false, applyFail: 0, applyLose: 0 };
 
   /** Fail the next `fail` sends, lose the answer of the next `lose` (sent, then taken as failed), crash the object before the next send; and the outbox as it is. */
   testOutbox(set: Partial<MetaOutboxTest> = {}): MetaOutboxState {
@@ -1125,6 +1138,21 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (this.env.META_TEST !== "1" || this.testSet.fail <= 0) return;
     this.testSet.fail--;
     throw new Error("meta test: the send failed");
+  }
+
+  /** Throws for the next `applyFail` applyFromMain calls (`lose`: for the next `applyLose`, after applying). */
+  private testApply(lose: boolean): void {
+    if (this.env.META_TEST !== "1") return;
+
+    if (lose && this.testSet.applyLose > 0) {
+      this.testSet.applyLose--;
+      throw new Error("meta test: applied, and the answer was lost");
+    }
+
+    if (!lose && this.testSet.applyFail > 0) {
+      this.testSet.applyFail--;
+      throw new Error("meta test: applyFromMain failed");
+    }
   }
 
   private testAfterSend(): void {
@@ -1215,11 +1243,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       next: more ? rows[rows.length - 1].path : null,
     };
 
-    if (folder === null) return json(page);
+    if (folder === null) return json(page satisfies typeof Contract.MetaTree.Encoded);
 
-    if (after) return json({ ...page, dir: folder });
+    if (after) return json({ ...page, dir: folder } satisfies typeof Contract.MetaTree.Encoded);
 
-    return json({ ...page, dir: folder, folders: this.folders(prefix, upper) });
+    return json({ ...page, dir: folder, folders: this.folders(prefix, upper) } satisfies typeof Contract.MetaTree.Encoded);
   }
 
   // Each subfolder under prefix with its file count and `last`: the newest
@@ -1321,9 +1349,23 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- updates from main (Durable Object RPC, called by the monorepo object) ----
 
-  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
+  //
+  // Idempotent per merge commit (CODE-VS-MODEL M2): the monorepo object tries
+  // again until a call succeeds, so a call whose answer was lost may come
+  // twice. A commit already applied changes nothing, so a live save made
+  // since is never replaced a second time.
+  //
+  // Each path it changes drops its `pending` row: an older live save there
+  // was replaced by the merge, so a later commit must never put it back on
+  // git main (CODE-VS-MODEL M1). It ends the merge's reservation.
+  async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[]; merge?: string }): Promise<{ versions: number[] }> {
+    this.testApply(false);
+
+    if (this.applied(input.commit)) return this.endReservation(input.merge, []);
     // Hash first, the only await: the loop below reads and writes with no await.
     const changes = await Promise.all(input.changes.map((c) => hashed(c)));
+
+    if (this.applied(input.commit)) return this.endReservation(input.merge, []); // the same commit, applied by a call that ran meanwhile
 
     if (input.monorepo && this.kv("monorepo") !== input.monorepo) this.setKv("monorepo", input.monorepo);
     const versions: number[] = [];
@@ -1353,13 +1395,56 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         });
       }
 
+      this.sql.exec("DELETE FROM pending WHERE path = ? AND version < ?", c.path, version);
       versions.push(version);
       this.broadcast(this.changeMessage(this.row(version)));
     }
 
+    this.sql.exec("INSERT INTO applied (commit_sha, at) VALUES (?, ?)", input.commit, Date.now());
     this.setKv("parent", input.commit);
+    const out = await this.endReservation(input.merge, versions);
+    this.testApply(true);
+
+    return out;
+  }
+
+  // ---- a merge's reservation (Durable Object RPC, called by the monorepo object) ----
+  //
+  // A merge into the meta layer reserves the paths its branch changes before
+  // it lands, and applyFromMain or release ends that (CODE-VS-MODEL M1).
+  // While a path is reserved no commit carries it, so no older live save of
+  // it can land on git main after the merge: git main and the live files
+  // agree once the merge is applied. Live saves of it are taken as usual,
+  // and the merge's version replaces them (the merge wins), until the owner
+  // answers question 3 (QUESTIONS.md, 2026-10-04). If the answer is "the
+  // merge waits", reserve also commits any pending version of these paths at
+  // once and answers git main's new sha (the merge then merges against it),
+  // and change() answers a live save of a reserved path `stale`.
+
+  /** Reserve paths for a merge; a commit of any of them already on its way lands (or fails) first. */
+  async reserve(merge: string, paths: string[]): Promise<{ reserved: number }> {
+    for (const p of paths) this.sql.exec("INSERT OR IGNORE INTO reserved (path, merge) VALUES (?, ?)", p, merge);
+    const busy = this.committing;
+
+    if (busy && paths.some((p) => busy.paths.has(p))) await busy.done;
+
+    return { reserved: paths.length };
+  }
+
+  /** End a merge's reservation (the merge did not land). Saves that waited are committed as usual. */
+  async release(merge: string): Promise<void> {
+    await this.endReservation(merge, []);
+  }
+
+  private async endReservation(merge: string | undefined, versions: number[]): Promise<{ versions: number[] }> {
+    if (merge) this.sql.exec("DELETE FROM reserved WHERE merge = ?", merge);
+    await this.scheduleCommit();
 
     return { versions };
+  }
+
+  private applied(commit: string): boolean {
+    return this.sql.exec("SELECT 1 FROM applied WHERE commit_sha = ?", commit).toArray().length > 0;
   }
 
   // ---- commits after quiet ----
@@ -1368,14 +1453,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!gitWriter(this.env)) return; // no Artifacts binding: versions are kept, not committed
 
     if (this.initializing()) return; // pando init commits everything when it is done
-    const next = this.sql.exec<{ due: number | null }>("SELECT MIN(due) AS due FROM pending").one().due;
+    const next = this.sql.exec<{ due: number | null }>("SELECT MIN(due) AS due FROM pending WHERE path NOT IN (SELECT path FROM reserved)").one().due;
 
     if (next === null) return;
     await this.alarmBy(next);
   }
 
+  /** The commit on its way, if any: its paths, and when it is done (landed or failed). */
+  private committing: { paths: Set<string>; done: Promise<void> } | null = null;
+
   // One commit per alarm, so each gets its own CPU budget; the next alarm is
-  // set right away while more is due.
+  // set right away while more is due. Paths reserved by a merge wait.
   async alarm(): Promise<void> {
     if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM event_outbox").one().n > 0) await this.drain();
     const writer = gitWriter(this.env);
@@ -1383,7 +1471,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!writer || this.initializing()) return;
 
     const due = this.sql
-      .exec<{ path: string; version: number }>("SELECT path, version FROM pending WHERE due <= ? ORDER BY version", Date.now() + GROUP_MS)
+      .exec<{ path: string; version: number }>(
+        "SELECT path, version FROM pending WHERE due <= ? AND path NOT IN (SELECT path FROM reserved) ORDER BY version",
+        Date.now() + GROUP_MS,
+      )
       .toArray();
 
     if (!due.length) return this.scheduleCommit();
@@ -1407,12 +1498,17 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       bytes += r.size ?? 0;
     }
 
+    const run = timed(
+      "object",
+      { route: "meta.commit", monorepo_id: this.kv("monorepo"), repo: "meta", files: rows.length },
+      () => this.commitRows(writer, rows, this.kv("init_commit") === "1"),
+    );
+
+    // A merge reserving one of these paths waits for this commit (reserve).
+    this.committing = { paths: new Set(rows.map((r) => r.path)), done: run.then(() => undefined, () => undefined) };
+
     try {
-      await timed(
-        "object",
-        { route: "meta.commit", monorepo_id: this.kv("monorepo"), repo: "meta", files: rows.length },
-        () => this.commitRows(writer, rows, this.kv("init_commit") === "1"),
-      );
+      await run;
     } catch (e) {
       this.setKv("commit_error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
       const retry = Math.min(intParam(this.kv("retry_ms"), RETRY_MIN_MS) * (this.kv("retry_ms") ? 2 : 1), RETRY_MAX_MS);
@@ -1420,6 +1516,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       await this.alarmBy(Date.now() + retry);
 
       return;
+    } finally {
+      this.committing = null;
     }
 
     this.setKv("retry_ms", null);
@@ -1438,7 +1536,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const repoName = this.kv("meta_repo") ?? this.kv("monorepo");
 
     if (!repoName) throw new Error("the object does not know its monorepo yet");
-    const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first), author };
+    const carried = rows.flatMap((r) => this.sql.exec<VersionRow>(`SELECT * FROM versions WHERE ${CARRIED}`, r.path, r.version).toArray());
+    const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first, carried), author };
 
     // Through the repo's write gate (merges into the meta layer push to the same repo), retrying Artifacts' "busy".
     const commit = (o: typeof opts) =>
@@ -1457,12 +1556,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.setKv("commit_error", null);
 
     for (const r of rows) {
-      this.sql.exec(
-        "UPDATE versions SET commit_sha = ? WHERE path = ? AND version <= ? AND commit_sha IS NULL AND source != 'main'",
-        sha,
-        r.path,
-        r.version,
-      );
+      this.sql.exec(`UPDATE versions SET commit_sha = ?3 WHERE ${CARRIED}`, r.path, r.version, sha);
       this.sql.exec("DELETE FROM pending WHERE path = ? AND version = ?", r.path, r.version);
     }
   }
@@ -1476,7 +1570,12 @@ function verb(r: VersionRow): string {
   return r.deleted ? "Delete" : "Save";
 }
 
-export function commitMessage(rows: VersionRow[], first = false): string {
+/**
+ * A commit's message: a title for its rows, then the who-made-it trailers for
+ * every version it carries (`carried`, the rows themselves by default): a
+ * save folded into a later one names its saver too (CODE-VS-MODEL M7).
+ */
+export function commitMessage(rows: VersionRow[], first = false, carried: VersionRow[] = rows): string {
   let title: string;
   let body = "";
   const renameTo = rows.find((r) => r.op === "rename" && !r.deleted);
@@ -1503,15 +1602,16 @@ export function commitMessage(rows: VersionRow[], first = false): string {
     body = listed.join("\n") + "\n\n";
   }
 
-  // The last saver is the author (commitRows). Everyone else in the commit is
-  // a Co-authored-by line; every agent and machine gets its own line, in the
-  // order they first saved. With one author, machine and agent this is the
-  // shape formats.md section 6 gives.
+  // The last saver is the author (commitRows). Everyone else whose save the
+  // commit carries is a Co-authored-by line; every agent and machine gets its
+  // own line, in the order they first saved. With one author, machine and
+  // agent this is the shape formats.md section 6 gives.
   const last = rows[rows.length - 1];
+  const savers = [...carried].sort((a, b) => a.version - b.version);
 
   const distinct = (pick: (r: VersionRow) => string | null) => [
     ...new Set(
-      rows.flatMap((r) => {
+      savers.flatMap((r) => {
         const v = pick(r);
 
         return v ? [v] : [];

@@ -5,8 +5,8 @@
 
 import type { Env } from "../env";
 import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
-import { gitRequest } from "./artifacts";
-import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal, type RefCommand } from "./pktline";
+import { gitRequest, listRefs } from "./artifacts";
+import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal, statusReport, type RefCommand } from "./pktline";
 import { isBusy, LEASE_MS } from "./gate";
 import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
 
@@ -60,7 +60,8 @@ import { cachedRepo, monorepoStub } from "./session";
 import { answerObjectInfo, peekCommand, withObjectInfo } from "./objectinfo";
 import { accounts, authenticate, identityOf } from "../accounts/auth";
 import type { MonorepoInfo } from "../accounts/store";
-import { monorepoRef } from "./names";
+import { monorepoRef, ZERO } from "./names";
+import { runReconcile } from "./reconcile";
 
 // /owner/monorepo/repo.git/... (a monorepo's repo, meta included) or /owner/name.git/... (a plain repo).
 const DOOR_RE = /^\/([^/]+)\/([^/]+)(?:\/([^/]+))?\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/;
@@ -277,7 +278,9 @@ async function receivePack(
 
   const section = await readCommandSection(body);
   const stub = monorepoStub(env, monorepo);
-  const refused = await stub.checkPush(repo.name, section.commands);
+  // Tests only: the refs compare after this push comes this soon (else REFS_CHECK_MS).
+  const checkEveryMs = env.DOOR_TEST === "1" ? Number(req.headers.get("x-pando-test-refs-check-ms") ?? 0) || null : null;
+  const { refused, kept } = await stub.checkPush(repo.name, section.commands, checkEveryMs);
 
   if (refused.length) {
     await drain(section.rest);
@@ -315,9 +318,11 @@ async function receivePack(
   let bytes: Uint8Array = new Uint8Array(0);
   let res: Response | null = null;
   let busy = false;
-  // A failed call (thrown, or Artifacts answering 5xx): its reason, for the log; git gets a plain refusal.
+  // A failed call (thrown, or Artifacts answering 5xx): its reason, for the log. The push may have landed anyway.
   let failed: string | null = null;
   let fakeFail = env.DOOR_TEST === "1" && req.headers.get("x-pando-test-fail") === "1";
+  // Tests only: the pack reaches Artifacts for real; its answer is dropped as if the call threw.
+  let loseAnswer = env.DOOR_TEST === "1" && req.headers.get("x-pando-test-lose-answer") === "1";
 
   const send = async (): Promise<{ res: Response | null; bytes: Uint8Array; busy: boolean; failed: string | null }> => {
     try {
@@ -352,30 +357,93 @@ async function receivePack(
 
     // The whole report, before git sees it: the push is recorded first (it is small).
     const b = new Uint8Array(await timeArtifacts("http POST git-receive-pack (body)", repo.artifacts_name, () => r.arrayBuffer()));
+
+    if (loseAnswer) {
+      loseAnswer = false;
+      throw new Error("door test: Artifacts' answer was lost");
+    }
+
     // Busy: Artifacts' code, and no pack taken (a branch could be named like the code).
     const refusedBusy = isBusy(new TextDecoder().decode(b.subarray(0, 512))) && parseReport(b, section.caps).unpack !== "ok";
 
     return { res: r, bytes: b, busy: refusedBusy, failed: r.status >= 500 ? `Artifacts answered ${r.status}` : null };
   };
 
+  // After a lost answer: where the push's refs are at Artifacts now. All at their new heads (it landed), all at their old
+  // ones (it did not), or anything else (or unreadable).
+  const readWhere = async (): Promise<{ at: "new" | "old" | "unknown"; refs: Map<string, string> | null }> => {
+    try {
+      // Tests only: a pause after the lost answer, before the read, for another push to move the ref meanwhile.
+      const pause = env.DOOR_TEST === "1" ? Math.min(Number(req.headers.get("x-pando-test-pause-after-lost-ms") ?? 0), 10_000) : 0;
+
+      if (pause > 0) await new Promise((r) => setTimeout(r, pause));
+      const refs = await listRefs(env, repo);
+      const there = (c: RefCommand) => refs.get(c.ref) ?? ZERO;
+
+      if (section.commands.every((c) => there(c) === c.new)) return { at: "new", refs };
+
+      return { at: section.commands.every((c) => there(c) === c.old) ? "old" : "unknown", refs };
+    } catch (err) {
+      console.warn(`reading ${repo.artifacts_name}'s refs after a lost answer failed: ${err instanceof Error ? err.message : String(err)}`);
+
+      return { at: "unknown", refs: null };
+    }
+  };
+
+  const wait = () => new Promise((r) => setTimeout(r, BUSY_WAIT_MS[0] + Math.random() * (BUSY_WAIT_MS[1] - BUSY_WAIT_MS[0])));
+  // What decides git's answer: Artifacts' own report, or, after a lost answer, where the refs are (CODE-VS-MODEL.md P1).
+  let outcome: "report" | "landed" | "unknown" = "report";
+  let refsNow: Map<string, string> | null = null;
+
   try {
-    ({ res, bytes, busy, failed } = await send());
+    let lost = false;
 
-    if ((busy || failed) && buffered.all) {
-      // Busy (mid-push with others) or failed: wait a moment and send the same pack again, once, in the same slot.
-      // A replay cannot apply twice: each ref update names the old head it expects.
-      const why = busy ? "busy_retry" : "fail_retry";
-
-      if (failed) console.warn(`receive-pack on ${repo.artifacts_name} failed, retrying once: ${failed}`);
-      await new Promise((r) => setTimeout(r, BUSY_WAIT_MS[0] + Math.random() * (BUSY_WAIT_MS[1] - BUSY_WAIT_MS[0])));
+    // At most two sends, in the same slot. A resend cannot apply twice: each ref update names the old head it expects.
+    for (let sends = 1; ; sends++) {
       ({ res, bytes, busy, failed } = await send());
-      note({ [why]: busy || failed ? "failed" : "ok" });
-    } else if (busy) {
-      if (!res) await drain(section.rest); // the test's unsent large push
-      note({ busy_retry: "too_large" });
-    } else if (failed) {
-      note({ fail_retry: "too_large" });
-      await drain(section.rest).catch(() => undefined); // whatever git still sends
+      const again = buffered.all && sends < 2;
+
+      if (busy) {
+        // Busy (mid-push with others): no pack taken. A push held in memory is sent again after a moment.
+        note({ busy_retry: again ? "resent" : buffered.all ? "failed" : "too_large" });
+
+        if (again) {
+          await wait();
+          continue;
+        }
+
+        if (!res) await drain(section.rest); // the test's unsent large push
+        break;
+      }
+
+      // Artifacts' report decides, unless the answer was lost (a throw or a 5xx) or a resend after one was refused.
+      if (!failed && !(lost && refusedSome(bytes, section))) break;
+      lost = true;
+
+      if (failed) {
+        console.warn(`receive-pack on ${repo.artifacts_name} failed: ${failed}`);
+        note({ push_error: failed.slice(0, 200) });
+
+        if (!buffered.all) await drain(section.rest).catch(() => undefined); // whatever git still sends
+      }
+
+      // The push may have landed: read its refs before sending it again.
+      const where = await readWhere();
+      refsNow = where.refs;
+
+      if (where.at === "new") {
+        outcome = "landed";
+        break;
+      }
+
+      if (where.at === "old" && again) {
+        note({ fail_retry: "resent" });
+        await wait();
+        continue;
+      }
+
+      outcome = "unknown";
+      break;
     }
   } finally {
     clearInterval(renew);
@@ -385,28 +453,53 @@ async function receivePack(
   // Still busy: a plain message, not Artifacts' code.
   if (busy) return busyRefusal(section, `Pando: ${repo.name} is busy with other pushes right now; push again`);
 
-  // Failed: never a bare 500 to git. Nothing was recorded; the person pushes again.
-  if (failed) {
-    console.error(`receive-pack on ${repo.artifacts_name} failed: ${failed}`);
-    note({ push_error: failed.slice(0, 200) });
+  // Not known to have landed: kept as 'unknown' and reconciled from Artifacts' refs before git hears anything (record
+  // before ack), so a push that did land is recorded with its events and hook delivery. If either fails, git is answered
+  // anyway; the refs compare covers it. git hears ok for each ref already at its new head, "push again" for the rest.
+  if (outcome === "unknown") {
+    note({ push_outcome: "unknown" });
+    const notThere = section.commands.filter((c) => (refsNow?.get(c.ref) ?? ZERO) !== c.new);
 
-    return busyRefusal(section, `Pando: ${repo.name} couldn't take this push right now; push again`, "couldn't take it; push again");
+    try {
+      await keepUnrecorded(stub, repo.name, identity, section.commands, origin, false, "unknown");
+      await runReconcile(env, stub, repo);
+    } catch (err) {
+      console.error(`reconciling ${repo.name} after a lost answer failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return reportResponse(section, new Map(notThere.map((c) => [c.ref, "couldn't take it; push again"])), notThere.length ? `Pando: ${repo.name} couldn't take this push right now; push again` : "");
   }
 
-  const headers = { "content-type": res!.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
+  let accepted: RefCommand[];
+  let answer: Response;
 
-  if (!res!.ok) return new Response(bytes, { status: res!.status, headers });
+  if (outcome === "landed") {
+    // Artifacts' answer was lost, but every ref is at its new head: the push landed.
+    note({ push_outcome: "landed_after_lost_answer" });
+    accepted = section.commands;
+    answer = reportResponse(section, new Map(), "");
+  } else {
+    const headers = { "content-type": res!.headers.get("content-type") ?? "application/x-git-receive-pack-result", "cache-control": "no-cache" };
 
-  // Record before ack: branch heads and their events are written before git gets its report.
-  const report = parseReport(bytes, section.caps);
+    if (!res!.ok) return new Response(bytes, { status: res!.status, headers });
 
-  if (report.error) console.warn(`receive-pack on ${repo.artifacts_name}: ${report.error}`);
-  const accepted = report.unpack === "ok" ? section.commands.filter((c) => report.refs.get(c.ref) === null) : [];
+    // Record before ack: branch heads and their events are written before git gets its report.
+    const report = parseReport(bytes, section.caps);
+
+    if (report.error) console.warn(`receive-pack on ${repo.artifacts_name}: ${report.error}`);
+    accepted = report.unpack === "ok" ? section.commands.filter((c) => report.refs.get(c.ref) === null) : [];
+    answer = new Response(bytes, { headers });
+  }
 
   // The object writes the branch rows, their events and their hook deliveries in one step (C2, C9). If that fails,
   // the push still landed: git gets its report, and the commands are kept for the next branch read to reconcile.
   if (accepted.length) {
     try {
+      // Tests only: a slow record (another push's record can land first), or a failed one.
+      const delay = env.DOOR_TEST === "1" ? Number(req.headers.get("x-pando-test-record-delay-ms") ?? 0) : 0;
+
+      if (delay > 0) await new Promise((r) => setTimeout(r, Math.min(delay, 10_000)));
+
       if (env.DOOR_TEST === "1" && req.headers.get("x-pando-test-record-fail") === "1") throw new Error("door test: the record failed");
       await stub.recordPush(repo.name, identity, accepted, {}, origin);
     } catch (err) {
@@ -414,20 +507,46 @@ async function receivePack(
 
       console.error(`recording a push to ${repo.name} failed; kept for a reconcile: ${why}`);
       note({ record_error: why.slice(0, 200) });
-      ctx.waitUntil(keepUnrecorded(stub, repo.name, identity, accepted, origin));
+      ctx.waitUntil(keepUnrecorded(stub, repo.name, identity, accepted, origin, env.DOOR_TEST === "1" && req.headers.get("x-pando-test-keep-fail") === "1"));
     }
   }
 
-  return new Response(bytes, { headers });
+  // Pushes kept earlier (a record that failed, an answer lost) are repaired now, not at the next compare.
+  if (kept) ctx.waitUntil(runReconcile(env, stub, repo).catch((err) => console.error(`reconciling ${repo.name} on a push failed: ${err instanceof Error ? err.message : String(err)}`)));
+
+  return answer;
 }
 
-/** Store a push the object could not record, trying again a few times while the object is unreachable. */
-async function keepUnrecorded(stub: ReturnType<typeof monorepoStub>, repo: string, identity: Identity, commands: RefCommand[], origin: string | null): Promise<void> {
+/** Whether a report refused any of the push's refs (or did not unpack). */
+function refusedSome(bytes: Uint8Array, section: { commands: RefCommand[]; caps: Set<string> }): boolean {
+  const report = parseReport(bytes, section.caps);
+
+  return report.unpack !== "ok" || section.commands.some((c) => report.refs.get(c.ref) !== null);
+}
+
+/** git's report for the push: ok for each ref, but those in `ng` with their reason; `message` is shown first (side-band). */
+function reportResponse(section: { commands: RefCommand[]; caps: Set<string> }, ng: Map<string, string>, message: string): Response {
+  return new Response(statusReport(section.commands, ng, section.caps, message), {
+    headers: { "content-type": "application/x-git-receive-pack-result", "cache-control": "no-cache" },
+  });
+}
+
+/** Store a push the object could not record (or one not known to have landed), trying again a few times while the object is unreachable. */
+async function keepUnrecorded(
+  stub: ReturnType<typeof monorepoStub>,
+  repo: string,
+  identity: Identity,
+  commands: RefCommand[],
+  origin: string | null,
+  testFail = false,
+  landed: "yes" | "unknown" = "yes",
+): Promise<void> {
   for (const wait of [0, 1_000, 3_000, 10_000]) {
     if (wait) await new Promise((r) => setTimeout(r, wait));
 
     try {
-      await stub.markUnrecorded(repo, identity, commands, origin);
+      if (testFail) throw new Error("door test: keeping the push failed");
+      await stub.markUnrecorded(repo, identity, commands, origin, landed);
 
       return;
     } catch (err) {
@@ -445,3 +564,20 @@ function busyRefusal(section: { commands: import("./pktline").RefCommand[]; caps
   });
 }
 
+
+/**
+ * Tests only (DOOR_TEST=1 and the bootstrap secret): GET
+ * /v1/_door/test?monorepo=<id>&repo=<name> lists the repo's kept pushes.
+ */
+export async function doorTestRoute(request: Request, env: Env): Promise<Response> {
+  if (env.DOOR_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+  const { isBootstrap } = await import("./session");
+
+  if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
+  const q = new URL(request.url).searchParams;
+  const [monorepo, repo] = [q.get("monorepo"), q.get("repo")];
+
+  if (!monorepo || !repo) return Response.json({ error: { code: "bad_request", message: "monorepo (its id) and repo" } }, { status: 400 });
+
+  return Response.json({ kept: await env.MONOREPO.getByName(monorepo).testKept(repo) });
+}

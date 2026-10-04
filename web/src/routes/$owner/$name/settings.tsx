@@ -36,8 +36,8 @@ function Rename() {
           if (name.trim().toLowerCase() !== monorepo.name) move.mutate();
         }}
       >
-        <span className="inline-flex h-[34px] items-center rounded-lg border border-rootline px-3 font-mono text-[13px] text-ash">{monorepo.owner}/</span>
-        <input className={`${field} w-[220px] font-mono`} aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <span className="inline-flex h-[34px] items-center rounded-lg border border-rootline px-3 text-[13px] text-ash">{monorepo.owner}/</span>
+        <input className={`${field} w-[220px]`} aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} />
         <button type="submit" className={button("quiet")} disabled={move.isPending}>
           Rename
         </button>

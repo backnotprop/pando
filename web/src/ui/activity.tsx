@@ -18,7 +18,8 @@ interface Sentence {
   actor: string;
   verb: string;
   bad: boolean;
-  object: { text: string; link: AppLink | null } | null;
+  /** A branch (mono, as code is) or a saved file's path (SF Pro Text, at the sentence's size). */
+  object: { text: string; link: AppLink | null; path?: boolean } | null;
   tail: string | null;
   repo: string | null;
   machine: string | null;
@@ -49,8 +50,12 @@ export function describe(e: FeedEvent): Sentence {
       return { ...base, verb: "opened", detail: e.summary?.head_title ?? null };
     case "branch.deleted":
       return { ...base, verb: "deleted", object: branch && { text: branch.text, link: null } };
-    case "merged":
-      return { ...base, verb: "merged", tail: "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+    case "merged": {
+      const closes = e.summary?.closes ?? [];
+
+      return { ...base, verb: "merged", tail: closes.length ? `into main, closing ${closes.map((n) => `#${n}`).join(", ")}` : "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+    }
+
     case "review":
       return { ...base, verb: VERDICTS[e.summary?.verdict ?? "comment"] };
     case "status": {
@@ -58,8 +63,12 @@ export function describe(e: FeedEvent): Sentence {
       const app = d?.app ?? null;
       const took = d?.duration_s == null ? null : duration(d.duration_s);
 
+      // On a commit no branch is at (main's, or a deleted branch's): the branch the server names, else the commit itself.
+      const on = base.object ?? (d?.sha ? { text: d.sha.slice(0, 7), link: null } : null);
+
       return {
         ...base,
+        object: on,
         person: app ? null : e.actor,
         app,
         actor: d?.context ?? "check",
@@ -82,8 +91,25 @@ export function describe(e: FeedEvent): Sentence {
         ...base,
         repo: null,
         verb: deleted ? "deleted" : "saved",
-        object: { text: path, link: deleted ? null : blobLink(e.monorepo, path) },
+        object: { text: path, link: deleted ? null : blobLink(e.monorepo, path), path: true },
         detail: e.summary?.version ? `version ${e.summary.version}` : null,
+      };
+    }
+
+    // Issues (the issues lane styles these): the number as the object, the title after it.
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened": {
+      const d = e.summary;
+      const verb = { "issue.opened": "opened", "issue.commented": "commented on", "issue.closed": "closed", "issue.reopened": "reopened" }[e.kind];
+
+      return {
+        ...base,
+        verb,
+        object: d ? { text: `#${d.number}`, link: null, path: true } : null,
+        tail: d ? `${d.title}${e.kind === "issue.closed" && d.reason === "not_planned" ? " as not planned" : ""}` : null,
+        detail: d?.excerpt ?? null,
       };
     }
   }
@@ -104,7 +130,7 @@ export const CheckMark = ({ height = 10, big = false }: { height?: number; big?:
 /** The sentence. `mini` (the side column) leads with the mark and drops "in" and "from". */
 export function Sentence({ s, mini = false }: { s: Sentence; mini?: boolean }) {
   const obj = s.object;
-  const objClass = "fox-cool font-mono text-[13px] leading-[16px] text-bark";
+  const objClass = obj?.path ? "fox-cool leading-[16px] text-bark" : `fox-cool font-mono leading-[16px] text-bark ${mini ? "text-[12.5px]" : "text-[13px]"}`;
 
   return (
     <span className={`flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap phone:flex-wrap phone:whitespace-normal ${mini ? "text-[13px]" : ""}`}>
@@ -113,17 +139,17 @@ export function Sentence({ s, mini = false }: { s: Sentence; mini?: boolean }) {
       <span className={`fox-cool ${s.bad ? "text-rust" : "text-bark-dim"}`}>{s.verb}</span>
       {obj ? (
         obj.link ? (
-          <Link {...obj.link} className={`${objClass} ${mini ? "text-[12.5px]" : ""} hover:underline hover:decoration-ash hover:underline-offset-3`}>
+          <Link {...obj.link} className={`${objClass} hover:underline hover:decoration-ash hover:underline-offset-3`}>
             {obj.text}
           </Link>
         ) : (
-          <span className={`${objClass} ${mini ? "text-[12.5px]" : ""}`}>{obj.text}</span>
+          <span className={objClass}>{obj.text}</span>
         )
       ) : null}
       {s.tail ? <span className="fox-cool text-bark-dim">{s.tail}</span> : null}
       {!mini && s.repo ? (
         <span className="fox-cool text-ash">
-          in <code className="text-[12.5px] text-ash">{s.repo}</code>
+          in {s.repo}
         </span>
       ) : null}
       {!mini && s.machine ? <span className="fox-cool text-ash">from {s.machine}</span> : null}
@@ -156,9 +182,9 @@ function Line({ e, withMonorepo, clock }: { e: FeedEvent; withMonorepo: boolean;
         tabIndex={-1}
         className={`group -mx-2.5 grid min-h-[38px] items-center gap-4 rounded-[7px] px-2.5 py-1.5 ${withMonorepo ? "grid-cols-[64px_186px_minmax(0,1fr)] phone:grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[64px_minmax(0,1fr)]"}`}
       >
-        <span className="fox-cool font-mono text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
+        <span className="fox-cool text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
         {withMonorepo ? (
-          <span className="flex items-center gap-2 overflow-hidden font-mono text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash phone:hidden">
+          <span className="flex items-center gap-2 overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash phone:hidden">
             <span>
               {owner}/<span className="text-bark-dim">{name}</span>
             </span>
@@ -240,7 +266,7 @@ export function MiniActivity({ events }: { events: readonly FeedEvent[] }) {
         <li key={lineKey(e)} className="border-t border-rule-faint first:border-t-0">
           <div className="-mx-2.5 grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2.5 py-[5px]">
             <Sentence s={describe(e)} mini />
-            <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
+            <span className="text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
           </div>
         </li>
       ))}

@@ -415,6 +415,22 @@ try {
   checkS("the socket got the same events as the JSON page", live.length === all.length && live.every((x, i) => x.seq === all[i].seq), `${live.length} vs ${all.length}`);
   r = await call("GET", `/v1/monorepos/${O}/${M}/events?limit=1`, A);
   checkS("GET events?limit=1 is the latest event (last activity)", r.json?.events?.length === 1 && r.json.events[0].seq === all[all.length - 1].seq);
+  // The pull's repo=, kinds= and before= (C4), in SQL on their indexes.
+  const page = async (q) => (await call("GET", `/v1/monorepos/${O}/${M}/events?${q}`, A)).json?.events ?? [];
+  const sameSeqs = (a, b) => a.length === b.length && a.every((x, i) => x.seq === b[i].seq);
+  const ofRepo = all.filter((x) => x.repo === repo);
+  checkS("events?repo= is that repo's events, in order", ofRepo.length > 0 && ofRepo.length < all.length && sameSeqs(await page(`since=0&limit=500&repo=${repo}`), ofRepo), `${ofRepo.length} of ${all.length}`);
+  const ofKinds = all.filter((x) => x.kind === "status" || x.kind === "merged");
+  checkS("events?kinds=status,merged is those kinds only", ofKinds.length > 0 && sameSeqs(await page("since=0&limit=500&kinds=status,merged"), ofKinds), `${ofKinds.length}`);
+  const cut = all[10].seq;
+  const back = await page(`before=${cut}&limit=4`);
+  const back2 = await page(`before=${back[0]?.seq}&limit=4`);
+  checkS("events?before= pages back: the 4 before a seq, oldest first, then the 4 before those", sameSeqs(back, all.slice(6, 10)) && sameSeqs(back2, all.slice(2, 6)), `${back.map((x) => x.seq).join(",")} | ${back2.map((x) => x.seq).join(",")}`);
+  const both = all.filter((x) => x.repo === repo && x.kind === "push" && x.seq < all[all.length - 1].seq).slice(-2);
+  checkS("repo=, kinds= and before= together", both.length > 0 && sameSeqs(await page(`repo=${repo}&kinds=push&before=${all[all.length - 1].seq}&limit=2`), both), `${both.length}`);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/events?before=0`, A);
+  const r2 = await call("GET", `/v1/monorepos/${O}/${M}/events?kinds=Bad%20Kind`, A);
+  check("a bad before= or kinds= answers 400", r.status === 400 && r2.status === 400, `${r.status} ${r2.status}`);
   const mid = all[Math.floor(all.length / 2)].seq;
   const again = openEvents(M, A, mid);
   sockets.push(again);

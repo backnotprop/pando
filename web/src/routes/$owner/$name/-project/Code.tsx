@@ -73,7 +73,7 @@ export function Toolbar({ repo, gitRef, at, here }: { repo: Repo; gitRef: string
         </Link>
       )}
       {here ? (
-        <span className="font-mono text-[13px] leading-[16px] text-ash">{here}</span>
+        <span className="text-[13px] leading-[16px] text-ash">{here}</span>
       ) : (
         <span className="relative ml-auto">
           <Clone full={monorepo.full} repos={repos} plain={info.kind === "repo"} only={repo} />
@@ -141,7 +141,7 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
         {toolbar}
         {isBranch(gitRef) ? <AheadLine repo={repo} gitRef={gitRef} /> : null}
         <FileList
-          bar={newest ? <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} at={Date.parse(newest.at)} history={history} /> : null}
+          bar={newest ? <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha at={Date.parse(newest.at)} history={history} /> : null}
           rows={rows}
         />
         {readme ? <CodeReadme repo={repo} commit={tree.commit} path={join(dir, readme)} gitRef={gitRef} /> : null}

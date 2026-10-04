@@ -139,7 +139,7 @@ export interface ChangedFile extends Schema.Schema.Type<typeof ChangedFile> {}
  */
 export const BranchDiff = Schema.Struct({
   base_branch: Schema.String,
-  /** The default branch's head the diff was taken against. */
+  /** The default branch's head the diff was taken against; for a branch Pando merged at this head, main just before that merge. */
   base: Sha,
   head: Sha,
   merge_base: Sha,
@@ -198,6 +198,12 @@ export const MergeResult = Schema.Struct({
   merge_base: Schema.optionalKey(Sha),
   forced: Schema.optionalKey(Schema.Boolean),
   merged_by: Schema.optionalKey(Login),
+  /**
+   * `merged`: the open issues this merge closes, decided as it lands: the branch's links (explicit, its title or
+   * description, its commits) and closing keywords in the merge message and the merged commits. Each closes about
+   * a second later, in its own step (an `issue.closed` naming the merge); one closed by someone meanwhile is left.
+   */
+  closes: Schema.optionalKey(Schema.Array(Count)),
 });
 
 export interface MergeResult extends Schema.Schema.Type<typeof MergeResult> {}

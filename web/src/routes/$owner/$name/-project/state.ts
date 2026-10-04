@@ -42,6 +42,9 @@ export function stateOf(b: Branch): BranchState {
   return { tone: "ready", text: "ready to merge", app: null };
 }
 
+/** "Required checks unknown: pando.toml line 3: ...", whatever the state says first, while pando.toml cannot be read; null otherwise. */
+export const unknownWhy = (b: Branch) => (b.checks.state === "unknown" ? `Required checks unknown: ${b.checks.checks_unknown ?? "pando.toml could not be read"}` : null);
+
 /** The state's colour in a list: ready in Bark, failures in Rust, waiting in Ash. */
 export const toneClass: Record<Tone, string> = {
   ready: "font-semibold text-bark",

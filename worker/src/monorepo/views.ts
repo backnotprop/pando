@@ -3,9 +3,20 @@
 // from stored facts (facts.ts).
 
 import type { Env } from "../env";
+import { isOneOf } from "../parse";
 import { gitwrite } from "./merge-port";
 import { timedArtifacts } from "../timing";
 import type { Checks, RepoRecord } from "./types";
+
+/** The merge dry run's answer, as the contract's Mergeable has it; `pending` while not computed for the current main and head. */
+export const MERGEABLE = ["clean", "conflicts", "up_to_date", "unknown", "pending"] as const;
+
+export type Mergeable = (typeof MERGEABLE)[number];
+
+/** A stored mergeable answer (branches.mergeable), checked as it is read back. */
+export function isMergeable(v: string | null | undefined): v is Mergeable {
+  return isOneOf(MERGEABLE, v);
+}
 
 export interface BranchView {
   name: string;
@@ -16,7 +27,7 @@ export interface BranchView {
   description: string | null;
   ahead: number | null;
   behind: number | null;
-  mergeable: string;
+  mergeable: Mergeable;
   checks: Checks;
   state: "open" | "merged";
   merge_commit: string | null;
@@ -32,7 +43,7 @@ export interface BranchView {
   /** True when ahead, behind, base and mergeable are not yet for the current main and head. */
   stale: boolean;
   /** When stale: the last known mergeable answer (mergeable says "pending"). */
-  last_mergeable: string | null;
+  last_mergeable: Mergeable | null;
   /** The paths changed differently on both sides, from the dry run behind mergeable (or last_mergeable while stale); null unless that answer is "conflicts". */
   conflict_paths: string[] | null;
   facts_at: string | null;
@@ -51,7 +62,7 @@ export interface BranchList {
 
 /** A dry run's answer: mergeable, and the paths that conflict when it is "conflicts" (else null). */
 export interface DryRun {
-  mergeable: string;
+  mergeable: Mergeable;
   conflict_paths: string[] | null;
 }
 

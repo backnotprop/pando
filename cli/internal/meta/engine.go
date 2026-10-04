@@ -244,6 +244,33 @@ func (e *Engine) synced() bool {
 	return true
 }
 
+// notSent lists what pando sync --once leaves out of Pando: frozen paths,
+// whose edits wait for pando resolve, and changes the server refused, which
+// wait until the file changes again. One plain line each, sorted.
+func (e *Engine) notSent() []string {
+	var out []string
+	frozen, _ := ListFrozen(e.cfg.Root)
+	for _, f := range frozen {
+		line := f.Path + ": frozen after a conflict, so its edits are not sent."
+		if f.ConflictCopy != "" {
+			line += " Your version is in " + f.ConflictCopy + "."
+		}
+		out = append(out, line+" When the file is right: pando resolve "+f.Path)
+	}
+	for p := range e.st.Refused {
+		if _, err := os.Lstat(e.abs(p)); err != nil {
+			continue // gone since: nothing waits
+		}
+		why := e.st.RefusedWhy[p]
+		if why == "" {
+			why = "no reason kept"
+		}
+		out = append(out, p+": refused by the server: "+why+". It goes again when the file changes.")
+	}
+	sort.Strings(out)
+	return out
+}
+
 // CatchUp downloads every change since this machine last synced (all of the
 // meta layer on a new clone), writes it, and returns. It does not send.
 func (e *Engine) CatchUp(ctx context.Context) error {
@@ -1096,7 +1123,9 @@ func (e *Engine) send(ctx context.Context, op *Op, mayConvert bool) {
 		if data == nil {
 			data = []byte{}
 		}
-		op.sentSHA, op.sentSize, op.sentMt = sha, info.Size(), info.ModTime().UnixNano()
+		op.SentSHA, op.SentDelete, op.sentOid = sha, false, ""
+		op.sentSize, op.sentMt = info.Size(), info.ModTime().UnixNano()
+		e.dirty = true
 		op.id = id
 		e.inflight[id] = op
 		e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: sha, Bytes: data})
@@ -1106,6 +1135,8 @@ func (e *Engine) send(ctx context.Context, op *Op, mayConvert bool) {
 			e.send(ctx, op, false)
 			return
 		}
+		op.SentSHA, op.SentDelete, op.sentOid = "", true, ""
+		e.dirty = true
 		op.id = id
 		e.inflight[id] = op
 		e.write(ctx, deleteMsg{Type: "delete", ID: id, Path: op.Path, Base: op.Base})
@@ -1144,10 +1175,12 @@ func (e *Engine) sendLarge(ctx context.Context, op *Op, id string, info fs.FileI
 		return
 	}
 	text := u.ptr.text()
-	op.sentSHA, op.sentOid, op.sentSize, op.sentMt = gitSHA(text), u.ptr.Oid, info.Size(), info.ModTime().UnixNano()
+	op.SentSHA, op.SentDelete, op.sentOid = gitSHA(text), false, u.ptr.Oid
+	op.sentSize, op.sentMt = info.Size(), info.ModTime().UnixNano()
+	e.dirty = true
 	op.id = id
 	e.inflight[id] = op
-	e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: op.sentSHA, Bytes: text})
+	e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: op.SentSHA, Bytes: text})
 }
 
 func (e *Engine) uploaded(ctx context.Context, r *uploadResult) {
@@ -1176,8 +1209,9 @@ func (e *Engine) accepted(m *serverMsg) {
 	}
 	switch op.Kind {
 	case "save":
-		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.sentSHA, Oid: op.sentOid, Size: op.sentSize, Mtime: op.sentMt}
+		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.SentSHA, Oid: op.sentOid, Size: op.sentSize, Mtime: op.sentMt}
 		delete(e.st.Refused, op.Path)
+		delete(e.st.RefusedWhy, op.Path)
 		e.logf("sent %s (version %d)", op.Path, m.Version)
 	case "delete":
 		e.st.Files[op.Path] = &FileState{Version: m.Version}
@@ -1203,10 +1237,11 @@ func (e *Engine) refused(m *serverMsg) {
 		return
 	}
 	if op.Kind == "save" {
-		e.st.Refused[op.Path] = op.sentSHA
+		e.st.Refused[op.Path] = op.SentSHA
 		if op.sentOid != "" {
 			e.st.Refused[op.Path] = "sha256:" + op.sentOid
 		}
+		e.st.RefusedWhy[op.Path] = fmt.Sprintf("%s (%s)", m.Message, m.Reason)
 	}
 	e.removeOp(op)
 	e.cfg.Log.Printf("the server refused %s: %s (%s)", m.Path, m.Message, m.Reason)
@@ -1230,48 +1265,67 @@ func (e *Engine) stale(m *serverMsg) {
 		e.queue(&Op{Kind: "save", Path: op.Path, Base: op.ToBase})
 		return
 	case "delete":
+		if _, err := os.Lstat(e.abs(op.Path)); err == nil {
+			// Made again here since the delete went out: its new bytes lose
+			// as a save's would, to a conflict copy (CODE-VS-MODEL M4).
+			if !e.lostSave(op, cur) {
+				return
+			}
+			break
+		}
 		e.writeCurrent(op.Path, cur)
 		if !cur.Deleted {
 			e.cfg.Log.Printf("%s changed on %s before your delete arrived, so it is back", op.Path, cur.Machine)
 		}
 	case "save":
-		p := op.Path
-		data, err := os.ReadFile(e.abs(p))
-		if err == nil && !cur.Deleted && gitSHA(data) == cur.SHA {
-			e.adopt(p, cur.Version, cur.SHA, "") // the same bytes won
-			break
+		if !e.lostSave(op, cur) {
+			return
 		}
-		if ptr, ok := parsePointer(cur.Bytes); err == nil && ok && op.sentOid == ptr.Oid {
-			e.adopt(p, cur.Version, cur.SHA, ptr.Oid) // the same large file won
-			break
-		}
-		copyRel := ""
-		if err == nil {
-			copyRel = e.freeConflictName(p)
-			if _, werr := writeAtomic(e.abs(copyRel), data); werr != nil {
-				e.cfg.Log.Printf("could not keep your copy of %s: %v; leaving it as it is", p, werr)
-				return
-			}
-		}
-		e.writeCurrent(p, cur)
-		who := cur.Author
-		if cur.Machine != "" {
-			who += " on " + cur.Machine
-		}
-		if copyRel == "" {
-			e.cfg.Log.Printf("%s: %s saved first; your file was already gone", p, who)
-			break
-		}
-		fz := Frozen{Path: p, ConflictCopy: copyRel, Version: cur.Version, At: time.Now().UTC()}
-		if err := freeze(e.cfg.Root, fz); err != nil {
-			e.cfg.Log.Printf("could not freeze %s: %v", p, err)
-		}
-		e.frozen[p] = fz
-		e.cfg.Log.Printf("conflict on %s: %s saved first. Your version is in %s. %s is frozen until: pando resolve %s", p, who, copyRel, p, p)
 	}
 	if h := e.held[op.Path]; h != nil && h.Version <= cur.Version {
 		delete(e.held, op.Path)
 	}
+}
+
+// lostSave handles the local file of a change that lost the race: the same
+// bytes won (adopted), or the local bytes go to a conflict copy, the
+// object's are written, and the path freezes. False: the copy could not be
+// written, and the file is left as it is.
+func (e *Engine) lostSave(op *Op, cur *Current) bool {
+	p := op.Path
+	data, err := os.ReadFile(e.abs(p))
+	if err == nil && !cur.Deleted && gitSHA(data) == cur.SHA {
+		e.adopt(p, cur.Version, cur.SHA, "", nil) // the same bytes won
+		return true
+	}
+	if ptr, ok := parsePointer(cur.Bytes); err == nil && ok && op.sentOid == ptr.Oid {
+		e.adopt(p, cur.Version, cur.SHA, ptr.Oid, nil) // the same large file won
+		return true
+	}
+	copyRel := ""
+	if err == nil {
+		copyRel = e.freeConflictName(p)
+		if _, werr := writeAtomic(e.abs(copyRel), data); werr != nil {
+			e.cfg.Log.Printf("could not keep your copy of %s: %v; leaving it as it is", p, werr)
+			return false
+		}
+	}
+	e.writeCurrent(p, cur)
+	who := cur.Author
+	if cur.Machine != "" {
+		who += " on " + cur.Machine
+	}
+	if copyRel == "" {
+		e.cfg.Log.Printf("%s: %s saved first; your file was already gone", p, who)
+		return true
+	}
+	fz := Frozen{Path: p, ConflictCopy: copyRel, Version: cur.Version, At: time.Now().UTC()}
+	if err := freeze(e.cfg.Root, fz); err != nil {
+		e.cfg.Log.Printf("could not freeze %s: %v", p, err)
+	}
+	e.frozen[p] = fz
+	e.cfg.Log.Printf("conflict on %s: %s saved first. Your version is in %s. %s is frozen until: pando resolve %s", p, who, copyRel, p, p)
+	return true
 }
 
 func (e *Engine) freeConflictName(rel string) string {
@@ -1322,8 +1376,12 @@ func (e *Engine) writeCurrent(rel string, cur *Current) {
 	e.dirty = true
 }
 
-// adopt records the local file as synced at version (its bytes already match).
-func (e *Engine) adopt(rel string, version int64, sha, oid string) {
+// adopt records the local file as synced at version (its bytes already
+// match). A queued change of it is dropped, except one that went out and
+// whose answer was lost: m, the change that matched, drops it only when m is
+// that change's own version (CODE-VS-MODEL M3). Otherwise it waits for its
+// own version, or goes out again and finds nothing left to send.
+func (e *Engine) adopt(rel string, version int64, sha, oid string, m *serverMsg) {
 	f := &FileState{Version: version, SHA: sha, Oid: oid}
 	if sha != "" {
 		if info, err := os.Lstat(e.abs(rel)); err == nil {
@@ -1331,11 +1389,47 @@ func (e *Engine) adopt(rel string, version int64, sha, oid string) {
 		}
 	}
 	e.st.Files[rel] = f
-	if op := e.opFor(rel); op != nil && op.id == "" {
+	if op := e.opFor(rel); op != nil && op.id == "" && (m == nil || !op.wasSent() || e.lostAnswer(op, m)) {
 		e.removeOp(op)
 	}
 	delete(e.held, rel)
 	e.dirty = true
+}
+
+func (op *Op) wasSent() bool { return op.SentSHA != "" || op.SentDelete }
+
+// lostAnswer reports whether m is this machine's own version of what op last
+// sent, with op not in flight now: the server accepted it, and the answer was
+// lost with a dropped socket.
+func (e *Engine) lostAnswer(op *Op, m *serverMsg) bool {
+	if op == nil || op.id != "" || op.Path != m.Path || m.Machine != e.cfg.Machine {
+		return false
+	}
+	if m.Deleted {
+		return op.SentDelete
+	}
+	return op.SentSHA != "" && op.SentSHA == m.SHA
+}
+
+// rebase takes m as the answer a dropped socket lost, when the file changed
+// again since: m is synced, and the queued change goes out on top of it
+// instead of meeting its own version as a conflict (CODE-VS-MODEL M3).
+func (e *Engine) rebase(m *serverMsg, oid string) bool {
+	op := e.st.Outbox[m.Path]
+	if !e.lostAnswer(op, m) {
+		return false
+	}
+	f := &FileState{Version: m.Version}
+	if !m.Deleted {
+		// Not the bytes on disk: the file changed since, so it is not clean.
+		f.SHA, f.Oid, f.Size, f.Mtime = m.SHA, oid, -1, -1
+	}
+	e.st.Files[m.Path] = f
+	op.Base = m.Version
+	delete(e.held, m.Path)
+	e.dirty = true
+	e.logf("%s: version %d is this machine's own (its answer was lost); the newer edit goes out on top of it", m.Path, m.Version)
+	return true
 }
 
 func (e *Engine) noteWrite(rel string) {
@@ -1407,7 +1501,7 @@ func (e *Engine) move(m *serverMsg) bool {
 	e.noteWrite(from)
 	e.noteWrite(to)
 	e.st.Files[from] = &FileState{Version: m.FromVersion}
-	e.adopt(to, m.Version, m.SHA, ff.Oid)
+	e.adopt(to, m.Version, m.SHA, ff.Oid, nil)
 	delete(e.cache, from)
 	e.logf("%s moved %s to %s", who(m), from, to)
 	return true
@@ -1482,14 +1576,17 @@ func (e *Engine) applyOne(m *serverMsg) {
 	}
 	// The file already holds these bytes: a lost answer, or the same edit.
 	if !exists && m.Deleted {
-		e.adopt(p, m.Version, "", "")
+		e.adopt(p, m.Version, "", "", m)
 		return
 	}
 	if exists && !m.Deleted && info.Size() == m.Size {
 		if data, err := os.ReadFile(abs); err == nil && gitSHA(data) == m.SHA {
-			e.adopt(p, m.Version, m.SHA, ptrOid)
+			e.adopt(p, m.Version, m.SHA, ptrOid, m)
 			return
 		}
+	}
+	if e.rebase(m, ptrOid) {
+		return
 	}
 	if !e.clean(p) {
 		if e.held[p] == nil {
@@ -1549,9 +1646,12 @@ func (e *Engine) applyLarge(m *serverMsg, ptr Pointer, exists bool, info fs.File
 	abs := e.abs(p)
 	if exists && info.Size() == ptr.Size {
 		if oid, _, err := sha256File(abs); err == nil && oid == ptr.Oid {
-			e.adopt(p, m.Version, m.SHA, ptr.Oid) // already here
+			e.adopt(p, m.Version, m.SHA, ptr.Oid, m) // already here
 			return
 		}
+	}
+	if e.rebase(m, ptr.Oid) {
+		return
 	}
 	if !e.clean(p) {
 		if e.held[p] == nil {

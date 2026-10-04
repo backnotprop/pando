@@ -29,12 +29,31 @@ export function shade(name: string): number {
 // 2.2 MiB, over the 1 MiB that is coloured: shown as plain text.
 const BIG = Array.from({ length: 80_000 }, (_, i) => `export const n${i} = ${i};\n`).join("");
 
-// A 1 by 1 PNG, and different bytes of the same kind for a branch to change it to.
+// A 1 by 1 PNG, and another (a sage pixel) for a branch to change it to.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
-const PNG2 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const PNG2 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOYc3TLfwAHKwMV6vokJQAAAABJRU5ErkJggg==", "base64");
+
+/** Where a coloured view's line numbers end and its code starts, from the view's left edge. */
+const columns = (view: Locator) =>
+  view.evaluate((host) => {
+    const root = host.shadowRoot;
+    const number = root?.querySelector("[data-line-number-content]");
+    const line = root?.querySelector("[data-line]");
+
+    if (!number || !line) return null;
+    const range = document.createRange();
+    const left = host.getBoundingClientRect().left;
+
+    range.selectNodeContents(number);
+
+    return [range.getBoundingClientRect().right - left, line.getBoundingClientRect().left - left];
+  });
 
 /** The distance between the first three rows' tops. */
+/** The face an element is set in: the first family of its computed stack. */
+const face = (el: Locator) => el.evaluate((e) => getComputedStyle(e).fontFamily.split(",")[0]?.replaceAll('"', "").trim());
+
 const pitch = (rows: Locator) => rows.evaluateAll((els) => els.slice(0, 3).map((e) => e.getBoundingClientRect().top)).then(([a = 0, b = 0, c = 0]) => [b - a, c - b]);
 
 interface Made {
@@ -187,13 +206,26 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(file("logo.png")).toContainText("modified");
       await expect(file("logo.png")).toContainText("Binary file");
       await expect(page.getByRole("link", { name: "Files changed 4" })).toBeVisible();
-      // On a phone the diff scrolls inside its box, never the page.
+      // On a phone the diff scrolls inside its box, never the page, and its numbers and code sit where the code view's do.
       await page.setViewportSize({ width: 390, height: 844 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+      const diffColumns = await columns(file("src/colour.ts").locator("diffs-container"));
+
+      await page.goto(`${project}/blob/src/colour.ts?ref=files`);
+      await expect(page.locator("[data-line] span[style]").first()).toBeVisible();
+      expect(await columns(page.locator("diffs-container"))).toEqual(diffColumns);
       await page.setViewportSize({ width: 1440, height: 900 });
-      m.push(m.commit("web", url, "files", { "src/live.ts": "export const live = true;\n" }, "Live"), url, "files");
+      await page.goto(`${project}/branches/files?tab=files`);
+      await expect(file("src/files.ts")).toContainText("added");
+      const live = m.commit("web", url, "files", { "src/live.ts": "export const live = true;\n" }, "Live");
+
+      m.push(live, url, "files");
       await expect(file("src/live.ts")).toContainText("added", { timeout: 30_000 });
       await expect(page.getByRole("link", { name: "Files changed 5" })).toBeVisible();
+      // A file with no diff links to its page, at the branch's head.
+      await file("logo.png").getByRole("link", { name: "View file" }).click();
+      await expect(page).toHaveURL(`${project}/blob/logo.png?ref=${m.git(live, "rev-parse", "HEAD").trim()}`);
+      await expect.poll(() => page.getByRole("img", { name: "logo.png" }).evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
     });
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {
@@ -218,6 +250,16 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(page).toHaveURL(`${project}/branches/feature`);
       await expect(page.getByRole("list", { name: "Commits" }).getByText("Two is better")).toBeVisible();
       await expect(page.getByText("and Claude")).toBeVisible();
+
+      // Mono only for code, commit ids and branch names (owner ruling, variant C): a time is SF Pro Text, with tabular figures.
+      const commit = page.getByRole("list", { name: "Commits" }).getByRole("listitem").first();
+      const time = commit.getByText(/^(now|\d+ (s|min|h|d|w))$/);
+      const mono = /^(SF Mono|Ioskeley Mono)$/;
+
+      expect(await face(commit.getByText(/^[0-9a-f]{7}$/))).toMatch(mono);
+      expect(await face(page.locator("main p code", { hasText: /^feature$/ }))).toMatch(mono);
+      expect(await face(time)).toBe("SF Pro Text");
+      expect(await time.evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toBe("tabular-nums");
     });
 
     await test.step("a failing check reported by Buildkite arrives live: its mark, and Merge anyway", async () => {

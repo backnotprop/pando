@@ -221,16 +221,16 @@ func Init(e *Env, args []string) error {
 	if plan.Kind == config.KindMonorepo {
 		switch {
 		case strings.HasPrefix(serverURL, "file://"):
-			e.printf("meta layer: none on a file:// server\n")
+			e.printf("shared files: not synced on a file:// server\n")
 		case !made:
-			e.printf("meta layer: already started; keep it live with pando meta sync\n")
+			e.printf("shared files: the first upload already started; keep the files outside projects/ live with pando sync\n")
 		default:
 			start := time.Now()
 			if err := meta.Init(e.Ctx, plan.Root); err != nil {
-				e.warnf("meta layer: the first upload did not finish: %v", err)
+				e.warnf("shared files: the first upload did not finish: %v", err)
 				failed++
 			} else {
-				e.printf("meta layer: uploaded in %.1fs; keep it live with pando meta sync\n", time.Since(start).Seconds())
+				e.printf("shared files: uploaded the files outside projects/ in %.1fs; keep them live with pando sync\n", time.Since(start).Seconds())
 			}
 		}
 	}
@@ -264,7 +264,7 @@ func printPlan(e *Env, p *detect.Plan) {
 		e.printf("%s is a git repo: it becomes a plain Pando repo.\n", p.Root)
 		e.printf("  main: local branch %s at %s\n", pr.MainBranch, short(pr.Head))
 	} else {
-		e.printf("%s is not a git repo: it becomes a Pando monorepo, with this folder as the meta layer.\n", p.Root)
+		e.printf("%s is not a git repo: it becomes a Pando monorepo. Its files outside projects/ are shared with every machine.\n", p.Root)
 		e.printf("\nRepos (%d):\n", len(p.Projects))
 		for _, pr := range p.Projects {
 			from := rel(p.Root, pr.Checkout)

@@ -173,7 +173,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer e.close()
 	e.runCtx = ctx
 	how := fmt.Sprintf("scanning every %s", e.cfg.Poll)
-	if !e.untilSynced && !e.cfg.NoWatch { // pando meta sync --once and pando init scan once instead
+	if !e.untilSynced && !e.cfg.NoWatch { // pando sync --once and pando init scan once instead
 		w, err := startWatcher(e.cfg.Root, e.rules)
 		if err == nil {
 			e.watch = w
@@ -280,7 +280,7 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 			}
 		}
 	}
-	e.cfg.Log.Printf("downloaded the meta layer: %d paths known (%d new), at version %d", len(e.st.Files), len(e.st.Files)-start, e.st.Cursor)
+	e.cfg.Log.Printf("downloaded the files outside projects/: %d paths known (%d new), at version %d", len(e.st.Files), len(e.st.Files)-start, e.st.Cursor)
 	return nil
 }
 

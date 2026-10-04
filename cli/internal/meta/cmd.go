@@ -6,7 +6,7 @@ package meta
 //	pando fetch <path>...:         CmdFetch(args)           a large file's bytes on a --text-only clone
 //	pando init, after root.json:   Init(ctx, root)          the first upload, .pando/ included
 //	the daemon:                    Sync(ctx, root, hooks)   the live sync until ctx ends
-//	pando meta sync [--once]:      CmdSync(args, hooks)
+//	pando sync [--once]:           CmdSync(args, hooks)
 //	pando history <path>:          CmdHistory(args)
 //	pando restore <path> --to X:   CmdRestore(args)
 //	pando resolve [<path>]:        CmdResolve(args)
@@ -141,7 +141,7 @@ func metaPath(root, arg string) (string, error) {
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("%s is not in the meta layer at %s", arg, root)
+		return "", fmt.Errorf("%s is not in the monorepo at %s", arg, root)
 	}
 	return filepath.ToSlash(rel), nil
 }
@@ -149,7 +149,7 @@ func metaPath(root, arg string) (string, error) {
 func setup(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", "", "the monorepo root (default: found from the current folder)")
+	root := fs.String("root", "", "the monorepo's folder (default: found from the current folder)")
 	return fs, root
 }
 

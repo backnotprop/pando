@@ -19,31 +19,38 @@ import (
 // metaCommands are the live lane's (internal/meta): they take the arguments
 // after their name and return an exit code.
 var metaCommands = map[string]func([]string) int{
+	"sync":    syncDaemon,
 	"history": meta.CmdHistory,
 	"restore": meta.CmdRestore,
 	"resolve": meta.CmdResolve,
 	"fetch":   meta.CmdFetch,
+	// Hidden: pando meta sync is pando sync's old name, kept so scripts and
+	// installed services keep working; pando meta status is a debugging aid.
 	"meta": func(args []string) int {
 		if len(args) > 0 && args[0] == "sync" {
-			// The one daemon of a monorepo: the meta layer, and its
-			// read-only mains following merges.
-			if !hasFlag(args[1:], "once") {
-				dir, _ := os.Getwd()
-				if r := flagValue(args[1:], "root"); r != "" {
-					dir = r
-				}
-				ctx, stop := context.WithCancel(context.Background())
-				defer stop()
-				app.StartFollower(ctx, dir)
-			}
-			return meta.CmdSync(args[1:], meta.Hooks{References: app.ReferencesHook})
+			return syncDaemon(args[1:])
 		}
 		if len(args) > 0 && args[0] == "status" {
 			return meta.CmdStatus(args[1:])
 		}
-		fmt.Fprintln(os.Stderr, "usage: pando meta sync [--once] | status")
+		fmt.Fprintln(os.Stderr, "usage: pando sync [--once]")
 		return 2
 	},
+}
+
+// syncDaemon is pando sync, the one daemon of a monorepo: the live sync of
+// its files outside projects/, and its read-only mains following merges.
+func syncDaemon(args []string) int {
+	if !hasFlag(args, "once") {
+		dir, _ := os.Getwd()
+		if r := flagValue(args, "root"); r != "" {
+			dir = r
+		}
+		ctx, stop := context.WithCancel(context.Background())
+		defer stop()
+		app.StartFollower(ctx, dir)
+	}
+	return meta.CmdSync(args, meta.Hooks{References: app.ReferencesHook})
 }
 
 func hasFlag(args []string, name string) bool {
@@ -68,11 +75,11 @@ func flagValue(args []string, name string) string {
 }
 
 var metaUsage = []string{
-	"meta sync [--once]                                        keep the meta layer live (the daemon)",
-	"history <path> [--limit n] [--json]                       every saved version of a meta layer file",
+	"sync [--once]                                             keep the monorepo's files outside projects/ live (the daemon)",
+	"history <path> [--limit n] [--json]                       every saved version of a file outside projects/",
 	"restore <path> --to <version | HH:MM>                     write an old version back, as a new save",
 	"resolve [<path>...]                                       unfreeze a file after a conflict",
-	"fetch <path>...                                           download large meta layer files kept as pointers",
+	"fetch <path>...                                           download large files outside projects/ kept as pointers",
 }
 
 var commands = []app.Command{

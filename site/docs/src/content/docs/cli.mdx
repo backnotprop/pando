@@ -55,6 +55,7 @@ usage: pando <command> [args]
   pando hook list | create <url> | delete <id>                    a repo's web hooks [--repo <path>] (owners write)
   pando hook deliveries <id> | redeliver <delivery-id>            what a hook sent; send one again
   pando machine list                                              machines that acted in the monorepo, and which are connected
+  pando profile [<login>] [--json]                                a person's profile: their graph for the last year, by month
   pando activity [--monorepo <owner/name> | --all] [--limit n]    what happened, newest first
   pando api <path> [-X method] [-f k=v] [-F k=v] [--paginate]     any API call, signed as this machine (like gh api)
   pando sync [--once]                                             keep the monorepo's files outside projects/ live (the daemon)
@@ -578,6 +579,14 @@ What happened, newest first, one line each, as the home page shows it: pushes, n
 | `--all` | Every repository's lines, even inside a repository's folder. |
 | `--limit <n>` | How many lines. Default 30. |
 | `--json` | Print the API's [answer](/api/monorepos/listActivity/), its pages joined. |
+
+### pando profile
+
+```sh
+pando profile [<login>] [--json]
+```
+
+A person's [profile](/profiles/), yours by default: their name, bio and links, their contribution graph for the last year drawn in the terminal (a column a week, Sunday on top, `·` for a day with nothing and `░▒▓█` for busier days), then each month in a line. You see only their work in repositories you can open. `--json` prints the API's [answer](/api/users/getContributions/).
 
 ## The API
 

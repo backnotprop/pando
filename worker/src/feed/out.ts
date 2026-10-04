@@ -819,7 +819,7 @@ export class FeedOut {
       if (!r || b.name === r.default_branch) continue;
       const kept = r.required_checks ? parseJson(r.required_checks) : null;
       const required = isTextList(kept) ? kept : [];
-      const checks = combine(b.head, required, statuses.get(`${b.repo}\n${b.head}`) ?? []);
+      const checks = combine(b.head, { list: required, unknown: null }, statuses.get(`${b.repo}\n${b.head}`) ?? []);
       let state: NeedState | null = null;
 
       if (b.facts_head === b.head && b.mergeable === "conflicts") state = "conflicts";

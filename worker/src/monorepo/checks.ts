@@ -67,12 +67,21 @@ export async function requiredChecks(env: Env, monorepo: { id: string; kind: Kin
   return Array.isArray(list) ? list.filter(isText) : [];
 }
 
-/** The latest status per context, then the gate's verdict. */
-export function combine(sha: string | null, required: string[], all: StatusRecord[]): Checks {
+/** The required checks, or (list null) why they are unknown: pando.toml could not be read or does not parse. */
+export interface Required {
+  list: string[] | null;
+  unknown: string | null;
+}
+
+/** The latest status per context, then the gate's verdict: `unknown` while the required checks are. */
+export function combine(sha: string | null, req: Required, all: StatusRecord[]): Checks {
   const latest = new Map<string, StatusRecord>();
 
   for (const s of all) latest.set(s.context, s); // `all` is oldest first
   const statuses = [...latest.values()];
+  const required = req.list;
+
+  if (required === null) return { sha, state: "unknown", required: null, missing: [], statuses, checks_unknown: req.unknown };
   const missing = required.filter((c) => !latest.has(c));
   const considered = required.length ? statuses.filter((s) => required.includes(s.context)) : statuses;
   let state: Checks["state"] = "success";
@@ -82,25 +91,32 @@ export function combine(sha: string | null, required: string[], all: StatusRecor
   else if (missing.length) state = "missing";
   else if (considered.some((s) => s.state === "pending")) state = "pending";
 
-  return { sha, state, required, missing, statuses };
+  return { sha, state, required, missing, statuses, checks_unknown: null };
 }
 
 /**
  * Required checks as the monorepo object keeps them (C3): read from
  * pando.toml only when the object has none, which is after a merge or main's
- * first push in the repo that holds the file. A failed read throws
- * checks_unknown (503) and keeps nothing.
+ * first push in the repo that holds the file. When it cannot be read or does
+ * not parse, the list is null with the reason, and nothing is kept: reads
+ * show it, and only the merge refuses (object.ts mergeNow).
  */
-export async function requiredKept(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<string[]> {
+export async function requiredKept(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord): Promise<Required> {
   const stub = env.MONOREPO.getByName(monorepo.id);
   const kept = await stub.storedRequired(repo.name);
 
-  if (kept) return kept;
+  if (kept) return { list: kept, unknown: null };
   const failRead = env.CHECKS_TEST === "1" && (await stub.takeConfigFail());
-  const list = await requiredChecks(env, monorepo, repo, failRead);
-  await stub.setRequiredChecks(repo.name, list);
 
-  return list;
+  try {
+    const list = await requiredChecks(env, monorepo, repo, failRead);
+    await stub.setRequiredChecks(repo.name, list);
+
+    return { list, unknown: null };
+  } catch (err) {
+    if (isChecksUnknown(err)) return { list: null, unknown: err.message };
+    throw err;
+  }
 }
 
 /**

@@ -106,11 +106,27 @@ try {
   commit(meta, ".pando/pando.toml", '[repos."projects/web"]\nrequired_checks = ["ci/test"]\n', "Require ci/test on projects/web");
   check("the meta layer's first push brings pando.toml", git(["push", "-q", r.json?.clone_url, "main"], meta).ok);
 
-  // pando.toml cannot be read (as when Artifacts fails): the list and the merge say so; nothing is kept as "none".
-  r = await call("POST", "/v1/_checks/test", { monorepo: MID, fail: 5 }, BOOT);
-  check("the test switch is on (CHECKS_TEST)", r.status === 200 && r.json?.fail === 5, JSON.stringify(r.json));
-  r = await call("GET", `${base}/branches?state=open`);
-  check("the branch list says the required checks could not be read", r.status === 503 && r.json?.error?.code === "checks_unknown", `${r.status} ${r.json?.error?.code}`);
+  // Reads answer as usual while the required checks are unknown: the list null, checks unknown, and why.
+  const unknownReads = async (why) => {
+    const list = await call("GET", `${base}/branches?state=open`);
+    const row = list.json?.branches?.find((x) => x.name === "feat/x" || x.name === "feat/y");
+    const one = await call("GET", `${base}/branches/${encodeURIComponent(row?.name ?? "feat/x")}`);
+    const status = await call("GET", `${base}/commits/${row?.head}/status`);
+    const repoRead = await call("GET", base);
+    const unknown = (c) => c?.state === "unknown" && c?.required === null && why.test(c?.checks_unknown ?? "");
+
+    return {
+      ok: list.status === 200 && unknown(row?.checks) && one.status === 200 && unknown(one.json?.checks) && status.status === 200 && unknown(status.json) &&
+        repoRead.status === 200 && repoRead.json?.required_checks === null && why.test(repoRead.json?.checks_unknown ?? ""),
+      detail: `${list.status} ${one.status} ${status.status} ${repoRead.status}: ${row?.checks?.state} ${JSON.stringify(row?.checks?.required)} "${row?.checks?.checks_unknown}"`,
+    };
+  };
+
+  // pando.toml cannot be read (as when Artifacts fails): reads say so, the merge refuses; nothing is kept as "none".
+  r = await call("POST", "/v1/_checks/test", { monorepo: MID, fail: 50 }, BOOT);
+  check("the test switch is on (CHECKS_TEST)", r.status === 200 && r.json?.fail === 50, JSON.stringify(r.json));
+  const failing = await unknownReads(/couldn't read this monorepo's required checks; try again/);
+  check("the branch list, the branch, its status and the repo answer 200 with required null and the reason", failing.ok, failing.detail);
   r = await call("POST", `${base}/branches/feat%2Fx/merge`, { expected_head: head });
   check(
     "an unforced merge while the required checks are unknown is refused, plainly",
@@ -147,9 +163,14 @@ try {
     r.status === 503 && r.json?.error?.code === "checks_unknown" && /^pando\.toml line \d+: .+; fix it on main, or merge with force$/.test(r.json?.error?.message ?? ""),
     `${r.status} ${r.json?.error?.code}: ${r.json?.error?.message}`,
   );
+  const broken = await unknownReads(/^pando\.toml line \d+: .+; fix it on main, or merge with force$/);
+  check("reads answer 200 with required null and the file's line", broken.ok, broken.detail);
   git(["checkout", "-q", "break"], meta);
   commit(meta, ".pando/pando.toml", '[repos."projects/web"]\nrequired_checks = ["ci/test"]\n', "Fix pando.toml");
   git(["push", "-q", metaUrl, "break:fix"], meta);
+  r = await call("GET", `${metaBase}/branches?state=open`);
+  const fixRow = r.json?.branches?.find((x) => x.name === "fix");
+  check("the meta layer's branch list shows the fix, its checks unknown", r.status === 200 && fixRow?.checks?.state === "unknown" && fixRow.checks.required === null, `${r.status} ${fixRow?.checks?.state}`);
   r = await call("POST", `${metaBase}/branches/fix/merge`);
   check("the fix's own merge is refused the same way (the meta layer's checks are unknown too)", r.status === 503 && r.json?.error?.code === "checks_unknown", `${r.status} ${r.json?.error?.code}`);
   r = await call("POST", `${metaBase}/branches/fix/merge?force=1`);

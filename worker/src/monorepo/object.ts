@@ -13,7 +13,7 @@ import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoToken, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, LEASE_MS, releaseDelay, retryBusy, WAIT_MS, WRITE_SLOTS, WriteGate } from "./gate";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
-import { combine, isChecksUnknown, requiredChecks } from "./checks";
+import { combine, isChecksUnknown, requiredChecks, type Required } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
@@ -880,7 +880,7 @@ export class MonorepoObject extends DurableObject<Env> {
       this.setRequiredChecks(r.name, required);
     }
 
-    return combine(sha, required, this.statuses(r.name, sha));
+    return combine(sha, { list: required, unknown: null }, this.statuses(r.name, sha));
   }
 
   // ── Merge ────────────────────────────────────────────────────────────────
@@ -1550,7 +1550,7 @@ export class MonorepoObject extends DurableObject<Env> {
    * current head (else a newer job is coming), keep the required checks they
    * were computed with, and publish the full row. False when stale.
    */
-  writeFacts(repo: string, name: string, f: Facts, required: string[]): boolean {
+  writeFacts(repo: string, name: string, f: Facts, required: Required): boolean {
     if (this.currentMain(repo) !== f.main) return false;
     const b = this.branchRecord(repo, name);
 
@@ -1566,7 +1566,7 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   /** A branch's full row as getBranch answers it (facts, checks and gate), as `branch.updated` with `partial: false`. */
-  private publishBranchRow(repo: string, name: string, required: string[] | null = null): void {
+  private publishBranchRow(repo: string, name: string, required: Required | null = null): void {
     const row = this.branchRows(repo, { names: [name], state: "all", required }).branches[0];
 
     if (row) this.publish({ kind: "branch.updated", collection: "branches", key: `${repo}/${name}`, op: "upsert", repo, actor: null, machine: null, agent: null, row: { repo, ...row }, partial: false });
@@ -1588,14 +1588,14 @@ export class MonorepoObject extends DurableObject<Env> {
    */
   branchRows(
     repo: string,
-    o: { names?: string[]; state: "open" | "merged" | "all"; limit?: number; cursor?: string | null; required?: string[] | null; graceMs?: number },
+    o: { names?: string[]; state: "open" | "merged" | "all"; limit?: number; cursor?: string | null; required?: Required | null; graceMs?: number },
   ): BranchList {
     const r = this.repoRow(repo);
 
     if (!r) return { default_branch: DEFAULT_BRANCH, default_head: null, branches: [], next_cursor: null, due: [], reconcile: false };
     const main = this.currentMain(repo);
     const mainAt = Date.parse(this.row<{ t: string | null }>("SELECT default_head_at AS t FROM repos WHERE name = ?", repo)?.t ?? "") || 0;
-    const required = o.required ?? this.storedRequired(repo) ?? [];
+    const required: Required = o.required ?? { list: this.storedRequired(repo) ?? [], unknown: null };
     const limit = Math.min(Math.max(o.limit ?? 100, 1), 500);
 
     // Newest first, as GitHub lists active branches: an open branch by its last push, a merged one by its merge; ties by name.

@@ -121,8 +121,8 @@ export const CiPipeline = Schema.Struct({
   default_branch: Schema.NullOr(Schema.String),
   /** The buildkite hook that starts its builds on push, if any. */
   hook_id: Schema.NullOr(Schema.String),
-  /** Its repo's required checks, from `.pando/pando.toml`. */
-  required_checks: Schema.Array(Schema.String),
+  /** Its repo's required checks, from `.pando/pando.toml`; null while they are unknown (the file unreadable or broken). */
+  required_checks: Schema.NullOr(Schema.Array(Schema.String)),
   last_build: Schema.NullOr(CiBuild),
 });
 
@@ -134,8 +134,8 @@ export const CiOverview = Schema.Struct({
   services: Schema.Array(CiService),
   connections: Schema.Array(CiConnection),
   pipelines: Schema.Array(CiPipeline),
-  /** Every repo's required checks (a repo with no pipeline is here too). */
-  required_checks: Schema.Array(Schema.Struct({ repo: RepoName, path: Schema.String, checks: Schema.Array(Schema.String) })),
+  /** Every repo's required checks (a repo with no pipeline is here too); `checks` null while unknown. */
+  required_checks: Schema.Array(Schema.Struct({ repo: RepoName, path: Schema.String, checks: Schema.NullOr(Schema.Array(Schema.String)) })),
 });
 
 export interface CiOverview extends Schema.Schema.Type<typeof CiOverview> {}

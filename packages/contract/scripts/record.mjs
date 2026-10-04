@@ -11,7 +11,7 @@
 // with a .pando/pando.toml that requires the check ci/test, pushes four
 // branches, posts statuses, a review and a worktree, feeds a Buildkite build
 // in through its webhook, merges (forced, refused, clean), saves and
-// restores root files, records every route the contract covers and every
+// restores root files, breaks pando.toml (checks unknown), records every route the contract covers and every
 // socket frame, and deletes the monorepo, pass or fail. Tokens are stripped before anything is written; credentials stay in
 // memory. Git runs with a temp HOME, no system config and no keychain.
 import { spawnSync } from "node:child_process";
@@ -665,6 +665,27 @@ try {
   }
 
   record("monorepo-event-frames.json", "MonorepoEventFrame[]", "GET /v1/monorepos/{owner}/{monorepo}/events?topics=kind:<row kinds>[&since=] (WebSocket)", 101, rowFrames);
+
+  // Required checks unknown: a pando.toml that does not parse, merged into the meta layer. Reads answer with the list null and why; an unforced merge is refused.
+  const metaDir = join(work, "meta-clone");
+
+  git(["clone", "-q", (await call("GET", `${base}/repos/meta`, secret)).json?.clone_url, metaDir], work);
+  git(["checkout", "-qb", "break-config"], metaDir);
+  commit(metaDir, ".pando/pando.toml", '[repos."projects/web"]\nrequired_checks = ["ci/test"\n', "Break pando.toml");
+  git(["push", "-q", "origin", "break-config"], metaDir);
+  r = await call("POST", `${base}/repos/meta/branches/break-config/merge`, secret);
+
+  if (r.status !== 200) throw new Error(`the broken pando.toml did not merge: ${r.status}`);
+  r = await call("GET", `${repoPath}/branches/feat%2Fclash`, secret);
+  record("branch-checks-unknown.json", "Branch", "GET .../branches/{branch} (pando.toml broken: checks unknown, required null)", r.status, r.json);
+  const clashHead = r.json?.head;
+
+  r = await call("GET", `${repoPath}/commits/${clashHead}/status`, secret);
+  record("status-checks-unknown.json", "Checks", "GET .../repos/{repo}/commits/{ref}/status (pando.toml broken)", r.status, r.json);
+  r = await call("GET", repoPath, secret);
+  record("repo-checks-unknown.json", "Repo", "GET .../repos/{repo} (pando.toml broken: required_checks null, checks_unknown)", r.status, r.json);
+  r = await call("POST", `${repoPath}/branches/feat%2Fclash/merge`, secret, { expected_head: clashHead });
+  record("merge-checks-unknown.json", "ErrorBody", "POST .../branches/{branch}/merge (pando.toml broken: 503 checks_unknown)", r.status, r.json);
 
   // Settings: rename, last (the old name keeps working; the cleanup deletes by the new one).
   r = await call("PATCH", base, secret, { name: `${name}-renamed` });

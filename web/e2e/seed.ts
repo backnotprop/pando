@@ -256,6 +256,8 @@ declare global {
   interface Window {
     /** The frames watchFrames saw, in the page under test. */
     pandoFrames?: Frame[];
+    /** The long tasks watchLongTasks saw (their lengths in ms). */
+    pandoLongTasks?: number[];
   }
 }
 
@@ -294,4 +296,18 @@ export async function watchFrames(page: Page): Promise<() => Promise<Frame[]>> {
   });
 
   return () => page.evaluate(() => window.pandoFrames ?? []);
+}
+
+/** Records the page's long tasks (over 50 ms) from now on; the returned function reads their lengths, in ms. */
+export async function watchLongTasks(page: Page): Promise<() => Promise<number[]>> {
+  await page.evaluate(() => {
+    const seen: number[] = [];
+
+    window.pandoLongTasks = seen;
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) seen.push(Math.round(e.duration));
+    }).observe({ type: "longtask" });
+  });
+
+  return () => page.evaluate(() => window.pandoLongTasks ?? []);
 }

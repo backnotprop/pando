@@ -12,6 +12,7 @@ import { MonorepoEntry, MonorepoList, MonorepoRenamed, MonorepoSummaryList } fro
 import { Org, OrgInviteResult, OrgList, OrgMember, OrgMemberList, Owner } from "./org.ts";
 import { EventsPage } from "./feed.ts";
 import { MetaHistory, MetaTree, Restored } from "./meta.ts";
+import { GithubChoices, GithubRepos, Mirror, MirrorQueued, MirrorSaved } from "./mirror.ts";
 import { NeedsPage } from "./needs.ts";
 import { HeadList, InviteList, InviteResult, MachineList, MemberList, MonorepoCreated, Repo, RepoList, WorktreeList } from "./repo.ts";
 import { CredentialList, Me, SignedOut } from "./user.ts";
@@ -507,3 +508,34 @@ export const listOrgInvites = (org: Login) => ({ path: `${orgBase(org)}/invites`
 
 /** DELETE /v1/orgs/{org}/invites/{email} (204; owners). */
 export const revokeOrgInvite = (org: Login, email: string) => ({ method: "DELETE", path: `${orgBase(org)}/invites/${encodeURIComponent(email)}` }) as const;
+
+// ── Mirror to GitHub ───────────────────────────────────────────────────────
+
+const mirrorBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/mirror`;
+
+/** GET .../mirror (members): the connection, the mode, the switch, one row per source. */
+export const getMirror = (owner: Login, name: MonorepoName) => ({ path: mirrorBase(owner, name), response: Mirror });
+
+/** PATCH .../mirror {on} (owners): the section's switch; off pauses. */
+export const setMirrorOn = (owner: Login, name: MonorepoName) => ({ method: "PATCH", path: mirrorBase(owner, name), response: Mirror }) as const;
+
+/** PUT .../mirror/targets {mode, targets} (owners): Start mirroring, Change, a project's switch. */
+export const saveMirrorTargets = (owner: Login, name: MonorepoName) => ({ method: "PUT", path: `${mirrorBase(owner, name)}/targets`, response: MirrorSaved }) as const;
+
+/** POST .../mirror/run {repos?} (owners): Retry. */
+export const retryMirror = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${mirrorBase(owner, name)}/run`, response: MirrorQueued }) as const;
+
+/** DELETE .../mirror (owners): Disconnect; GitHub is never touched. */
+export const disconnectMirror = (owner: Login, name: MonorepoName) => ({ method: "DELETE", path: mirrorBase(owner, name) }) as const;
+
+/** GET .../mirror/github-repos (owners): the installation's repositories, for Change. */
+export const listGithubRepos = (owner: Login, name: MonorepoName) => ({ path: `${mirrorBase(owner, name)}/github-repos`, response: GithubRepos });
+
+/** GET .../mirror/choices (owners): the installations this browser proved, when there were several. */
+export const getGithubChoices = (owner: Login, name: MonorepoName) => ({ path: `${mirrorBase(owner, name)}/choices`, response: GithubChoices });
+
+/** POST .../mirror/installation {installation_id} (owners): one of those. */
+export const chooseGithubInstallation = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${mirrorBase(owner, name)}/installation`, response: Mirror }) as const;
+
+/** The address a browser goes to, to connect GitHub (or to authorize creating repositories). */
+export const mirrorConnectPath = (owner: Login, name: MonorepoName, purpose: "connect" | "create" = "connect"): string => `${mirrorBase(owner, name)}/connect?purpose=${purpose}`;

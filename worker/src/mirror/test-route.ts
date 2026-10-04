@@ -53,7 +53,7 @@ async function pipeOnce(env: Env, monorepo: string, repoName: string | null, url
   });
 
   const pack = (await artifactsPack(env, repo, [want], [...new Set(theirs.values())])).pipeThrough(count);
-  const report = await pushPack(remote, [{ old: had, new: want, ref }], pack);
+  const { report } = await pushPack(remote, [{ old: had, new: want, ref }], pack);
 
   return { ref, sha: want, refs_ms: refsMs, first_pack_byte_ms: firstByteMs, total_ms: Date.now() - t0, pack_bytes: bytes, report: { unpack: report.unpack, error: report.error, refs: Object.fromEntries(report.refs) } };
 }

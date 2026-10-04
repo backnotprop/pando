@@ -7,7 +7,7 @@
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { gitRequest, type ArtifactsRef } from "../monorepo/artifacts";
-import { concat, FLUSH, parseAdvertisement, parseReport, pkt, prepend, type PushReport, type RefCommand } from "../monorepo/pktline";
+import { concat, FLUSH, parseAdvertisement, parseReport, pkt, pktLines, prepend, type PushReport, type RefCommand } from "../monorepo/pktline";
 
 const dec = new TextDecoder();
 
@@ -134,7 +134,13 @@ const PUSH_CAPS = ["report-status", "side-band-64k", "ofs-delta", "agent=pando-m
  * report. Commands carry the remote's current value as their old id, so each
  * is a compare-and-swap on the remote even though the mirror always overwrites.
  */
-export async function pushPack(remote: Remote, commands: RefCommand[], pack: ReadableStream<Uint8Array> | Uint8Array | null): Promise<PushReport> {
+/** A push's report, and what the remote said on side-band 2 (GitHub's "remote:" lines: a refusal's reason). */
+export interface PushAnswer {
+  report: PushReport;
+  messages: string;
+}
+
+export async function pushPack(remote: Remote, commands: RefCommand[], pack: ReadableStream<Uint8Array> | Uint8Array | null): Promise<PushAnswer> {
   const head = concat([...commands.map((c, i) => pkt(`${c.old} ${c.new} ${c.ref}${i === 0 ? "\0" + PUSH_CAPS.join(" ") : ""}\n`)), FLUSH]);
   let body: ReadableStream<Uint8Array> | Uint8Array;
 
@@ -165,5 +171,18 @@ export async function pushPack(remote: Remote, commands: RefCommand[], pack: Rea
     throw new RemoteError(res.status, `GitHub answered ${res.status} to the push${text ? `: ${text.trim()}` : ""}`, res.headers.get("retry-after"));
   }
 
-  return parseReport(new Uint8Array(await res.arrayBuffer()), new Set(PUSH_CAPS));
+  const bytes = new Uint8Array(await res.arrayBuffer());
+
+  return { report: parseReport(bytes, new Set(PUSH_CAPS)), messages: bandTwo(bytes) };
+}
+
+/** Side-band 2 text of a receive-pack answer, trimmed. */
+function bandTwo(bytes: Uint8Array): string {
+  const out: string[] = [];
+
+  for (const line of pktLines(bytes)) {
+    if (line && line.length > 1 && line[0] === 2) out.push(dec.decode(line.subarray(1)));
+  }
+
+  return out.join("").replace(/\r/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean).join("\n").slice(0, 1_000);
 }

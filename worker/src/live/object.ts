@@ -1636,6 +1636,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     // Nothing awaits from here on: mark versions committed, clear what is done.
     this.setKv("parent", sha);
     this.setKv("commit_error", null);
+    // Mirror to GitHub: the files outside projects/ moved (mirror/out.ts). Not awaited.
+    const monorepo = this.kv("monorepo");
+
+    if (monorepo && this.env.MONOREPO) this.ctx.waitUntil(this.env.MONOREPO.getByName(monorepo).mirrorDirty("meta").catch(() => {}));
 
     const wait = this.maxWait();
 

@@ -30,6 +30,8 @@ export * from "./issue.ts";
 
 export * from "./ci.ts";
 
+export * from "./mirror.ts";
+
 export * from "./files.ts";
 
 export * from "./stream.ts";

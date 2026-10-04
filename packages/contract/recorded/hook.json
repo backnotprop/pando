@@ -1,0 +1,21 @@
+{
+  "schema": "Hook",
+  "route": "POST .../repos/{repo}/hooks {type: buildkite} (Add pipeline)",
+  "status": 201,
+  "body": {
+    "id": "hk_1b27490a13fe940c",
+    "type": "buildkite",
+    "url": null,
+    "events": [
+      "push"
+    ],
+    "buildkite": {
+      "organization": "o",
+      "pipeline": "web"
+    },
+    "app": "buildkite",
+    "active": true,
+    "created_at": "2026-10-04T02:01:45.877Z",
+    "created_by": "rec-mut6cqy2"
+  }
+}

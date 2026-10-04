@@ -95,6 +95,33 @@ export const MemberList = Schema.Struct({ members: Schema.Array(Member) });
 
 export interface MemberList extends Schema.Schema.Type<typeof MemberList> {}
 
+/** An invite waiting for that email's first sign-in. */
+export const Invite = Schema.Struct({
+  email: Schema.String,
+  role: MemberRole,
+  /** The owner who invited them (a login). */
+  invited_by: Login,
+  created_at: Timestamp,
+});
+
+export interface Invite extends Schema.Schema.Type<typeof Invite> {}
+
+/** GET .../invites: invites not yet accepted. */
+export const InviteList = Schema.Struct({ invites: Schema.Array(Invite) });
+
+export interface InviteList extends Schema.Schema.Type<typeof InviteList> {}
+
+/**
+ * POST .../invites: someone who has already signed in with that email is
+ * added now (200, `added`); otherwise the invite waits (201, `invited`).
+ */
+export const InviteResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("added"), member: Member }),
+  Schema.Struct({ status: Schema.Literal("invited"), invite: Invite }),
+]);
+
+export type InviteResult = typeof InviteResult.Type;
+
 /** A machine's latest activity line in this monorepo: as a feed line, without its monorepo, actor and machine. */
 export const MachineActivity = byActivityKind({
   seq: Count,

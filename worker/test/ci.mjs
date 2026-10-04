@@ -511,6 +511,26 @@ try {
   r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/statuses/${head2}`, sent.env?.PANDO_STATUS_TOKEN, { state: "success", context: "rebuilt" });
   check("the rebuild's status token posts", r.status === 201 && r.json?.app === "buildkite");
 
+  // New build: a pipeline's build of a branch's head as Pando has it, started as a push delivery would.
+  r = await call("POST", `${ciBase}/pipelines/p/builds`, B, { branch: "feat" });
+  const newBuild = r.json?.build;
+  const asked = bkStub.created.at(-1) ?? {};
+  const nc = asked.env?.PANDO_STATUS_TOKEN ? claimsOf(asked.env.PANDO_STATUS_TOKEN) : {};
+  check(
+    "New build of feat: its head and its commit's title, fresh tokens, recorded at once",
+    r.status === 201 && newBuild?.sha === head2 && newBuild.branch === "feat" && newBuild.message === "second" && asked.commit === head2 && nc.s === head2 && nc.a === "buildkite" &&
+      /^art_v\d+_/.test(asked.env?.PANDO_READ_TOKEN ?? "") && asked.meta_data?.pando_repo === M && asked.meta_data.pando_rebuild_of === undefined,
+    `${r.status} ${newBuild?.sha?.slice(0, 7)} ${JSON.stringify(newBuild?.message)}`,
+  );
+  r = await call("POST", `${ciBase}/pipelines/p/builds`, B, { branch: "nope" });
+  check("New build of a branch Pando does not have: 404", r.status === 404);
+
+  // A build's page address names its pipeline and number (#101 here).
+  r = await call("GET", `${ciBase}/builds?pipeline=p&number=${newBuild?.number}`, B);
+  check("builds?pipeline=&number= finds that one build", r.status === 200 && r.json?.builds?.length === 1 && r.json.builds[0].id === newBuild?.id, `${r.json?.builds?.length}`);
+  r = await call("GET", `${ciBase}/builds?number=1`, B);
+  check("number without pipeline is refused (it is only unique within one)", r.status === 400);
+
   r = await call("DELETE", `${ciBase}/connections/${conn.id}`, B);
   check("a member cannot disconnect", r.status === 403);
   check("every call to Buildkite carried BUILDKITE_API_TOKEN", bkStub.calls.length > 0 && bkStub.badAuth === 0, `${bkStub.calls.length} calls`);

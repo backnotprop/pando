@@ -13,7 +13,7 @@ import type { Env } from "./env";
 import { errorJson, HttpError, toErrorResponse } from "./http";
 import { authenticateRequest } from "./accounts/auth";
 import { finishTiming, note, runTimed, startTiming } from "./timing";
-import { metaRoute, routeMeta } from "./live/route";
+import { metaRoute, metaTestRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
 import { handleDoor, isDoorPath, type IncomingRequest } from "./monorepo/door";
 import { handleRaw, RAW_RE } from "./monorepo/raw";
@@ -161,6 +161,8 @@ export default {
     if (url.pathname === "/v1/_facts/test") return factsTestRoute(request, env);
 
     if (url.pathname === "/v1/_hooks/test") return hooksTestRoute(request, env);
+
+    if (url.pathname === "/v1/_meta/test") return metaTestRoute(request, env);
 
     if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
 

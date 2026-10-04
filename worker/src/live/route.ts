@@ -13,8 +13,10 @@
 // The Worker checks the credential first, then passes the user as `identity`.
 // Without one the object takes the author from the client's hello.
 import { monorepoRef } from "../monorepo/names";
+import type { Env } from "../env";
+import { isRecord, isText, isWholeNumber, type Json } from "../parse";
 import { handleBlob } from "./blobs";
-import type { MetaLayerObject } from "./object";
+import type { MetaLayerObject, MetaOutboxTest } from "./object";
 
 export interface LiveEnv {
   META: DurableObjectNamespace<MetaLayerObject>;
@@ -68,4 +70,31 @@ export async function routeMeta(request: Request, env: LiveEnv, monorepo: string
   const stub = env.META.get(env.META.idFromName(monorepo));
 
   return stub.fetch(new Request(request, { headers }));
+}
+
+/**
+ * Tests only (META_TEST=1 and the bootstrap secret): POST /v1/_meta/test
+ * {monorepo, fail?, lose?, crash?} sets the meta layer object's next event
+ * sends to fail, to lose their answer, or to crash the object first; GET
+ * ?monorepo= shows its outbox. The monorepo is its id.
+ */
+export async function metaTestRoute(request: Request, env: Env): Promise<Response> {
+  if (env.META_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+  const { credential } = await import("../http");
+  const { isBootstrap } = await import("../monorepo/session");
+
+  if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
+  const b = request.method === "POST" ? await request.json<Json>().catch(() => null) : null;
+  const id = (isRecord(b) && isText(b.monorepo) ? b.monorepo : null) ?? new URL(request.url).searchParams.get("monorepo");
+
+  if (!id) return Response.json({ error: { code: "bad_request", message: "monorepo (its id)" } }, { status: 400 });
+  const set: Partial<MetaOutboxTest> = {};
+
+  if (isRecord(b) && isWholeNumber(b.fail)) set.fail = b.fail;
+
+  if (isRecord(b) && isWholeNumber(b.lose)) set.lose = b.lose;
+
+  if (isRecord(b) && (b.crash === true || b.crash === false)) set.crash = b.crash;
+
+  return Response.json(await env.META.get(env.META.idFromName(id)).testOutbox(set));
 }

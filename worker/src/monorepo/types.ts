@@ -125,6 +125,17 @@ export interface StreamEvent {
   via?: Via;
 }
 
+/**
+ * An event from the meta layer object's outbox with its idempotency key: the
+ * monorepo object publishes each (source, version) once, however often it is
+ * sent ("meta" with the saved version, "meta.presence" with the outbox row).
+ */
+export interface KeyedEvent {
+  source: string;
+  version: number;
+  event: StreamEvent;
+}
+
 /** A merge's result, as the merge route answers and merged events carry it. */
 export interface MergeResult {
   status: "merged" | "up_to_date";

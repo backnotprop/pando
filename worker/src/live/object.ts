@@ -50,6 +50,12 @@ const COMMIT_FILES = 1000; // one commit holds at most this many files
 
 const COMMIT_BYTES = 24 * 1024 * 1024; // and about this many bytes (gitwrite packs in memory)
 
+// The versions a commit of path ?1 at version ?2 carries: every one since the
+// path's last version in git, up to ?2. Saves folded into a later one count,
+// whoever made them; a save replaced by a merge from main does not.
+const CARRIED = `path = ?1 AND version <= ?2 AND version > COALESCE(
+  (SELECT MAX(version) FROM versions WHERE path = ?1 AND version < ?2 AND commit_sha IS NOT NULL), 0)`;
+
 type Op = "save" | "delete" | "rename";
 
 type Source = "live" | "restore" | "main";
@@ -1438,7 +1444,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const repoName = this.kv("meta_repo") ?? this.kv("monorepo");
 
     if (!repoName) throw new Error("the object does not know its monorepo yet");
-    const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first), author };
+    const carried = rows.flatMap((r) => this.sql.exec<VersionRow>(`SELECT * FROM versions WHERE ${CARRIED}`, r.path, r.version).toArray());
+    const opts = { parent: this.kv("parent"), changes, message: commitMessage(rows, first, carried), author };
 
     // Through the repo's write gate (merges into the meta layer push to the same repo), retrying Artifacts' "busy".
     const commit = (o: typeof opts) =>
@@ -1457,12 +1464,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.setKv("commit_error", null);
 
     for (const r of rows) {
-      this.sql.exec(
-        "UPDATE versions SET commit_sha = ? WHERE path = ? AND version <= ? AND commit_sha IS NULL AND source != 'main'",
-        sha,
-        r.path,
-        r.version,
-      );
+      this.sql.exec(`UPDATE versions SET commit_sha = ?3 WHERE ${CARRIED}`, r.path, r.version, sha);
       this.sql.exec("DELETE FROM pending WHERE path = ? AND version = ?", r.path, r.version);
     }
   }
@@ -1476,7 +1478,12 @@ function verb(r: VersionRow): string {
   return r.deleted ? "Delete" : "Save";
 }
 
-export function commitMessage(rows: VersionRow[], first = false): string {
+/**
+ * A commit's message: a title for its rows, then the who-made-it trailers for
+ * every version it carries (`carried`, the rows themselves by default): a
+ * save folded into a later one names its saver too (CODE-VS-MODEL M7).
+ */
+export function commitMessage(rows: VersionRow[], first = false, carried: VersionRow[] = rows): string {
   let title: string;
   let body = "";
   const renameTo = rows.find((r) => r.op === "rename" && !r.deleted);
@@ -1503,15 +1510,16 @@ export function commitMessage(rows: VersionRow[], first = false): string {
     body = listed.join("\n") + "\n\n";
   }
 
-  // The last saver is the author (commitRows). Everyone else in the commit is
-  // a Co-authored-by line; every agent and machine gets its own line, in the
-  // order they first saved. With one author, machine and agent this is the
-  // shape formats.md section 6 gives.
+  // The last saver is the author (commitRows). Everyone else whose save the
+  // commit carries is a Co-authored-by line; every agent and machine gets its
+  // own line, in the order they first saved. With one author, machine and
+  // agent this is the shape formats.md section 6 gives.
   const last = rows[rows.length - 1];
+  const savers = [...carried].sort((a, b) => a.version - b.version);
 
   const distinct = (pick: (r: VersionRow) => string | null) => [
     ...new Set(
-      rows.flatMap((r) => {
+      savers.flatMap((r) => {
         const v = pick(r);
 
         return v ? [v] : [];

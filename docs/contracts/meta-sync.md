@@ -363,7 +363,12 @@ setting, `META_COMMIT_GROUPING`:
   `Rename <from> to <path>`, `Restore <path> to version <n>`; several paths:
   `Save 3 files`, the first 50 listed in the body), then the who-made-it trailers from
   `formats.md` section 6 (`Pando-Agent` when set, `Pando-Machine`; a save
-  has no worktree), `Co-authored-by` with `window`, and `Pando-Version: <n>`.
+  has no worktree), `Co-authored-by`, and `Pando-Version: <n>`.
+- The trailers name everyone whose save the commit carries. That includes a
+  save folded into a later save of the same file in the same quiet window,
+  in either grouping: Ana saves `plan.md`, Ben saves it again 2 s later, and
+  the one commit has Ben as author and `Co-authored-by: Ana`. History marks
+  both versions with the commit.
 - Author: whoever made the latest change, at the time they made it. The
   committer is the same person (gitwrite's default).
 - The object keeps the last commit it wrote as the parent. On `ref_moved` it

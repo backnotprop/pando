@@ -1932,3 +1932,54 @@ func TestE2ECommitWindow(t *testing.T) {
 		}
 	}
 }
+
+// Ana saves a file and Ben saves it again inside one quiet window: the
+// commit carries only Ben's version, so Ben is its author, and Ana, whose
+// save is folded into it, is a Co-authored-by line. The same in either
+// grouping (CODE-VS-MODEL M7):
+//
+//	worker/test/live/run-e2e.sh --artifacts -run Credit
+//	META_COMMIT_GROUPING=window worker/test/live/run-e2e.sh --artifacts -run Credit
+func TestE2ECommitCreditsFoldedSave(t *testing.T) {
+	env := artifactsEnv(t, "e2e-credit-")
+	server, mono := env.server, env.mono
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	a := env.machine(t, "ana")
+	b := env.machine(t, "ben")
+
+	a.write("plan.md", "ana's plan\n")
+	waitContent(t, b, "plan.md", "ana's plan\n")
+	time.Sleep(2 * time.Second)
+	b.write("plan.md", "ana's plan\nben's line\n")
+	c := env.client()
+	deadline := time.Now().Add(45 * time.Second)
+	for {
+		h, err := c.History(context.Background(), env.p("plan.md"), 2)
+		if err == nil && len(h.Versions) == 2 && h.Versions[0].Commit != "" {
+			if h.Versions[1].Commit != h.Versions[0].Commit {
+				t.Errorf("ana's version has commit %q, ben's %q: want the one commit for both", h.Versions[1].Commit, h.Versions[0].Commit)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no commit after 45 s: %+v %v", h, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	var l []gitCommit
+	json.Unmarshal(metaRepo(t, server, mono, "log", nil), &l)
+	if len(l) != 1 {
+		t.Fatalf("%d commits, want 1", len(l))
+	}
+	t.Logf("commit (author %s):\n%s", l[0].Author.Name, l[0].Message)
+	if l[0].Author.Name != "Ben" {
+		t.Errorf("the commit's author is %s, want Ben (the last saver)", l[0].Author.Name)
+	}
+	if !strings.Contains(l[0].Message, "\nCo-authored-by: Ana <ana@example.com>\n") {
+		t.Error("Ana's folded save has no Co-authored-by line")
+	}
+	if !strings.Contains(l[0].Message, "\nPando-Machine: ana\n") || !strings.Contains(l[0].Message, "\nPando-Machine: ben\n") {
+		t.Error("the commit does not name both machines")
+	}
+}

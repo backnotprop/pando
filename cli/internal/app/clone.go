@@ -21,7 +21,7 @@ func Clone(e *Env, args []string) error {
 	fs := flags("clone")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse, for worktrees/main and references (default: the mount when this machine has one)")
-	textOnly := fs.Bool("text-only", false, "keep the meta layer's large files and binaries as pointers until pando fetch (agent sandboxes)")
+	textOnly := fs.Bool("text-only", false, "keep the meta layer's large files and binaries as pointers until pando fetch (sandboxes)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err

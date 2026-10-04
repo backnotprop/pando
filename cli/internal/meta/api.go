@@ -37,7 +37,7 @@ type Version struct {
 	Deleted      bool   `json:"deleted"`
 	Author       string `json:"author"`
 	Machine      string `json:"machine"`
-	Agent        string `json:"agent"`
+	Agent        string `json:"agent,omitempty"`
 	At           int64  `json:"at"` // ms since 1970
 	Source       string `json:"source"`
 	From         string `json:"from"`

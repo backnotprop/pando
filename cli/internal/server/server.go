@@ -236,7 +236,7 @@ type Worktree struct {
 	Branch     string `json:"branch"`
 	Path       string `json:"path"`
 	Machine    string `json:"machine"`
-	Agent      string `json:"agent"`
+	Agent      string `json:"agent,omitempty"`
 	Kind       string `json:"kind"`
 	ReportedBy string `json:"reported_by"`
 	CreatedAt  string `json:"created_at"`

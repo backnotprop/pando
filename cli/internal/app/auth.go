@@ -181,7 +181,7 @@ func finishLogin(e *Env, serverURL, flagServer, secret string, me *server.Me, na
 		return err
 	}
 	e.printf("Signed in to %s as %s (credential %q).\n", config.Host(serverURL), acct.Login, me.Credential.Name)
-	e.printf("The credential is in %s, mode 600. git and agents on this machine now act as %s.\n",
+	e.printf("The credential is in %s, mode 600. git and pando on this machine now act as %s.\n",
 		e.Home.CredentialPath(serverURL), acct.Login)
 	if acct.Name != "" {
 		e.printf("Commits in Pando worktrees are authored as %s.\n", who(acct))
@@ -288,9 +288,6 @@ func Auth(e *Env, args []string) error {
 		return nil
 	}
 	e.printf("  machine: %s\n", e.Home.Machine)
-	if a := os.Getenv("PANDO_AGENT"); a != "" {
-		e.printf("  agent: %s (commits get Pando-Agent: %s)\n", a, a)
-	}
 	tok, _ := e.Home.Token(serverURL)
 	s, err := server.Open(serverURL, tok)
 	if err != nil {

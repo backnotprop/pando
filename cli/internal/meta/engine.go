@@ -67,6 +67,12 @@ type Engine struct {
 	nextFull  time.Time            // the next safety-net scan
 	nextTick  time.Time
 
+	// Case-only twins (Notes.md, notes.md): on a file system that keeps one
+	// file for both, pando sync names each pair once.
+	caseFold   bool                       // this file system is case-insensitive
+	byLower    map[string]map[string]bool // live paths from the server, by lower case
+	warnedCase map[string]bool            // pairs already named
+
 	untilSynced bool // return from Run once everything here is sent
 	textOnly    bool // CatchUp for a --text-only clone (saved in the state)
 	hooks       Hooks
@@ -328,6 +334,7 @@ func (e *Engine) open() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	e.caseFold = caseInsensitive(dir)
 	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
@@ -1552,6 +1559,7 @@ func (e *Engine) applyOne(m *serverMsg) {
 	if !e.rules.Receivable(p) {
 		return
 	}
+	e.noteCase(m)
 	f := e.st.Files[p]
 	if f != nil && m.Version <= f.Version {
 		delete(e.held, p)
@@ -1616,6 +1624,45 @@ func (e *Engine) applyOne(m *serverMsg) {
 		e.logf("%s saved %s (version %d)", who(m), p, m.Version)
 	}
 	e.dirty = true
+}
+
+// noteCase warns once per pair when the server holds two live paths that
+// differ only in case and this file system keeps one file for both: on a
+// Mac, Notes.md and notes.md overwrite each other.
+func (e *Engine) noteCase(m *serverMsg) {
+	if !e.caseFold {
+		return
+	}
+	if e.byLower == nil {
+		e.byLower, e.warnedCase = map[string]map[string]bool{}, map[string]bool{}
+		for q, f := range e.st.Files {
+			if f.SHA != "" {
+				e.addLower(q)
+			}
+		}
+	}
+	key := strings.ToLower(m.Path)
+	if m.Deleted {
+		delete(e.byLower[key], m.Path)
+		return
+	}
+	for q := range e.byLower[key] {
+		a, b := min(q, m.Path), max(q, m.Path)
+		if q == m.Path || e.warnedCase[a+"\x00"+b] {
+			continue
+		}
+		e.warnedCase[a+"\x00"+b] = true
+		e.cfg.Log.Printf("warning: %s and %s differ only in case; this file system keeps one file for both, so they overwrite each other here (git and Linux keep two). Rename one.", a, b)
+	}
+	e.addLower(m.Path)
+}
+
+func (e *Engine) addLower(p string) {
+	key := strings.ToLower(p)
+	if e.byLower[key] == nil {
+		e.byLower[key] = map[string]bool{}
+	}
+	e.byLower[key][p] = true
 }
 
 // ---- large files from other machines ----

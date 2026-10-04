@@ -30,6 +30,13 @@ const RULINGS = "# Rulings in force\n\n- **One monorepo per project.** Code sits
 
 const WEB = fileURLToPath(new URL("..", import.meta.url));
 
+/**
+ * Where an SF build copies Apple's fonts from, as vite.config.ts finds them:
+ * PANDO_FONTS_DIR, else the landing page's folder in the meta layer. A
+ * checkout outside the monorepo's layout (a public clone) has neither.
+ */
+const APPLE_FONTS = process.env.PANDO_FONTS_DIR ?? fileURLToPath(new URL("../../../../../../research/design/pando-2026-10-02/landing/fonts", import.meta.url));
+
 /** The app built into a folder of its own (not the dist the Worker serves), with or without Apple's fonts; its files by path. */
 function build(sf: boolean) {
   const out = mkdtempSync(join(tmpdir(), "pando-build-"));
@@ -48,6 +55,20 @@ function build(sf: boolean) {
 
 /** data-theme on <html> the moment the app's module script was put in the page (the init script below records it). */
 const themeAtApp = (page: Page) => page.evaluate(() => document.documentElement.dataset.atApp ?? null);
+
+/** The signed-in person's avatar in the name button: its slot, its fill as shown, and the theme's colour for that slot (#rrggbb, as rgb()). */
+async function avatarOf(page: Page) {
+  return page
+    .getByRole("button", { name: login })
+    .locator("[data-slot]")
+    .evaluate((el) => {
+      const slot = el.getAttribute("data-slot") ?? "";
+      const hex = getComputedStyle(document.documentElement).getPropertyValue(`--av-${slot}-fill`).trim();
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+      return { slot, fill: getComputedStyle(el).backgroundColor, theme: `rgb(${r}, ${g}, ${b})` };
+    });
+}
 
 /** Opens the name menu and picks a theme or a mode in it. */
 async function pick(page: Page, choice: string) {
@@ -96,12 +117,19 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
     });
 
     await test.step("a default build ships no font file of Apple's; an SF build ships SF Pro Text and SF Mono, with SF Mono first in the mono stack", async () => {
-      const sf = build(true);
+      // The SF half needs Apple's files, which a public checkout never has: without them it is left out, and says so.
+      if (existsSync(APPLE_FONTS)) {
+        const sf = build(true);
+
+        expect(sf.files).toEqual(expect.arrayContaining(["fonts/SF-Pro-Text-Regular.otf", "fonts/SF-Pro-Text-Semibold.otf", "fonts/SFNSMono.ttf"]));
+        expect(sf.text).toContain('font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf")');
+        expect(sf.text).toContain('--mono-face:"SF Mono","Ioskeley Mono"');
+      } else {
+        test.info().annotations.push({ type: "skipped", description: `the SF build's half: no Apple fonts at ${APPLE_FONTS} (set PANDO_FONTS_DIR to run it)` });
+      }
+
       const plain = build(false);
 
-      expect(sf.files).toEqual(expect.arrayContaining(["fonts/SF-Pro-Text-Regular.otf", "fonts/SF-Pro-Text-Semibold.otf", "fonts/SFNSMono.ttf"]));
-      expect(sf.text).toContain('font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf")');
-      expect(sf.text).toContain('--mono-face:"SF Mono","Ioskeley Mono"');
       expect(plain.files.filter((f) => f.startsWith("fonts") || /SF-?Pro|SFNS|SF-?Mono/i.test(f))).toEqual([]);
       expect(plain.text).not.toMatch(/SF-Pro-Text|SFNSMono|"SF Mono"|--mono-face:/);
       // The SF build copied Apple's files into public/fonts; the default build cleared them again.
@@ -144,7 +172,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
 
       page.on("request", record);
       await page.goto("/");
-      await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) })).toBeVisible();
+      await expect(page.getByRole("link", { name: new RegExp(`${login}/${name}`) }).first()).toBeVisible();
       await page.waitForLoadState("networkidle");
       page.off("request", record);
       expect(loaded.filter((url) => /PlannotatorDoc|bridge-script|katex|mermaid/.test(url))).toEqual([]);
@@ -182,6 +210,18 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(before);
       // A new person's log fits on one page: it ends, with no "Older" to load.
       await expect(page.getByText("No older activity.")).toBeVisible();
+    });
+
+    await test.step("an activity row's repository name opens the repository; the rest of the row opens what it is about", async () => {
+      const row = page.getByTestId("activity").getByRole("listitem").filter({ hasText: "feature-live" }).first();
+
+      await row.getByRole("link", { name: full, exact: true }).click();
+      await expect(page).toHaveURL(`${BASE}/${full}`);
+      await page.goBack();
+      // Its time, at the left, is not a link of its own: the row's link under it takes the click.
+      await row.click({ position: { x: 24, y: 12 } });
+      await expect(page).toHaveURL(`${BASE}/${full}/projects/web/branches/feature-live`);
+      await page.goto("/");
     });
 
     await test.step("open the monorepo: the root folder, Clone, the README", async () => {
@@ -238,6 +278,9 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       });
       await page.reload();
       expect(await themeAtApp(page)).toBe("pando-dark");
+      // An avatar's slot comes from the name; its colours from the theme (avatars.css).
+      const pandoAvatar = await avatarOf(page);
+      expect(pandoAvatar.fill).toBe(pandoAvatar.theme);
       await expect(page.locator(".pn-doc article")).toBeVisible();
 
       await pick(page, "Cloudflare");
@@ -246,6 +289,10 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-light");
       // Plannotator's viewer follows without a reload (its ThemeProvider marks <html> light).
       await expect(page.locator("html")).toHaveClass(/(^|\s)light(\s|$)/);
+      const cloudflareAvatar = await avatarOf(page);
+      expect(cloudflareAvatar.slot).toBe(pandoAvatar.slot);
+      expect(cloudflareAvatar.fill).toBe(cloudflareAvatar.theme);
+      expect(cloudflareAvatar.fill).not.toBe(pandoAvatar.fill);
       await page.keyboard.press("Escape");
 
       await page.reload();
@@ -260,6 +307,23 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-dark");
       await page.emulateMedia({ colorScheme: "light" });
       await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-light");
+
+      // Black Rainbow is dark only: Mode shows Dark and cannot be picked; the kept mode (System) stays for the others.
+      await pick(page, "Black Rainbow");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "black-rainbow");
+      await expect(page.getByRole("menuitemradio", { name: "Light", exact: true })).toHaveAttribute("aria-disabled", "true");
+      await expect(page.getByRole("menuitemradio", { name: "Dark", exact: true })).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByRole("menu").getByText("dark only")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await page.reload();
+      expect(await themeAtApp(page)).toBe("black-rainbow");
+      const rainbowAvatar = await avatarOf(page);
+      expect(rainbowAvatar.slot).toBe(pandoAvatar.slot);
+      expect(rainbowAvatar.fill).toBe(rainbowAvatar.theme);
+      expect(new Set([pandoAvatar.fill, cloudflareAvatar.fill, rainbowAvatar.fill]).size).toBe(3);
+      await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
+      expect(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--diffs-token-keyword").trim())).toBe("#4379fb");
+      expect(await page.evaluate(() => localStorage.getItem("pando-mode"))).toBe("system");
 
       await pick(page, "Pando");
       await pick(page, "Dark");

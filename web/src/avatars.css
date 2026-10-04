@@ -1,0 +1,253 @@
+/* Avatar colours, per theme (owner: "change depending on the theme"). A name's
+   hash picks one of twelve slots (ui/Avatar.tsx), the same slot in every
+   theme; the theme gives the slot its fill and letter. Each palette comes from
+   its theme's own colours: four anchors at three lightness tiers (slot k is
+   anchor k % 4 at tier floor(k / 4)), or for Cloudflare its brand scale's
+   steps as they are. Every letter is at least 4.5:1 on its fill, the closest
+   two fills are at least 0.04 apart (OKLab), and none sits in the hue band of
+   its theme's Rust or Foxfire. Made, with those checks and the tables, by
+   research/design/pando-ui-2026-10-03/web-look/_tools/avatars.mjs. */
+
+/* pando-dark: clay (#9A7B5E), sage and slate (its syntax's string and function) and bark's warm grey. */
+:root {
+  --av-0-fill: #442501;
+  --av-0-letter: #f2d9c2;
+  --av-1-fill: #013728;
+  --av-1-letter: #c8e6d9;
+  --av-2-fill: #0a3149;
+  --av-2-letter: #c9e2f4;
+  --av-3-fill: #302e28;
+  --av-3-letter: #dfdeda;
+  --av-4-fill: #5f3c18;
+  --av-4-letter: #fbe7d6;
+  --av-5-fill: #1f4f3f;
+  --av-5-letter: #dbf1e8;
+  --av-6-fill: #244962;
+  --av-6-letter: #dceefc;
+  --av-7-fill: #47453f;
+  --av-7-letter: #ecebe8;
+  --av-8-fill: #775636;
+  --av-8-letter: #fff3e8;
+  --av-9-fill: #3e6858;
+  --av-9-letter: #eaf9f3;
+  --av-10-fill: #416279;
+  --av-10-letter: #edf7fe;
+  --av-11-fill: #605d58;
+  --av-11-letter: #f6f5f3;
+}
+/* pando-light: clay (#9A7B5E), sage and slate (its syntax's string and function) and bark's warm grey. */
+html[data-theme="pando-light"] {
+  --av-0-fill: #ffdec0;
+  --av-0-letter: #674420;
+  --av-1-fill: #c7efde;
+  --av-1-letter: #285847;
+  --av-2-fill: #cce9fe;
+  --av-2-letter: #2c516b;
+  --av-3-fill: #e7e4df;
+  --av-3-letter: #4f4d47;
+  --av-4-fill: #ebc29b;
+  --av-4-letter: #56340f;
+  --av-5-fill: #a5d8c3;
+  --av-5-letter: #164737;
+  --av-6-fill: #a8d1ee;
+  --av-6-letter: #1c4159;
+  --av-7-fill: #cdcac3;
+  --av-7-letter: #3f3d37;
+  --av-8-fill: #d5a77b;
+  --av-8-letter: #3d2101;
+  --av-9-fill: #85c0a9;
+  --av-9-letter: #013123;
+  --av-10-fill: #89b8d9;
+  --av-10-letter: #042c43;
+  --av-11-fill: #b4b1a9;
+  --av-11-letter: #2b2923;
+}
+/* plannotator-dark: its accent (orange, 60), success (green, 150), focus highlight (cyan, 200) and its slate ground (260). */
+html[data-theme="plannotator-dark"] {
+  --av-0-fill: #472400;
+  --av-0-letter: #fdd5b7;
+  --av-1-fill: #013916;
+  --av-1-letter: #c6e9cc;
+  --av-2-fill: #023538;
+  --av-2-letter: #bae8eb;
+  --av-3-fill: #252e3d;
+  --av-3-letter: #d7deea;
+  --av-4-fill: #673702;
+  --av-4-letter: #ffe6d3;
+  --av-5-fill: #18522a;
+  --av-5-letter: #d9f3dd;
+  --av-6-fill: #014f53;
+  --av-6-letter: #d0f3f5;
+  --av-7-fill: #3c4655;
+  --av-7-letter: #e6ecf4;
+  --av-8-fill: #825023;
+  --av-8-letter: #fff3e9;
+  --av-9-fill: #396a45;
+  --av-9-letter: #e9fbec;
+  --av-10-fill: #1d6a6e;
+  --av-10-letter: #e3fafb;
+  --av-11-fill: #555e6d;
+  --av-11-letter: #f2f5fb;
+}
+/* plannotator-light: its accent (orange, 60), success (green, 150), focus highlight (cyan, 200) and its slate ground (260). */
+html[data-theme="plannotator-light"] {
+  --av-0-fill: #fedec4;
+  --av-0-letter: #733e01;
+  --av-1-fill: #c3f3cc;
+  --av-1-letter: #225a31;
+  --av-2-fill: #b2f2f5;
+  --av-2-letter: #04585c;
+  --av-3-fill: #dbe5f5;
+  --av-3-letter: #444e5e;
+  --av-4-fill: #fbbb87;
+  --av-4-letter: #5c3001;
+  --av-5-fill: #a0dcac;
+  --av-5-letter: #0d4a22;
+  --av-6-fill: #89dbdf;
+  --av-6-letter: #034649;
+  --av-7-fill: #bfcbdf;
+  --av-7-letter: #343e4d;
+  --av-8-fill: #e79f62;
+  --av-8-letter: #401f00;
+  --av-9-fill: #80c48e;
+  --av-9-letter: #013313;
+  --av-10-fill: #61c3c8;
+  --av-10-letter: #023032;
+  --av-11-fill: #a5b2c8;
+  --av-11-letter: #202938;
+}
+/* iris-dark: ember (#D58F70, its "a person was here" colour, taken down to a taupe: at full colour it sits 20 degrees from its Rust), warning (amber, 85), success (green, 150) and its cool grey (260). */
+html[data-theme="iris-dark"] {
+  --av-0-fill: #3c2820;
+  --av-0-letter: #eadad3;
+  --av-1-fill: #3c2b02;
+  --av-1-letter: #efdcb6;
+  --av-2-fill: #033816;
+  --av-2-letter: #c8e8ce;
+  --av-3-fill: #272e3b;
+  --av-3-letter: #d8dee8;
+  --av-4-fill: #553f36;
+  --av-4-letter: #f5e8e3;
+  --av-5-fill: #594100;
+  --av-5-letter: #f8eacd;
+  --av-6-fill: #20512d;
+  --av-6-letter: #dbf2df;
+  --av-7-fill: #3d4553;
+  --av-7-letter: #e7ebf3;
+  --av-8-fill: #6d5850;
+  --av-8-letter: #fbf3f0;
+  --av-9-fill: #735a20;
+  --av-9-letter: #fef4e1;
+  --av-10-fill: #3e6948;
+  --av-10-letter: #eafaed;
+  --av-11-fill: #565e6b;
+  --av-11-letter: #f2f5fa;
+}
+/* iris-light: ember (#D58F70, its "a person was here" colour, taken down to a taupe: at full colour it sits 20 degrees from its Rust), warning (amber, 85), success (green, 150) and its cool grey (260). */
+html[data-theme="iris-light"] {
+  --av-0-fill: #f5dfd6;
+  --av-0-letter: #5d473e;
+  --av-1-fill: #fbe2ae;
+  --av-1-letter: #624800;
+  --av-2-fill: #c7f1ce;
+  --av-2-letter: #295935;
+  --av-3-fill: #dde5f2;
+  --av-3-letter: #454e5b;
+  --av-4-fill: #dfc4b9;
+  --av-4-letter: #4d382e;
+  --av-5-fill: #e6c686;
+  --av-5-letter: #4f3900;
+  --av-6-fill: #a6daaf;
+  --av-6-letter: #174825;
+  --av-7-fill: #c1cbdb;
+  --av-7-letter: #363e4b;
+  --av-8-fill: #c7aa9d;
+  --av-8-letter: #37231b;
+  --av-9-fill: #cfac60;
+  --av-9-letter: #352601;
+  --av-10-fill: #86c292;
+  --av-10-letter: #013313;
+  --av-11-fill: #a7b2c4;
+  --av-11-letter: #222935;
+}
+/* black-rainbow: its spectrum's green, blue and yellow (red + green) and its greys; never its red or pink. */
+html[data-theme="black-rainbow"] {
+  --av-0-fill: #013909;
+  --av-0-letter: #c4eac3;
+  --av-1-fill: #102864;
+  --av-1-letter: #cedeff;
+  --av-2-fill: #382d02;
+  --av-2-letter: #ebdeb1;
+  --av-3-fill: #2e2e2e;
+  --av-3-letter: #dedede;
+  --av-4-fill: #12531a;
+  --av-4-letter: #d8f5d7;
+  --av-5-fill: #26417f;
+  --av-5-letter: #e2ebfe;
+  --av-6-fill: #534400;
+  --av-6-letter: #f5ebca;
+  --av-7-fill: #454545;
+  --av-7-letter: #ebebeb;
+  --av-8-fill: #366c38;
+  --av-8-letter: #e8fbe8;
+  --av-9-fill: #415c95;
+  --av-9-letter: #f1f5fe;
+  --av-10-fill: #6e5c14;
+  --av-10-letter: #fcf5df;
+  --av-11-fill: #5d5d5d;
+  --av-11-letter: #f5f5f5;
+}
+/* cloudflare-dark: its brand scale: orange, gold, green, blue, indigo and violet, a dark step behind a light one. */
+html[data-theme="cloudflare-dark"] {
+  --av-0-fill: #592b04;
+  --av-0-letter: #f8a054;
+  --av-1-fill: #4c3700;
+  --av-1-letter: #ffce4b;
+  --av-2-fill: #104122;
+  --av-2-letter: #55d584;
+  --av-3-fill: #003681;
+  --av-3-letter: #82b6ff;
+  --av-4-fill: #2c1ea9;
+  --av-4-letter: #c2bdf3;
+  --av-5-fill: #5f1477;
+  --av-5-letter: #dfa8f1;
+  --av-6-fill: #8d4406;
+  --av-6-letter: #fef1e6;
+  --av-7-fill: #735400;
+  --av-7-letter: #fff8e4;
+  --av-8-fill: #196535;
+  --av-8-letter: #e3f8eb;
+  --av-9-fill: #0051c3;
+  --av-9-letter: #ecf4ff;
+  --av-10-fill: #4b3bdc;
+  --av-10-letter: #f1f0fc;
+  --av-11-fill: #8d1eb1;
+  --av-11-letter: #f7eafb;
+}
+/* cloudflare-light: its brand scale: orange, gold, green, blue, indigo and violet, a dark step behind a light one. */
+html[data-theme="cloudflare-light"] {
+  --av-0-fill: #fbcda5;
+  --av-0-letter: #763905;
+  --av-1-fill: #ffeab2;
+  --av-1-letter: #644900;
+  --av-2-fill: #a8e9c0;
+  --av-2-letter: #15562d;
+  --av-3-fill: #b9d6ff;
+  --av-3-letter: #0045a6;
+  --av-4-fill: #dfdcf9;
+  --av-4-letter: #3524cd;
+  --av-5-fill: #ebcaf6;
+  --av-5-letter: #741892;
+  --av-6-fill: #ee730a;
+  --av-6-letter: #361a02;
+  --av-7-fill: #dda100;
+  --av-7-letter: #361a02;
+  --av-8-fill: #2db35e;
+  --av-8-letter: #0a2614;
+  --av-9-fill: #4693ff;
+  --av-9-letter: #001c43;
+  --av-10-fill: #9d94ec;
+  --av-10-letter: #170f58;
+  --av-11-fill: #cf7ee9;
+  --av-11-letter: #350b42;
+}

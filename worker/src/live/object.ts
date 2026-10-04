@@ -23,6 +23,10 @@ export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoOb
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
 
+// ...or this long after its first save not yet in git, if it never goes quiet
+// (CODE-VS-MODEL M6; the owner's choice, 2026-10-04). META_COMMIT_MAX_WAIT_MS sets it.
+const MAX_WAIT_MS = 60_000;
+
 const TREE_LIMIT = 1000; // GET tree: files per page by default
 
 const TREE_MAX = 5000; // and at most
@@ -103,6 +107,8 @@ export interface MetaOutboxTest {
   applyFail: number;
   /** The next n apply everything, then fail: the caller's answer is lost. */
   applyLose: number;
+  /** The next reservation waits this long once its paths are reserved, before anything else. */
+  reserveHoldMs: number;
 }
 
 /** The outbox as it is: rows waiting and the failed tries in a row, with the test switches. */
@@ -294,6 +300,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // Objects made before the lfs_* columns existed: add them, and fill them
   // from the stored pointers once.
   private migrate(): void {
+    const pcols = this.sql.exec<{ name: string }>("PRAGMA table_info(pending)").toArray().map((c) => c.name);
+
+    if (!pcols.includes("first_at")) this.sql.exec("ALTER TABLE pending ADD COLUMN first_at INTEGER");
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(versions)").toArray().map((c) => c.name);
 
     if (!cols.includes("login")) this.sql.exec("ALTER TABLE versions ADD COLUMN login TEXT");
@@ -338,7 +347,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE INDEX IF NOT EXISTS versions_by_path ON versions(path, version);
       CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, version INTEGER NOT NULL, sha TEXT, deleted INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS files_by_version ON files(version);
-      CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL, first_at INTEGER);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS applied (commit_sha TEXT PRIMARY KEY, at INTEGER NOT NULL);
@@ -526,6 +535,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const target = this.versionAt(path, intField(b?.version));
 
     if (!target) return fail(404, "not_found", `${path} has no version at or before ${b?.version}`);
+    const clash = target.deleted ? null : this.fileFolderClash(path);
+
+    if (clash) return fail(clash.status, clash.reason, clash.message);
 
     // From here to the broadcast nothing awaits, so no other change interleaves.
     const author = request.headers.get("x-pando-author") ?? (name(b?.author) || "unknown");
@@ -588,6 +600,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     }
 
     return fail(400, "invalid_input", 'action is "start" or "done"');
+  }
+
+  /** The longest a path saved again and again waits for its commit (META_COMMIT_MAX_WAIT_MS, else 60 s). */
+  private maxWait(): number {
+    return intParam(this.env.META_COMMIT_MAX_WAIT_MS ?? null, MAX_WAIT_MS) || MAX_WAIT_MS;
   }
 
   private initializing(): boolean {
@@ -791,10 +808,14 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       const badPointer = checkPointer(path, bytes);
 
       if (badPointer) return refuse(path, badPointer);
+      const clash = this.fileFolderClash(path);
+
+      if (clash) return refuse(path, clash);
       const base = intField(msg.base_version, -1);
       const cur = this.current(path);
 
-      if (!this.baseMatches(cur, base)) return this.stale(ws, id, path, base, cur);
+      // A merge landing on this path waits for no save: the saver keeps a conflict copy.
+      if (!this.baseMatches(cur, base) || this.reserved(path)) return this.stale(ws, id, path, base, cur);
 
       if (cur && !cur.deleted && cur.sha === sha) {
         this.send(ws, { type: "accepted", id, path, version: cur.version, sha }); // nothing changed
@@ -823,7 +844,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         return false;
       }
 
-      if (cur.version !== base) return this.stale(ws, id, path, base, cur);
+      if (cur.version !== base || this.reserved(path)) return this.stale(ws, id, path, base, cur);
       const version = this.insert({ path, op: "delete", sha: null, size: null, deleted: true, ...who, source: "live" });
       this.send(ws, { type: "accepted", id, path, version, sha: null });
       this.broadcast(this.changeMessage(this.row(version)), att.id);
@@ -837,13 +858,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const badFrom = checkPath(from);
 
     if (badFrom) return refuse(msg.from, badFrom);
-    const badTo = checkPath(path);
+    const badTo = checkPath(path) ?? this.fileFolderClash(path, from);
 
     if (badTo) return refuse(msg.path, badTo);
     const base = intField(msg.base_version, -1);
     const curFrom = this.current(from);
 
-    if (!curFrom || curFrom.deleted || curFrom.version !== base) return this.stale(ws, id, from, base, curFrom);
+    if (!curFrom || curFrom.deleted || curFrom.version !== base || this.reserved(from)) return this.stale(ws, id, from, base, curFrom);
 
     if (msg.sha !== curFrom.sha) {
       return refuse(from, { reason: "bad_sha", status: 400, message: "a rename moves bytes unchanged; send a delete and a save" });
@@ -852,7 +873,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const toBase = intField(msg.to_base_version, -1);
     const curTo = this.current(path);
 
-    if (!this.baseMatches(curTo, toBase)) return this.stale(ws, id, path, toBase, curTo);
+    if (!this.baseMatches(curTo, toBase) || this.reserved(path)) return this.stale(ws, id, path, toBase, curTo);
     const fromRow = this.row(curFrom.version);
     const badPointer = fromRow.sha ? checkPointer(path, new Uint8Array(this.blob(fromRow.sha))) : null;
 
@@ -870,6 +891,29 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.broadcast(this.changeMessage(this.row(version)), att.id);
 
     return true;
+  }
+
+  /**
+   * A file named like a live folder, or a path inside a live file: git holds
+   * no such pair, and every commit would fail (CODE-VS-MODEL M5). The second
+   * of the pair is refused; case-only twins (Notes.md, notes.md) are allowed,
+   * as git allows them (the owner's choice, 2026-10-04). `moving`: a
+   * rename's own `from`, gone once it lands.
+   */
+  private fileFolderClash(path: string, moving = ""): Refusal | null {
+    const parts = path.split("/");
+
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      const cur = this.current(dir);
+
+      if (dir !== moving && cur && !cur.deleted) return { reason: "file_folder", status: 409, message: `${dir} is a file here` };
+    }
+
+    // Every path inside the folder sorts between "<path>/" and "<path>0" ("0" follows "/").
+    const inside = this.sql.exec("SELECT 1 FROM files WHERE deleted = 0 AND path > ? AND path < ? AND path != ? LIMIT 1", `${path}/`, `${path}0`, moving).toArray();
+
+    return inside.length ? { reason: "file_folder", status: 409, message: `${path} is a folder here` } : null;
   }
 
   private baseMatches(cur: Current | null, base: number): boolean {
@@ -979,13 +1023,19 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       n.deleted ? 1 : 0,
     );
 
+    // Due after 10 s of quiet, but never later than the maximum wait after
+    // the path's first save not yet in git (first_at, kept across saves).
     if (n.source !== "main") {
+      const wait = this.maxWait();
       this.sql.exec(
-        `INSERT INTO pending (path, version, due) VALUES (?, ?, ?)
-         ON CONFLICT(path) DO UPDATE SET version = excluded.version, due = excluded.due`,
+        `INSERT INTO pending (path, version, due, first_at) VALUES (?1, ?2, MIN(?3 + ?4, ?3 + ?5), ?3)
+         ON CONFLICT(path) DO UPDATE SET version = excluded.version,
+           due = MIN(?3 + ?4, COALESCE(pending.first_at, ?3) + ?5), first_at = COALESCE(pending.first_at, ?3)`,
         n.path,
         version,
-        at + QUIET_MS,
+        at,
+        QUIET_MS,
+        wait,
       );
     }
 
@@ -1118,7 +1168,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- tests only (META_TEST=1) ----
 
-  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false, applyFail: 0, applyLose: 0 };
+  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false, applyFail: 0, applyLose: 0, reserveHoldMs: 0 };
 
   /** Fail the next `fail` sends, lose the answer of the next `lose` (sent, then taken as failed), crash the object before the next send; and the outbox as it is. */
   testOutbox(set: Partial<MetaOutboxTest> = {}): MetaOutboxState {
@@ -1153,6 +1203,15 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       this.testSet.applyFail--;
       throw new Error("meta test: applyFromMain failed");
     }
+  }
+
+  /** Tests only: hold the next reservation open for reserveHoldMs. */
+  private async testHold(): Promise<void> {
+    const ms = this.env.META_TEST === "1" ? this.testSet.reserveHoldMs : 0;
+
+    if (ms <= 0) return;
+    this.testSet.reserveHoldMs = 0;
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private testAfterSend(): void {
@@ -1411,24 +1470,47 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // ---- a merge's reservation (Durable Object RPC, called by the monorepo object) ----
   //
   // A merge into the meta layer reserves the paths its branch changes before
-  // it lands, and applyFromMain or release ends that (CODE-VS-MODEL M1).
-  // While a path is reserved no commit carries it, so no older live save of
-  // it can land on git main after the merge: git main and the live files
-  // agree once the merge is applied. Live saves of it are taken as usual,
-  // and the merge's version replaces them (the merge wins), until the owner
-  // answers question 3 (QUESTIONS.md, 2026-10-04). If the answer is "the
-  // merge waits", reserve also commits any pending version of these paths at
-  // once and answers git main's new sha (the merge then merges against it),
-  // and change() answers a live save of a reserved path `stale`.
+  // it lands, and applyFromMain or release ends that (CODE-VS-MODEL M1, the
+  // design TLC checked). The merge waits for live saves (the owner's choice,
+  // 2026-10-04):
+  // - reserve commits any live save of these paths still waiting for its
+  //   commit at once, and answers git main's sha: the merge merges against
+  //   it, so a branch that changed the same file is refused as a conflict;
+  // - while a path is reserved, no commit carries it, and a live save,
+  //   delete or rename of it is answered `stale` (the saver keeps a conflict
+  //   copy), until the merge is applied or released.
+  // So no live save is replaced silently, and git main and the live files
+  // agree once the merge is applied.
 
-  /** Reserve paths for a merge; a commit of any of them already on its way lands (or fails) first. */
-  async reserve(merge: string, paths: string[]): Promise<{ reserved: number }> {
+  /**
+   * Reserve paths for a merge. A commit of any of them already on its way
+   * lands (or fails) first; then their waiting live saves are committed.
+   * Answers git main's sha after that commit (null when none was needed) and
+   * the paths it carried. Throws when that commit failed.
+   */
+  async reserve(merge: string, paths: string[]): Promise<{ sha: string | null; committed: string[] }> {
     for (const p of paths) this.sql.exec("INSERT OR IGNORE INTO reserved (path, merge) VALUES (?, ?)", p, merge);
+    await this.testHold();
     const busy = this.committing;
 
     if (busy && paths.some((p) => busy.paths.has(p))) await busy.done;
+    const writer = gitWriter(this.env);
 
-    return { reserved: paths.length };
+    const rows = this.sql
+      .exec<VersionRow>(
+        "SELECT v.* FROM pending p JOIN versions v ON v.version = p.version WHERE p.path IN (SELECT path FROM reserved WHERE merge = ?) ORDER BY v.version",
+        merge,
+      )
+      .toArray();
+
+    if (!writer || !rows.length) return { sha: null, committed: [] };
+    await this.commitRows(writer, rows, false);
+
+    return { sha: this.kv("parent"), committed: rows.map((r) => r.path) };
+  }
+
+  private reserved(path: string): boolean {
+    return this.sql.exec("SELECT 1 FROM reserved WHERE path = ? LIMIT 1", path).toArray().length > 0;
   }
 
   /** End a merge's reservation (the merge did not land). Saves that waited are committed as usual. */
@@ -1480,10 +1562,10 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (!due.length) return this.scheduleCommit();
 
     // Paths due together share a commit, up to COMMIT_FILES files and about
-    // COMMIT_BYTES bytes: all of them ("window"), or those with the first
-    // one's author, machine and agent ("author", the default).
+    // COMMIT_BYTES bytes: all of them ("window", the default), or those with
+    // the first one's author, machine and agent ("author").
     const first = this.row(due[0].version);
-    const window = this.env.META_COMMIT_GROUPING === "window";
+    const window = this.env.META_COMMIT_GROUPING !== "author";
     const key = (r: VersionRow) => (window ? "" : JSON.stringify([r.author, r.machine, r.agent]));
     const rows: VersionRow[] = [];
     let bytes = 0;
@@ -1555,9 +1637,18 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.setKv("parent", sha);
     this.setKv("commit_error", null);
 
+    const wait = this.maxWait();
+
     for (const r of rows) {
       this.sql.exec(`UPDATE versions SET commit_sha = ?3 WHERE ${CARRIED}`, r.path, r.version, sha);
       this.sql.exec("DELETE FROM pending WHERE path = ? AND version = ?", r.path, r.version);
+      // Saved again meanwhile: its maximum wait starts at the first save after this commit.
+      this.sql.exec(
+        `UPDATE pending SET first_at = (SELECT MIN(at) FROM versions WHERE path = ?1 AND version > ?2),
+           due = MIN((SELECT at FROM versions WHERE version = pending.version) + ?3, (SELECT MIN(at) FROM versions WHERE path = ?1 AND version > ?2) + ?4)
+         WHERE path = ?1`,
+        r.path, r.version, QUIET_MS, wait,
+      );
     }
   }
 }

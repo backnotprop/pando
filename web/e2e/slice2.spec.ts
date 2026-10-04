@@ -29,6 +29,9 @@ export function shade(name: string): number {
 // 2.2 MiB, over the 1 MiB that is coloured: shown as plain text.
 const BIG = Array.from({ length: 80_000 }, (_, i) => `export const n${i} = ${i};\n`).join("");
 
+// A file long enough that Files changed scrolls.
+const FILES = Array.from({ length: 150 }, (_, i) => `export const file${i} = ${i};\n`).join("");
+
 // A 1 by 1 PNG, and another (a sage pixel) for a branch to change it to.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
@@ -188,7 +191,7 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
     await test.step("Files changed: an edit, an add, a delete and a binary, each with its status; a push shows at once", async () => {
       const m = machine();
-      const dir = m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "moss"), "src/files.ts": "export const files = 4;\n", "logo.png": PNG2 }, "Files changed");
+      const dir = m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "moss"), "src/files.ts": FILES, "logo.png": PNG2 }, "Files changed");
 
       m.git(dir, "rm", "-q", "README.md");
       m.git(dir, "-c", "user.name=Web Lane", "-c", `user.email=${m.name}@pando.invalid`, "commit", "-qm", "No README");
@@ -206,6 +209,20 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(file("logo.png")).toContainText("modified");
       await expect(file("logo.png")).toContainText("Binary file");
       await expect(page.getByRole("link", { name: "Files changed 4" })).toBeVisible();
+      // Plannotator's tree beside the files: scrolling the files moves it, choosing in it scrolls to the file.
+      const tree = page.getByRole("tree", { name: "Changed files" });
+      const node = (name: RegExp) => tree.getByRole("treeitem", { name });
+
+      await expect(node(/colour\.ts/)).toHaveAttribute("aria-selected", "true");
+      const reach = await file("src/files.ts").evaluate((el) => el.getBoundingClientRect().top - 20);
+
+      await page.mouse.move(900, 500);
+      await page.mouse.wheel(0, reach);
+      await expect(node(/files\.ts/)).toHaveAttribute("aria-selected", "true");
+      await node(/logo\.png/).click();
+      await expect(file("logo.png")).toHaveAttribute("aria-current", "true");
+      await expect(file("logo.png")).toBeInViewport();
+      await expect(node(/logo\.png/)).toHaveAttribute("aria-selected", "true");
       // On a phone the diff scrolls inside its box, never the page, and its numbers and code sit where the code view's do.
       await page.setViewportSize({ width: 390, height: 844 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);

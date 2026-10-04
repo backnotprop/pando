@@ -22,7 +22,11 @@
     // The docs site (site/docs, the Worker pando-docs): the app's /docs
     // redirects here, and the home reads What's new from it. docs.<domain>
     // once the domain is bought.
-    "DOCS_URL": "https://pando-docs.plannotator.workers.dev"
+    "DOCS_URL": "https://pando-docs.plannotator.workers.dev",
+    // Shared files (the meta layer): everything due in one quiet window is
+    // one git commit, the others as Co-authored-by ("author": one per person).
+    // The owner's choice, 2026-10-04 (docs/contracts/meta-sync.md).
+    "META_COMMIT_GROUPING": "window"
   },
   "observability": { "enabled": true },
   "artifacts": [

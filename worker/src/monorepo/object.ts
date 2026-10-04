@@ -7,6 +7,7 @@
 // Its methods are RPC. A method that can fail returns an Outcome, because RPC
 // passes only an error's message across.
 
+import type * as Contract from "@pando/contract";
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { HttpError, now, redact } from "../http";
@@ -20,14 +21,14 @@ import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS, type Facts } from "./facts";
 import { FactsOut, type FactsRequest } from "./facts-out";
 import { HooksOut } from "./hooks-out";
-import type { BranchList, BranchView } from "./views";
+import { isMergeable, type BranchList, type BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
 import type { RefCommand } from "./pktline";
 import { FeedOut, type HelloAnswer } from "../feed/out";
-import { isRecord, isText, isTextList, parseJson } from "../parse";
+import { isOneOf, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../parse";
 import { attachmentOf, Machines, type MachineRow } from "./machines";
-import type { FeedEvent, Key, NeedRow, NeedState, PushNumbers, Summary } from "../feed/shape";
+import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
 import type { Json } from "../parse";
@@ -42,7 +43,10 @@ import type {
   RepoRecord,
   StatusRecord,
   StreamEvent,
+  HookEvent,
   KeyedEvent,
+  ReviewComment,
+  ReviewVerdict,
   ReconcileSeen,
   EventFilter,
   RefusalExtra,
@@ -119,8 +123,14 @@ type AttemptRow = { n: number; at: string; response_code: number | null; error: 
 
 export type DeliveryView = DeliveryRow & { recent_attempts: AttemptRow[] };
 
+/** How a worktree is mounted. */
+export type WorktreeKind = "fuse" | "sparse" | "fskit";
+
 /** A worktree as reported (the API's Worktree). */
-export type WorktreeRow = {
+export type Worktree = Omit<WorktreeRow, "kind"> & { kind: WorktreeKind };
+
+/** A worktree row as stored. */
+type WorktreeRow = {
   id: string;
   repo: string;
   branch: string;
@@ -247,6 +257,20 @@ type KeptRow = { id: number; identity: string; origin: string | null; ref: strin
 function keptIdentity(k: KeptRow): Identity | null {
   // SAFETY: keepPush is the only writer of unrecorded.identity: JSON.stringify of an Identity or null.
   return JSON.parse(k.identity) as Identity | null;
+}
+
+/** A stored review comment, read back from its JSON column; null when it is not one. */
+function reviewCommentOf(v: Json): ReviewComment | null {
+  if (!isRecord(v) || !isText(v.path) || !isText(v.body) || (v.side !== "new" && v.side !== "old")) return null;
+
+  return isWholeNumber(v.line) ? { path: v.path, line: v.line, side: v.side, body: v.body } : { path: v.path, side: v.side, body: v.body };
+}
+
+const WORKTREE_KINDS: readonly WorktreeKind[] = ["fuse", "sparse", "fskit"];
+
+/** A stored worktree, its kind checked as it is read back from SQL; null when the kind is none of the three. */
+function worktreeOf(r: WorktreeRow): Worktree | null {
+  return isOneOf(WORKTREE_KINDS, r.kind) ? { ...r, kind: r.kind } : null;
 }
 
 function who(by: Identity | null): EventWho {
@@ -984,7 +1008,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Reviews ──────────────────────────────────────────────────────────────
 
-  addReview(repo: string, branch: string, head: string, verdict: string, body: string | null, comments: unknown[], identity: Identity) {
+  addReview(repo: string, branch: string, head: string, verdict: ReviewVerdict, body: string | null, comments: ReviewComment[], identity: Identity) {
     const id = randomId("rv_");
     const at = now();
     this.sql.exec(
@@ -998,10 +1022,20 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   listReviews(repo: string, branch: string) {
-    return this.rows<Record<string, string>>("SELECT * FROM reviews WHERE repo = ? AND branch = ? ORDER BY created_at", repo, branch).map((r) => ({
-      id: r.id, branch: r.branch, head: r.head, verdict: r.verdict, body: r.body, comments: JSON.parse(r.comments),
-      author: r.author, created_at: r.created_at,
-    }));
+    type ReviewRow = { id: string; branch: string; head: string; verdict: string; body: string | null; comments: string; author: string; created_at: string };
+
+    // addReview is the only writer: a row whose verdict reads back as none of the three is left out.
+    return this.rows<ReviewRow>("SELECT * FROM reviews WHERE repo = ? AND branch = ? ORDER BY created_at", repo, branch).flatMap((r) => {
+      const verdict = verdictOf(r.verdict);
+
+      if (!verdict) return [];
+      const comments = parseJson(r.comments);
+
+      return [{
+        id: r.id, branch: r.branch, head: r.head, verdict, body: r.body, comments: Array.isArray(comments) ? comments.flatMap((x) => reviewCommentOf(x) ?? []) : [],
+        author: r.author, created_at: r.created_at,
+      }];
+    });
   }
 
   // ── Statuses and the gate ────────────────────────────────────────────────
@@ -1260,7 +1294,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Hooks and deliveries ─────────────────────────────────────────────────
 
-  addHook(repo: string, h: { type: "web" | "buildkite"; url: string | null; secret: string | null; events: string[]; config: unknown }, identity: Identity) {
+  addHook(repo: string, h: { type: "web" | "buildkite"; url: string | null; secret: string | null; events: HookEvent[]; config: unknown }, identity: Identity) {
     const id = randomId("hk_");
     this.sql.exec(
       "INSERT INTO hooks (id, repo, type, url, secret, events, config, active, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
@@ -1585,11 +1619,11 @@ export class MonorepoObject extends DurableObject<Env> {
       const all = topics.includes("all");
 
       if (!Number.isSafeInteger(since) || since < 0 || since > head || (head > 0 && since < oldest - 1) || missed > (all ? REPLAY_MAX : SCAN_MAX)) {
-        server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest }));
+        server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest } satisfies typeof Contract.MonorepoEventFrame.Encoded));
       } else {
         const replay = this.eventRows(since, REPLAY_MAX + 1, false, topics);
 
-        if (replay.length > REPLAY_MAX) server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest }));
+        if (replay.length > REPLAY_MAX) server.send(JSON.stringify({ type: "resync", seq: head, oldest_seq: oldest } satisfies typeof Contract.MonorepoEventFrame.Encoded));
         else for (const e of replay) server.send(JSON.stringify({ type: "event", ...e }));
       }
     }
@@ -1597,7 +1631,8 @@ export class MonorepoObject extends DurableObject<Env> {
     // The `feed` topic: what was sent after feed_since, in the order it went out (C25).
     if (topics.includes("feed")) this.feed.replay(server, url.searchParams.get("feed_since"));
     // feed_n only with the feed topic (stringify drops undefined).
-    server.send(JSON.stringify({ type: "caught_up", seq: head, feed_n: topics.includes("feed") ? this.feed.feedHead() : undefined }));
+    // The same frame ends a row socket's replay and a feed socket's (feed_n only on the latter).
+    server.send(JSON.stringify({ type: "caught_up", seq: head, feed_n: topics.includes("feed") ? this.feed.feedHead() : undefined } satisfies typeof Contract.MonorepoFeedFrame.Encoded));
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -1842,7 +1877,7 @@ export class MonorepoObject extends DurableObject<Env> {
         description: b.description,
         ahead: merged ? 0 : (b.ahead ?? null),
         behind: b.behind ?? null,
-        mergeable: merged ? "up_to_date" : fresh ? (b.mergeable ?? "unknown") : "pending",
+        mergeable: merged ? "up_to_date" : fresh ? (isMergeable(b.mergeable) ? b.mergeable : "unknown") : "pending",
         checks: combine(b.head!, required, this.statuses(repo, b.head!)),
         state,
         merge_commit: merged ? b.merge_commit : null,
@@ -1855,7 +1890,7 @@ export class MonorepoObject extends DurableObject<Env> {
         created_at: b.created_at,
         updated_at: b.updated_at,
         stale: !fresh,
-        last_mergeable: !fresh ? (b.mergeable ?? null) : null,
+        last_mergeable: !fresh && isMergeable(b.mergeable) ? b.mergeable : null,
         conflict_paths: merged ? null : this.conflictPaths(b),
         facts_at: b.facts_at ?? null,
       });
@@ -2132,7 +2167,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Worktrees ────────────────────────────────────────────────────────────
 
-  putWorktree(id: string, w: { repo: string; branch: string; path: string; machine: string; agent: string | null; kind: string }, identity: Identity): Promise<Outcome<WorktreeRow>> {
+  putWorktree(id: string, w: { repo: string; branch: string; path: string; machine: string; agent: string | null; kind: WorktreeKind }, identity: Identity): Promise<Outcome<Worktree>> {
     return this.guard(() => {
       const at = now();
       const old = this.row<{ created_at: string }>("SELECT created_at FROM worktrees WHERE id = ?", id);
@@ -2150,22 +2185,24 @@ export class MonorepoObject extends DurableObject<Env> {
     });
   }
 
-  private worktree(id: string): WorktreeRow | null {
-    return this.row<WorktreeRow>(
+  private worktree(id: string): Worktree | null {
+    const r = this.row<WorktreeRow>(
       "SELECT id, repo, branch, path, machine, agent, kind, reported_by, created_at, last_seen_at FROM worktrees WHERE id = ?", id,
     );
+
+    return r ? worktreeOf(r) : null;
   }
 
   getWorktree(id: string) {
     return this.worktree(id);
   }
 
-  listWorktrees(filter: { machine?: string; repo?: string }) {
+  listWorktrees(filter: { machine?: string; repo?: string }): Worktree[] {
     return this.rows<WorktreeRow>(
       `SELECT id, repo, branch, path, machine, agent, kind, reported_by, created_at, last_seen_at FROM worktrees
        WHERE (?1 IS NULL OR machine = ?1) AND (?2 IS NULL OR repo = ?2) ORDER BY machine, path`,
       filter.machine ?? null, filter.repo ?? null,
-    );
+    ).flatMap((r) => worktreeOf(r) ?? []);
   }
 
   deleteWorktree(id: string, identity: Identity): Promise<Outcome<boolean>> {

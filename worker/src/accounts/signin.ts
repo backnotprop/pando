@@ -17,6 +17,7 @@
 // Worker at a stand-in WorkOS for tests; only a localhost address is honoured.
 
 import { Hono } from "hono";
+import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { credential, hasControl, HttpError, toErrorResponse } from "../http";
 import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
@@ -361,7 +362,7 @@ signin.post("/v1/logout", async (c) => {
   if ((c.req.header("accept") ?? "").includes("application/json")) {
     headers.set("content-type", "application/json");
 
-    return new Response(JSON.stringify({ signed_out: !!secret, logout_url: next }), { headers });
+    return new Response(JSON.stringify({ signed_out: !!secret, logout_url: next } satisfies typeof Contract.SignedOut.Encoded), { headers });
   }
 
   headers.set("location", next);

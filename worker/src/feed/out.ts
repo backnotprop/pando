@@ -16,6 +16,7 @@
 // - answers needs-you from stored branch facts.
 // It never calls Artifacts or another object; the Worker does the fan-out.
 
+import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { now } from "../http";
 import { released } from "../timing";
@@ -25,8 +26,8 @@ import type { ObjectInfo, StatusRecord } from "../monorepo/types";
 import { isRecord, isTextList, parseJson, type Json, type JsonObject } from "../parse";
 import {
   FANOUT_MAX, feedEventOf, flagOf, HELLO_WORKTREES_MAX, isNeedState, MEMBERS_INLINE_MAX, nameOf, needChangesOf, pushSummaryOf, seqBound,
-  storedPointerOf, summaryOf, textOf, TICK_LARGE_MS, TICK_SMALL_MS, wholeOf,
-  type FeedEvent, type FeedMessage, type Key, type LineSummary, type NeedChange, type NeedRow, type NeedState, type PushNumbers,
+  statusStateOf, storedPointerOf, summaryOf, textOf, TICK_LARGE_MS, TICK_SMALL_MS, verdictOf, wholeOf,
+  type FeedEvent, type FeedMessage, type Key, type Line, type NeedChange, type NeedRow, type NeedState, type PushNumbers,
   type StoredPointer, type Summary,
 } from "./shape";
 
@@ -305,7 +306,7 @@ export class FeedOut {
     const stored = parseJson(r.feed);
     const line = storedPointerOf(stored);
 
-    if (!line || !isRecord(stored)) return false;
+    if (!line || !isRecord(stored) || (line.kind !== "push" && line.kind !== "branch.opened")) return false;
     const base = pushSummaryOf(stored.summary) ?? { head: null, before: null, commits: null, head_title: null };
     const p: StoredPointer = { ...line, summary: { ...base, ...numbers } };
     this.sql.exec("UPDATE events SET feed = ?, feed_wait = 0 WHERE seq = ?", JSON.stringify(p), seq);
@@ -320,7 +321,7 @@ export class FeedOut {
     const n = this.feedHead() + 1;
     this.set("feed_n", String(n));
     this.sql.exec("UPDATE events SET feed_n = ? WHERE seq = ?", n, event.seq);
-    const frame = JSON.stringify({ type: "feed", n, event });
+    const frame = JSON.stringify({ type: "feed", n, event } satisfies typeof Contract.MonorepoFeedFrame.Encoded);
 
     for (const ws of this.ctx.getWebSockets("feed")) {
       try {
@@ -348,7 +349,7 @@ export class FeedOut {
     if (sinceParam === null || sinceParam === "") return;
     const head = this.feedHead();
     const since = Number(sinceParam);
-    const resync = () => ws.send(JSON.stringify({ type: "feed_resync", feed_n: head }));
+    const resync = () => ws.send(JSON.stringify({ type: "feed_resync", feed_n: head } satisfies typeof Contract.MonorepoFeedFrame.Encoded));
 
     if (!Number.isSafeInteger(since) || since < 0 || since > head) return resync();
 
@@ -363,7 +364,7 @@ export class FeedOut {
     for (const r of rows) {
       const p = storedPointerOf(parseJson(r.feed));
 
-      if (p) ws.send(JSON.stringify({ type: "feed", n: r.feed_n, event: { monorepo_id: id, monorepo: label, seq: r.seq, at: r.at, ...p } }));
+      if (p) ws.send(JSON.stringify({ type: "feed", n: r.feed_n, event: { monorepo_id: id, monorepo: label, seq: r.seq, at: r.at, ...p } } satisfies typeof Contract.MonorepoFeedFrame.Encoded));
     }
   }
 
@@ -570,7 +571,7 @@ export class FeedOut {
     const row: JsonObject = isRecord(ev.row) ? ev.row : {};
     let repo = textOf(ev.repo);
     let branch: string | null = null;
-    let summary: LineSummary | null = null;
+    let line: Line | null = null;
     let actor = textOf(ev.actor);
     const machine = textOf(ev.machine);
 
@@ -586,29 +587,29 @@ export class FeedOut {
 
         if (head === ZERO) return null;
         const before = textOf(ev.before);
-        summary = { head, before: before && before !== ZERO ? before : null, commits: null, head_title: null };
+        line = { kind, summary: { head, before: before && before !== ZERO ? before : null, commits: null, head_title: null } };
         break;
       }
 
       case "branch.deleted":
         branch = textOf(row.name);
-        summary = { before: textOf(ev.before) };
+        line = { kind, summary: { before: textOf(ev.before) } };
         break;
       case "merged": {
         const m: JsonObject = isRecord(ev.merge) ? ev.merge : {};
         branch = textOf(row.name);
-        summary = { merge_commit: textOf(m.sha) ?? textOf(row.merge_commit), forced: flagOf(m.forced) ?? flagOf(row.forced), title: textOf(row.title), head: textOf(row.head) };
+        line = { kind, summary: { merge_commit: textOf(m.sha) ?? textOf(row.merge_commit), forced: flagOf(m.forced) ?? flagOf(row.forced), title: textOf(row.title), head: textOf(row.head) } };
         break;
       }
 
       case "review":
         branch = textOf(row.branch);
-        summary = { verdict: textOf(row.verdict), comments: Array.isArray(row.comments) ? row.comments.length : 0, head: textOf(row.head) };
+        line = { kind, summary: { verdict: verdictOf(row.verdict), comments: Array.isArray(row.comments) ? row.comments.length : 0, head: textOf(row.head) } };
         break;
       case "status": {
         const sha = textOf(row.sha);
         const context = textOf(row.context);
-        const state = textOf(row.state);
+        const state = statusStateOf(row.state);
 
         if (!repo || !sha || !context || !state) return null;
 
@@ -634,7 +635,7 @@ export class FeedOut {
           "SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1", repo, sha,
         )?.name ?? null;
         // app: the CI service that reported it (null: a member posted it, and `actor` is that member).
-        summary = { context, state, description: textOf(row.description), target_url: textOf(row.target_url), sha, duration_s: duration, app: textOf(row.app) };
+        line = { kind, summary: { context, state, description: textOf(row.description), target_url: textOf(row.target_url), sha, duration_s: duration, app: textOf(row.app) } };
         break;
       }
 
@@ -656,15 +657,16 @@ export class FeedOut {
         if (textOf(row.source) === "main") return null;
         // The saver's login, as on every other line; versions saved before logins were kept have only a name.
         actor = actor ?? textOf(row.login) ?? nameOf(textOf(row.author));
-        summary = { path: textOf(ev.key) ?? textOf(row.path), version: wholeOf(row.version), deleted: row.deleted === true };
+        line = { kind, summary: { path: textOf(ev.key) ?? textOf(row.path), version: wholeOf(row.version), deleted: row.deleted === true } };
         break;
       default:
         return null;
     }
 
+    if (!line) return null;
     const repo_path = repo === "meta" ? "." : repo ? (this.row<{ path: string }>("SELECT path FROM repos WHERE name = ?", repo)?.path ?? null) : null;
 
-    return { kind, repo, repo_path, branch, actor, machine, summary };
+    return { ...line, repo, repo_path, branch, actor, machine };
   }
 
   // ── Reads: pages older than a key, and a join's backfill ─────────────────

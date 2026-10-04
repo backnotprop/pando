@@ -397,7 +397,7 @@ describe("a person's picture", () => {
 });
 
 describe("the home's activity feed (C25)", () => {
-  const ev = (monorepo_id: string, seq: number, at: string) => ({ monorepo_id, monorepo: `o/${monorepo_id}`, seq, at, kind: "push", repo: null, repo_path: null, branch: null, actor: null, machine: null, summary: null });
+  const ev = (monorepo_id: string, seq: number, at: string) => ({ monorepo_id, monorepo: `o/${monorepo_id}`, seq, at, kind: "push" as const, repo: null, repo_path: null, branch: null, actor: null, machine: null, summary: null });
   it("orders by (at, monorepo, seq), newest first, and merges sources once each", async () => {
     const { mergePages } = await import("../src/feed/shape");
     const a = [ev("a", 3, "2026-10-03T10:00:02.000Z"), ev("a", 2, "2026-10-03T10:00:01.000Z")];

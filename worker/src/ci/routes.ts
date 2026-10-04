@@ -23,6 +23,7 @@
 // REST call asks the monorepo object for a permit first (Buildkite's limits).
 
 import type { Context, Hono } from "hono";
+import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { HttpError, toErrorResponse } from "../http";
 import { finishTiming, note, runTimed, startTiming } from "../timing";
@@ -373,7 +374,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
       connections: o.connections.map((x) => ({ ...x, webhook_url: webhookUrl(c, x.service, x.id) })),
       pipelines: o.pipelines.map((x) => ({ ...x, required_checks: pipelineChecks(x.repo) })),
       required_checks: repos.map((r, i) => ({ repo: r.name, path: r.path, checks: lists[i].list })),
-    });
+    } satisfies typeof Contract.CiOverview.Encoded);
   });
 
   api.get(`${base}/builds`, async (c) => {
@@ -397,7 +398,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     return c.json(unwrap(await c.get("stub").ciBuilds({
       repo: c.req.query("repo"), branch: c.req.query("branch"), sha: sha?.toLowerCase(), pipeline, number,
       connection: c.req.query("connection"), state, limit, cursor: c.req.query("cursor") ?? null,
-    })));
+    })) satisfies typeof Contract.CiBuildList.Encoded);
   });
 
   api.get(`${base}/builds/:build`, async (c) => {
@@ -405,7 +406,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
 
     if (!b) throw new HttpError(404, "not_found", "no such build");
 
-    return c.json(b);
+    return c.json(b satisfies typeof Contract.CiBuildDetail.Encoded);
   });
 
   api.get(`${base}/builds/:build/jobs/:job/log`, async (c) => {
@@ -418,7 +419,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
       const complete = h.meta.complete === "1";
 
       return c.json(
-        { job: job.external_id, content: h.text, bytes: Number(h.meta.bytes), total_bytes: Number(h.meta.total_bytes), truncated: h.meta.truncated === "1", complete, fetched_at: h.meta.fetched_at, cached: true, retry_after_ms: retryAfterMs },
+        { job: job.external_id, content: h.text, bytes: Number(h.meta.bytes), total_bytes: Number(h.meta.total_bytes), truncated: h.meta.truncated === "1", complete, fetched_at: h.meta.fetched_at, cached: true, retry_after_ms: retryAfterMs } satisfies typeof Contract.CiJobLog.Encoded,
         200,
         cacheHeader(complete),
       );
@@ -444,19 +445,19 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const truncated = total > bytes.length;
     await toCache(c.env, key, content, { complete: complete ? "1" : "0", fetched_at, bytes: String(bytes.length), total_bytes: String(total), truncated: truncated ? "1" : "0" });
 
-    return c.json({ job: job.external_id, content, bytes: bytes.length, total_bytes: total, truncated, complete, fetched_at, cached: false, retry_after_ms: null }, 200, cacheHeader(complete));
+    return c.json({ job: job.external_id, content, bytes: bytes.length, total_bytes: total, truncated, complete, fetched_at, cached: false, retry_after_ms: null } satisfies typeof Contract.CiJobLog.Encoded, 200, cacheHeader(complete));
   });
 
   api.get(`${base}/builds/:build/annotations`, async (c) => {
     const a = await annotationsOf(c, await refOf(c));
 
-    return c.json({ annotations: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms }, 200, cacheHeader(a.complete));
+    return c.json({ annotations: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms } satisfies typeof Contract.CiAnnotationList.Encoded, 200, cacheHeader(a.complete));
   });
 
   api.get(`${base}/builds/:build/artifacts`, async (c) => {
     const a = await artifactsOf(c, await refOf(c));
 
-    return c.json({ artifacts: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms }, 200, cacheHeader(a.complete));
+    return c.json({ artifacts: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms } satisfies typeof Contract.CiArtifactList.Encoded, 200, cacheHeader(a.complete));
   });
 
   api.get(`${base}/builds/:build/artifacts/:artifact/download`, async (c) => {
@@ -506,7 +507,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     return c.json({
       pipeline: { ...pl.pipeline, required_checks: required, configuration, configuration_fetched_at: fetchedAt, configuration_error: error },
       ...page,
-    });
+    } satisfies typeof Contract.CiPipelinePage.Encoded);
   });
 
   // A new build of the same commit with fresh tokens: Buildkite's own rebuild would reuse the old env and its expired tokens.
@@ -521,7 +522,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const branch = b.branch ?? r.default_branch;
     const build = await startBuild(c, ref.connection, b.pipeline, r, { sha: b.sha, branch, message: b.message ?? `Rebuild of #${b.number}`, meta: { pando_rebuild_of: b.external_id } });
 
-    return c.json({ build }, 201);
+    return c.json({ build } satisfies typeof Contract.CiBuildAnswer.Encoded, 201);
   });
 
   // New build: a pipeline's build of a branch's head as Pando has it (default: its repo's default branch), as a push delivery would start it.
@@ -546,7 +547,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const title = commit?.message?.split("\n")[0] || `Build of ${branch}`;
     const build = await startBuild(c, pl.connection, pl.pipeline.slug, r, { sha, branch, message: title, meta: {} });
 
-    return c.json({ build }, 201);
+    return c.json({ build } satisfies typeof Contract.CiBuildAnswer.Encoded, 201);
   });
 
   api.post(`${base}/builds/:build/cancel`, async (c) => {
@@ -556,7 +557,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const res = await call(c, ref.connection, "PUT", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/cancel`);
     unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await jsonOf(res)));
 
-    return c.json({ build: await c.get("stub").ciBuild(ref.build.id) }, 202);
+    return c.json({ build: await c.get("stub").ciBuild(ref.build.id) } satisfies typeof Contract.CiBuildAnswer.Encoded, 202);
   });
 
   api.post(`${base}/builds/:build/jobs/:job/retry`, async (c) => {
@@ -564,7 +565,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const res = await call(c, ref.connection, "PUT", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(ref.job!.external_id)}/retry`);
     const job = await c.get("stub").ciIngestJob(ref.build.id, await jsonOf(res));
 
-    return c.json({ job }, 202);
+    return c.json({ job } satisfies typeof Contract.CiJobAnswer.Encoded, 202);
   });
 
   api.post(`${base}/connections`, async (c) => {
@@ -599,7 +600,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const out = unwrap(await c.get("stub").ciConnect({ service: "buildkite", organization, api_base: apiBase, webhook_token: token }, c.get("identity")));
 
     // The webhook token is shown once: paste it into Buildkite's webhook settings.
-    return c.json({ connection: { ...out.connection, webhook_url: webhookUrl(c, out.connection.service, out.connection.id) }, webhook_token: out.webhook_token }, 201);
+    return c.json({ connection: { ...out.connection, webhook_url: webhookUrl(c, out.connection.service, out.connection.id) }, webhook_token: out.webhook_token } satisfies typeof Contract.CiConnected.Encoded, 201);
   });
 
   api.delete(`${base}/connections/:connection`, async (c) => {

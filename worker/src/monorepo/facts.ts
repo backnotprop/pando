@@ -21,7 +21,7 @@ import { currentTiming, note, timed, timedStub } from "../timing";
 import { withRepo } from "./artifacts";
 import { requiredKept } from "./checks";
 import { commitReader, compareWith, type CommitReader } from "./graph";
-import { MainMoved, mergeableOf, pool } from "./views";
+import { MainMoved, mergeableOf, pool, type DryRun, type Mergeable } from "./views";
 import type { RepoRecord } from "./types";
 import { sendPushSummary } from "../feed/push";
 import { runReconcile } from "./reconcile";
@@ -47,7 +47,7 @@ export interface Facts {
   ahead: number | null;
   behind: number | null;
   merge_base: string | null;
-  mergeable: string;
+  mergeable: Mergeable;
   /** On "conflicts": every path changed differently on both sides (the dry run's own list). */
   conflict_paths: string[] | null;
 }
@@ -76,7 +76,7 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
       /* too far apart: unknown */
     }
 
-    const dry = base ? await mergeableOf(env, r, main, head, ahead) : { mergeable: "unknown", conflict_paths: null };
+    const dry: DryRun = base ? await mergeableOf(env, r, main, head, ahead) : { mergeable: "unknown", conflict_paths: null };
 
     return { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths };
   };

@@ -152,6 +152,17 @@ export interface ReconcileSeen {
   ids: number[];
 }
 
+/** A review's verdict; a review is comments and an approval, not a gate. */
+export type ReviewVerdict = "comment" | "request_changes" | "approve";
+
+/** One comment of a review: a line in the new file (`side` new) or the old one. */
+export interface ReviewComment {
+  path: string;
+  line?: number;
+  side: "new" | "old";
+  body: string;
+}
+
 /** A merge's result, as the merge route answers and merged events carry it. */
 export interface MergeResult {
   status: "merged" | "up_to_date";

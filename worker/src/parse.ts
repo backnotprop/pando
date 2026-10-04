@@ -36,6 +36,11 @@ export function isRecord(v: Json | undefined): v is JsonObject {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/** One of a closed list of words, such as a stored column's value read back from SQL. */
+export function isOneOf<T extends string>(list: readonly T[], v: string | null | undefined): v is T {
+  return list.some((x) => x === v);
+}
+
 /** A list of strings. */
 export function isTextList(v: unknown): v is string[] {
   return Array.isArray(v) && v.every(isText);

@@ -70,6 +70,27 @@
   },
   "overrides": [
     {
+      "files": ["worker/src/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "effect",
+                "message": "Import the module instead (effect/Schema, effect/Effect, ...): the barrel puts about 3 times more Effect in a bundle (research/plans/architecture-2026-10-03/EFFECT.md)."
+              },
+              {
+                "name": "@pando/contract",
+                "allowTypeImports": true,
+                "message": "The Worker uses the contract for types only (import type ...), so the deploy carries none of it (decisions/RULINGS.md, M5)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": [
         "packages/**",
         "web/src/api/**",

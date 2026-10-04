@@ -3,6 +3,7 @@
 // WebSocket, and commits changes to the meta layer's main after 10 s of quiet.
 // Owned by the live lane. The wire is docs/contracts/meta-sync.md.
 import { DurableObject } from "cloudflare:workers";
+import type * as Contract from "@pando/contract";
 import { checkBytes, checkPath, checkPointer, MAX_BYTES, type Refusal } from "./rules";
 import { blobKey, parsePointer } from "./blobs";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
@@ -446,13 +447,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
         .toArray();
     }
 
-    return json({ path, head: this.head(), versions: rows.map((r) => this.historyEntry(r)) });
+    return json({ path, head: this.head(), versions: rows.map((r) => this.historyEntry(r)) } satisfies typeof Contract.MetaHistory.Encoded);
   }
 
   private historyEntry(r: VersionRow) {
-    // A large file's version is its pointer: show the file's own size and hash.
+    // A large file's version is its pointer: show the file's own size and hash (insert() writes the two together).
     return {
-      large: r.lfs_oid ? { oid: r.lfs_oid, size: r.lfs_size } : null,
+      large: r.lfs_oid !== null && r.lfs_size !== null ? { oid: r.lfs_oid, size: r.lfs_size } : null,
       version: r.version,
       path: r.path,
       op: r.op,
@@ -521,7 +522,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const cur = this.current(path);
     const same = target.deleted ? !cur || cur.deleted : !!cur && !cur.deleted && cur.sha === target.sha;
 
-    if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 });
+    if (same) return json({ path, unchanged: true, version: cur?.version ?? 0 } satisfies typeof Contract.Restored.Encoded);
 
     const version = this.insert({
       path,
@@ -541,7 +542,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.broadcast(this.changeMessage(this.row(version)));
     await this.scheduleCommit();
 
-    return json({ path, version, sha: target.deleted ? null : target.sha, restored_from: target.version });
+    return json({ path, version, sha: target.deleted ? null : target.sha, restored_from: target.version } satisfies typeof Contract.Restored.Encoded);
   }
 
   // pando init's first upload. "start" opens a window, only on an empty meta
@@ -1215,11 +1216,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       next: more ? rows[rows.length - 1].path : null,
     };
 
-    if (folder === null) return json(page);
+    if (folder === null) return json(page satisfies typeof Contract.MetaTree.Encoded);
 
-    if (after) return json({ ...page, dir: folder });
+    if (after) return json({ ...page, dir: folder } satisfies typeof Contract.MetaTree.Encoded);
 
-    return json({ ...page, dir: folder, folders: this.folders(prefix, upper) });
+    return json({ ...page, dir: folder, folders: this.folders(prefix, upper) } satisfies typeof Contract.MetaTree.Encoded);
   }
 
   // Each subfolder under prefix with its file count and `last`: the newest

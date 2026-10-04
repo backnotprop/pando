@@ -269,7 +269,7 @@ export function IssuesList({ search }: { search: IssuesSearch }) {
           }}
         >
           <SearchIcon className="size-4 flex-none text-ash" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search issues" aria-label="Search issues" className="min-w-0 flex-1 bg-transparent text-[14px] text-bark placeholder:text-ash focus:outline-none" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search issues" aria-label="Search issues" className="min-w-0 flex-1 bg-transparent text-[14px] text-bark placeholder:text-ash focus:outline-none" />
         </form>
         <Link {...newIssueLink(full)} className={`${button("solid")} h-[34px]`}>
           New issue

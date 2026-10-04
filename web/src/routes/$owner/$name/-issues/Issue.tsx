@@ -29,7 +29,7 @@ function StateChip({ issue }: { issue: Issue }) {
 
   if (issue.state === "open") {
     return (
-      <span className={`${chip} text-bark shadow-[inset_0_0_0_1px_var(--rule-hi)]`}>
+      <span role="status" aria-label="State" className={`${chip} text-bark shadow-[inset_0_0_0_1px_var(--rule-hi)]`}>
         <OpenIcon className="size-[15px]" />
         Open
       </span>
@@ -37,7 +37,7 @@ function StateChip({ issue }: { issue: Issue }) {
   }
 
   return (
-    <span className={`${chip} text-bark-dim`}>
+    <span role="status" aria-label="State" className={`${chip} text-bark-dim`}>
       {issue.state_reason === "not_planned" ? <NotPlannedIcon className="size-[15px]" /> : <DoneIcon className="size-[15px]" />}
       {issue.state_reason === "not_planned" ? "Closed as not planned" : "Closed"}
     </span>

@@ -1,22 +1,36 @@
 // Git protocol v2 `object-info` at the git door. Artifacts does not offer it,
 // so the door adds it to the v2 advertisement and answers it itself: object
-// sizes come from a per-repo index in the monorepo object, filled on a miss by
-// reading the blob through the binding. Mounts use it to list file sizes
+// sizes come from a per-repo index in the monorepo object, filled on a miss
+// from one git fetch of the missing blobs, whose pack is read here. Mounts use it to list file sizes
 // (ls -l, Finder, git's index) without downloading the files.
 
 import type { Env } from "../env";
-import { withRepo } from "./artifacts";
+import { gitRequest, withRepo } from "./artifacts";
 import { concat, FLUSH, pkt, pktLines } from "./pktline";
 import type { MonorepoObject } from "./object";
+import { packBlobSizes } from "./thinpack";
 import type { RepoRecord } from "./types";
 
 const dec = new TextDecoder();
+
+const DELIM = new TextEncoder().encode("0001");
 
 const MAX_REQUEST = 1 << 20;
 
 const MAX_OIDS = 10_000;
 
-const CONCURRENCY = 4;
+// Sizes the index lacks come from one git fetch per FETCH_WANTS blob ids: the
+// pack is read here and each object hashed. Reading blobs one at a time
+// through the binding sized a cold repository at 33 to 50 files/s (1,000 in
+// 20 to 30 s); one fetch of 1,000 blobs took 1.7 s (2026-10-04,
+// research/operational/mac-mount-downloads-2026-10-04.md).
+const FETCH_WANTS = 1_000;
+
+// Blobs no pack answered (an id that is not a blob) are read one at a time,
+// at most this many per request; the rest come back with an empty size.
+const READS_MAX = 200;
+
+const READS_AT_ONCE = 8;
 
 /** Add `object-info` to a v2 capability advertisement (before its last flush). */
 export function withObjectInfo(adv: Uint8Array): Uint8Array {
@@ -113,22 +127,32 @@ export async function answerObjectInfo(
 
   if (missing.length) {
     const found: [string, number][] = [];
-    await withRepo(env, repo.artifacts_name, async (r) => {
-      let i = 0;
-      await Promise.all(
-        Array.from({ length: Math.min(CONCURRENCY, missing.length) }, async () => {
-          while (i < missing.length) {
-            const oid = missing[i++];
+
+    for (let i = 0; i < missing.length; i += FETCH_WANTS) {
+      for (const [oid, size] of await fetchedSizes(env, repo, missing.slice(i, i + FETCH_WANTS))) {
+        if (sizes[oid] === undefined) {
+          sizes[oid] = size;
+          found.push([oid, size]);
+        }
+      }
+    }
+
+    const unread = missing.filter((o) => sizes[o] === undefined).slice(0, READS_MAX);
+
+    if (unread.length) {
+      await withRepo(env, repo.artifacts_name, async (r) => {
+        for (let i = 0; i < unread.length; i += READS_AT_ONCE) {
+          await Promise.all(unread.slice(i, i + READS_AT_ONCE).map(async (oid) => {
             const blob = await r.readBlob(oid).catch(() => null);
 
             if (blob) {
               sizes[oid] = blob.size;
               found.push([oid, blob.size]);
             }
-          }
-        }),
-      );
-    });
+          }));
+        }
+      });
+    }
 
     if (found.length) await stub.recordObjectSizes(repo.name, found);
   }
@@ -144,4 +168,52 @@ export async function answerObjectInfo(
   out.push(FLUSH);
 
   return concat(out);
+}
+
+/** Blob sizes from one protocol v2 fetch of exactly these ids; empty when the fetch or its pack fails. */
+async function fetchedSizes(env: Env, repo: RepoRecord, oids: string[]): Promise<Map<string, number>> {
+  const body = concat([
+    pkt("command=fetch\n"), pkt("object-format=sha1\n"), DELIM, pkt("no-progress\n"), pkt("ofs-delta\n"),
+    ...oids.map((o) => pkt(`want ${o}\n`)), pkt("done\n"), FLUSH,
+  ]);
+
+  try {
+    const res = await gitRequest(env, repo, "/git-upload-pack", "read", {
+      method: "POST",
+      headers: { "git-protocol": "version=2", "content-type": "application/x-git-upload-pack-request", accept: "application/x-git-upload-pack-result" },
+      body,
+    });
+
+    if (!res.ok) {
+      await res.body?.cancel();
+
+      return new Map();
+    }
+
+    const pack = packOf(new Uint8Array(await res.arrayBuffer()));
+
+    return (pack && (await packBlobSizes(pack))) ?? new Map();
+  } catch {
+    return new Map();
+  }
+}
+
+/** The pack in a v2 fetch reply: the pkt-lines after `packfile`, side-band 1. Null on an error band or no pack. */
+function packOf(reply: Uint8Array): Uint8Array | null {
+  const parts: Uint8Array[] = [];
+  let inPack = false;
+
+  for (const line of pktLines(reply)) {
+    if (line === null) continue;
+
+    if (!inPack) {
+      inPack = dec.decode(line) === "packfile\n";
+      continue;
+    }
+
+    if (line[0] === 1) parts.push(line.subarray(1));
+    else if (line[0] === 3) return null;
+  }
+
+  return parts.length ? concat(parts) : null;
 }

@@ -1,0 +1,29 @@
+{
+  "schema": "CiBuildAnswer",
+  "route": "POST .../ci/builds/{build}/rebuild",
+  "status": 201,
+  "body": {
+    "build": {
+      "id": "cib_bdd3db4a193e34ad",
+      "service": "buildkite",
+      "connection": "m_8afc371665c89aac--cic_0baede132c36",
+      "pipeline": "web",
+      "number": 2,
+      "repo": "projects-web",
+      "repo_path": "projects/web",
+      "sha": "0be70b5c6e9a410cf7d140fa8b4ccd1d5a7ed10f",
+      "branch": "feat/ready",
+      "message": "Add the ready file",
+      "state": "queued",
+      "service_state": "scheduled",
+      "web_url": "https://buildkite.com/o/web/builds/2",
+      "pushed_by": "rec-mut6cqy2",
+      "created_at": "2026-10-04T02:01:45.519Z",
+      "started_at": null,
+      "finished_at": null,
+      "duration_s": null,
+      "rebuilt_from": "bld-web-1",
+      "jobs": []
+    }
+  }
+}

@@ -4,20 +4,20 @@
   "status": 200,
   "body": {
     "default_branch": "main",
-    "default_head": "421b0bea184e0daaef6f06b828d33f6b633a84ef",
+    "default_head": "5f8b74edff615708b2659293f90fa3913890ba59",
     "branches": [
       {
         "name": "feat/ready",
-        "head": "6cc2b842aa432544682225869b281f18ba60806e",
-        "base": "6cc2b842aa432544682225869b281f18ba60806e",
-        "author": "rec-mut4cnpt",
+        "head": "0be70b5c6e9a410cf7d140fa8b4ccd1d5a7ed10f",
+        "base": "0be70b5c6e9a410cf7d140fa8b4ccd1d5a7ed10f",
+        "author": "rec-mut6cqy2",
         "title": null,
         "description": null,
         "ahead": 0,
         "behind": 2,
         "mergeable": "up_to_date",
         "checks": {
-          "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+          "sha": "0be70b5c6e9a410cf7d140fa8b4ccd1d5a7ed10f",
           "state": "success",
           "required": [
             "ci/test"
@@ -25,54 +25,54 @@
           "missing": [],
           "statuses": [
             {
-              "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+              "sha": "0be70b5c6e9a410cf7d140fa8b4ccd1d5a7ed10f",
               "context": "ci/test",
               "state": "success",
               "target_url": "https://ci.example/builds/1",
               "description": null,
-              "creator": "rec-mut4cnpt",
+              "creator": "rec-mut6cqy2",
               "app": null,
-              "created_at": "2026-10-04T01:05:25.497Z"
+              "created_at": "2026-10-04T02:01:28.941Z"
             },
             {
-              "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+              "sha": "0be70b5c6e9a410cf7d140fa8b4ccd1d5a7ed10f",
               "context": "lint",
               "state": "success",
               "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
               "description": "#1 passed in 8 s",
               "creator": "app:buildkite",
               "app": "buildkite",
-              "created_at": "2026-10-04T01:05:26.368Z"
+              "created_at": "2026-10-04T02:01:29.690Z"
             }
           ]
         },
         "state": "merged",
-        "merge_commit": "421b0bea184e0daaef6f06b828d33f6b633a84ef",
-        "merged_by": "rec-mut4cnpt",
-        "merged_at": "2026-10-04T01:05:32.331Z",
+        "merge_commit": "5f8b74edff615708b2659293f90fa3913890ba59",
+        "merged_by": "rec-mut6cqy2",
+        "merged_at": "2026-10-04T02:01:37.948Z",
         "merged_machine": "ana-mbp",
         "merged_agent": null,
         "forced": false,
         "pushed_machine": "ana-mbp",
-        "created_at": "2026-10-04T01:05:21.770Z",
-        "updated_at": "2026-10-04T01:05:21.770Z",
+        "created_at": "2026-10-04T02:01:24.848Z",
+        "updated_at": "2026-10-04T02:01:24.848Z",
         "stale": false,
         "last_mergeable": null,
         "conflict_paths": null,
-        "facts_at": "2026-10-04T01:05:28.719Z"
+        "facts_at": "2026-10-04T02:01:31.969Z"
       },
       {
         "name": "feat/merge-me",
-        "head": "09e16b3c13e496cb4941651dedf5b666590e1021",
-        "base": "09e16b3c13e496cb4941651dedf5b666590e1021",
-        "author": "rec-mut4cnpt",
+        "head": "dfbbb2d25900b4715d7c6c606e960bda99ced568",
+        "base": "dfbbb2d25900b4715d7c6c606e960bda99ced568",
+        "author": "rec-mut6cqy2",
         "title": null,
         "description": null,
         "ahead": 0,
         "behind": 0,
         "mergeable": "up_to_date",
         "checks": {
-          "sha": "09e16b3c13e496cb4941651dedf5b666590e1021",
+          "sha": "dfbbb2d25900b4715d7c6c606e960bda99ced568",
           "state": "missing",
           "required": [
             "ci/test"
@@ -83,19 +83,19 @@
           "statuses": []
         },
         "state": "merged",
-        "merge_commit": "d63dcdfcea97e11a6c9a750c557d9e805bc08c64",
-        "merged_by": "rec-mut4cnpt",
-        "merged_at": "2026-10-04T01:05:27.340Z",
+        "merge_commit": "a3bddfc03fbfd9e141cca24af3e7ecb7c31ee0e9",
+        "merged_by": "rec-mut6cqy2",
+        "merged_at": "2026-10-04T02:01:30.755Z",
         "merged_machine": "ana-mbp",
         "merged_agent": null,
         "forced": true,
         "pushed_machine": "ana-mbp",
-        "created_at": "2026-10-04T01:05:23.354Z",
-        "updated_at": "2026-10-04T01:05:23.354Z",
+        "created_at": "2026-10-04T02:01:26.468Z",
+        "updated_at": "2026-10-04T02:01:26.468Z",
         "stale": false,
         "last_mergeable": null,
         "conflict_paths": null,
-        "facts_at": "2026-10-04T01:05:25.486Z"
+        "facts_at": "2026-10-04T02:01:28.970Z"
       }
     ],
     "next_cursor": null

@@ -29,7 +29,7 @@ import { isRecord, isText, isTextList, parseJson } from "../parse";
 import { attachmentOf, Machines, type MachineRow } from "./machines";
 import type { FeedEvent, Key, NeedRow, NeedState, PushNumbers, Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
-import { CiStore, type CiRef, type IngestResult } from "../ci/store";
+import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
 import type { Json } from "../parse";
 import type {
   BranchRecord,
@@ -1767,7 +1767,7 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.ci.overview();
   }
 
-  ciBuilds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }) {
+  ciBuilds(q: BuildsQuery) {
     return this.guard(() => this.ci.builds(q));
   }
 

@@ -2102,6 +2102,10 @@ paths:
         - { name: branch, in: query, schema: { type: string } }
         - { name: sha, in: query, schema: { type: string }, description: A full sha. }
         - { name: pipeline, in: query, schema: { type: string } }
+        - name: number
+          in: query
+          description: "A build number, with `pipeline` (400 without it): a build's page address, `/{owner}/{monorepo}/ci/{pipeline}/{number}`. A number is unique within one pipeline on one connection; when two connections have a pipeline with the same slug, both builds come back, and `connection` narrows to one."
+          schema: { type: integer, minimum: 1 }
         - { name: connection, in: query, schema: { type: string } }
         - { name: state, in: query, schema: { $ref: "#/components/schemas/CiState" } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
@@ -2378,6 +2382,58 @@ paths:
                   next_cursor: { type: [string, "null"] }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/pipelines/{pipeline}/builds:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - name: pipeline
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: startCiBuild
+      summary: New build - the pipeline builds a branch's head as Pando has it
+      description: |
+        Any member. The branch's head comes from Pando's stored heads (no
+        ref read); its commit's title (one Artifacts read) is the build's
+        message. Started as a push delivery starts one: a read token for the
+        repo and a status token for the commit, both fresh. The build is
+        recorded at once; its webhooks update it. `?connection=` picks the
+        pipeline when two connections share its slug.
+      tags: [ci]
+      parameters:
+        - { name: connection, in: query, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch: { type: string, description: "Default: the repo's default branch." }
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [build]
+                properties:
+                  build:
+                    description: The build as Pando now has it, with its jobs; null if the service's answer named none.
+                    oneOf:
+                      - allOf:
+                          - $ref: "#/components/schemas/CiBuild"
+                          - type: object
+                            required: [jobs]
+                            properties:
+                              jobs: { type: array, items: { $ref: "#/components/schemas/CiJob" } }
+                      - type: "null"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { description: "No such pipeline, or no such branch (or it has no recorded head yet).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`no_repo`: the pipeline builds no repo of this monorepo (register it with a buildkite hook).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/integrations/buildkite/{connection}:
     parameters:
       - $ref: "#/components/parameters/ciConnection"

@@ -25,6 +25,21 @@ export const MonorepoEntry = Monorepo.pipe(Schema.fieldsAssign({ role: MemberRol
 
 export interface MonorepoEntry extends Schema.Schema.Type<typeof MonorepoEntry> {}
 
+/** An old `owner/name` (from a rename or transfer) that led to another monorepo and now leads to this one. */
+export const ReplacedAlias = Schema.Struct({
+  /** The old name, now this monorepo's. */
+  full_name: FullName,
+  /** The `owner/name` it led to before. */
+  pointed_to: Schema.NullOr(FullName),
+});
+
+export interface ReplacedAlias extends Schema.Schema.Type<typeof ReplacedAlias> {}
+
+/** PATCH .../{monorepo}: renamed (or moved to another owner); the old name keeps leading here. Never silent about a name it took over. */
+export const MonorepoRenamed = MonorepoEntry.pipe(Schema.fieldsAssign({ replaced_alias: Schema.NullOr(ReplacedAlias) }));
+
+export interface MonorepoRenamed extends Schema.Schema.Type<typeof MonorepoRenamed> {}
+
 /** Branches that need someone, by state. */
 export const NeedCounts = Schema.Struct({
   ready: Count,

@@ -5,9 +5,9 @@
   "body": {
     "error": {
       "code": "checks_not_green",
-      "message": "checks are failure on 4df8b1582f79; wait, or merge with force",
+      "message": "checks are failure on a8695486baec; wait, or merge with force",
       "checks": {
-        "sha": "4df8b1582f79d3f13137d42e86e44afc957a1027",
+        "sha": "a8695486baece06779b385a9621fae59bacccab4",
         "state": "failure",
         "required": [
           "ci/test"
@@ -15,14 +15,14 @@
         "missing": [],
         "statuses": [
           {
-            "sha": "4df8b1582f79d3f13137d42e86e44afc957a1027",
+            "sha": "a8695486baece06779b385a9621fae59bacccab4",
             "context": "ci/test",
             "state": "failure",
             "target_url": null,
             "description": "2 tests failed",
-            "creator": "rec-mut4cnpt",
+            "creator": "rec-mut6cqy2",
             "app": null,
-            "created_at": "2026-10-04T01:05:25.479Z"
+            "created_at": "2026-10-04T02:01:28.934Z"
           }
         ]
       }

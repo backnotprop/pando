@@ -465,6 +465,7 @@ try {
   bkStub.logs["job-tc-1"] = "x".repeat(1.5 * 1024 * 1024) + tailText;
   const logCalls = (job) => bkStub.calls.filter((x) => x.endsWith(`/jobs/${job}/log`)).length;
   r = await call("GET", `${ciBase}/builds/${build1}/jobs/job-tc-1/log`, B);
+  const tcReadAt = Date.now();
   check("a job's log from Buildkite: its last 1 MiB, the end kept", r.status === 200 && r.json?.bytes === 1 << 20 && r.json.total_bytes === 1.5 * 1024 * 1024 + tailText.length && r.json.truncated === true && r.json.content.endsWith(tailText) && r.json.cached === false && r.json.complete === false);
   r = await call("GET", `${ciBase}/builds/${build1}/jobs/job-tc-1/log`, B);
   check("read again at once: from the cache (10 s while unsettled), one call to Buildkite", r.json?.cached === true && logCalls("job-tc-1") === 1 && /no-store/.test(r.headers.get("cache-control") ?? ""));
@@ -535,14 +536,24 @@ try {
   check("a member cannot disconnect", r.status === 403);
   check("every call to Buildkite carried BUILDKITE_API_TOKEN", bkStub.calls.length > 0 && bkStub.badAuth === 0, `${bkStub.calls.length} calls`);
 
-  // Buildkite's rate limit: a 429 stops this connection's calls until its reset.
+  // Buildkite's rate limit: a 429 stops this connection's calls until its reset. Never a 5xx to a reader.
   bkStub.rateLimited = true;
   r = await call("GET", `${ciBase}/builds/${rebuilt?.id}/annotations`, B);
-  check("a 429 from Buildkite: 503 ci_rate_limited with retry_after_ms", r.status === 503 && r.json?.error?.code === "ci_rate_limited" && r.json.error.retry_after_ms >= 25_000);
+  check("a 429 from Buildkite, nothing read before: 429 ci_rate_limited, try again in N s (retry_after_ms)", r.status === 429 && r.json?.error?.code === "ci_rate_limited" && r.json.error.retry_after_ms >= 25_000 && /try again in \d+ s/.test(r.json.error.message), r.json?.error?.message);
   bkStub.rateLimited = false;
   const before = bkStub.calls.length;
   r = await call("GET", `${ciBase}/builds/${rebuilt?.id}/artifacts`, B);
-  check("then no call reaches Buildkite until the reset", r.status === 503 && r.json?.error?.code === "ci_rate_limited" && bkStub.calls.length === before);
+  check("then no call reaches Buildkite until the reset", r.status === 429 && r.json?.error?.code === "ci_rate_limited" && bkStub.calls.length === before);
+  // The running job's log copy from earlier has expired (10 s): held, a reader gets that last copy and when to ask again.
+  await new Promise((res) => setTimeout(res, Math.max(0, tcReadAt + 11_000 - Date.now())));
+  r = await call("GET", `${ciBase}/builds/${build1}/jobs/job-tc-1/log`, B);
+  check(
+    "held, a running job's expired log copy is still answered: 200, the last copy, complete false, retry_after_ms, no call",
+    r.status === 200 && r.json?.cached === true && r.json.complete === false && r.json.content.endsWith(tailText) && r.json.retry_after_ms > 0 && bkStub.calls.length === before && /no-store/.test(r.headers.get("cache-control") ?? ""),
+    `${r.status} retry_after_ms=${r.json?.retry_after_ms}`,
+  );
+  r = await call("GET", `${ciBase}/builds/${build1}/annotations`, B);
+  check("and the build's expired annotations copy the same way", r.status === 200 && r.json?.annotations?.[0]?.context === "test-summary" && r.json.retry_after_ms > 0 && bkStub.calls.length === before, `${r.status}`);
 
   r = await call("DELETE", `${ciBase}/connections/${conn.id}`, S);
   check("an owner disconnects", r.status === 204);

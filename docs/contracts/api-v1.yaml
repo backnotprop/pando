@@ -231,12 +231,16 @@ tags:
       - **The service's rate limit**: Buildkite allows 200 REST calls a
         minute per organization and 50 per user token. A connection makes at
         most 40 a minute (10 are left for starting builds); past that, or
-        after Buildkite answers 429, calls answer 503 `ci_rate_limited` with
-        `retry_after_ms`.
+        after Buildkite answers 429, calls answer 429 `ci_rate_limited`
+        ("try again in N s", with `retry_after_ms`). A reader of a log,
+        annotations or artifacts gets the last copy instead, when there is
+        one: 200 with `cached: true`, `complete: false` and
+        `retry_after_ms`. pipeline.yml shows its stored copy with
+        `configuration_error`. Never a 5xx for the hold.
 
       Errors from the service: `ci_unauthorized` (502: the token lacks a
       scope), `ci_refused` (409: Buildkite refused the action),
-      `ci_service` (502), `ci_rate_limited` (503), `ci_token_missing` (503:
+      `ci_service` (502), `ci_rate_limited` (429), `ci_token_missing` (503:
       the Worker secret BUILDKITE_API_TOKEN is not set).
 paths:
   /v1/users:
@@ -2167,7 +2171,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [job, content, bytes, total_bytes, truncated, complete, fetched_at, cached]
+                required: [job, content, bytes, total_bytes, truncated, complete, fetched_at, cached, retry_after_ms]
                 properties:
                   job: { type: string }
                   content: { type: string }
@@ -2177,6 +2181,7 @@ paths:
                   complete: { type: boolean, description: The job finished over 30 s ago; this never changes again. }
                   fetched_at: { type: string, format: date-time }
                   cached: { type: boolean }
+                  retry_after_ms: { type: [integer, "null"], description: "Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise." }
         "404": { $ref: "#/components/responses/Error" }
         "413":
           description: "`log_too_large`: the log is over 64 MiB; open it in the service (`web_url`)."
@@ -2200,7 +2205,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [annotations, truncated, complete, fetched_at, cached]
+                required: [annotations, truncated, complete, fetched_at, cached, retry_after_ms]
                 properties:
                   annotations:
                     type: array
@@ -2209,6 +2214,7 @@ paths:
                   complete: { type: boolean }
                   fetched_at: { type: string, format: date-time }
                   cached: { type: boolean }
+                  retry_after_ms: { type: [integer, "null"], description: "Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise." }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/artifacts:
@@ -2227,7 +2233,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [artifacts, truncated, complete, fetched_at, cached]
+                required: [artifacts, truncated, complete, fetched_at, cached, retry_after_ms]
                 properties:
                   artifacts:
                     type: array
@@ -2236,6 +2242,7 @@ paths:
                   complete: { type: boolean }
                   fetched_at: { type: string, format: date-time }
                   cached: { type: boolean }
+                  retry_after_ms: { type: [integer, "null"], description: "Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise." }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/artifacts/{artifact}/download:

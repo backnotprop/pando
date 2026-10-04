@@ -161,6 +161,8 @@ const fetched = {
   complete: Schema.Boolean,
   fetched_at: Timestamp,
   cached: Schema.Boolean,
+  /** Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise. */
+  retry_after_ms: Schema.NullOr(Count),
 };
 
 /** GET .../ci/builds/{build}/jobs/{job}/log: the log's end (at most 1 MiB, where failures are). */
@@ -177,6 +179,8 @@ export const CiJobLog = Schema.Struct({
   complete: Schema.Boolean,
   fetched_at: Timestamp,
   cached: Schema.Boolean,
+  /** Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise. */
+  retry_after_ms: Schema.NullOr(Count),
 });
 
 export interface CiJobLog extends Schema.Schema.Type<typeof CiJobLog> {}

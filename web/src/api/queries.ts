@@ -6,7 +6,6 @@ import type * as Schema from "effect/Schema";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { get, getText } from "./client";
 import type { MonorepoRef } from "./names";
-import * as P from "./pending";
 
 const enc = encodeURIComponent;
 
@@ -59,12 +58,12 @@ export const reposQuery = (m: MonorepoRef) =>
 
 /** Each code repo's main head and when it last moved (the projects rows' time). */
 export const headsQuery = (m: MonorepoRef) =>
-  queryOptions({ queryKey: [...key(m), "heads"], queryFn: () => get(P.Heads, `${base(m)}/heads`).then((r) => r.heads) });
+  queryOptions({ queryKey: [...key(m), "heads"], queryFn: () => read(Routes.listHeads(m.owner, m.name)).then((r) => r.heads) });
 
 /** A repo's open branches, counted on the first page (100). */
 export const openBranchesQuery = (m: MonorepoRef, repo: RepoName) =>
   queryOptions({
-    queryKey: [...key(m), "branches", repo],
+    queryKey: [...key(m), "r", repo, "open-count"],
     queryFn: () => read(Routes.listBranches(m.owner, m.name, repo, "open", null)).then((r) => r.branches.length),
   });
 

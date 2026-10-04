@@ -1,7 +1,11 @@
-// This worktree's ports for the e2e run (other lanes use 8797, 8799 and 8811 to 8814).
-// worker/.dev.vars must point WORKOS_API_BASE at the stand-in: http://127.0.0.1:8872.
-export const WORKER_PORT = 8871;
+// The e2e run's ports, each from the environment when set: the Worker
+// (PANDO_E2E_WORKER_PORT, or PANDO_E2E_PORT; default 8871), the stand-in
+// WorkOS (PANDO_E2E_STANDIN_PORT; default the next port) and the inspector
+// (PANDO_E2E_INSPECTOR_PORT; default 500 above). Each worktree takes its own
+// (other lanes use 8797, 8799 and 8811 to 8814). worker/.dev.vars must point
+// WORKOS_API_BASE at the stand-in.
+export const WORKER_PORT = Number(process.env.PANDO_E2E_WORKER_PORT ?? process.env.PANDO_E2E_PORT ?? 8871);
 
-export const STANDIN_PORT = 8872;
+export const STANDIN_PORT = Number(process.env.PANDO_E2E_STANDIN_PORT ?? WORKER_PORT + 1);
 
-export const INSPECTOR_PORT = 9371;
+export const INSPECTOR_PORT = Number(process.env.PANDO_E2E_INSPECTOR_PORT ?? WORKER_PORT + 500);

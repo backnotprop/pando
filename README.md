@@ -24,6 +24,7 @@ work; see `REFERENCES.md`.
 ```sh
 npm install                # at projects/pando: lint tooling, effect, @pando/contract, web
 (cd worker && npm ci)      # the Worker keeps its own install
+npm run build -w web       # the Worker serves web/dist; wrangler dev will not start without it
 ```
 
 Make `worker/.dev.vars` (gitignored) with values of your own. None of them is
@@ -35,6 +36,7 @@ PANDO_STATUS_SECRET=...                 # openssl rand -hex 32: ci.mjs
 BUILDKITE_API_TOKEN=...                 # any text: ci.mjs's local stand-in checks it
 HOOK_RETRY_DELAYS=1,1,1,1               # hooks.mjs: retries in seconds
 WORKOS_API_BASE=http://127.0.0.1:8799   # browser.mjs: its stand-in WorkOS
+WORKOS_API_KEY=...                      # any text: browser.mjs checks the stand-in received one
 ```
 
 ### Checks with no server
@@ -45,6 +47,8 @@ npm run check -w @pando/contract          # recorded responses against the schem
 npm run typecheck -w @pando/contract
 (cd worker && npx tsc --noEmit && npm test)   # types, then vitest
 ```
+
+Root `npm run lint` is the lint every gate runs, and it stays at 0 findings.
 
 ### Suites against wrangler dev
 

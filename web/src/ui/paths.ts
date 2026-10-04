@@ -25,15 +25,54 @@ export const historyLink = (full: string, path: string) => linkOptions({ to: "/$
 export const tabLink = (full: string, tab: "activity" | "machines" | "ci" | "members" | "settings") =>
   linkOptions({ to: `/$owner/$name/${tab}`, params: split(full) });
 
-/** A project's page (projects/web); a plain repo's is the monorepo's own. */
-export const repoLink = (full: string, repoPath: string) =>
-  repoPath === "." ? monoLink(full) : linkOptions({ to: "/$owner/$name/projects/$", params: { ...split(full), _splat: repoPath.replace(/^projects\//, "") } });
+// ── A repo's code: a monorepo's projects at /{owner}/{name}/projects/{project}/...,
+// a plain repo's at /{owner}/{name}/... (its code is its page). `ref` is a
+// branch or a commit; null is the default branch.
 
-/** A branch's page: the pull request (slice 2). */
+const project = (repoPath: string) => repoPath.replace(/^projects\//, "");
+
+const refOf = (ref: string | null) => (ref ? { ref } : {});
+
+export const codeLink = (full: string, repoPath: string, dir: string, ref: string | null = null) => {
+  const at = { ...split(full), project: project(repoPath) };
+
+  if (repoPath === ".") {
+    return dir
+      ? linkOptions({ to: "/$owner/$name/tree/$", params: { ...split(full), _splat: dir }, search: refOf(ref) })
+      : linkOptions({ to: "/$owner/$name", params: split(full), search: refOf(ref) });
+  }
+
+  return dir
+    ? linkOptions({ to: "/$owner/$name/projects/$project/tree/$", params: { ...at, _splat: dir }, search: refOf(ref) })
+    : linkOptions({ to: "/$owner/$name/projects/$project", params: at, search: refOf(ref) });
+};
+
+export const repoLink = (full: string, repoPath: string) => codeLink(full, repoPath, "");
+
+export const codeBlobLink = (full: string, repoPath: string, path: string, ref: string | null) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/blob/$", params: { ...split(full), _splat: path }, search: refOf(ref) })
+    : linkOptions({ to: "/$owner/$name/projects/$project/blob/$", params: { ...split(full), project: project(repoPath), _splat: path }, search: refOf(ref) });
+
+export const codeHistoryLink = (full: string, repoPath: string, path: string, ref: string | null) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/history/$", params: { ...split(full), _splat: path }, search: refOf(ref) })
+    : linkOptions({ to: "/$owner/$name/projects/$project/history/$", params: { ...split(full), project: project(repoPath), _splat: path }, search: refOf(ref) });
+
+export const branchesLink = (full: string, repoPath: string, merged = false) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/branches", params: split(full), search: merged ? { tab: "merged" } : {} })
+    : linkOptions({ to: "/$owner/$name/projects/$project/branches", params: { ...split(full), project: project(repoPath) }, search: merged ? { tab: "merged" } : {} });
+
+/** A branch's page: the pull request. */
 export const branchLink = (full: string, repoPath: string, branch: string) =>
   repoPath === "."
     ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch } })
-    : linkOptions({ to: "/$owner/$name/projects/$", params: { ...split(full), _splat: `${repoPath.replace(/^projects\//, "")}/branches/${branch}` } });
+    : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch } });
+
+/** A code file's bytes (the Worker's raw route; members only). */
+export const codeRawHref = (full: string, repoPath: string, path: string, ref: string | null) =>
+  `/${full}${repoPath === "." ? "" : `/projects/${project(repoPath)}`}/raw/${path.split("/").map(encodeURIComponent).join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
 
 export type AppLink =
   | ReturnType<typeof ownerLink>
@@ -42,7 +81,10 @@ export type AppLink =
   | ReturnType<typeof blobLink>
   | ReturnType<typeof historyLink>
   | ReturnType<typeof tabLink>
-  | ReturnType<typeof repoLink>
+  | ReturnType<typeof codeLink>
+  | ReturnType<typeof codeBlobLink>
+  | ReturnType<typeof codeHistoryLink>
+  | ReturnType<typeof branchesLink>
   | ReturnType<typeof branchLink>;
 
 /** The full address, for Copy link and Copy raw link. */

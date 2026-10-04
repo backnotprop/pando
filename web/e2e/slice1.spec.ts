@@ -40,6 +40,21 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
   };
 
   try {
+    await test.step("the Worker serves Ioskeley Mono, and no font file of Apple's unless the build asked for SF Pro Text", async () => {
+      const html = await (await page.request.get("/")).text();
+      const sheet = await (await page.request.get(html.match(/\/assets\/[\w.-]+\.css/)?.[0] ?? "/missing.css")).text();
+      const mono = sheet.match(/\/assets\/IoskeleyMono-Regular-[\w-]+\.woff2/)?.[0] ?? "/missing.woff2";
+
+      expect(sheet).toContain("font-family:Ioskeley Mono");
+      expect((await page.request.get(mono)).headers()["content-type"]).toBe("font/woff2");
+      expect(html + sheet).not.toMatch(/SFNSMono|SF Mono/);
+
+      if (process.env.PANDO_SF_FONTS !== "1") {
+        expect(html + sheet).not.toMatch(/SF-Pro-Text/);
+        expect((await page.request.get("/fonts/SF-Pro-Text-Regular.otf")).headers()["content-type"]).not.toMatch(/^font\//);
+      }
+    });
+
     await test.step("a signed-out visitor gets the sign-in page", async () => {
       await page.goto("/");
       await expect(page).toHaveURL(`${BASE}/login?return_to=/`);

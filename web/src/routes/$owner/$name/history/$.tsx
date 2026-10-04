@@ -7,6 +7,7 @@ import { useState } from "react";
 import { restore } from "../../../../api/actions";
 import type { MetaVersion } from "@pando/contract";
 import { historyQuery } from "../../../../api/queries";
+import { refSearch } from "../../../../api/search";
 import { Avatar } from "../../../../ui/Avatar";
 import { Cmd, lnk } from "../../../../ui/controls";
 import { CommitIcon } from "../../../../ui/Icons";
@@ -14,14 +15,27 @@ import { blobLink } from "../../../../ui/paths";
 import { ago, day, useNow } from "../../../../ui/time";
 import { Older } from "../../../../ui/Older";
 import { saverOf } from "../-code/FileList";
+import { MonorepoHead, usePlainRepo } from "../-frame/heads";
+import { plainRepo } from "../-project/Branches";
+import { loadHistory, ProjectHistory } from "../-project/History";
 
 export const Route = createFileRoute("/$owner/$name/history/$")({
-  loader: async ({ context: { queryClient, monorepo }, params }) => {
+  validateSearch: refSearch,
+  loaderDeps: ({ search }) => ({ ref: search.ref ?? null }),
+  loader: async ({ context: { queryClient, monorepo }, params, deps }) => {
+    const repo = await plainRepo(queryClient, monorepo);
+
+    if (repo) return void (await loadHistory(queryClient, monorepo, repo, params._splat ?? "", deps.ref));
+
     const first = await queryClient.ensureInfiniteQueryData(historyQuery(monorepo, params._splat ?? ""));
 
     if (!first.pages[0]?.versions.length) throw notFound();
   },
-  component: History,
+  component: function HistoryPage() {
+    const plain = usePlainRepo();
+
+    return plain ? <ProjectHistory repo={plain} path={Route.useParams()._splat ?? ""} gitRef={Route.useLoaderDeps().ref} /> : <History />;
+  },
 });
 
 const titleOf = (v: MetaVersion) =>
@@ -89,10 +103,12 @@ function History() {
   }
 
   return (
-    <div className="max-w-[1000px]">
+    <>
+      <MonorepoHead tab="code" />
+      <div className="max-w-[1000px]">
       <div className="mb-[22px] flex items-center justify-between gap-8 phone:flex-col phone:items-start phone:gap-4">
         <h2 className="flex items-baseline gap-2.5 text-[17px] leading-6 font-semibold">
-          History of <code className="text-[15px]">{path}</code>
+          History of <code className="-mb-px text-[15px] leading-6">{path}</code>
         </h2>
         <Cmd text={`pando history ${path}`} />
       </div>
@@ -110,6 +126,7 @@ function History() {
         </section>
       ))}
       {log.hasNextPage ? <Older more loading={log.isFetchingNextPage} load={() => void log.fetchNextPage()} none="" /> : null}
-    </div>
+      </div>
+    </>
   );
 }

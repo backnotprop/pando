@@ -1,0 +1,14 @@
+Pando
+Copyright 2026 the Pando authors
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+This product bundles Ioskeley Mono v2.1.0, the web app's monospace font
+(web/src/fonts/IoskeleyMono-Regular.woff2), copyright (c) 2025 Ahmed Hatem,
+licensed under the SIL Open Font License, Version 1.1
+(web/src/fonts/IoskeleyMono-OFL.txt).
+Source: https://github.com/ahatem/IoskeleyMono (release v2.1.0)
+
+Pando's Mac app and file system extension (mac/) are derived from Oak's macOS FSKit mount app and extension (https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak), Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache License, Version 2.0. mac/NOTICE gives the source commit and every change made.
+
+Pando mounts worktrees with ArtifactFS (https://github.com/cloudflare/artifact-fs), Copyright Cloudflare, Inc., licensed under the Apache License, Version 2.0, through the fork https://github.com/backnotprop/artifact-fs. Parts of the fork's macOS front end are translated from Oak's FSKit backend; the fork's NOTICE has the details.

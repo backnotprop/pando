@@ -4,7 +4,7 @@
 // No secret is printed; git gets it from a credential helper reading the
 // environment, with the system config and inherited helpers cleared (keychain
 // safety, AGENTS.md).
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -118,16 +118,18 @@ export async function ciStatus(member: Machine, full: string, repo: string, sha:
 export class Machine {
   private readonly work = mkdtempSync(join(tmpdir(), "pando-web-e2e-"));
 
+  /** `author` is the git author name its commits carry. */
   constructor(
     private readonly secret: string,
     readonly name: string,
+    readonly author = "Web Lane",
   ) {}
 
   /** A machine credential for the signed-in person (POST /v1/user/credentials). */
-  static async make(page: Page, name: string): Promise<Machine> {
+  static async make(page: Page, name: string, author?: string): Promise<Machine> {
     const made = await browserPost(page, "/v1/user/credentials", { name });
 
-    return new Machine(made.secret, name);
+    return new Machine(made.secret, name, author);
   }
 
   async api(method: string, path: string, body?: Record<string, string>): Promise<Response> {
@@ -170,7 +172,15 @@ export class Machine {
       }
     }
 
-    if (branch !== "main") this.git(dir, "checkout", "-q", "-B", branch, existsSync(join(dir, ".git/refs/remotes/origin/main")) ? "origin/main" : "main");
+    if (branch !== "main") {
+      const exists = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: dir }).status === 0;
+      const from = existsSync(join(dir, ".git/refs/remotes/origin/main")) ? "origin/main" : "main";
+
+      // A branch seen before takes more commits; a new one starts from main.
+      this.git(dir, "checkout", "-q", ...(exists ? [branch] : ["-b", branch, from]));
+    } else if (existsSync(join(dir, ".git/refs/heads/main"))) {
+      this.git(dir, "checkout", "-q", "main");
+    }
 
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
@@ -178,7 +188,7 @@ export class Machine {
     }
 
     this.git(dir, "add", "-A");
-    this.git(dir, "-c", "user.name=Web Lane", "-c", `user.email=${this.name}@pando.invalid`, "commit", "-qm", message);
+    this.git(dir, "-c", `user.name=${this.author}`, "-c", `user.email=${this.name}@pando.invalid`, "commit", "-qm", message);
 
     return dir;
   }

@@ -41,7 +41,7 @@ export function NeedsList({ rows }: { rows: readonly NeedRow[] }) {
             >
               <div>
                 <p className="flex items-baseline gap-2.5 text-[14px]">
-                  <span className="font-mono text-[14px] leading-[17px] text-bark group-hover:underline group-hover:decoration-ash group-hover:underline-offset-3">{n.branch}</span>
+                  <span className="font-mono text-[14px] leading-[17px] text-bark group-hover:underline group-hover:decoration-ash group-hover:underline-offset-3 group-focus-visible:underline group-focus-visible:decoration-ash group-focus-visible:underline-offset-3">{n.branch}</span>
                   <NeedState row={n} />
                 </p>
                 <p className="mt-[3px] flex items-center gap-2 text-[13px] text-ash">

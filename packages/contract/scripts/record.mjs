@@ -492,7 +492,7 @@ try {
   record("meta-history-since.json", "MetaHistory", "GET .../meta/history?since=0", r.status, r.json);
   r = await call("GET", `${metaPath}/file?path=README.md`, secret);
   record("meta-file-headers.json", "MetaFileHeaders", "GET .../meta/file?path=README.md", r.status, { "x-pando-version": r.headers.get("x-pando-version"), "x-pando-sha": r.headers.get("x-pando-sha") });
-  // A monorepo's pages: the monorepo, repos, members, machines; branches, commits, reviews, checks, CI.
+  // A monorepo's pages: the monorepo, repos, members, machines; branches, commits, files changed, reviews, checks, CI.
   const base = `/v1/monorepos/${full}`;
 
   for (const [file, schema, route, path] of [
@@ -504,6 +504,7 @@ try {
     ["branches-open.json", "BranchList", "GET .../repos/{repo}/branches?state=open", `${repoPath}/branches?state=open`],
     ["branch.json", "Branch", "GET .../branches/{branch}", `${repoPath}/branches/feat%2Fready`],
     ["branch-commits.json", "BranchCommits", "GET .../branches/{branch}/commits", `${repoPath}/branches/feat%2Fready/commits`],
+    ["branch-diff.json", "BranchDiff", "GET .../branches/{branch}/diff?patches=1 (Files changed)", `${repoPath}/branches/feat%2Fready/diff?patches=1`],
     ["reviews.json", "ReviewList", "GET .../branches/{branch}/reviews", `${repoPath}/branches/feat%2Fready/reviews`],
     ["status.json", "Checks", "GET .../repos/{repo}/commits/{ref}/status", `${repoPath}/commits/${readyHead}/status`],
     ["ci-builds.json", "CiBuildList", "GET .../ci/builds?branch=", `${base}/ci/builds?branch=feat%2Fready`],

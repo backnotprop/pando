@@ -222,7 +222,9 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
   );
   pushBranch(machine, "artifact-fs", fs, "main", { "README.md": "# artifact-fs\n" }, "Merge index-stat: a fresh mount's first git status downloads nothing");
   const live = pushBranch(anaMbp, "pando", pando, "live", { "README.md": "# Pando\n\nLarge files through R2.\n" }, "live: large files go to R2 by their sha256\n\nCo-authored-by: Codex <codex@openai.invalid>");
-  pushBranch(machine, "pando", pando, "docs", { "README.md": "# Pando\n\nA git platform for monorepos.\n" }, "docs: the README names the parts");
+  const docs = pushBranch(machine, "pando", pando, "docs", { "README.md": "# Pando\n\nA git platform for monorepos.\n" }, "docs: the README names the parts");
+  // projects/pando requires ci (.pando/pando.toml): it passes, then docs merges, and live (which changed the README too) conflicts.
+  await ciStatus(machine, "ramos/pando", "projects-pando", docs, "ci", "success");
   await machine.api("POST", "/v1/monorepos/ramos/pando/repos/projects-pando/branches/docs/merge");
   const webApiMerge = pushBranch(sandbox, "pando", pando, "web-api", { "worker/src/main.ts": "export {};\n" }, "Merge branch 'main' into web-api");
 

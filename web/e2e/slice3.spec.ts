@@ -1,10 +1,12 @@
 // Slice 3, end to end: a machine connects over its socket and shows on the
-// Machines tab, then its push shows as its last event; Your machines; invite
-// and remove a member, and an invite revoked; Buildkite connected through a
-// stand-in, a build arriving by webhook on the CI tab, its page with the
-// failing job's log, a sanitised annotation, Retry, Rebuild and Cancel, and
-// the pipeline's page; then a rename (the old name redirects) and a delete
-// with the typed confirmation. Real Worker, real git, real browser.
+// open Machines tab, then its push shows as its last event; Your machines;
+// invite and remove a member, and an invite revoked; Buildkite connected
+// through a stand-in; a branch's checks moving live as jobs report; a running
+// log growing on its build's page; the build failing there, with its
+// sanitised annotation, Retry, Rebuild and Cancel; the pipeline's page with
+// New build; the CI tab taking a build's change live; then a rename (the old
+// name redirects) and a delete with the typed confirmation. No page polls
+// while its socket is up. Real Worker, real git, real browser.
 import { expect, type Page, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
 import { BASE, browserPost, Machine, nextSignIn } from "./seed";
@@ -305,6 +307,11 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(page).toHaveURL(`${BASE}/${full}/ci/web-ci`);
       await expect(page.getByText("command: npm test")).toBeVisible();
       await expect(page.getByRole("list", { name: "Builds" }).getByRole("link")).toHaveCount(2);
+      // New build: the default branch's head, with fresh tokens, as Rebuild does.
+      await page.getByRole("button", { name: "New build" }).click();
+      await expect(page).toHaveURL(`${BASE}/${full}/ci/web-ci/101`, { timeout: 30_000 });
+      expect(buildkite().created.at(-1)?.branch).toBe("main");
+      await page.goBack();
     });
 
     await test.step("the CI tab: a build that moves while it is open changes in place, with the arrival", async () => {

@@ -261,8 +261,8 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       await page.goto(`${BASE}/${full}/activity`);
       const log = page.getByTestId("activity");
 
-      await expect(log.getByText(/merged\s*fix-login\s*into main, closing #1/)).toBeVisible();
-      await expect(log.getByRole("link", { name: "#2" })).toBeVisible();
+      await expect(log.getByText(/merged\s*fix-login\s*into main, closing #1/).first()).toBeVisible();
+      await expect(log.getByRole("link", { name: "#2", exact: true })).toBeVisible();
     });
 
     await test.step("on a phone: the list and the issue fit; Development comes before the timeline", async () => {

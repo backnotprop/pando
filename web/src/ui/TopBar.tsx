@@ -40,13 +40,13 @@ function Switcher({ current }: { current: string }) {
   return (
     <Menu.Root>
       <Menu.Trigger
-        aria-label="Switch monorepo"
+        aria-label="Switch repository"
         className="flex h-7 w-[22px] flex-none items-center justify-center rounded-md text-ash hover:bg-loam hover:text-bark data-popup-open:bg-loam data-popup-open:text-bark"
       >
         <Caret kind="switch" />
       </Menu.Trigger>
       <MenuPopup offset={10}>
-        <MenuHeading>Switch monorepo</MenuHeading>
+        <MenuHeading>Switch repository</MenuHeading>
         {(lines.data ?? []).map((m) => (
           <MenuLink key={m.id} link={monoLink(m.full_name)} current={m.full_name === current}>
             <Avatar name={m.name} org size={18} />
@@ -54,14 +54,11 @@ function Switcher({ current }: { current: string }) {
               <span className="text-ash">{m.owner}/</span>
               {m.name}
             </span>
-            <span className="ml-auto text-[12px] text-ash">
-              {m.kind === "repo" ? "repo, " : ""}
-              {m.last_activity_at ? lastSeen(m.last_activity_at, clock) : ""}
-            </span>
+            <span className="ml-auto text-[12px] text-ash">{m.last_activity_at ? lastSeen(m.last_activity_at, clock) : ""}</span>
           </MenuLink>
         ))}
         <MenuRule />
-        <MenuLink link={{ to: "/" }}>All monorepos</MenuLink>
+        <MenuLink link={{ to: "/" }}>All repositories</MenuLink>
       </MenuPopup>
     </Menu.Root>
   );
@@ -177,7 +174,7 @@ const full = (crumbs: Crumb[]) => crumbs.find((c) => c.monorepo)?.monorepo ?? ""
 export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
   return (
     <header className="relative flex h-14 items-center gap-1.5 px-(--margin)">
-      <Link to="/" aria-label="Home: your monorepos" className="-ml-1.5 flex size-8 items-center justify-center rounded-[7px] text-bark hover:bg-loam">
+      <Link to="/" aria-label="Home: your repositories" className="-ml-1.5 flex size-8 items-center justify-center rounded-[7px] text-bark hover:bg-loam">
         <Mark className="block" />
       </Link>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-0.5 text-[14px] leading-5">

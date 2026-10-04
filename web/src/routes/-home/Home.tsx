@@ -39,7 +39,7 @@ function Line({ m }: { m: MonorepoSummary }) {
 function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
   const clock = useNow();
 
-  if (!lines.length) return <Empty>No monorepos yet.</Empty>;
+  if (!lines.length) return <Empty>No repositories yet.</Empty>;
 
   return (
     <ul>
@@ -80,13 +80,13 @@ function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current
             {shown.name}
           </span>
         ) : (
-          <span>All monorepos</span>
+          <span>All repositories</span>
         )}
         <Caret />
       </Menu.Trigger>
       <MenuPopup>
         <MenuLink link={{ to: "/" }} current={!current}>
-          All monorepos
+          All repositories
         </MenuLink>
         {lines.map((m) => (
           <MenuLink key={m.id} link={{ to: "/", search: { in: m.full_name } }} current={m.full_name === current}>
@@ -150,7 +150,7 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
                 {owner}
               </h1>
             ) : null}
-            <SectionHead title="Monorepos" count={mine.length} />
+            <SectionHead title="Repositories" count={mine.length} />
             <MonorepoList lines={mine} />
           </div>
           <HomeFoot />

@@ -114,3 +114,18 @@ func filepathSplit(rel string) (dir, base string) {
 	i := strings.LastIndex(rel, "/")
 	return rel[:i+1], rel[i+1:]
 }
+
+// caseInsensitive reports whether the file system at dir keeps one file for
+// names that differ only in case (macOS by default): it makes a file there
+// and looks for it under its name in capitals.
+func caseInsensitive(dir string) bool {
+	f, err := os.CreateTemp(dir, ".pando-case-probe-")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+	_, err = os.Lstat(filepath.Join(filepath.Dir(name), strings.ToUpper(filepath.Base(name))))
+	return err == nil
+}

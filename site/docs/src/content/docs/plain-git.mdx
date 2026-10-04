@@ -1,11 +1,11 @@
 ---
-title: A plain git repo
-description: Use Pando with one ordinary git repo, no monorepo needed.
+title: A plain git repository
+description: Use Pando with one ordinary git repo, a repository with no projects.
 sidebar:
   order: 4
 ---
 
-You do not need a monorepo to use Pando. Any ordinary git repo works.
+A repository on Pando does not need projects. Any ordinary git repo works on its own.
 
 ```sh
 cd ~/code/acme          # any existing git repo
@@ -40,12 +40,12 @@ Everything Pando gives code:
 
 Plain `git clone`, `git pull` and `git push` against the repo's address (`https://<server>/<owner>/<name>.git`) work too. git asks for a password: give it a credential from `pando credential create`.
 
-Settings that would live in the monorepo's `.pando/pando.toml` live on the repo's main branch instead, at `.pando/pando.toml`, so they change through a reviewed branch like any other file. Required checks go under `[repos."."]`.
+Settings that a repository with projects keeps in its shared `.pando/pando.toml` live on this repo's main branch instead, at `.pando/pando.toml`, so they change through a reviewed branch like any other file. Required checks go under `[repos."."]`.
 
 ## What you do not get
 
-The shared files around the repos, and [references](/references/). A plain repo is one repo, with nothing around it.
+The shared files around the projects, and [references](/references/). A plain repository is one git repo, with nothing around it.
 
 ## How Pando tells the difference
 
-`pando init` in a folder that is a git repo makes a plain repo. In a folder that is not, it makes a monorepo, and each git repo under `projects/` becomes one of its repos.
+`pando init` in a folder that is a git repo makes a plain repository. In a folder that is not, it makes a repository with projects: each git repo under `projects/` becomes one of its projects.

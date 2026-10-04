@@ -743,9 +743,9 @@ async function whatsNew(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
-const FILTER: Trigger = { name: "home filter", real: (p) => p.getByRole("button", { name: "All monorepos" }), proto: "#pickb" };
+const FILTER: Trigger = { name: "home filter", real: (p) => p.getByRole("button", { name: "All repositories" }), proto: "#pickb" };
 
-const SWITCHER: Trigger = { name: "monorepo switcher", real: (p) => p.getByRole("button", { name: "Switch monorepo" }), proto: "#sw" };
+const SWITCHER: Trigger = { name: "monorepo switcher", real: (p) => p.getByRole("button", { name: "Switch repository" }), proto: "#sw" };
 
 const PROJECT_SWITCHER: Trigger = { name: "project switcher", real: (p) => p.getByRole("button", { name: "Switch project" }), proto: "#psw" };
 
@@ -790,7 +790,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
     await pair(page, proto, "file", "/ramos/pando/blob/decisions/RULINGS.md");
 
     if (width === 1440) {
-      await pair(page, proto, "home-filter", "/", { click: "All monorepos", protoClick: "#pickb", carets: [FILTER] });
+      await pair(page, proto, "home-filter", "/", { click: "All repositories", protoClick: "#pickb", carets: [FILTER] });
       await pair(page, proto, "clone-panel", "/ramos/pando", { click: "Clone", protoClick: "#clb", carets: [CLONE, CLONE_SELECT] });
       await pair(page, proto, "code-decisions", "/ramos/pando/tree/decisions");
       await pair(page, proto, "file-history", "/ramos/pando/history/decisions/RULINGS.md");
@@ -817,7 +817,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
         marks: ["Person", "Role", "Active", "Michael Ramos", "Ana Lopes", "you", "Remove", "Invite", "Invited", "ben@example.com", "Revoke"],
         carets: [ROLE],
       });
-      await pair(page, proto, "settings", "/ramos/pando/settings", { marks: ["Name", "Rename", "Delete this monorepo", "Delete ramos/pando"] });
+      await pair(page, proto, "settings", "/ramos/pando/settings", { marks: ["Name", "Rename", "Delete this repository", "Delete ramos/pando"] });
       await pair(page, proto, "mono-ci", "/ramos/pando/ci", {
         marks: ["CI service", "Buildkite", "pando", "Webhook", "Copy", "Disconnect", "Pipelines", "Project", "Required to merge", "Last build", "projects/pando", "Recent builds", "Merge branch 'main' into web-api", "#1285"],
       });
@@ -847,7 +847,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
       await pair(page, proto, "ci-build", "/ramos/pando/ci/pando-ci/1285");
       await pair(page, proto, "ci-pipeline", "/ramos/pando/ci/pando-ci");
       // The dropdowns at phone width.
-      await pair(page, proto, "home-filter", "/", { click: "All monorepos", protoClick: "#pickb", carets: [FILTER] });
+      await pair(page, proto, "home-filter", "/", { click: "All repositories", protoClick: "#pickb", carets: [FILTER] });
       await pair(page, proto, "clone-panel", "/ramos/pando", { click: "Clone", protoClick: "#clb", carets: [CLONE, CLONE_SELECT] });
       await pair(page, proto, "branch-picker", "/ramos/pando/projects/pando", { click: "main", protoClick: "#bpb", carets: [PICKER] });
       await pair(page, proto, "members", "/ramos/pando/members", { carets: [ROLE] });

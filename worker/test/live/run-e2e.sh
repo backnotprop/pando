@@ -7,8 +7,9 @@
 #   worker/test/live/run-e2e.sh -run Race       # extra go test flags
 #   worker/test/live/run-e2e.sh --artifacts     # also commits, on real Artifacts
 #                                               # (pando-spike, your wrangler login)
-#   META_COMMIT_GROUPING=window worker/test/live/run-e2e.sh --artifacts -run Window
-#                                               # one commit per quiet window
+#   META_COMMIT_GROUPING=author worker/test/live/run-e2e.sh --artifacts -run Window
+#                                               # one commit per person (the default
+#                                               # is window: one per quiet window)
 #
 # Against a deployed Worker instead:
 #   PANDO_META_TEST_URL=https://pando-dev... go test ./internal/meta -run E2E -v

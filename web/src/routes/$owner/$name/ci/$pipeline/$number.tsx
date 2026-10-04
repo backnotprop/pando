@@ -88,7 +88,8 @@ function Annotations({ b }: { b: CiBuildDetail }) {
     <div className="mb-[18px] grid gap-2.5">
       {list.map((a, i) => (
         <section key={a.id ?? i} aria-label={a.context ?? "Annotation"} className="rounded-[10px] border border-rootline px-4 py-3 text-[13.5px] leading-5">
-          <p className="mb-1.5 flex gap-2.5 font-mono text-[12px] text-ash">
+          {/* The prototype sets these fonts with the shorthand, so each line is its font's own height. */}
+          <p className="mb-1.5 flex gap-2.5 font-mono text-[12px] leading-[15px] text-ash">
             {a.style ? <span className={a.style === "error" ? "text-rust" : ""}>{a.style}</span> : null}
             {a.context ? <span>{a.context}</span> : null}
           </p>
@@ -119,7 +120,7 @@ function Retry({ b, job }: { b: CiBuildDetail; job: CiJob }) {
 
   return (
     <>
-      <button type="button" className={`${lnk} font-sans text-[12.5px]`} disabled={retry.isPending} onClick={() => retry.mutate()}>
+      <button type="button" className={`${lnk} font-sans text-[12.5px] leading-[normal]`} disabled={retry.isPending} onClick={() => retry.mutate()}>
         Retry
       </button>
       {retry.error ? <span className="font-sans text-[12.5px] text-rust">{retry.error.message}</span> : null}
@@ -142,7 +143,7 @@ function Job({ b, job, opened, arrived }: { b: CiBuildDetail; job: CiJob; opened
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`grid min-h-[46px] w-full cursor-pointer grid-cols-[72px_minmax(0,1fr)_96px_20px] items-center gap-3.5 px-4 text-left text-[14px] text-bark hover:bg-air ${arrived ? "arrived" : ""}`}
+        className={`grid min-h-[46px] w-full cursor-pointer grid-cols-[72px_minmax(0,1fr)_96px_20px] items-center gap-3.5 px-4 text-left text-[14px] leading-[normal] text-bark hover:bg-air ${arrived ? "arrived" : ""}`}
       >
         <BuildState state={job.state} />
         <span className="fox-cool min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -155,7 +156,7 @@ function Job({ b, job, opened, arrived }: { b: CiBuildDetail; job: CiJob; opened
       {open ? (
         <div className="bg-air py-2.5 pr-4 pb-3.5 pl-[102px] phone:pl-4">
           {job.exit_status !== null || failed ? (
-            <p className="mb-2 flex items-center gap-3.5 font-mono text-[12px] text-ash">
+            <p className="mb-2 flex items-center gap-3.5 font-mono text-[12px] leading-[15px] text-ash">
               <span>exit status {job.exit_status ?? 1}</span>
               {failed ? <Retry b={b} job={job} /> : null}
             </p>
@@ -218,7 +219,7 @@ function BuildPage() {
         <div className="mb-5 flex items-start justify-between gap-8 phone:flex-col phone:gap-4">
           <div className="min-w-0">
             <h2 className="max-w-[28em] text-[22px] leading-7 tracking-[-.018em] text-balance">{b.message ?? `Build #${b.number}`}</h2>
-            <p className={`${facts} mt-2 text-[13px]`}>
+            <p className={`${facts} mt-2 text-[13px] leading-4`}>
               <BuildState state={b.state} />
               <BuildFacts
                 b={b}
@@ -231,7 +232,7 @@ function BuildPage() {
                 }
               />
             </p>
-            <p className="mt-2 flex items-center gap-2.5 text-[13px] text-ash">
+            <p className="mt-2 flex items-center gap-2.5 text-[13px] leading-4 text-ash">
               {b.pushed_by ? (
                 <>
                   <Avatar name={b.pushed_by} size={16} />

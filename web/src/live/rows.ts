@@ -11,7 +11,7 @@ import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import type { MonorepoRef } from "../api/names";
-import { decodeRowFrame, monorepoEventsPath, type RowEvent } from "../api/pending";
+import { decodeMonorepoEventFrame, monorepoEventsSocketPath, type RowEvent } from "../api/pending";
 import { type CheckRuns, branchQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
 import { keepOpen } from "./socket";
@@ -100,7 +100,7 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
       patchBuild(qc, m, f.row);
       break;
     case "ci.job":
-      patchJob(qc, m, f.repo, f.row.build_id ?? f.key.split("/")[0] ?? "", f.row);
+      patchJob(qc, m, f.repo, f.row.build, f.row);
       break;
     case "ci.connection":
       // Connected or disconnected (rare): the tab's top is read again.
@@ -114,7 +114,7 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     }
 
     case "status":
-      // Until the server sends branch.updated with the checks (pending.ts): a branch at this commit is read once.
+      // Until fd9c23d lands (the server then sends branch.updated with the checks; pending.ts): a branch at this commit is read once.
       if (f.repo) {
         void qc.invalidateQueries({
           queryKey: [...repoKey(m, f.repo), "branch"],
@@ -141,12 +141,12 @@ export function useRows(m: MonorepoRef, topics: readonly string[], sync: () => v
   useEffect(() => {
     let seq: number | null = null;
 
-    const stop = keepOpen(() => monorepoEventsPath(m.owner, m.name, key.split(","), seq), {
+    const stop = keepOpen(() => monorepoEventsSocketPath(m.owner, m.name, key.split(","), seq), {
       up: (open) => {
         if (!open) setLive(false);
       },
       frame: (data) => {
-        const frame = Option.getOrNull(decodeRowFrame(data));
+        const frame = Option.getOrNull(decodeMonorepoEventFrame(data));
 
         if (!frame) return;
 

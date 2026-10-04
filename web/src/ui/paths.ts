@@ -95,6 +95,9 @@ export type AppLink =
   | ReturnType<typeof branchesLink>
   | ReturnType<typeof branchLink>;
 
+/** A monorepo's own project: the one named after it (projects/pando in ramos/pando); lists put it first and leave its name off. */
+export const isHomeProject = (repoPath: string | null, monorepoName: string) => repoPath?.split("/").pop() === monorepoName;
+
 /** The full address, for Copy link and Copy raw link. */
 export const absolute = (href: string) => new URL(href, location.origin).toString();
 

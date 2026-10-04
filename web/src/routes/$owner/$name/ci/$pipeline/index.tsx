@@ -66,7 +66,7 @@ function PipelinePage() {
             <h2 className="text-[22px] leading-7 tracking-[-.018em]">
               <span className="font-mono text-[20px]">{p.slug}</span>
             </h2>
-            <p className="mt-1.5 flex items-center gap-2.5 overflow-hidden font-mono text-[13px] whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal">
+            <p className="mt-1.5 flex items-center gap-2.5 overflow-hidden font-mono text-[13px] leading-4 whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal">
               {p.repo_path ? <span>{p.repo_path}</span> : null}
               <span>{branch}</span>
               {p.required_checks.map((c) => (

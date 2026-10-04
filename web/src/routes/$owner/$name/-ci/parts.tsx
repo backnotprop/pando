@@ -45,8 +45,8 @@ export function BuildFacts({ b, branch }: { b: CiBuild; branch?: ReactNode }) {
   );
 }
 
-/** One line of a build's facts, ash on mono; on a phone it wraps. */
-export const facts = "flex items-center gap-2.5 overflow-hidden font-mono text-[12.5px] whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal";
+/** One line of a build's facts, ash on mono, its size given where it is used; on a phone it wraps. */
+export const facts = "flex items-center gap-2.5 overflow-hidden font-mono whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal";
 
 const cols = "grid-cols-[72px_minmax(0,1fr)_140px_96px] phone:grid-cols-[64px_minmax(0,1fr)_auto]";
 
@@ -67,7 +67,8 @@ export function BuildList({ full, builds, label }: { full: string; builds: reado
             <BuildState state={b.state} />
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="fox-cool overflow-hidden text-ellipsis whitespace-nowrap text-bark">{b.message ?? `Build #${b.number}`}</span>
-              <span className={facts}>
+              {/* The prototype's .bmeta sets its font with the shorthand, so its line is the font's own height (15 px at 12.5 px). */}
+              <span className={`${facts} text-[12.5px] leading-[15px]`}>
                 <BuildFacts b={b} />
               </span>
             </span>

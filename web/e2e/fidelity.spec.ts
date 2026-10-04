@@ -9,6 +9,7 @@
 //   npm run shots                       (the Worker with this worktree's own state; the persona `ramos` is local to it)
 //   PANDO_SHOTS=mono-,ci- npm run shots (only the pairs whose names start so)
 import { type Browser, expect, test, type Page } from "@playwright/test";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Buildkite } from "./buildkite";
 import { BASE, browserPost, ciStatus, Machine, nextSignIn, saveRootFiles } from "./seed";
@@ -146,10 +147,15 @@ async function anaMachine(browser: Browser): Promise<Machine> {
   return m;
 }
 
+/** A worktree a machine reports (pando worktree add), before it pushes, so its pushes are its latest activity. */
+const worktree = (m: Machine, full: string, id: string, repo: string, branch: string, kind: "fuse" | "fskit" = "fuse") =>
+  m.api("PUT", `/v1/monorepos/${full}/worktrees/${id}`, { repo, branch, path: `${repo}/worktrees/${branch}`, machine: m.name, kind });
+
 async function seed(page: Page, browser: Browser): Promise<Showcase> {
   const machine = await Machine.make(page, "ramos-mbp", "ramos");
   const sandbox = await Machine.make(page, "sandbox-1", "ramos", "sandbox");
   const sandbox2 = await Machine.make(page, "sandbox-2", "ramos", "sandbox");
+  const sandbox3 = await Machine.make(page, "sandbox-3", "ramos", "sandbox");
   const anaMbp = await anaMachine(browser);
   await remake(page, machine, "pando-brand", "repo");
   await remake(page, machine, "workspaces", "monorepo");
@@ -161,6 +167,8 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
   requireChecks(machine, "ramos/workspaces", WORKSPACES_TOML);
   const ws = await project(page, "workspaces", "projects/workspaces");
   const wsCli = await project(page, "workspaces", "projects/workspaces-cli");
+  await worktree(sandbox, "ramos/workspaces", "wt-search-index", "projects/workspaces", "search-index");
+  await worktree(machine, "ramos/workspaces", "wt-decision-chips", "projects/workspaces", "decision-chips");
   await saveRootFiles(page, "ramos/workspaces", "ramos-mbp", { "AGENTS.md": "# Workspaces\n\nThe monorepo for Workspaces.\n" });
   const wsMain = pushBranch(machine, "workspaces", ws, "main", { "README.md": "# workspaces\n" }, "Merge callout-seam: callouts keep their seam on narrow cards");
   pushBranch(machine, "workspaces-cli", wsCli, "main", { "README.md": "# workspaces-cli\n" }, "Merge release-0.9: the 0.9 notes");
@@ -176,6 +184,13 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
   await browserPost(page, "/v1/monorepos/ramos/pando/invites", { email: "ben@example.com", role: "member" });
   const pando = await project(page, "pando", "projects/pando");
   const fs = await project(page, "pando", "projects/artifact-fs");
+  await worktree(anaMbp, "ramos/pando", "wt-live", "projects/pando", "live", "fskit");
+  await worktree(machine, "ramos/pando", "wt-cli", "projects/pando", "cli", "fskit");
+  await worktree(machine, "ramos/pando", "wt-mac-mount", "projects/pando", "mac-mount", "fskit");
+  await worktree(sandbox, "ramos/pando", "wt-web-api", "projects/pando", "web-api");
+  await worktree(sandbox2, "ramos/pando", "wt-fs-mac-mount", "projects/artifact-fs", "mac-mount");
+  // A sandbox that reported a worktree once and has not connected since (the Machines tab's offline row).
+  await worktree(sandbox3, "ramos/pando", "wt-scale-audit", "projects/pando", "scale-audit");
   await saveRootFiles(page, "ramos/pando", "ramos-mbp", [
     ["backlog/active-checklist.md", "# Pando board\n\nOpen items only, newest last.\n"],
     ["backlog/active-checklist-archive-2026-10-03.md", "# Archive\n"],
@@ -223,13 +238,6 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
   await ciStatus(machine, "ramos/pando", "projects-pando", webApi, "ci", "success");
   await title(machine, "ramos/pando", "projects-pando", "web-api", "Push with the object's cached write token");
   await title(machine, "ramos/pando", "projects-pando", "live", "Large files through R2");
-  await sandbox.api("PUT", "/v1/monorepos/ramos/pando/worktrees/wt-web-api", {
-    repo: "projects/pando",
-    branch: "web-api",
-    path: "projects/pando/worktrees/web-api",
-    machine: "sandbox-1",
-    kind: "fuse",
-  });
   const cli = pushBranch(machine, "pando", pando, "cli", { "cli/mount.go": "package main\n" }, "cli: pando worktree add mounts through Pando.app when the switch is on");
 
   await title(machine, "ramos/pando", "projects-pando", "cli", "Mount worktrees through Pando.app when FSKit is on");
@@ -239,17 +247,7 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
   const heads = (await (await machine.api("GET", "/v1/monorepos/ramos/pando/heads")).json()).heads;
   const pandoMain = heads.find((h: { path: string }) => h.path === "projects/pando").head;
 
-  // Each machine's worktrees, and its socket: connected while the shots run.
-  const worktree = (m: Machine, full: string, id: string, repo: string, branch: string) =>
-    m.api("PUT", `/v1/monorepos/${full}/worktrees/${id}`, { repo, branch, path: `${repo}/worktrees/${branch}`, machine: m.name, kind: "fuse" });
-
-  await worktree(anaMbp, "ramos/pando", "wt-live", "projects/pando", "live");
-  await worktree(machine, "ramos/pando", "wt-cli", "projects/pando", "cli");
-  await worktree(machine, "ramos/pando", "wt-mac-mount", "projects/pando", "mac-mount");
-  await worktree(sandbox2, "ramos/pando", "wt-fs-mac-mount", "projects/artifact-fs", "mac-mount");
-  await worktree(sandbox, "ramos/workspaces", "wt-search-index", "projects/workspaces", "search-index");
-  await worktree(machine, "ramos/workspaces", "wt-decision-chips", "projects/workspaces", "decision-chips");
-
+  // Each machine's socket, with its worktrees: connected while the shots run.
   const sockets = [
     await anaMbp.follow("ramos/pando", ["wt-live"]),
     await machine.follow("ramos/pando", ["wt-cli", "wt-mac-mount"]),
@@ -400,7 +398,39 @@ const settle = async (page: Page) => {
 
 /** The app's screen and the prototype's, same size, same settings. */
 /** `proto` is the prototype's route when its data differs (its workspaces belongs to plannotator). */
-async function pair(page: Page, proto: Page, name: string, route: string, opts: { query?: string; click?: string; protoClick?: string; proto?: string } = {}) {
+interface Box {
+  x: number;
+  y: number;
+  h: number;
+}
+
+/** A landmark's box: the first element that shows exactly that text. */
+async function box(p: Page, text: string): Promise<Box | null> {
+  const b = await p.getByText(text, { exact: true }).first().boundingBox({ timeout: 2000 }).catch(() => null);
+
+  return b && { x: Math.round(b.x * 10) / 10, y: Math.round(b.y * 10) / 10, h: Math.round(b.height * 10) / 10 };
+}
+
+/** Each landmark's position and height in the app and in the prototype, and how far apart they are, into <name>-<width>-marks.json. */
+async function measure(page: Page, proto: Page, file: string, marks: readonly string[]) {
+  const rows = [];
+
+  for (const mark of marks) {
+    const [real, design] = [await box(page, mark), await box(proto, mark)];
+
+    rows.push({ mark, real, proto: design, dx: real && design ? real.x - design.x : null, dy: real && design ? real.y - design.y : null, dh: real && design ? real.h - design.h : null });
+  }
+
+  writeFileSync(file, `${JSON.stringify(rows, null, 1)}\n`);
+}
+
+async function pair(
+  page: Page,
+  proto: Page,
+  name: string,
+  route: string,
+  opts: { query?: string; click?: string; protoClick?: string; proto?: string; marks?: readonly string[] } = {},
+) {
   if (!wanted(name)) return;
 
   await page.goto(`${route}${opts.query ? `?${opts.query}` : ""}`);
@@ -422,6 +452,8 @@ async function pair(page: Page, proto: Page, name: string, route: string, opts: 
   }
 
   await proto.screenshot({ path: `${SHOTS}${name}-${width}-proto.png` });
+
+  if (opts.marks) await measure(page, proto, `${SHOTS}${name}-${width}-marks.json`, opts.marks);
 }
 
 test.use({ deviceScaleFactor: 2, colorScheme: "dark", reducedMotion: "reduce" });
@@ -478,15 +510,19 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
       await pair(page, proto, "code-history", "/ramos/pando/projects/pando/history/worker/src/index.ts");
       await pair(page, proto, "activity", "/ramos/pando/activity");
       // Slice 3
-      await pair(page, proto, "mono-machines", "/ramos/pando/machines");
-      await pair(page, proto, "machines", "/settings/machines");
-      await pair(page, proto, "members", "/ramos/pando/members");
-      await pair(page, proto, "settings", "/ramos/pando/settings");
-      await pair(page, proto, "mono-ci", "/ramos/pando/ci");
-      await pair(page, proto, "mono-ci-workspaces", "/ramos/workspaces/ci", { proto: "/plannotator/workspaces/ci" });
-      await pair(page, proto, "ci-pipeline", "/ramos/pando/ci/pando-ci");
-      await pair(page, proto, "ci-build", "/ramos/pando/ci/pando-ci/1285");
-      await pair(page, proto, "ci-build-running", "/ramos/pando/ci/pando-ci/1288");
+      await pair(page, proto, "mono-machines", "/ramos/pando/machines", { marks: ["Machine", "Worktrees", "Now", "ramos-mbp", "sandbox-1", "connected"] });
+      await pair(page, proto, "machines", "/settings/machines", { marks: ["Your machines", "Name", "Kind", "Last used", "ramos-mbp", "this browser", "this session", "Add a cloud sandbox", "Copy"] });
+      await pair(page, proto, "members", "/ramos/pando/members", { marks: ["Person", "Role", "Active", "Michael Ramos", "Ana Lopes", "you", "Remove", "Invite", "Invited", "ben@example.com", "Revoke"] });
+      await pair(page, proto, "settings", "/ramos/pando/settings", { marks: ["Name", "Rename", "Delete this monorepo", "Delete ramos/pando"] });
+      await pair(page, proto, "mono-ci", "/ramos/pando/ci", {
+        marks: ["CI service", "Buildkite", "pando", "Webhook", "Copy", "Disconnect", "Pipelines", "Project", "Required to merge", "Last build", "projects/pando", "Recent builds", "Merge branch 'main' into web-api", "#1285"],
+      });
+      await pair(page, proto, "mono-ci-workspaces", "/ramos/workspaces/ci", { proto: "/plannotator/workspaces/ci", marks: ["projects/workspaces-cli", "Add pipeline", "Connect another CI service"] });
+      await pair(page, proto, "ci-pipeline", "/ramos/pando/ci/pando-ci", { marks: ["Open in Buildkite", "New build", "pipeline.yml", "Copy", "Builds"] });
+      await pair(page, proto, "ci-build", "/ramos/pando/ci/pando-ci/1285", {
+        marks: ["Merge branch 'main' into web-api", "#1285", "Open in Buildkite", "Rebuild", "test-summary", "typecheck", "exit status 1", "Retry", "Artifacts", "test-results/junit.xml", "Download"],
+      });
+      await pair(page, proto, "ci-build-running", "/ramos/pando/ci/pando-ci/1288", { marks: ["#1288", "Cancel", "typecheck", "running"] });
       // The running job open on its log (the prototype's job opened by a click).
       await pair(page, proto, "ci-build-running-log", `/ramos/pando/ci/pando-ci/1288?job=${shown.runningJob}`, { proto: "/ramos/pando/ci/pando-ci/1288", protoClick: '.job[data-j="1"]' });
       await pair(page, proto, "ci-build-workspaces", "/ramos/workspaces/ci/web-ci/2203", { proto: "/plannotator/workspaces/ci/web-ci/2203" });

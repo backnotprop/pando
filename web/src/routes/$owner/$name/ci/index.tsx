@@ -12,7 +12,7 @@ import { CI_TOPICS, fallback, syncCi, useRows } from "../../../../live/rows";
 import { monorepoQuery } from "../../../../api/queries";
 import buildkiteMark from "../../../../ui/buildkite-mark.svg";
 import { button, copyInCmd, CopyButton, Empty, lnk, Refusal, row, SectionHead, thead } from "../../../../ui/controls";
-import { ciPipelineLink } from "../../../../ui/paths";
+import { ciPipelineLink, isHomeProject } from "../../../../ui/paths";
 import { ago, since, useNow } from "../../../../ui/time";
 import { BuildList, BuildState, CommandButton, ServiceMark, serviceName } from "../-ci/parts";
 import { MonorepoHead, useMonorepo } from "../-frame/heads";
@@ -59,7 +59,7 @@ function Service({ c, owner }: { c: CiConnection; owner: boolean }) {
       <div className="flex items-center gap-3.5 rounded-[10px] border border-rootline px-[18px] py-4 phone:flex-wrap phone:gap-y-2.5">
         {c.service === "buildkite" ? <img src={buildkiteMark} alt="" width={27} height={18} className="flex-none" /> : null}
         <span className="text-[15px] font-semibold">{name}</span>
-        <span className="font-mono text-[13px] text-bark-dim">{c.organization}</span>
+        <span className="font-mono text-[13px] leading-4 text-bark-dim">{c.organization}</span>
         <span className="ml-auto flex items-center gap-4 phone:ml-0 phone:basis-full phone:flex-wrap phone:gap-y-2">
           <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">connected {ago(c.created_at, clock)}</span>
           <a href={c.web_url} target="_blank" rel="noopener noreferrer" className={lnk}>
@@ -128,8 +128,10 @@ function PipelineRow({ p, ran }: { p: CiPipeline; ran: ReadonlySet<string> }) {
 function Pipelines() {
   const { monorepo } = useMonorepo();
   const ci = useSuspenseQuery(ciQuery(monorepo)).data;
+  // The monorepo's own project first, then by path.
+  const pipelines = [...ci.pipelines].sort((a, b) => Number(isHomeProject(b.repo_path, monorepo.name)) - Number(isHomeProject(a.repo_path, monorepo.name)) || (a.repo_path ?? "").localeCompare(b.repo_path ?? ""));
   // The checks each pipeline's last build ran, so a mark shows only where the service ran it (ruling).
-  const lastBuilds = useQueries({ queries: ci.pipelines.map((p) => ({ ...ciBuildQuery(monorepo, p.last_build?.id ?? ""), enabled: p.last_build !== null })) });
+  const lastBuilds = useQueries({ queries: pipelines.map((p) => ({ ...ciBuildQuery(monorepo, p.last_build?.id ?? ""), enabled: p.last_build !== null })) });
   const ranBy = (i: number) => new Set((lastBuilds[i]?.data?.jobs ?? []).flatMap((j) => (j.check && !j.retried ? [j.check] : [])));
   const without = ci.required_checks.filter((r) => !ci.pipelines.some((p) => p.repo === r.repo));
 
@@ -143,7 +145,7 @@ function Pipelines() {
         <span className="text-right">Last build</span>
       </div>
       <ul aria-label="Pipelines">
-        {ci.pipelines.map((p, i) => (
+        {pipelines.map((p, i) => (
           <li key={`${p.connection}/${p.slug}`} className="border-t border-rule-faint">
             <PipelineRow p={p} ran={ranBy(i)} />
           </li>

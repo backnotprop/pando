@@ -11,7 +11,7 @@ import { machinesQuery, monorepoQuery, reposQuery } from "../../../api/queries";
 import { describe } from "../../../ui/activity";
 import { Avatar } from "../../../ui/Avatar";
 import { Empty, row, thead } from "../../../ui/controls";
-import { branchLink, repoLink } from "../../../ui/paths";
+import { branchLink, isHomeProject, repoLink } from "../../../ui/paths";
 import { fallback, useRows } from "../../../live/rows";
 import { since, useNow } from "../../../ui/time";
 import { MonorepoHead, useMonorepo } from "./-frame/heads";
@@ -29,12 +29,12 @@ export const Route = createFileRoute("/$owner/$name/machines")({
 });
 
 // On a phone: the machine (its name whole, wrapping), its worktrees, when, and connected; what it did is left out.
-const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px] phone:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] phone:gap-3";
+const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px] phone:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_52px_72px] phone:gap-3";
 
-/** A worktree as a link to its branch: `cli`, or `artifact-fs/mac-mount` outside the first project. */
-function WorktreeLink({ w, full, first }: { w: MachineWorktree; full: string; first: string | undefined }) {
+/** A worktree as a link to its branch: `cli` in the monorepo's own project (or its only one), `artifact-fs/mac-mount` in another. */
+function WorktreeLink({ w, full, home }: { w: MachineWorktree; full: string; home: string | null }) {
   if (!w.repo || !w.branch) return <span className="font-mono text-[13px] text-ash">{w.path ?? w.id}</span>;
-  const label = `${w.repo === first ? "" : `${w.repo.split("/").pop()}/`}${w.branch}`;
+  const label = `${w.repo === home ? "" : `${w.repo.split("/").pop()}/`}${w.branch}`;
   const link = w.branch === "main" ? repoLink(full, w.repo) : branchLink(full, w.repo, w.branch);
 
   return (
@@ -70,7 +70,8 @@ function Machines() {
   const live = useRows(monorepo, ["kind:machine.updated"], () => void qc.invalidateQueries({ queryKey: machinesQuery(monorepo).queryKey }));
   const machines = useSuspenseQuery({ ...machinesQuery(monorepo), refetchInterval: fallback(live) }).data;
   const repos: readonly Repo[] = useSuspenseQuery(reposQuery(monorepo)).data;
-  const first = repos[0]?.path;
+  // The project named after the monorepo (projects/pando in ramos/pando), or its only one, goes without its name.
+  const home = repos.length === 1 ? (repos[0]?.path ?? null) : (repos.find((r) => isHomeProject(r.path, monorepo.name))?.path ?? null);
 
   return (
     <>
@@ -81,7 +82,10 @@ function Machines() {
             <span>Machine</span>
             <span>Worktrees</span>
             <span className="phone:hidden">Last</span>
-            <span className="hidden phone:block">Last</span>
+            {/* The time's column: unlabelled beside Last, which it shows alone on a phone. */}
+            <span>
+              <span className="hidden phone:inline">Last</span>
+            </span>
             <span className="text-right">Now</span>
           </div>
           <ul aria-label="Machines">
@@ -102,7 +106,7 @@ function Machines() {
                       m.worktrees.map((w, i) => (
                         <Fragment key={w.id}>
                           {i ? <span className="text-ash">, </span> : null}
-                          <WorktreeLink w={w} full={monorepo.full} first={first} />
+                          <WorktreeLink w={w} full={monorepo.full} home={home} />
                         </Fragment>
                       ))
                     ) : (

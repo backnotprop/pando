@@ -50,7 +50,8 @@ function People({ owner }: { owner: boolean }) {
   const { monorepo } = useMonorepo();
   const clock = useNow();
   const me = useSuspenseQuery(meQuery).data;
-  const members = useSuspenseQuery(membersQuery(monorepo)).data;
+  // Owners first, then by login.
+  const members = [...useSuspenseQuery(membersQuery(monorepo)).data].sort((a, b) => Number(b.role === "owner") - Number(a.role === "owner") || a.login.localeCompare(b.login));
 
   return (
     <div>

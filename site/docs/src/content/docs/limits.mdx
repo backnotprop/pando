@@ -10,7 +10,7 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 ## Pushes and files
 
 - **One push: at most 64 MiB** (67,108,864 bytes). That is Artifacts' limit for one push. Pando refuses a larger push and says so; nothing of it lands. Push it in steps, oldest commits first, each under the limit.
-- **`pando init` brings in a larger history by itself,** in steps of about 32 MiB: older commits first, then main. A single commit over 64 MiB goes up too: its files are sent ahead of it.
+- **`pando init` brings in a larger history by itself,** in steps of about 16 MiB: older commits first, then main. A single commit over 64 MiB goes up too: its files are sent ahead of it.
 - **One repository: at most 1 GB.** That is Artifacts' limit for one repository, so it is also the largest history `pando init` can bring in.
 - **One file in a repo: at most 32 MB.** That is Artifacts' limit for one file.
 - `pando` checks the push and file limits before git sends anything, and says which limit a push is over. `git push --no-verify` skips the check, and the server then refuses the push.

@@ -22,13 +22,15 @@ import (
 // what the server's refs already reach.
 //
 // Steps follow main's first-parent line. They are planned from the size of
-// the files each commit adds (their size on disk, a rough guide) to about
-// half the limit, and each is measured exactly with the pre-push check
-// before it goes: a step over the limit is cut in two. A single commit over
-// the limit sends its files ahead of it on FilesRef: a tree holding one tree
-// per share of the files, each share under half the limit, the tree growing
-// by one share a push. git leaves out of a push everything inside a tree a
-// server ref names, so the commit then carries only its own trees.
+// the files each commit adds (their size on disk, a rough guide) to about a
+// quarter of the limit (stepTarget), and each is measured exactly with the
+// pre-push check before it goes: a step over the limit is cut in two. A
+// single commit over the limit sends its files ahead of it on FilesRef: a
+// tree holding one tree per share of the files, each share at most
+// stepTarget, the tree growing by one share a push. git leaves out of a
+// push everything inside a tree a server ref names, so the commit then
+// carries only its own trees. (A commit a ref names does not do that: git
+// walks only commits on main's own line.)
 //
 // Both refs are outside refs/heads, so the door records no branch, event or
 // hook for them, and both are deleted once main is pushed. Each push to them
@@ -38,6 +40,13 @@ const (
 	StepsRef = "refs/pando/import"
 	FilesRef = "refs/pando/import-files"
 )
+
+// stepTarget is the size a step aims at: a quarter of the limit (16 MiB).
+// Smaller than one push can carry, because a long upload is the one a bad
+// network breaks: from one Wi-Fi network, 10 MB pushes went 9 of 9 and
+// 24 MB ones 5 of 8 (TLS "bad record mac" mid-upload), and a broken step is
+// cheaper to send again.
+func stepTarget(limit int64) int64 { return limit / 4 }
 
 // pushSteps sends the history of `head` ahead of main's push until what is
 // left fits one push. It answers the side refs it wrote (to delete after
@@ -51,7 +60,7 @@ func pushSteps(e *Env, g gitx.Cmd, label, cloneURL, head string) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	tips := planSteps(line, limit/2)
+	tips := planSteps(line, stepTarget(limit))
 	e.printf("%-44s history over %s, the most one push carries: pushing it in about %d steps\n", label, sizeText(limit), len(tips))
 	var wrote []string
 	push := func(src, ref string) error {
@@ -74,7 +83,7 @@ func pushSteps(e *Env, g gitx.Cmd, label, cloneURL, head string) ([]string, erro
 			continue
 		}
 		if !fits {
-			if err := sendFiles(e, g, label, tip, prev, limit/2, push); err != nil {
+			if err := sendFiles(e, g, label, tip, prev, stepTarget(limit), limit, push); err != nil {
 				return wrote, err
 			}
 		}
@@ -172,10 +181,10 @@ func fitsOnePush(e *Env, g gitx.Cmd, tip, prev string) (bool, error) {
 }
 
 // sendFiles pushes the files `tip` adds (beyond what `prev` reaches) to
-// FilesRef in shares of `target` bytes or less by their whole size: each
-// push names a tree of one tree per share so far, so it carries one new
-// share.
-func sendFiles(e *Env, g gitx.Cmd, label, tip, prev string, target int64, push func(src, ref string) error) error {
+// FilesRef in shares of `target` bytes or less by their whole size (one
+// file over it goes alone): each push names a tree of one tree per share so
+// far, so it carries one new share.
+func sendFiles(e *Env, g gitx.Cmd, label, tip, prev string, target, limit int64, push func(src, ref string) error) error {
 	args := []string{"rev-list", "--objects", "--no-object-names", tip}
 	if prev != "" {
 		args = append(args, "^"+prev)
@@ -196,8 +205,8 @@ func sendFiles(e *Env, g gitx.Cmd, label, tip, prev string, target int64, push f
 		if !ok {
 			continue // a commit or a tree
 		}
-		if size > 2*target {
-			return fmt.Errorf("a file in %s (%s) is over %s, the most one push carries", short(tip), sizeText(size), sizeText(2*target))
+		if size > limit {
+			return fmt.Errorf("a file in %s (%s) is over %s, the most one push carries", short(tip), sizeText(size), sizeText(limit))
 		}
 		if len(shares) == 0 || sum+size > target {
 			shares, sum = append(shares, nil), 0

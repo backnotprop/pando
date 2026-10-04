@@ -1,7 +1,7 @@
 // The merge gate: required checks from .pando/pando.toml on main, and
 // GitHub's combined status over the latest status per context.
 
-import { parse as parseToml, TomlDate, type TomlTable, type TomlValue } from "smol-toml";
+import { parse as parseToml, TomlDate, TomlError, type TomlTable, type TomlValue } from "smol-toml";
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { isRecord, isText, isWholeNumber, type Json } from "../parse";
@@ -9,15 +9,22 @@ import { withRepo } from "./artifacts";
 import { metaArtifactsName } from "./names";
 import type { Checks, Kind, RepoRecord, StatusRecord } from "./types";
 
-/** pando.toml could not be read: the required checks are unknown, never taken as none (the gate fails closed). */
-export const checksUnknown = (): HttpError => new HttpError(503, "checks_unknown", "Pando couldn't read this monorepo's required checks; try again");
+/**
+ * pando.toml could not be read, or does not parse: the required checks are
+ * unknown, never taken as none (the gate fails closed). `why` says what is
+ * wrong with the file; without it, the read failed and a retry may work.
+ */
+export const checksUnknown = (why: string | null = null): HttpError =>
+  new HttpError(503, "checks_unknown", why ? `${why}; fix it on main, or merge with force` : "Pando couldn't read this monorepo's required checks; try again");
 
 export function isChecksUnknown(err: unknown): err is HttpError {
   return err instanceof HttpError && err.code === "checks_unknown";
 }
 
 // Read whenever the monorepo object keeps no list: a merge into main can
-// change it, and the gate must see the change at once.
+// change it, and the gate must see the change at once. A file that does not
+// parse is never kept either: each read tries it again, so the fix's merge
+// counts at once.
 async function readConfig(env: Env, artifactsName: string, failRead = false): Promise<TomlTable | null> {
   let text: string | null;
 
@@ -37,10 +44,10 @@ async function readConfig(env: Env, artifactsName: string, failRead = false): Pr
   try {
     return parseToml(text);
   } catch (err) {
-    // A file that is not TOML: no required checks.
-    console.warn(`pando.toml in ${artifactsName}: ${err instanceof Error ? err.message : String(err)}`);
+    // "Invalid TOML document: <what>", then the lines around it.
+    const what = (err instanceof Error ? err.message : String(err)).split("\n")[0].replace(/^Invalid TOML document: /, "");
 
-    return null;
+    throw checksUnknown(err instanceof TomlError ? `pando.toml line ${err.line}: ${what}` : `pando.toml: ${what}`);
   }
 }
 

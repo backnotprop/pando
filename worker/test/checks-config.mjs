@@ -1,6 +1,6 @@
-// The merge gate fails closed when pando.toml cannot be read: a read error is
-// never kept as "no required checks", an unforced merge while the required
-// checks are unknown is refused, and the next read tries again.
+// The merge gate fails closed when pando.toml cannot be read or does not
+// parse: neither is kept as "no required checks", an unforced merge while the
+// required checks are unknown is refused, and the next read tries again.
 //
 //   npx wrangler dev --port 8797 --persist-to <dir> --var CHECKS_TEST:1
 //   PANDO_URL=http://localhost:8797 node test/checks-config.mjs
@@ -128,6 +128,34 @@ try {
   check("ci/test reports success", r.status === 201, `${r.status}`);
   r = await call("POST", `${base}/branches/feat%2Fx/merge`, { expected_head: head });
   check("then the merge goes through, not forced", r.status === 200 && r.json?.status === "merged" && r.json?.forced === false, `${r.status} ${r.json?.status ?? r.json?.error?.code}`);
+
+  // A pando.toml that does not parse: unknown too, said with its line, until a fix is merged.
+  const metaUrl = (await call("GET", `/v1/monorepos/${O}/${M}/repos/meta`)).json?.clone_url;
+  const metaBase = `/v1/monorepos/${O}/${M}/repos/meta`;
+  git(["checkout", "-qb", "break"], meta);
+  commit(meta, ".pando/pando.toml", '[repos."projects/web"]\nrequired_checks = ["ci/test"\n', "Break pando.toml");
+  git(["push", "-q", metaUrl, "break"], meta);
+  r = await call("POST", `${metaBase}/branches/break/merge`);
+  check("a broken pando.toml merges into the meta layer (it was fine until then)", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
+  git(["checkout", "-qb", "feat/y", "main"], web);
+  const headY = commit(web, "y.txt", "y\n", "another change");
+  git(["push", "-q", webUrl, "feat/y"], web);
+  await call("POST", `${base}/statuses/${headY}`, { context: "ci/test", state: "success" });
+  r = await call("POST", `${base}/branches/feat%2Fy/merge`, { expected_head: headY });
+  check(
+    "with pando.toml invalid, an unforced merge is refused and says which line",
+    r.status === 503 && r.json?.error?.code === "checks_unknown" && /^pando\.toml line \d+: .+; fix it on main, or merge with force$/.test(r.json?.error?.message ?? ""),
+    `${r.status} ${r.json?.error?.code}: ${r.json?.error?.message}`,
+  );
+  git(["checkout", "-q", "break"], meta);
+  commit(meta, ".pando/pando.toml", '[repos."projects/web"]\nrequired_checks = ["ci/test"]\n', "Fix pando.toml");
+  git(["push", "-q", metaUrl, "break:fix"], meta);
+  r = await call("POST", `${metaBase}/branches/fix/merge`);
+  check("the fix's own merge is refused the same way (the meta layer's checks are unknown too)", r.status === 503 && r.json?.error?.code === "checks_unknown", `${r.status} ${r.json?.error?.code}`);
+  r = await call("POST", `${metaBase}/branches/fix/merge?force=1`);
+  check("merged with force, it goes through and is recorded as forced", r.status === 200 && r.json?.status === "merged" && r.json?.forced === true, `${r.status} ${r.json?.status ?? r.json?.error?.code} forced ${r.json?.forced}`);
+  r = await call("POST", `${base}/branches/feat%2Fy/merge`, { expected_head: headY });
+  check("with pando.toml fixed, the merge goes through, not forced", r.status === 200 && r.json?.status === "merged" && r.json?.forced === false, `${r.status} ${r.json?.status ?? r.json?.error?.code}`);
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

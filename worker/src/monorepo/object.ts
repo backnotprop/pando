@@ -13,7 +13,7 @@ import { HttpError, now, redact } from "../http";
 import { branchesOf, listRefs, repoToken, repoTokenEntry, updateRefs, withRepo } from "./artifacts";
 import { GateBusy, isBusy, LEASE_MS, releaseDelay, retryBusy, WAIT_MS, WRITE_SLOTS, WriteGate } from "./gate";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts, timeGate } from "../timing";
-import { checksUnknown, combine, isChecksUnknown, requiredChecks } from "./checks";
+import { combine, isChecksUnknown, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
@@ -869,20 +869,14 @@ export class MonorepoObject extends DurableObject<Env> {
    * when there is none. The kept list is dropped whenever main moves in the
    * repo holding pando.toml by a merge or its first push, and .pando/** never
    * changes any other way (the live layer refuses saves there), so it is
-   * never stale. Null when pando.toml could not be read: unknown, nothing
-   * kept, read again next time.
+   * never stale. Throws checks_unknown when pando.toml could not be read or
+   * does not parse: nothing is kept, and the next merge reads it again.
    */
-  private async checksFor(r: RepoRecord, sha: string): Promise<Checks | null> {
+  private async checksFor(r: RepoRecord, sha: string): Promise<Checks> {
     let required = this.storedRequired(r.name);
 
     if (!required) {
-      try {
-        required = await requiredChecks(this.env, this.info()!, r, this.takeConfigFail());
-      } catch (err) {
-        if (isChecksUnknown(err)) return null;
-        throw err;
-      }
-
+      required = await requiredChecks(this.env, this.info()!, r, this.takeConfigFail());
       this.setRequiredChecks(r.name, required);
     }
 
@@ -932,10 +926,14 @@ export class MonorepoObject extends DurableObject<Env> {
     const r = (await this.getRepo(a.repo)) ?? fail(404, "not_found", `no repo ${a.repo}`);
     let { head, base, read } = await this.mergeHeads(r, a, false);
     note({ heads_from: read ? "artifacts" : "records" });
-    const checks = await this.checksFor(r, head);
+    let checks: Checks | null = null;
 
-    // Unknown required checks refuse an unforced merge, as red ones do.
-    if (!checks && !a.force) throw checksUnknown();
+    try {
+      checks = await this.checksFor(r, head);
+    } catch (err) {
+      // Unknown required checks refuse an unforced merge, as red ones do; a forced one goes through as forced.
+      if (!isChecksUnknown(err) || !a.force) throw err;
+    }
 
     if (checks && checks.state !== "success" && !a.force) {
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });

@@ -261,14 +261,12 @@ try {
   check("merge feat/a (as agent-1)", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
   e = await find(ev, (x) => x.kind === "merged");
   checkS("event: merged, with merge facts on the Branch row", e?.row?.state === "merged" && e?.row?.merge_commit === mergeSha && e?.row?.merged_by === `ana-${id}` && e?.row?.merged_machine === "ana-mbp" && e?.row?.merged_agent === "agent-1" && e?.row?.forced === false && !!e?.row?.merged_at, scrub(JSON.stringify(e?.row)).slice(0, 260));
-  r = await call("GET", `/v1/monorepos/${O}/${M}/heads`, A);
-  git(["fetch", "-q", url, "main"], src, A);
-  const mergeTitle = git(["log", "-1", "--format=%s", mergeSha], src).out.trim();
-  check("GET heads: main is the merge commit after a merge, head_title its title as git reads it", r.json?.heads?.[0]?.head === mergeSha && !!mergeTitle && r.json.heads[0].head_title === mergeTitle, `${JSON.stringify(r.json?.heads?.[0]?.head_title)} vs ${JSON.stringify(mergeTitle)}`);
+  // These reads go back to back: the sweep's facts land about 0.3 s after a merge (git subprocesses wait until after them).
+  const headsAfter = await call("GET", `/v1/monorepos/${O}/${M}/heads`, A);
 
   if (STREAM) {
     const latest = await call("GET", `/v1/monorepos/${O}/${M}/events?limit=1`, A);
-    checkS("GET heads carries the stream's seq to resume from", r.json?.seq === latest.json?.seq, `${r.json?.seq} vs ${latest.json?.seq}`);
+    checkS("GET heads carries the stream's seq to resume from", headsAfter.json?.seq === latest.json?.seq, `${headsAfter.json?.seq} vs ${latest.json?.seq}`);
   }
 
   e = await find(ev, (x) => x.kind === "default_head.updated");
@@ -276,6 +274,9 @@ try {
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches?state=open`, A);
   const atOnce = r.json?.branches?.find((b) => b.name === "feat/b");
   check("right after the merge, the list answers at once with feat/b pending (last answer kept)", atOnce?.stale === true && atOnce?.mergeable === "pending" && atOnce?.last_mergeable === "clean", JSON.stringify({ m: atOnce?.mergeable, last: atOnce?.last_mergeable, stale: atOnce?.stale }));
+  git(["fetch", "-q", url, "main"], src, A);
+  const mergeTitle = git(["log", "-1", "--format=%s", mergeSha], src).out.trim();
+  check("GET heads: main is the merge commit after a merge, head_title its title as git reads it", headsAfter.json?.heads?.[0]?.head === mergeSha && !!mergeTitle && headsAfter.json.heads[0].head_title === mergeTitle, `${JSON.stringify(headsAfter.json?.heads?.[0]?.head_title)} vs ${JSON.stringify(mergeTitle)}`);
   e = await find(ev, (x) => x.kind === "branch.updated" && x.row?.name === "feat/b" && x.partial === false && x.row?.behind === 3 && x.row?.stale === false);
   checkS("the queue's sweep publishes feat/b's full row (behind 3, mergeable, checks)", !!e && !!e.row?.mergeable && !!e.row?.checks, e ? `mergeable ${e.row.mergeable}` : "no event");
 

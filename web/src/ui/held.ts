@@ -4,7 +4,7 @@
 // README) has a new query key. Shown at once, the page would suspend and React
 // would hide it until the reads land. Deferred, React keeps the page as it
 // was and swaps in the new one when it is ready.
-import { useDeferredValue, useMemo } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 
 /**
  * `value` for `key`, held back (useDeferredValue) while what it leads to is
@@ -16,4 +16,18 @@ export function useHeld<T>(key: string, value: T): T {
   const shown = useDeferredValue(now);
 
   return shown.key === key ? shown.value : value;
+}
+
+/**
+ * The newest answer seen for `key`: while a moved ref's new one is read
+ * (`value` undefined), the last one stays, so what it draws (a last-commit
+ * bar) does not drop out and come back. Another key starts empty.
+ */
+export function useLastAnswer<T>(key: string, value: T | undefined): T | undefined {
+  const [kept, setKept] = useState<{ key: string; value: T } | null>(null);
+
+  // React's pattern for state that follows a prop: set during render, drawn again at once.
+  if (value !== undefined && (kept?.key !== key || kept.value !== value)) setKept({ key, value });
+
+  return value ?? (kept?.key === key ? kept.value : undefined);
 }

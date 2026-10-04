@@ -8,9 +8,9 @@ import type { MonorepoRef } from "../../../../api/names";
 import type { Repo } from "@pando/contract";
 import { branchesQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { isDoc } from "../../../../ui/doc/Doc";
-import { useHeld } from "../../../../ui/held";
+import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref } from "../../../../ui/paths";
-import { ChangeBar } from "../-code/FileList";
+import { BarSpace, ChangeBar } from "../-code/FileList";
 import { FileShown, FileTools } from "../-code/FileView";
 import { PathTrail } from "../-code/PathTrail";
 import { RepoHead, useMonorepo } from "../-frame/heads";
@@ -35,12 +35,15 @@ export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: s
   const full = monorepo.full;
   const { dir, name } = split(path);
   // Held while a moved ref's new commit is read, so the file stays on screen (ui/held.ts); the blob's oid comes from the same tree.
-  const tree = useHeld(`${repo.name}:${gitRef ?? ""}:${dir}`, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
+  const at = `${repo.name}:${gitRef ?? ""}:${dir}`;
+  const tree = useHeld(at, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
   const commit = tree?.commit ?? "";
   // The bytes and the last commit are read at the commit the ref resolved to, so they agree.
   const { text, size } = useSuspenseQuery(codeFileQuery(monorepo, repo, commit, path)).data;
   const oid = tree?.entries.find((e) => e.name === name)?.oid ?? null;
-  const last = useQuery(lastCommitsQuery(monorepo, repo.name, commit, dir)).data?.entries[name] ?? null;
+  // The last answer for this ref and folder stays while a moved ref's is read (ui/held.ts).
+  const lastCommits = useLastAnswer(at, useQuery(lastCommitsQuery(monorepo, repo.name, commit, dir)).data);
+  const last = lastCommits?.entries[name] ?? null;
   const views = { preview: codeBlobLink(full, repo.path, path, gitRef), code: codeBlobLink(full, repo.path, path, gitRef, true), plain };
 
   return (
@@ -54,7 +57,9 @@ export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: s
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           {last ? (
             <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} sha at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
-          ) : null}
+          ) : lastCommits?.complete ? null : (
+            <BarSpace />
+          )}
           <FileTools name={name} text={text} raw={codeRawHref(full, repo.path, path, gitRef)} views={isDoc(name) && text !== null ? views : undefined} />
           <FileShown
             path={path}

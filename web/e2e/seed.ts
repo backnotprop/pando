@@ -236,10 +236,11 @@ export class Machine {
   }
 }
 
-/** What one frame showed: the top bar's height, the code's (the coloured view, else the plain lines), and the rows playing their arrival. */
+/** What one frame showed: the top bar's height, the code's (the coloured view, else the plain lines) and its top, and the rows playing their arrival. */
 export interface Frame {
   bar: number;
   code: number;
+  top: number;
   arrived: string[];
 }
 
@@ -260,6 +261,7 @@ export async function watchFrames(page: Page): Promise<() => Promise<Frame[]>> {
   await page.evaluate(() => {
     const frames: Frame[] = [];
     const height = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().height) : 0);
+    const code = () => document.querySelector("diffs-container") ?? document.querySelector("main pre");
     let last = "";
 
     window.pandoFrames = frames;
@@ -267,7 +269,8 @@ export async function watchFrames(page: Page): Promise<() => Promise<Frame[]>> {
     const tick = () => {
       const frame = {
         bar: height(document.querySelector("header")),
-        code: height(document.querySelector("diffs-container") ?? document.querySelector("main pre")),
+        code: height(code()),
+        top: Math.round(code()?.getBoundingClientRect().top ?? 0),
         arrived: [...document.querySelectorAll(".arrived")].map((e) => e.textContent ?? ""),
       };
 

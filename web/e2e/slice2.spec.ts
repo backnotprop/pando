@@ -8,7 +8,7 @@
 // the branch on screen moves, and a push replays no check's arrival. Real
 // Worker, real git.
 import { expect, type Locator, test } from "@playwright/test";
-import { BASE, browserPost, ciStatus, Machine, nextSignIn, watchFrames } from "./seed";
+import { BASE, browserPost, ciStatus, type Frame, Machine, nextSignIn, watchFrames } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -252,9 +252,17 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect.poll(() => page.getByRole("img", { name: "logo.png" }).evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
     });
 
-    await test.step("a file stays on screen while main moves under it, and while its branch takes a push: no frame without the top bar or the code", async () => {
+    await test.step("a file stays on screen while main moves under it, and while its branch takes a push: no frame without the top bar or the code, and the code never moves", async () => {
       const m = machine();
       const shown = (text: string) => expect(page.locator("[data-line]").filter({ hasText: text }).first()).toBeVisible({ timeout: 30_000 });
+
+      // Every frame: the top bar and the code shown, the code where it was (its last-commit bar kept while the new one is read).
+      const still = async (frames: () => Promise<Frame[]>) => {
+        const seen = await frames();
+
+        expect(seen.filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
+        expect([...new Set(seen.map((f) => f.top))]).toHaveLength(1);
+      };
 
       // A merge to main (through the API, as pando merge does) that changes the file on screen.
       await page.goto(`${project}/blob/src/colour.ts`);
@@ -267,7 +275,8 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
       expect(merged.status).toBe(200);
       await shown("steady");
-      expect((await frames()).filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
+      await page.waitForTimeout(2000);
+      await still(frames);
 
       // A push to the branch on screen.
       await page.goto(`${project}/blob/src/colour.ts?ref=files`);
@@ -275,7 +284,8 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       frames = await watchFrames(page);
       m.push(m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "fern") }, "Fern"), url, "files");
       await shown("fern");
-      expect((await frames()).filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
+      await page.waitForTimeout(2000);
+      await still(frames);
     });
 
     await test.step("a push to a branch replays no arrival on its unchanged check rows", async () => {

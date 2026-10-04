@@ -44,6 +44,9 @@ export function ChangeBar({ who, title, id, sha = false, at, history }: { who: s
   );
 }
 
+/** The bar's room while its commit is read, so the list or file under it does not move when it lands. */
+export const BarSpace = () => <div aria-hidden className="min-h-12 bg-loam" />;
+
 /** The bar for a version: its author, its path, "saved" or "deleted", when. */
 export const versionBar = (v: MetaVersion, title: string, history: AppLink) => (
   <ChangeBar who={saverOf(v)} title={title} id={v.deleted ? "deleted" : "saved"} at={v.at} history={history} />

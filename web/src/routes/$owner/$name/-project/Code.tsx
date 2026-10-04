@@ -9,10 +9,10 @@ import type { CommitLine, Repo } from "@pando/contract";
 import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Empty, lnk } from "../../../../ui/controls";
-import { useHeld } from "../../../../ui/held";
+import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
 import { Clone } from "../-code/Clone";
-import { ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
+import { BarSpace, ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 import { BranchPicker } from "./Picker";
 
@@ -98,8 +98,10 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
   const { monorepo } = useMonorepo();
   const full = monorepo.full;
   // Held while a moved ref's new commit is read (its README), so the folder stays on screen (ui/held.ts).
-  const tree = useHeld(`${repo.name}:${gitRef ?? ""}:${dir}`, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
-  const last = useQuery({ ...lastCommitsQuery(monorepo, repo.name, tree?.commit ?? "", dir), enabled: !!tree }).data;
+  const at = `${repo.name}:${gitRef ?? ""}:${dir}`;
+  const tree = useHeld(at, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
+  // The last answer for this ref and folder stays while a moved ref's is read (ui/held.ts).
+  const last = useLastAnswer(at, useQuery({ ...lastCommitsQuery(monorepo, repo.name, tree?.commit ?? "", dir), enabled: !!tree }).data);
   const here = dir ? `${repo.path === "." ? monorepo.name : repo.path} / ${dir.split("/").join(" / ")}` : undefined;
   const toolbar = <Toolbar repo={repo} gitRef={gitRef} at={(ref) => codeLink(full, repo.path, dir, ref)} here={here} />;
 
@@ -143,7 +145,13 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
         {toolbar}
         {isBranch(gitRef) ? <AheadLine repo={repo} gitRef={gitRef} /> : null}
         <FileList
-          bar={newest ? <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha at={Date.parse(newest.at)} history={history} /> : null}
+          bar={
+            newest ? (
+              <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha at={Date.parse(newest.at)} history={history} />
+            ) : last?.complete ? null : (
+              <BarSpace />
+            )
+          }
           rows={rows}
         />
         {readme ? <CodeReadme repo={repo} commit={tree.commit} path={join(dir, readme)} gitRef={gitRef} /> : null}

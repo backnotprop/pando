@@ -6,7 +6,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { issueListQuery, labelsQuery, type ListFilters, listKey, openCountQuery } from "../../../../api/issues";
 import type { IssueRow } from "@pando/contract";
 import { membersQuery, reposQuery } from "../../../../api/queries";
@@ -71,7 +71,7 @@ function FilterMenus({ f, go }: { f: ListFilters; go: (next: ListFilters) => voi
 
   return (
     <div className="ml-auto flex gap-1 phone:hidden">
-      <Picker label="Author" heading="Author" trigger={<>Author{caret}</>} triggerClass={filterButton} options={o.author} selected={f.author ? [f.author] : []} onDone={(v) => go({ ...f, author: one(v) === f.author ? null : one(v) })} />
+      <Picker label="Author" heading="Author" trigger={<>Author{caret}</>} triggerClass={filterButton} findAt={0} options={o.author} selected={f.author ? [f.author] : []} onDone={(v) => go({ ...f, author: one(v) === f.author ? null : one(v) })} />
       <Picker
         label="Label"
         heading="Labels"
@@ -84,13 +84,14 @@ function FilterMenus({ f, go }: { f: ListFilters; go: (next: ListFilters) => voi
         triggerClass={`${filterButton} ${f.labels.length ? "bg-pop-hi text-bark" : ""}`}
         options={o.label}
         selected={f.labels}
+        findAt={0}
         multi
         onDone={(labels) => go({ ...f, labels })}
       />
       {o.project.length ? (
         <Picker label="Project" heading="Project" trigger={<>Project{caret}</>} triggerClass={`${filterButton} ${f.project ? "bg-pop-hi text-bark" : ""}`} options={o.project} selected={f.project ? [f.project] : []} onDone={(v) => go({ ...f, project: one(v) === f.project ? null : one(v) })} />
       ) : null}
-      <Picker label="Assignee" heading="Assignee" trigger={<>Assignee{caret}</>} triggerClass={`${filterButton} ${f.assignee ? "bg-pop-hi text-bark" : ""}`} options={o.assignee} selected={f.assignee ? [f.assignee] : []} onDone={(v) => go({ ...f, assignee: one(v) === f.assignee ? null : one(v) })} />
+      <Picker label="Assignee" heading="Assignee" trigger={<>Assignee{caret}</>} triggerClass={`${filterButton} ${f.assignee ? "bg-pop-hi text-bark" : ""}`} findAt={0} options={o.assignee} selected={f.assignee ? [f.assignee] : []} onDone={(v) => go({ ...f, assignee: one(v) === f.assignee ? null : one(v) })} />
       <Picker
         label="Sort"
         heading="Sort"
@@ -143,7 +144,7 @@ function PhoneFilters({ f, go }: { f: ListFilters; go: (next: ListFilters) => vo
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger className={`${filterButton} ml-auto hidden phone:inline-flex`}>
+      <Popover.Trigger className={`${filterButton.replace("inline-flex ", "")} ml-auto hidden phone:inline-flex`}>
         Filters
         <Caret />
       </Popover.Trigger>
@@ -244,6 +245,9 @@ export function IssuesList({ search }: { search: IssuesSearch }) {
   const navigate = useNavigate();
   const f = filtersOf(search);
   const [q, setQ] = useState(f.q);
+
+  // The box follows the address (Back, a link with its own search).
+  useEffect(() => setQ(f.q), [f.q]);
   const full = monorepo.full;
 
   const live = useRows(monorepo, ["issues"], () => {

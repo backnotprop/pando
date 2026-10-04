@@ -58,7 +58,7 @@ export function Editor({
               onSubmit();
             }
           }}
-          className={`block w-full resize-y bg-transparent px-[18px] py-3.5 text-[14.5px] leading-[23px] text-bark placeholder:text-ash focus:outline-none ${tall ? "min-h-[280px]" : "min-h-[110px]"}`}
+          className={`block w-full resize-none bg-transparent [field-sizing:content] px-[18px] py-3.5 text-[14.5px] leading-[23px] text-bark placeholder:text-ash focus:outline-none ${tall ? "min-h-[280px]" : "min-h-[110px]"}`}
         />
       )}
       {footer ? <div className="flex items-center justify-end gap-2.5 px-3 pb-3 phone:flex-wrap">{footer}</div> : null}

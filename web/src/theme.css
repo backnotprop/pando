@@ -396,8 +396,8 @@ html[data-theme="cloudflare-light"] {
   --label-pink: oklch(var(--lb-l) var(--lb-c) 315);
 }
 html[data-theme$="-light"] {
-  --lb-l: 0.58;
-  --lb-c: 0.13;
+  --lb-l: 0.67;
+  --lb-c: 0.14;
 }
 /* Plannotator's and Iris' Foxfire is violet (about 280): purple and pink step away from it. */
 html[data-theme^="plannotator-"],

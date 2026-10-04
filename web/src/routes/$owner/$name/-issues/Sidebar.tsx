@@ -87,7 +87,7 @@ export function FactSections({ facts, onChange }: { facts: Facts; onChange: (cha
       <Section
         title="Assignees"
         picker={(t) => (
-          <Picker label="Assignees" heading="Assign up to 10 people" trigger={t} triggerClass={heading} options={people} selected={facts.assignees} multi onDone={(next) => onChange({ assignees: diff(facts.assignees, next) })} />
+          <Picker label="Assignees" heading="Assign up to 10 people" trigger={t} triggerClass={heading} findAt={0} options={people} selected={facts.assignees} multi onDone={(next) => onChange({ assignees: diff(facts.assignees, next) })} />
         )}
       >
         {facts.assignees.length ? (
@@ -113,7 +113,7 @@ export function FactSections({ facts, onChange }: { facts: Facts; onChange: (cha
       </Section>
       <Section
         title="Labels"
-        picker={(t) => <Picker label="Labels" heading="Labels" trigger={t} triggerClass={heading} options={labelOptions} selected={names} multi onDone={(next) => onChange({ labels: diff(names, next) })} />}
+        picker={(t) => <Picker label="Labels" heading="Labels" trigger={t} triggerClass={heading} findAt={0} options={labelOptions} selected={names} multi onDone={(next) => onChange({ labels: diff(names, next) })} />}
       >
         {facts.labels.length ? (
           <span className="flex flex-wrap gap-1.5">

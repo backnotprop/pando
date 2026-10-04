@@ -1,6 +1,6 @@
-// GitHub's eight reactions (owner ruling), under a body or a comment: a
-// quiet face that opens the eight, then each reaction given with its count.
-// Yours is outlined; pressing it takes it back. Each name shows who on hover.
+// GitHub's eight reactions (owner ruling) on a body or a comment: a quiet
+// face in its header opens the eight; under the text, each reaction given with
+// its count. Yours is outlined; pressing it takes it back. Hover names who.
 import { Popover } from "@base-ui/react/popover";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -27,67 +27,92 @@ const who = (r: ReactionGroup, me: string | null) => {
   return names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
 };
 
-/** `comment` null: the issue's body. `onChange` takes the reactions as the server answered them. */
-export function Reactions({ n, comment, reactions, onChange }: { n: number; comment: string | null; reactions: readonly ReactionGroup[]; onChange: (next: readonly ReactionGroup[]) => void }) {
+export interface Reacting {
+  given: readonly ReactionGroup[];
+  me: string | null;
+  mine: (c: ReactionContent) => boolean;
+  press: (c: ReactionContent) => void;
+  pending: boolean;
+}
+
+/** A body's or a comment's reactions and how to toggle yours. `comment` null: the issue's body. `onChange` takes the reactions as the server answered them. */
+export function useReactions(n: number, comment: string | null, reactions: readonly ReactionGroup[], onChange: (next: readonly ReactionGroup[]) => void): Reacting {
   const { monorepo } = useMonorepo();
   const me = useMe();
-  const [open, setOpen] = useState(false);
 
   const toggle = useMutation({
     mutationFn: ({ content, on }: { content: ReactionContent; on: boolean }) => react(monorepo, n, comment, content, on),
     onSuccess: onChange,
   });
 
-  const given = ReactionContent.literals.flatMap((c) => reactions.filter((r) => r.content === c && r.count > 0));
   const mine = (c: ReactionContent) => !!me && reactions.some((r) => r.content === c && r.by.includes(me));
 
-  const press = (content: ReactionContent) => {
-    setOpen(false);
-    toggle.mutate({ content, on: !mine(content) });
+  return {
+    given: ReactionContent.literals.flatMap((c) => reactions.filter((r) => r.content === c && r.count > 0)),
+    me,
+    mine,
+    press: (content) => toggle.mutate({ content, on: !mine(content) }),
+    pending: toggle.isPending,
   };
+}
+
+/** The quiet face in a box's header that opens the eight. */
+export function AddReaction({ r }: { r: Reacting }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        aria-label="Add a reaction"
+        className="flex size-6 cursor-pointer items-center justify-center rounded-md text-ash hover:bg-pop-hi hover:text-bark data-popup-open:bg-pop-hi data-popup-open:text-bark"
+      >
+        <SmileIcon className="size-4" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner side="bottom" align="end" sideOffset={6} className="z-10">
+          <Popover.Popup className="flex gap-0.5 rounded-[10px] border border-rootline bg-pop p-1.5 shadow-pop outline-none">
+            {ReactionContent.literals.map((c) => (
+              <button
+                key={c}
+                type="button"
+                aria-label={EMOJI[c].name}
+                aria-pressed={r.mine(c)}
+                title={EMOJI[c].name}
+                className="flex size-8 cursor-pointer items-center justify-center rounded-md text-[16px] hover:bg-pop-hi aria-pressed:bg-pop-hi"
+                onClick={() => {
+                  setOpen(false);
+                  r.press(c);
+                }}
+              >
+                {EMOJI[c].glyph}
+              </button>
+            ))}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** Each reaction given, with its count, under the text; none, no row. */
+export function ReactionPills({ r }: { r: Reacting }) {
+  if (!r.given.length) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-5 pb-3.5 phone:px-3.5">
-      <Popover.Root open={open} onOpenChange={setOpen}>
-        <Popover.Trigger
-          aria-label="Add a reaction"
-          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full text-ash shadow-[inset_0_0_0_1px_var(--rule-soft)] hover:text-bark hover:shadow-[inset_0_0_0_1px_var(--rule-hi)] data-popup-open:text-bark"
-        >
-          <SmileIcon className="size-4" />
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Positioner side="top" align="start" sideOffset={6} className="z-10">
-            <Popover.Popup className="flex gap-0.5 rounded-[10px] border border-rootline bg-pop p-1.5 shadow-pop outline-none">
-              {ReactionContent.literals.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  aria-label={EMOJI[c].name}
-                  aria-pressed={mine(c)}
-                  title={EMOJI[c].name}
-                  className="flex size-8 cursor-pointer items-center justify-center rounded-md text-[16px] hover:bg-pop-hi aria-pressed:bg-pop-hi"
-                  onClick={() => press(c)}
-                >
-                  {EMOJI[c].glyph}
-                </button>
-              ))}
-            </Popover.Popup>
-          </Popover.Positioner>
-        </Popover.Portal>
-      </Popover.Root>
-      {given.map((r) => (
+      {r.given.map((g) => (
         <button
-          key={r.content}
+          key={g.content}
           type="button"
-          aria-label={`${EMOJI[r.content].name} ${r.count}`}
-          aria-pressed={mine(r.content)}
-          title={`${EMOJI[r.content].name}: ${who(r, me)}`}
-          disabled={toggle.isPending}
+          aria-label={`${EMOJI[g.content].name} ${g.count}`}
+          aria-pressed={r.mine(g.content)}
+          title={`${EMOJI[g.content].name}: ${who(g, r.me)}`}
+          disabled={r.pending}
           className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-[12.5px] text-bark-dim shadow-[inset_0_0_0_1px_var(--rule-soft)] hover:text-bark aria-pressed:bg-loam aria-pressed:text-bark aria-pressed:shadow-[inset_0_0_0_1px_var(--ash-half)]"
-          onClick={() => press(r.content)}
+          onClick={() => r.press(g.content)}
         >
-          <span className="text-[14px] leading-none">{EMOJI[r.content].glyph}</span>
-          {r.count}
+          <span className="text-[14px] leading-none">{EMOJI[g.content].glyph}</span>
+          {g.count}
         </button>
       ))}
     </div>

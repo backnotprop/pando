@@ -22,7 +22,7 @@ import { useMonorepo } from "../-frame/heads";
 import { Editor } from "./Editor";
 import { Markdown } from "./Markdown";
 import { LabelChip, useMe } from "./parts";
-import { Reactions } from "./Reactions";
+import { AddReaction, ReactionPills, useReactions } from "./Reactions";
 
 /** What a box holds: the issue's body, or a comment. */
 interface Said {
@@ -109,6 +109,7 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
     }
   };
 
+  const reacting = useReactions(n, said.id, said.reactions, setReactions);
   const mine = said.author === me;
   const canDelete = !isBody && (mine || info.role === "owner");
   const href = absolute(`/${monorepo.full}/issues/${n}${isBody ? "" : `#${anchor}`}`);
@@ -118,12 +119,13 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
       <header className="flex min-h-[42px] items-center gap-2.5 rounded-t-[10px] border-b border-rule-faint bg-loam px-3.5 py-2 text-[13.5px] text-ash">
         <Avatar name={said.author} size={20} />
         <span className="fox-cool font-semibold text-bark">{said.author}</span>
-        {said.machine ? <span className="phone:hidden">{said.machine}</span> : null}
+        {said.machine ? <span>{said.machine}</span> : null}
         <a href={`#${anchor}`} className="whitespace-nowrap hover:text-bark">
           {ago(said.at, clock)}
         </a>
-        <span className="ml-auto flex items-center gap-3">
+        <span className="ml-auto flex items-center gap-2">
           {isBody ? <span className="h-5 rounded-[5px] px-[7px] text-[11.5px] leading-5 text-bark-dim shadow-[inset_0_0_0_1px_var(--rule-hi)] phone:hidden">Author</span> : null}
+          <AddReaction r={reacting} />
           <Menu.Root>
             <Menu.Trigger aria-label={isBody ? "The issue's menu" : `${said.author}'s comment menu`} className="flex size-6 cursor-pointer items-center justify-center rounded-md text-ash hover:bg-pop-hi hover:text-bark data-popup-open:bg-pop-hi">
               <DotsIcon className="size-4" />
@@ -161,7 +163,7 @@ function Box({ n, said, isBody, arrival, onSaved }: { n: number; said: Said; isB
       {editing === null ? (
         <>
           <div className="px-5 pt-4 pb-1 phone:px-3.5">{said.body?.trim() ? <Markdown text={said.body} full={monorepo.full} /> : <p className="pb-3 text-[14px] text-ash italic">No description provided.</p>}</div>
-          <Reactions n={n} comment={said.id} reactions={said.reactions} onChange={setReactions} />
+          <ReactionPills r={reacting} />
         </>
       ) : (
         <div className="p-3">

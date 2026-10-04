@@ -222,7 +222,7 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
     });
 
     await test.step("filters and search keep to the address and survive a reload", async () => {
-      await page.getByRole("button", { name: "Label" }).click();
+      await page.getByRole("button", { name: "Label", exact: true }).click();
       await page.getByRole("group", { name: "Labels" }).getByRole("button", { name: /^question/ }).click();
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL(`${issues}?label=question`);

@@ -5,7 +5,7 @@ import { Popover } from "@base-ui/react/popover";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { react } from "../../../../api/issues";
-import { REACTIONS, type Reaction, type ReactionContent } from "../../../../api/pending";
+import { ReactionContent, type ReactionGroup } from "@pando/contract";
 import { SmileIcon } from "../../../../ui/IssueIcons";
 import { useMonorepo } from "../-frame/heads";
 import { useMe } from "./parts";
@@ -21,22 +21,24 @@ export const EMOJI: Record<ReactionContent, { glyph: string; name: string }> = {
   eyes: { glyph: "👀", name: "Eyes" },
 };
 
-const who = (r: Reaction, me: string | null) => {
+const who = (r: ReactionGroup, me: string | null) => {
   const names = r.by.map((l) => (l === me ? "you" : l));
 
   return names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
 };
 
 /** `comment` null: the issue's body. `onChange` takes the reactions as the server answered them. */
-export function Reactions({ n, comment, reactions, onChange }: { n: number; comment: string | null; reactions: readonly Reaction[]; onChange: (next: readonly Reaction[]) => void }) {
+export function Reactions({ n, comment, reactions, onChange }: { n: number; comment: string | null; reactions: readonly ReactionGroup[]; onChange: (next: readonly ReactionGroup[]) => void }) {
   const { monorepo } = useMonorepo();
   const me = useMe();
   const [open, setOpen] = useState(false);
+
   const toggle = useMutation({
     mutationFn: ({ content, on }: { content: ReactionContent; on: boolean }) => react(monorepo, n, comment, content, on),
     onSuccess: onChange,
   });
-  const given = REACTIONS.flatMap((c) => reactions.filter((r) => r.content === c && r.count > 0));
+
+  const given = ReactionContent.literals.flatMap((c) => reactions.filter((r) => r.content === c && r.count > 0));
   const mine = (c: ReactionContent) => !!me && reactions.some((r) => r.content === c && r.by.includes(me));
 
   const press = (content: ReactionContent) => {
@@ -56,7 +58,7 @@ export function Reactions({ n, comment, reactions, onChange }: { n: number; comm
         <Popover.Portal>
           <Popover.Positioner side="top" align="start" sideOffset={6} className="z-10">
             <Popover.Popup className="flex gap-0.5 rounded-[10px] border border-rootline bg-pop p-1.5 shadow-pop outline-none">
-              {REACTIONS.map((c) => (
+              {ReactionContent.literals.map((c) => (
                 <button
                   key={c}
                   type="button"

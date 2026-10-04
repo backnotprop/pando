@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, repoKey, reports } from "../api/projects";
-import { issueFrameOf } from "../api/pending";
 import { machinesQuery } from "../api/queries";
 import { applyIssueFrame, touchLinkedIssues } from "./issues";
 import { keepOpen } from "./socket";
@@ -142,6 +141,14 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     case "status":
       // The branches at that commit follow as branch.updated, with their checks and gate.
       break;
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened":
+    case "issue.updated":
+    case "label.updated":
+      applyIssueFrame(qc, m, f);
+      break;
   }
 }
 
@@ -167,17 +174,7 @@ export function useRows(m: MonorepoRef, topics: readonly string[], sync: () => v
       frame: (data) => {
         const frame = Option.getOrNull(decodeMonorepoEventFrame(data));
 
-        if (!frame) {
-          // Issues' frames, until the contract carries them (api/pending.ts).
-          const issue = issueFrameOf(data);
-
-          if (issue) {
-            seq = Math.max(seq ?? 0, issue.seq);
-            applyIssueFrame(qc, m, issue);
-          }
-
-          return;
-        }
+        if (!frame) return;
 
         switch (frame.type) {
           case "caught_up":

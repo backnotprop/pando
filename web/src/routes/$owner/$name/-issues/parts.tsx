@@ -4,7 +4,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
-import type { IssueFilters, IssueRow, Label } from "../../../../api/pending";
+import type { IssueRow, Label } from "@pando/contract";
+import type { ListFilters } from "../../../../api/issues";
 import { meQuery } from "../../../../api/queries";
 import { Avatar } from "../../../../ui/Avatar";
 import { type IssuesSearch, issuesLink } from "../../../../ui/paths";
@@ -15,6 +16,7 @@ export function LabelChip({ label, full }: { label: Label; full?: string }) {
   // SAFETY: React passes custom properties through style; CSSProperties has no index for "--" names.
   const style = { "--dot": `var(--label-${label.color})` } as CSSProperties;
   const chip = "inline-flex h-5 flex-none items-center gap-1.5 rounded-[10px] bg-loam pr-2 pl-[7px] align-[1px] text-[12px] leading-5 whitespace-nowrap text-bark-dim shadow-[inset_0_0_0_1px_var(--rule-soft)]";
+
   const inner = (
     <>
       <i aria-hidden="true" className="size-2 rounded-full bg-(--dot)" />
@@ -47,7 +49,7 @@ export const SORTS = [
 const list = (v: string | undefined) => (v ? v.split(",").filter(Boolean) : []);
 
 /** The filters the address asks for. Several labels are one comma-separated `label`. */
-export function filtersOf(s: IssuesSearch): IssueFilters {
+export function filtersOf(s: IssuesSearch): ListFilters {
   const sort = SORTS.find((x) => x.id === (s.sort ?? "")) ?? SORTS[0];
 
   return {
@@ -56,7 +58,6 @@ export function filtersOf(s: IssuesSearch): IssueFilters {
     assignee: s.assignee || null,
     author: s.author || null,
     project: s.project || null,
-    linked: null,
     q: s.q ?? "",
     sort: sort.sort,
     order: sort.order,
@@ -64,7 +65,7 @@ export function filtersOf(s: IssuesSearch): IssueFilters {
 }
 
 /** The address for filters: only the keys that are set. */
-export function searchOf(f: IssueFilters): IssuesSearch {
+export function searchOf(f: ListFilters): IssuesSearch {
   const out: IssuesSearch = {};
   const sort = SORTS.find((x) => x.sort === f.sort && x.order === f.order)?.id;
 

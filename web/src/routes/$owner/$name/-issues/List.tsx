@@ -7,8 +7,8 @@ import { Popover } from "@base-ui/react/popover";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { issueListQuery, labelsQuery, listKey, openCountQuery } from "../../../../api/issues";
-import type { IssueFilters, IssueRow } from "../../../../api/pending";
+import { issueListQuery, labelsQuery, type ListFilters, listKey, openCountQuery } from "../../../../api/issues";
+import type { IssueRow } from "@pando/contract";
 import { membersQuery, reposQuery } from "../../../../api/queries";
 import { issueArrival } from "../../../../live/issues";
 import { takeArrived } from "../../../../live/arrivals";
@@ -28,7 +28,7 @@ const filterButton =
   "inline-flex h-7 cursor-pointer items-center gap-[5px] rounded-md px-2 text-[13px] text-bark-dim hover:text-bark data-popup-open:bg-pop-hi data-popup-open:text-bark aria-[current=true]:bg-pop-hi aria-[current=true]:text-bark";
 
 /** The options every filter menu offers, from the monorepo's members, labels and projects. */
-function useOptions(f: IssueFilters) {
+function useOptions(f: ListFilters) {
   const { monorepo, info } = useMonorepo();
   const me = useMe();
   const members = useQuery(membersQuery(monorepo)).data ?? [];
@@ -63,7 +63,7 @@ function useOptions(f: IssueFilters) {
 }
 
 /** The filters, as menus on the bar. */
-function FilterMenus({ f, go }: { f: IssueFilters; go: (next: IssueFilters) => void }) {
+function FilterMenus({ f, go }: { f: ListFilters; go: (next: ListFilters) => void }) {
   const o = useOptions(f);
   const sort = SORTS.find((s) => s.sort === f.sort && s.order === f.order) ?? SORTS[0];
   const one = (v: readonly string[]) => v[0] ?? null;
@@ -114,16 +114,17 @@ function FilterMenus({ f, go }: { f: IssueFilters; go: (next: IssueFilters) => v
 }
 
 /** On a phone, one Filters menu with each filter's rows under its heading. */
-function PhoneFilters({ f, go }: { f: IssueFilters; go: (next: IssueFilters) => void }) {
+function PhoneFilters({ f, go }: { f: ListFilters; go: (next: ListFilters) => void }) {
   const o = useOptions(f);
   const [open, setOpen] = useState(false);
   const sort = SORTS.find((s) => s.sort === f.sort && s.order === f.order) ?? SORTS[0];
-  const pick = (next: IssueFilters) => {
+
+  const pick = (next: ListFilters) => {
     setOpen(false);
     go(next);
   };
 
-  const sections: { heading: string; options: readonly PickOption[]; on: (id: string) => boolean; choose: (id: string) => IssueFilters }[] = [
+  const sections: { heading: string; options: readonly PickOption[]; on: (id: string) => boolean; choose: (id: string) => ListFilters }[] = [
     { heading: "Author", options: o.author, on: (id) => f.author === id, choose: (id) => ({ ...f, author: f.author === id ? null : id }) },
     { heading: "Labels", options: o.label, on: (id) => f.labels.includes(id), choose: (id) => ({ ...f, labels: f.labels.includes(id) ? f.labels.filter((l) => l !== id) : [...f.labels, id] }) },
     { heading: "Project", options: o.project, on: (id) => f.project === id, choose: (id) => ({ ...f, project: f.project === id ? null : id }) },
@@ -149,9 +150,8 @@ function PhoneFilters({ f, go }: { f: IssueFilters; go: (next: IssueFilters) => 
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="end" sideOffset={6} className="z-10">
           <Popover.Popup className="max-h-[min(520px,var(--available-height))] w-[290px] overflow-y-auto rounded-[10px] border border-rootline bg-pop p-1.5 shadow-pop outline-none">
-            {sections
-              .filter((s) => s.options.length)
-              .map((s) => (
+            {sections.flatMap((s) =>
+              s.options.length ? [
                 <div key={s.heading} role="group" aria-label={s.heading}>
                   <div className="px-2.5 pt-2 pb-1.5 text-[12px] text-ash">{s.heading}</div>
                   {s.options.map((opt) => (
@@ -166,8 +166,9 @@ function PhoneFilters({ f, go }: { f: IssueFilters; go: (next: IssueFilters) => 
                       {opt.node ?? opt.text}
                     </button>
                   ))}
-                </div>
-              ))}
+                </div>,
+              ] : [],
+            )}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -253,7 +254,7 @@ export function IssuesList({ search }: { search: IssuesSearch }) {
   const list = useInfiniteQuery({ ...issueListQuery(monorepo, f), refetchInterval: fallback(live) });
   const rows = list.data?.pages.flatMap((p) => p.issues) ?? [];
   const counts = list.data?.pages[0]?.counts;
-  const go = (next: IssueFilters) => void navigate({ ...issuesLink(full, searchOf(next)), replace: false });
+  const go = (next: ListFilters) => void navigate({ ...issuesLink(full, searchOf(next)), replace: false });
   const filtered = f.labels.length || f.assignee || f.author || f.project || f.q;
 
   return (

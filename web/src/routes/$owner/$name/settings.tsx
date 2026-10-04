@@ -1,11 +1,12 @@
 // Settings, for owners: the name (Rename; the old name keeps leading here),
-// and Delete, which you type the full owner/name to enable (ruling).
+// the issue labels, and Delete, which you type the full owner/name to enable (ruling).
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { deleteMonorepo, rename } from "../../../api/actions";
 import { button, Empty, field, Refusal, SectionHead } from "../../../ui/controls";
 import { OwnHead, useMonorepo } from "./-frame/heads";
+import { LabelsSettings } from "./-issues/LabelsSettings";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
   component: Settings,
@@ -96,6 +97,7 @@ function Settings() {
         {info.role === "owner" ? (
           <>
             <Rename />
+            <LabelsSettings />
             <Delete />
           </>
         ) : (

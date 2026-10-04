@@ -24,6 +24,9 @@ import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$nam
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
 import { Route as OwnerNameCiIndexRouteImport } from './routes/$owner/$name/ci/index'
 import { Route as OwnerNameHistorySplatRouteImport } from './routes/$owner/$name/history/$'
+import { Route as OwnerNameIssuesIndexRouteImport } from './routes/$owner/$name/issues/index'
+import { Route as OwnerNameIssuesNumberRouteImport } from './routes/$owner/$name/issues/$number'
+import { Route as OwnerNameIssuesNewRouteImport } from './routes/$owner/$name/issues/new'
 import { Route as OwnerNameProjectsProjectRouteRouteImport } from './routes/$owner/$name/projects/$project/route'
 import { Route as OwnerNameTreeSplatRouteImport } from './routes/$owner/$name/tree/$'
 import { Route as OwnerNameCiPipelineIndexRouteImport } from './routes/$owner/$name/ci/$pipeline/index'
@@ -110,6 +113,21 @@ const OwnerNameHistorySplatRoute = OwnerNameHistorySplatRouteImport.update({
   path: '/history/$',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
+const OwnerNameIssuesIndexRoute = OwnerNameIssuesIndexRouteImport.update({
+  id: '/issues/',
+  path: '/issues/',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
+const OwnerNameIssuesNumberRoute = OwnerNameIssuesNumberRouteImport.update({
+  id: '/issues/$number',
+  path: '/issues/$number',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
+const OwnerNameIssuesNewRoute = OwnerNameIssuesNewRouteImport.update({
+  id: '/issues/new',
+  path: '/issues/new',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
 const OwnerNameProjectsProjectRouteRoute =
   OwnerNameProjectsProjectRouteRouteImport.update({
     id: '/projects/$project',
@@ -185,9 +203,12 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
+  '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
+  '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
+  '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
   '/$owner/$name/ci/$pipeline/$number': typeof OwnerNameCiPipelineNumberRoute
   '/$owner/$name/ci/$pipeline/': typeof OwnerNameCiPipelineIndexRoute
   '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
@@ -210,9 +231,12 @@ export interface FileRoutesByTo {
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
+  '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
+  '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
   '/$owner/$name/branches': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci': typeof OwnerNameCiIndexRoute
+  '/$owner/$name/issues': typeof OwnerNameIssuesIndexRoute
   '/$owner/$name/ci/$pipeline/$number': typeof OwnerNameCiPipelineNumberRoute
   '/$owner/$name/ci/$pipeline': typeof OwnerNameCiPipelineIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectIndexRoute
@@ -238,9 +262,12 @@ export interface FileRoutesById {
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
+  '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
+  '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
+  '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
   '/$owner/$name/ci/$pipeline/$number': typeof OwnerNameCiPipelineNumberRoute
   '/$owner/$name/ci/$pipeline/': typeof OwnerNameCiPipelineIndexRoute
   '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
@@ -267,9 +294,12 @@ export interface FileRouteTypes {
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
+    | '/$owner/$name/issues/$number'
+    | '/$owner/$name/issues/new'
     | '/$owner/$name/tree/$'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
+    | '/$owner/$name/issues/'
     | '/$owner/$name/ci/$pipeline/$number'
     | '/$owner/$name/ci/$pipeline/'
     | '/$owner/$name/projects/$project/'
@@ -292,9 +322,12 @@ export interface FileRouteTypes {
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
+    | '/$owner/$name/issues/$number'
+    | '/$owner/$name/issues/new'
     | '/$owner/$name/tree/$'
     | '/$owner/$name/branches'
     | '/$owner/$name/ci'
+    | '/$owner/$name/issues'
     | '/$owner/$name/ci/$pipeline/$number'
     | '/$owner/$name/ci/$pipeline'
     | '/$owner/$name/projects/$project'
@@ -319,9 +352,12 @@ export interface FileRouteTypes {
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
+    | '/$owner/$name/issues/$number'
+    | '/$owner/$name/issues/new'
     | '/$owner/$name/tree/$'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
+    | '/$owner/$name/issues/'
     | '/$owner/$name/ci/$pipeline/$number'
     | '/$owner/$name/ci/$pipeline/'
     | '/$owner/$name/projects/$project/'
@@ -447,6 +483,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameHistorySplatRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
+    '/$owner/$name/issues/': {
+      id: '/$owner/$name/issues/'
+      path: '/issues'
+      fullPath: '/$owner/$name/issues/'
+      preLoaderRoute: typeof OwnerNameIssuesIndexRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
+    '/$owner/$name/issues/$number': {
+      id: '/$owner/$name/issues/$number'
+      path: '/issues/$number'
+      fullPath: '/$owner/$name/issues/$number'
+      preLoaderRoute: typeof OwnerNameIssuesNumberRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
+    '/$owner/$name/issues/new': {
+      id: '/$owner/$name/issues/new'
+      path: '/issues/new'
+      fullPath: '/$owner/$name/issues/new'
+      preLoaderRoute: typeof OwnerNameIssuesNewRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
     '/$owner/$name/projects/$project': {
       id: '/$owner/$name/projects/$project'
       path: '/projects/$project'
@@ -559,9 +616,12 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameBlobSplatRoute: typeof OwnerNameBlobSplatRoute
   OwnerNameBranchesSplatRoute: typeof OwnerNameBranchesSplatRoute
   OwnerNameHistorySplatRoute: typeof OwnerNameHistorySplatRoute
+  OwnerNameIssuesNumberRoute: typeof OwnerNameIssuesNumberRoute
+  OwnerNameIssuesNewRoute: typeof OwnerNameIssuesNewRoute
   OwnerNameTreeSplatRoute: typeof OwnerNameTreeSplatRoute
   OwnerNameBranchesIndexRoute: typeof OwnerNameBranchesIndexRoute
   OwnerNameCiIndexRoute: typeof OwnerNameCiIndexRoute
+  OwnerNameIssuesIndexRoute: typeof OwnerNameIssuesIndexRoute
   OwnerNameCiPipelineNumberRoute: typeof OwnerNameCiPipelineNumberRoute
   OwnerNameCiPipelineIndexRoute: typeof OwnerNameCiPipelineIndexRoute
 }
@@ -577,9 +637,12 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameBlobSplatRoute: OwnerNameBlobSplatRoute,
   OwnerNameBranchesSplatRoute: OwnerNameBranchesSplatRoute,
   OwnerNameHistorySplatRoute: OwnerNameHistorySplatRoute,
+  OwnerNameIssuesNumberRoute: OwnerNameIssuesNumberRoute,
+  OwnerNameIssuesNewRoute: OwnerNameIssuesNewRoute,
   OwnerNameTreeSplatRoute: OwnerNameTreeSplatRoute,
   OwnerNameBranchesIndexRoute: OwnerNameBranchesIndexRoute,
   OwnerNameCiIndexRoute: OwnerNameCiIndexRoute,
+  OwnerNameIssuesIndexRoute: OwnerNameIssuesIndexRoute,
   OwnerNameCiPipelineNumberRoute: OwnerNameCiPipelineNumberRoute,
   OwnerNameCiPipelineIndexRoute: OwnerNameCiPipelineIndexRoute,
 }

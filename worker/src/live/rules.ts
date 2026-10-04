@@ -16,7 +16,8 @@ export type Refusal = {
     | "bad_path"
     | "bad_sha"
     | "missing_blob"
-    | "credentials";
+    | "credentials"
+    | "file_folder";
   status: number;
   message: string;
 };

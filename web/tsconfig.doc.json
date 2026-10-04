@@ -1,4 +1,5 @@
-// The one module that imports @plannotator/ui (src/ui/doc/PlannotatorDoc.tsx).
+// The two modules that import @plannotator/ui (src/ui/doc/PlannotatorDoc.tsx
+// and src/ui/doc/PlannotatorTree.tsx).
 // The package ships TypeScript sources, which TypeScript checks under the
 // importing project's options; they are written without
 // noUncheckedIndexedAccess, so this check leaves it off. Everything else in
@@ -6,6 +7,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "noUncheckedIndexedAccess": false },
-  "include": ["src/ui/doc/PlannotatorDoc.tsx"],
+  "include": ["src/ui/doc/PlannotatorDoc.tsx", "src/ui/doc/PlannotatorTree.tsx"],
   "exclude": []
 }

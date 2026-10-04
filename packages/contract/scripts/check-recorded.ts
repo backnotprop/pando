@@ -57,6 +57,13 @@ import {
   MonorepoRenamed,
   Hook,
   MonorepoEventFrame,
+  Issue,
+  IssueComment,
+  IssueList,
+  Label,
+  LabelList,
+  ReactionsAnswer,
+  Timeline,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -118,6 +125,13 @@ const decoders = {
   MergeResult: refuses(MergeResult),
   Restored: refuses(Restored),
   SignedOut: refuses(SignedOut),
+  Issue: refuses(Issue),
+  IssueComment: refuses(IssueComment),
+  IssueList: refuses(IssueList),
+  Label: refuses(Label),
+  LabelList: refuses(LabelList),
+  ReactionsAnswer: refuses(ReactionsAnswer),
+  Timeline: refuses(Timeline),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

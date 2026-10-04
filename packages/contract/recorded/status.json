@@ -3,7 +3,7 @@
   "route": "GET .../repos/{repo}/commits/{ref}/status",
   "status": 200,
   "body": {
-    "sha": "fc944df20a32dbbb3d5d73eebe2cd8d1253ebce8",
+    "sha": "4df471f0a8e51038aab60e7e9010161444c6c53b",
     "state": "success",
     "required": [
       "ci/test"
@@ -11,24 +11,24 @@
     "missing": [],
     "statuses": [
       {
-        "sha": "fc944df20a32dbbb3d5d73eebe2cd8d1253ebce8",
+        "sha": "4df471f0a8e51038aab60e7e9010161444c6c53b",
         "context": "ci/test",
         "state": "success",
         "target_url": "https://ci.example/builds/1",
         "description": null,
-        "creator": "rec-mutbj3ey",
+        "creator": "rec-mutuzslr",
         "app": null,
-        "created_at": "2026-10-04T04:26:16.083Z"
+        "created_at": "2026-10-04T13:31:11.447Z"
       },
       {
-        "sha": "fc944df20a32dbbb3d5d73eebe2cd8d1253ebce8",
+        "sha": "4df471f0a8e51038aab60e7e9010161444c6c53b",
         "context": "lint",
         "state": "success",
         "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
         "description": "#1 passed in 8 s",
         "creator": "app:buildkite",
         "app": "buildkite",
-        "created_at": "2026-10-04T04:26:16.426Z"
+        "created_at": "2026-10-04T13:31:12.072Z"
       }
     ],
     "checks_unknown": null

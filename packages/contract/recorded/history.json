@@ -7,39 +7,39 @@
     "path": "",
     "commits": [
       {
-        "sha": "816826bdbfc9bbbb05733d03ca1cb93b74c9ba0a",
+        "sha": "fbaab58aa4cc1e4c6a2eae45424785611b6ca09f",
         "title": "Merge branch 'feat/ready'",
         "author": {
           "name": "Ana Lima",
-          "email": "rec-mutbj3ey@users.pando.invalid"
+          "email": "rec-mutuzslr@users.pando.invalid"
         },
-        "at": "2026-10-04T04:26:22.000Z",
+        "at": "2026-10-04T13:31:18.000Z",
         "merged_branch": {
           "branch": "feat/ready",
           "title": null
         }
       },
       {
-        "sha": "4cf73c247ad875a8e043c6c1225c115a243ad088",
+        "sha": "f0b6886ddb0bffe091a2d0200cb83fd0f903f7b9",
         "title": "Merge branch 'feat/merge-me'",
         "author": {
           "name": "Ana Lima",
-          "email": "rec-mutbj3ey@users.pando.invalid"
+          "email": "rec-mutuzslr@users.pando.invalid"
         },
-        "at": "2026-10-04T04:26:16.000Z",
+        "at": "2026-10-04T13:31:12.000Z",
         "merged_branch": {
           "branch": "feat/merge-me",
           "title": null
         }
       },
       {
-        "sha": "6dda8029c1bdf13989eb26cd34a1c58493fe0866",
+        "sha": "c6a914b4318733382b9ad43250ee5c051e65b0b0",
         "title": "First commit",
         "author": {
           "name": "Ana Lima",
           "email": "ana@pando.invalid"
         },
-        "at": "2026-10-04T04:26:13.000Z",
+        "at": "2026-10-04T13:31:05.000Z",
         "merged_branch": null
       }
     ],

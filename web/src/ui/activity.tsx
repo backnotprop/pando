@@ -50,8 +50,12 @@ export function describe(e: FeedEvent): Sentence {
       return { ...base, verb: "opened", detail: e.summary?.head_title ?? null };
     case "branch.deleted":
       return { ...base, verb: "deleted", object: branch && { text: branch.text, link: null } };
-    case "merged":
-      return { ...base, verb: "merged", tail: "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+    case "merged": {
+      const closes = e.summary?.closes ?? [];
+
+      return { ...base, verb: "merged", tail: closes.length ? `into main, closing ${closes.map((n) => `#${n}`).join(", ")}` : "into main", detail: e.summary?.merge_commit?.slice(0, 7) ?? null };
+    }
+
     case "review":
       return { ...base, verb: VERDICTS[e.summary?.verdict ?? "comment"] };
     case "status": {
@@ -89,6 +93,23 @@ export function describe(e: FeedEvent): Sentence {
         verb: deleted ? "deleted" : "saved",
         object: { text: path, link: deleted ? null : blobLink(e.monorepo, path), path: true },
         detail: e.summary?.version ? `version ${e.summary.version}` : null,
+      };
+    }
+
+    // Issues (the issues lane styles these): the number as the object, the title after it.
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened": {
+      const d = e.summary;
+      const verb = { "issue.opened": "opened", "issue.commented": "commented on", "issue.closed": "closed", "issue.reopened": "reopened" }[e.kind];
+
+      return {
+        ...base,
+        verb,
+        object: d ? { text: `#${d.number}`, link: null, path: true } : null,
+        tail: d ? `${d.title}${e.kind === "issue.closed" && d.reason === "not_planned" ? " as not planned" : ""}` : null,
+        detail: d?.excerpt ?? null,
       };
     }
   }

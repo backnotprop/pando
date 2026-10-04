@@ -280,7 +280,7 @@ async function receivePack(
   const stub = monorepoStub(env, monorepo);
   // Tests only: the refs compare after this push comes this soon (else REFS_CHECK_MS).
   const checkEveryMs = env.DOOR_TEST === "1" ? Number(req.headers.get("x-pando-test-refs-check-ms") ?? 0) || null : null;
-  const refused = await stub.checkPush(repo.name, section.commands, checkEveryMs);
+  const { refused, kept } = await stub.checkPush(repo.name, section.commands, checkEveryMs);
 
   if (refused.length) {
     await drain(section.rest);
@@ -510,6 +510,9 @@ async function receivePack(
       ctx.waitUntil(keepUnrecorded(stub, repo.name, identity, accepted, origin, env.DOOR_TEST === "1" && req.headers.get("x-pando-test-keep-fail") === "1"));
     }
   }
+
+  // Pushes kept earlier (a record that failed, an answer lost) are repaired now, not at the next compare.
+  if (kept) ctx.waitUntil(runReconcile(env, stub, repo).catch((err) => console.error(`reconciling ${repo.name} on a push failed: ${err instanceof Error ? err.message : String(err)}`)));
 
   return answer;
 }

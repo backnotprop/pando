@@ -22,6 +22,8 @@ export * from "./repo.ts";
 
 export * from "./branch.ts";
 
+export * from "./issue.ts";
+
 export * from "./ci.ts";
 
 export * from "./files.ts";

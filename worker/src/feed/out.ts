@@ -636,8 +636,16 @@ export class FeedOut {
         branch = this.row<{ name: string }>(
           "SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1", repo, sha,
         )?.name ?? this.row<{ name: string }>("SELECT default_branch AS name FROM repos WHERE name = ? AND default_head = ?", repo, sha)?.name ?? null;
+
+        // The build Pando holds for it (a CI integration's status), so the web opens Pando's build page, as the branch page does.
+        const build = this.row<{ pipeline: string; number: number }>(
+          `SELECT b.pipeline, b.number FROM ci_builds b JOIN ci_jobs j ON j.build_id = b.id
+           WHERE b.repo = ? AND b.sha = ? AND j.step_key = ? ORDER BY b.number DESC LIMIT 1`,
+          repo, sha, context,
+        ) ?? null;
+
         // app: the CI service that reported it (null: a member posted it, and `actor` is that member).
-        line = { kind, summary: { context, state, description: textOf(row.description), target_url: textOf(row.target_url), sha, duration_s: duration, app: textOf(row.app) } };
+        line = { kind, summary: { context, state, description: textOf(row.description), target_url: textOf(row.target_url), sha, duration_s: duration, app: textOf(row.app), build } };
         break;
       }
 
@@ -890,7 +898,8 @@ export class FeedOut {
 
     return {
       last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts,
-      members: this.memberCount(), large: this.isLarge(), repos, open_branches: open, assigned: assignedByLogin(this.sql), at: now(),
+      members: this.memberCount(), large: this.isLarge(), repos, open_branches: open, assigned: assignedByLogin(this.sql),
+      open_issues: this.row<{ n: number }>("SELECT COUNT(*) AS n FROM issues WHERE state = 'open'")!.n, at: now(),
     };
   }
 

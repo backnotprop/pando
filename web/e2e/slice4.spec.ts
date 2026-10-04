@@ -159,8 +159,9 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       const needs = page.getByRole("link", { name: /1 issue assigned to you/ });
 
       await expect(needs).toBeVisible();
-      await expect(needs).toContainText("#1 Login fails after token refresh");
-      await needs.click();
+      // The row's link lies under it; the newest issue is a link of its own on top (links R), so the text is the row's.
+      await expect(page.getByRole("listitem").filter({ has: needs })).toContainText("#1 Login fails after token refresh");
+      await needs.click({ position: { x: 12, y: 12 } });
       await expect(page).toHaveURL(/\/issues\?assignee=(@|%40)me$/);
       await expect(page.getByRole("list", { name: "Issues" }).getByRole("link", { name: "Login fails after token refresh" })).toBeVisible();
     });
@@ -257,12 +258,41 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       await page.keyboard.press("Escape");
     });
 
-    await test.step("the activity log: an opened line and a merge closing #1", async () => {
+    await test.step("the activity log: an opened line and a merge closing #1, whose #1 opens the issue; a person's name opens their page", async () => {
       await page.goto(`${BASE}/${full}/activity`);
       const log = page.getByTestId("activity");
 
       await expect(log.getByText(/merged\s*fix-login\s*into main, closing #1/).first()).toBeVisible();
-      await expect(log.getByRole("link", { name: "#2", exact: true })).toBeVisible();
+      // An issue reference is named with its state (links R: it carries its open or closed mark).
+      await expect(log.getByRole("link", { name: /^#2, / }).first()).toBeVisible();
+      await log.getByRole("listitem").filter({ hasText: /closing/ }).first().getByRole("link", { name: "#1, closed", exact: true }).click();
+      await expect(page).toHaveURL(`${issues}/1`);
+      await page.getByRole("region", { name: "Timeline" }).getByRole("link", { name: login, exact: true }).first().click();
+      await expect(page).toHaveURL(`${BASE}/${login}`);
+    });
+
+    await test.step("on a phone: the line's object is a link at rest, in the Link colour and underlined (no pointer to find it)", async () => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${BASE}/${full}/activity`);
+      const branch = page.getByTestId("activity").getByRole("link", { name: "fix-login", exact: true }).first();
+
+      await expect(branch).toBeVisible();
+
+      const looks = await branch.evaluate((el) => {
+        const probe = document.createElement("span");
+
+        probe.style.color = "var(--link)";
+        document.body.append(probe);
+        const link = getComputedStyle(probe).color;
+
+        probe.remove();
+        const s = getComputedStyle(el);
+
+        return { color: s.color, link, underline: s.textDecorationLine };
+      });
+
+      expect(looks.color).toBe(looks.link);
+      expect(looks.underline).toContain("underline");
     });
 
     await test.step("on a phone: the list and the issue fit; Development comes before the timeline", async () => {

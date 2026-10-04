@@ -137,6 +137,8 @@ export interface StatusSummary {
   duration_s: number | null;
   /** The CI service that reported it; null when a member posted it. */
   app: string | null;
+  /** The build Pando holds for it (its page in the web); null when none. */
+  build: { pipeline: string; number: number } | null;
 }
 
 export interface WorktreeSummary {
@@ -204,6 +206,14 @@ export function statusStateOf(v: Json | undefined): StatusRecord["state"] | null
   return isText(v) && isOneOf(STATUS_STATES, v) ? v : null;
 }
 
+/** A status line's build (pipeline and number), as stored; null when it has none. */
+function buildOf(v: Json | undefined): StatusSummary["build"] {
+  const pipeline = isRecord(v) ? textOf(v.pipeline) : null;
+  const number = isRecord(v) ? wholeOf(v.number) : null;
+
+  return pipeline !== null && number !== null ? { pipeline, number } : null;
+}
+
 /** A line's kind with its summary; null when the kind is not an activity kind. The summary is null when the JSON does not carry one. */
 export function lineOf(kind: string, v: Json | undefined): Line | null {
   const r = isRecord(v) ? v : null;
@@ -225,7 +235,7 @@ export function lineOf(kind: string, v: Json | undefined): Line | null {
 
       if (!r || context === null || state === null || sha === null) return { kind, summary: null };
 
-      return { kind, summary: { context, state, description: textOf(r.description), target_url: textOf(r.target_url), sha, duration_s: wholeOf(r.duration_s), app: textOf(r.app) } };
+      return { kind, summary: { context, state, description: textOf(r.description), target_url: textOf(r.target_url), sha, duration_s: wholeOf(r.duration_s), app: textOf(r.app), build: buildOf(r.build) } };
     }
 
     case "worktree.reported":
@@ -283,6 +293,7 @@ export function summaryOf(v: Json | undefined): Summary | null {
     repos: wholeOf(v.repos) ?? 0,
     open_branches: wholeOf(v.open_branches) ?? 0,
     assigned: assignedOf(v.assigned),
+    open_issues: wholeOf(v.open_issues) ?? 0,
     at,
   };
 }
@@ -420,6 +431,8 @@ export interface Summary {
   open_branches: number;
   /** Open issues assigned to each member, by login (none: left out). */
   assigned: AssignedByLogin;
+  /** Its open issues. */
+  open_issues: number;
   /** When the monorepo object computed it. */
   at: string;
 }

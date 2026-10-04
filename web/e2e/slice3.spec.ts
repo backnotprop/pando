@@ -123,7 +123,8 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       machinesReads.from();
       made.socket = await m.follow(full, [`wt-${id}`]);
       await expect(row.getByText("connected", { exact: true })).toBeVisible({ timeout: 30_000 });
-      await expect(row.getByRole("link", { name: "feature" })).toBeVisible();
+      // Its worktree, and what it did last, each name the branch, a link both times (links R: the line's object).
+      await expect(row.getByRole("link", { name: "feature" }).first()).toBeVisible();
       await expect(page.getByRole("navigation", { name: full }).getByRole("link", { name: /Machines/ })).toHaveText(/1$/);
     });
 
@@ -134,7 +135,8 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       m.push(m.commit("web", url, "feature", { "src/a.ts": "export const a = 1;\n" }, "Start a feature"), url, "feature");
       // A new branch's first push opens it.
       await expect(row.getByText("opened", { exact: true })).toBeVisible({ timeout: 30_000 });
-      await expect(row.locator("code", { hasText: "feature" })).toBeVisible();
+      // "opened feature": the branch is a link, as in the activity log (links R), beside its worktree's.
+      await expect(row.getByRole("link", { name: "feature" })).toHaveCount(2);
       made.socket?.close();
       made.socket = null;
       await expect(row.getByText("offline", { exact: true })).toBeVisible({ timeout: 30_000 });

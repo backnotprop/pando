@@ -293,6 +293,9 @@ export const renameMonorepo = (owner: Login, name: MonorepoName) => ({ method: "
  */
 export const transferMonorepo = renameMonorepo;
 
+/** PATCH {description}: a repository's one line (owners; at most 160 characters; empty or null clears it). */
+export const describeMonorepo = renameMonorepo;
+
 /** DELETE .../{monorepo}?confirm=owner/name (204): the monorepo, its repos and their history. */
 export const deleteMonorepo = (owner: Login, name: MonorepoName) =>
   ({ method: "DELETE", path: `${monorepoBase(owner, name)}?${new URLSearchParams({ confirm: `${owner}/${name}` })}` }) as const;

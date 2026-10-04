@@ -3,6 +3,7 @@
 // commit, and the folder's README. On a branch, a line says how far ahead of
 // main it is.
 import { type QueryClient, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
 import type { CommitLine, Repo } from "@pando/contract";
@@ -13,6 +14,7 @@ import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
 import { Clone } from "../-code/Clone";
 import { BarSpace, ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
+import { PathTrail } from "../-code/PathTrail";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 import { BranchPicker } from "./Picker";
 
@@ -62,7 +64,7 @@ function AheadLine({ repo, gitRef }: { repo: Repo; gitRef: string }) {
 }
 
 /** The picker, the open branches, and Clone (or, in a folder, where you are). */
-export function Toolbar({ repo, gitRef, at, here }: { repo: Repo; gitRef: string | null; at: Parameters<typeof BranchPicker>[0]["at"]; here?: string }) {
+export function Toolbar({ repo, gitRef, at, here }: { repo: Repo; gitRef: string | null; at: Parameters<typeof BranchPicker>[0]["at"]; here?: ReactNode }) {
   const { monorepo, info } = useMonorepo();
   const open = useQuery(openBranchesQuery(monorepo, repo.name)).data;
   const repos = useSuspenseQuery(reposQuery(monorepo)).data;
@@ -76,7 +78,7 @@ export function Toolbar({ repo, gitRef, at, here }: { repo: Repo; gitRef: string
         </Link>
       )}
       {here ? (
-        <span className="text-[13px] leading-[16px] text-ash">{here}</span>
+        here
       ) : (
         <span className="relative ml-auto">
           <Clone full={monorepo.full} repos={repos} plain={info.kind === "repo"} only={repo} />
@@ -104,7 +106,8 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
   const tree = useHeld(at, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
   // The last answer for this ref and folder stays while a moved ref's is read (ui/held.ts).
   const last = useLastAnswer(at, useQuery({ ...lastCommitsQuery(monorepo, repo.name, tree?.commit ?? "", dir), enabled: !!tree }).data);
-  const here = dir ? `${repo.path === "." ? monorepo.name : repo.path} / ${dir.split("/").join(" / ")}` : undefined;
+  // Where you are, each folder a link, as on a file's page (PathTrail).
+  const here = dir ? <PathTrail inline root={repo.path === "." ? monorepo.name : repo.path} folder={(d) => codeLink(full, repo.path, d, gitRef)} path={dir} /> : undefined;
   const toolbar = <Toolbar repo={repo} gitRef={gitRef} at={(ref) => codeLink(full, repo.path, dir, ref)} here={here} />;
 
   if (!tree) {

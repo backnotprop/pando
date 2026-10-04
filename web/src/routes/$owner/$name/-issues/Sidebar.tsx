@@ -13,7 +13,8 @@ import { Avatar } from "../../../../ui/Avatar";
 import { lnk } from "../../../../ui/controls";
 import { BranchIcon } from "../../../../ui/Icons";
 import { GearIcon, MergeIcon } from "../../../../ui/IssueIcons";
-import { branchLink } from "../../../../ui/paths";
+import { branchLink, ownerLink, repoLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { type PickOption, Picker } from "./Picker";
@@ -94,7 +95,9 @@ export function FactSections({ facts, onChange }: { facts: Facts; onChange: (cha
           facts.assignees.map((a) => (
             <span key={a} className="flex items-center gap-2">
               <Avatar name={a} size={20} />
-              {a}
+              <Ref kind="person" link={ownerLink(a)}>
+                {a}
+              </Ref>
             </span>
           ))
         ) : (
@@ -130,7 +133,13 @@ export function FactSections({ facts, onChange }: { facts: Facts; onChange: (cha
           title="Project"
           picker={(t) => <Picker label="Project" heading="Project" trigger={t} triggerClass={heading} options={projects} selected={[facts.project ?? ""]} onDone={([next = ""]) => onChange({ project: next || null })} />}
         >
-          {facts.projectPath ? <span>{facts.projectPath}</span> : <span className="text-[13px] text-ash">None</span>}
+          {facts.projectPath ? (
+            <Ref kind="object" link={repoLink(monorepo.full, facts.projectPath)}>
+              {facts.projectPath}
+            </Ref>
+          ) : (
+            <span className="text-[13px] text-ash">None</span>
+          )}
         </Section>
       ) : null}
     </>
@@ -163,9 +172,9 @@ function DevRow({ link }: { link: IssueLink }) {
         {link.branch_state === "deleted" ? (
           <code className="overflow-hidden text-[13px] text-ellipsis text-bark-dim">{link.branch}</code>
         ) : (
-          <Link {...branchLink(monorepo.full, link.repo_path, link.branch)} className="overflow-hidden font-mono text-[13px] text-ellipsis whitespace-nowrap text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
+          <Ref kind="object" link={branchLink(monorepo.full, link.repo_path, link.branch)} mono className="overflow-hidden text-ellipsis whitespace-nowrap">
             {link.branch}
-          </Link>
+          </Ref>
         )}
         <span className={`text-[12.5px] whitespace-nowrap ${word.tone}`}>{word.text}</span>
       </span>
@@ -233,9 +242,9 @@ export function IssueSidebar({ issue, onChange, onLinks }: { issue: Issue; onCha
       <Section title="Participants" wide>
         <span className="flex flex-wrap gap-1.5" aria-label="Participants">
           {issue.participants.map((p) => (
-            <span key={p} title={p}>
+            <Link key={p} {...ownerLink(p)} title={p} aria-label={p} className="rounded-full">
               <Avatar name={p} size={22} />
-            </span>
+            </Link>
           ))}
         </span>
       </Section>

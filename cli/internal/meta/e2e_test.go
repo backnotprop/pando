@@ -633,6 +633,52 @@ func TestE2EOfflineSavesGoOutOnReconnect(t *testing.T) {
 	t.Logf("after the network returned, ana's saves reached ben in %s", d.Round(time.Millisecond))
 }
 
+// The server accepts ana's save, but the answer is lost with the socket, and
+// ana edits the file again before she reconnects. The catch-up brings her own
+// version back: that is the lost answer, not a conflict, and her newer edit
+// goes out on top of it (CODE-VS-MODEL M3).
+func TestE2EOwnSaveAfterLostAnswer(t *testing.T) {
+	env := newEnv(t)
+	p := newProxy(t, env.server)
+	a := env.machineAt(t, "ana", p.url())
+	b := env.machine(t, "ben")
+	ctx := context.Background()
+	a.write("warm.md", "online\n")
+	waitContent(t, b, "warm.md", "online\n")
+
+	p.drop() // from here the server's answers to ana are lost
+	a.write("x.md", "first\n")
+	waitContent(t, b, "x.md", "first\n") // accepted on the server
+	p.cut()
+	time.Sleep(300 * time.Millisecond) // ana is offline; her save is back in the outbox
+	a.write("x.md", "second\n")
+	time.Sleep(500 * time.Millisecond) // her watcher sees the edit
+	p.restore()
+
+	waitFor(t, "ana's second edit on ben, or a conflict copy on ana", func() bool {
+		got, _ := b.read("x.md")
+		return got == "second\n" || len(a.conflictCopies("x.md")) > 0
+	})
+	time.Sleep(500 * time.Millisecond)
+	if copies := a.conflictCopies("x.md"); len(copies) != 0 {
+		kept, _ := os.ReadFile(copies[0])
+		t.Errorf("a conflict copy on ana, holding %q", kept)
+	}
+	if frozen, _ := ListFrozen(a.root); len(frozen) != 0 {
+		t.Errorf("frozen on ana: %+v", frozen)
+	}
+	if got, _ := a.read("x.md"); got != "second\n" {
+		t.Errorf("ana's x.md reads %q, want her newest edit", got)
+	}
+	if got, _ := b.read("x.md"); got != "second\n" {
+		t.Errorf("ben's x.md reads %q, want ana's newest edit", got)
+	}
+	h, err := env.client().History(ctx, env.p("x.md"), 10)
+	if err != nil || len(h.Versions) != 2 || h.Versions[0].Machine != "ana" || h.Versions[1].Machine != "ana" {
+		t.Errorf("x.md's history: %+v %v, want two versions by ana", h, err)
+	}
+}
+
 func TestE2EHistoryAndRestore(t *testing.T) {
 	env := newEnv(t)
 	a := env.machine(t, "ana")
@@ -976,13 +1022,23 @@ func TestE2ESyncCommand(t *testing.T) {
 
 // ---- a TCP proxy that can be cut ----
 
+// The proxy can also stop the server's bytes on their way to the client:
+// drop loses them (an answer lost with a socket), hold keeps them until
+// release (an answer that comes late).
 type proxy struct {
-	t      *testing.T
-	ln     net.Listener
-	target string
-	mu     sync.Mutex
-	down   bool
-	conns  []net.Conn
+	t        *testing.T
+	ln       net.Listener
+	target   string
+	mu       sync.Mutex
+	down     bool
+	conns    []net.Conn
+	toClient string // "" passes the server's bytes, "drop" loses them, "hold" keeps them
+	held     []heldBytes
+}
+
+type heldBytes struct {
+	c net.Conn
+	b []byte
 }
 
 func newProxy(t *testing.T, server string) *proxy {
@@ -1021,10 +1077,33 @@ func newProxy(t *testing.T, server string) *proxy {
 			p.conns = append(p.conns, c, up)
 			p.mu.Unlock()
 			go func() { io.Copy(up, c); up.Close() }()
-			go func() { io.Copy(c, up); c.Close() }()
+			go func() { p.toClientCopy(c, up); c.Close() }()
 		}
 	}()
 	return p
+}
+
+// toClientCopy copies the server's bytes to the client, unless they are
+// dropped or held. Writes happen under the lock, so release keeps the order.
+func (p *proxy) toClientCopy(c, up net.Conn) {
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := up.Read(buf)
+		if n > 0 {
+			p.mu.Lock()
+			switch p.toClient {
+			case "drop":
+			case "hold":
+				p.held = append(p.held, heldBytes{c, append([]byte(nil), buf[:n]...)})
+			default:
+				c.Write(buf[:n])
+			}
+			p.mu.Unlock()
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (p *proxy) url() string { return "http://" + p.ln.Addr().String() }
@@ -1036,13 +1115,37 @@ func (p *proxy) cut() {
 	for _, c := range p.conns {
 		c.Close()
 	}
-	p.conns = nil
+	p.conns, p.held, p.toClient = nil, nil, ""
 }
 
 func (p *proxy) restore() {
 	p.mu.Lock()
 	p.down = false
 	p.mu.Unlock()
+}
+
+// drop loses everything the server sends from now on, until cut.
+func (p *proxy) drop() {
+	p.mu.Lock()
+	p.toClient = "drop"
+	p.mu.Unlock()
+}
+
+// hold keeps everything the server sends from now on, until release.
+func (p *proxy) hold() {
+	p.mu.Lock()
+	p.toClient = "hold"
+	p.mu.Unlock()
+}
+
+// release sends what was held, in order, and lets the server's bytes through again.
+func (p *proxy) release() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, h := range p.held {
+		h.c.Write(h.b)
+	}
+	p.held, p.toClient = nil, ""
 }
 
 // ---- commits after quiet, on real Artifacts (run-e2e.sh --artifacts) ----

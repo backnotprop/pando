@@ -40,9 +40,14 @@ type Op struct {
 	ToBase int64  `json:"to_base,omitempty"`
 	SHA    string `json:"sha,omitempty"` // rename: the bytes moved
 
+	// What a save or delete last sent, kept with the outbox: an answer lost
+	// with a dropped socket is known by it when the change comes back in
+	// the catch-up (meta-sync.md, "A lost answer"). Empty: never sent.
+	SentSHA    string `json:"sent_sha,omitempty"`
+	SentDelete bool   `json:"sent_delete,omitempty"`
+
 	// In flight on the current connection (not saved).
 	id       string
-	sentSHA  string
 	sentOid  string
 	sentSize int64
 	sentMt   int64

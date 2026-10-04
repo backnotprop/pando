@@ -194,10 +194,15 @@ above:
 - **Offline.** Changes wait in the outbox (kept on disk) with their original
   base versions and go out when the socket returns. Reconnects back off: 5,
   10, 30, then every 60 seconds.
-- **A lost answer.** If a change arrives whose sha equals the local file's
-  bytes, the client adopts it as synced and drops its own queued change. This
-  covers an `accepted` lost to a dropped socket, and two machines making the
-  same edit.
+- **A lost answer.** The outbox keeps what each change last sent: its sha,
+  or that it was a delete. An `accepted` lost with a dropped socket comes
+  back in the catch-up as a `change` by this machine (`machine`) carrying
+  exactly that. The client then records the path as synced at that version,
+  and a newer local edit goes out on top of it: never a conflict against its
+  own save. A change whose sha equals the local file's bytes is adopted as
+  synced (two machines making the same edit); it drops a queued change that
+  was never sent, or whose own version it is, and keeps one still waiting
+  for its own answer.
 - **A lost race (409).** The client keeps its local bytes in
   `<name>.conflict-local-<UTC timestamp>.<ext>` beside the file (for example
   `HISTORY.conflict-local-20261003T104200Z.md`), writes the object's current

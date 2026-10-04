@@ -191,6 +191,16 @@ tags:
       for a held push, else `Pando: <repo> couldn't take this push right
       now; push again`, never a bare HTTP 500.
 
+      Push size. One push carries at most 64 MiB of receive-pack request
+      (67,108,864 bytes), Artifacts' limit. A push whose `Content-Length` is
+      over it is refused before anything goes to Artifacts; a streamed one is
+      cut off before its pack ends, so it cannot land. Either way git gets
+      `Pando: this push is over 64 MiB, the most one push can carry
+      (Artifacts' limit); nothing landed.`, how to push in steps (for a
+      first push of main: `pando init`, which pushes the history in steps on
+      `refs/pando/import` and `refs/pando/import-files`, then deletes them),
+      and every ref `over 64 MiB; push in steps`. Nothing is recorded.
+
       Raw files, GET or HEAD, beside the git door:
       `/{owner}/{monorepo}/projects/{project}/raw/{path}?ref=` for a
       monorepo's project (the repo at `projects/{project}`, named

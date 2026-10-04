@@ -73,7 +73,7 @@ function Commits({ commits }: { commits: readonly Commit[] }) {
             <span className="phone:col-span-2">
               <Authors c={c} />
             </span>
-            <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">{c.author.date ? since(c.author.date, clock) : ""}</span>
+            <span className="text-right text-[12.5px] whitespace-nowrap text-ash phone:hidden">{c.author.date ? since(c.author.date, clock) : ""}</span>
           </div>
         </li>
       ))}
@@ -101,7 +101,7 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
               <span className="text-bark-dim">{VERDICT[r.verdict]}</span>
               {r.body ? <span className="overflow-hidden text-[13px] text-ellipsis text-ash">{r.body}</span> : null}
             </span>
-            <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{since(r.created_at, clock)}</span>
+            <span className="text-[12.5px] whitespace-nowrap text-ash">{since(r.created_at, clock)}</span>
           </div>
         </li>
       ))}
@@ -147,7 +147,7 @@ function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch;
         // A monorepo's build has its page here; a plain repo's opens in the service.
         const page = run && info.kind === "monorepo" ? ciBuildLink(monorepo.full, run.build.pipeline, run.build.number) : null;
         const url = run?.job.web_url ?? s?.target_url ?? null;
-        const label = <code className="fox-cool text-bark">{name}</code>;
+        const label = <span className="fox-cool text-bark">{name}</span>;
 
         return (
           <li key={`${name}:${word}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px] ${arrived(name) ? "arrived" : ""}`}>
@@ -166,7 +166,7 @@ function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch;
               )}{" "}
               <span className={`fox-cool text-[13px] whitespace-nowrap ${toneOf(word)}`}>{word}</span>
             </span>
-            <span className="fox-cool font-mono text-[12.5px] whitespace-nowrap text-ash">{run ? elapsed(run.job, clock) : ""}</span>
+            <span className="fox-cool text-[12.5px] whitespace-nowrap text-ash">{run ? elapsed(run.job, clock) : ""}</span>
           </li>
         );
       })}
@@ -249,9 +249,9 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
         {paths.length ? (
           <p className={`${q} mt-1.5`}>
             {paths.map((p) => (
-              <code key={p} className="block text-[12.5px] text-bark">
+              <span key={p} className="block text-bark">
                 {p}
-              </code>
+              </span>
             ))}
           </p>
         ) : null}
@@ -326,7 +326,7 @@ function Worktree({ repo, branch }: { repo: Repo; branch: string }) {
       <SectionHead title="Worktree" />
       <div className="grid gap-2.5 text-[13px]">
         <span>
-          <code className="break-all text-bark">{w.path}</code>
+          <span className="break-all text-bark">{w.path}</span>
         </span>
         <span className="text-bark-dim">
           {w.reported_by} <span className="text-ash">on {w.machine}, {w.kind}</span>

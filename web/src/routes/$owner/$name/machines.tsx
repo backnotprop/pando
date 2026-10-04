@@ -33,7 +33,7 @@ const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px
 
 /** A worktree as a link to its branch: `cli` in the monorepo's own project (or its only one), `artifact-fs/mac-mount` in another. */
 function WorktreeLink({ w, full, home }: { w: MachineWorktree; full: string; home: string | null }) {
-  if (!w.repo || !w.branch) return <span className="font-mono text-[13px] text-ash">{w.path ?? w.id}</span>;
+  if (!w.repo || !w.branch) return <span className="text-[13px] text-ash">{w.path ?? w.id}</span>;
   const label = `${w.repo === home ? "" : `${w.repo.split("/").pop()}/`}${w.branch}`;
   const link = w.branch === "main" ? repoLink(full, w.repo) : branchLink(full, w.repo, w.branch);
 
@@ -55,7 +55,7 @@ function Last({ m, monorepo, id }: { m: Machine; monorepo: MonorepoRef; id: Feed
       {s.object ? (
         <>
           {" "}
-          <code className="text-[12.5px] text-bark">{s.object.text}</code>
+          {s.object.path ? <span className="text-bark">{s.object.text}</span> : <code className="text-[12.5px] text-bark">{s.object.text}</code>}
         </>
       ) : null}
       {s.tail ? ` ${s.tail}` : null}
@@ -95,7 +95,7 @@ function Machines() {
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Avatar name={m.login} size={22} />
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="overflow-hidden font-mono text-[13px] text-ellipsis whitespace-nowrap text-bark phone:whitespace-normal phone:[overflow-wrap:anywhere]">
+                      <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-bark phone:whitespace-normal phone:[overflow-wrap:anywhere]">
                         {m.name}
                       </span>
                       <span className="overflow-hidden text-[12.5px] text-ellipsis whitespace-nowrap text-ash">{m.login}</span>
@@ -114,7 +114,7 @@ function Machines() {
                     )}
                   </span>
                   <Last m={m} monorepo={monorepo} id={info.id} />
-                  <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{m.last_activity ? since(m.last_activity.at, clock) : ""}</span>
+                  <span className="text-right text-[12.5px] whitespace-nowrap text-ash">{m.last_activity ? since(m.last_activity.at, clock) : ""}</span>
                   <span className={`text-right text-[13px] ${m.connected ? "text-bark" : "text-ash"}`}>{m.connected ? "connected" : "offline"}</span>
                 </div>
               </li>

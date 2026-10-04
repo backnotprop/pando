@@ -58,7 +58,7 @@ export function NeedsList({ rows }: { rows: readonly NeedRow[] }) {
                 </p>
               </div>
               <div className="flex items-center gap-3.5">
-                <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{n.updated_at ? since(n.updated_at, clock) : ""}</span>
+                <span className="text-[12.5px] whitespace-nowrap text-ash">{n.updated_at ? since(n.updated_at, clock) : ""}</span>
                 <Chevron className="block size-3.5 -rotate-90 text-ash" />
               </div>
             </Link>

@@ -426,6 +426,37 @@ async function measure(page: Page, proto: Page, file: string, marks: readonly st
   writeFileSync(file, `${JSON.stringify(rows, null, 1)}\n`);
 }
 
+/**
+ * The page's rows and columns, into <name>-<width>-rows.json, so two builds can
+ * be compared (a font change must not move them): every list row (the app's
+ * rows are CSS grids, code lines aside) with its top, height and each cell's
+ * left edge, and the headings.
+ */
+async function rows(page: Page, file: string) {
+  const found = await page.evaluate(() => {
+    const r = (n: number) => Math.round(n * 10) / 10;
+
+    return [...document.querySelectorAll<HTMLElement>("body *")].flatMap((el) => {
+      const b = el.getBoundingClientRect();
+      const row = (getComputedStyle(el).display === "grid" && !el.closest("pre")) || /^H[1-3]$/.test(el.tagName);
+
+      if (!row || b.height === 0 || b.height >= 200) return [];
+
+      return [
+        {
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent ?? "").trim().slice(0, 40),
+          y: r(b.top + scrollY),
+          h: r(b.height),
+          cols: [...el.children].map((c) => r(c.getBoundingClientRect().left)),
+        },
+      ];
+    });
+  });
+
+  writeFileSync(file, `${JSON.stringify(found, null, 1)}\n`);
+}
+
 async function pair(
   page: Page,
   proto: Page,
@@ -445,6 +476,7 @@ async function pair(
 
   const width = page.viewportSize()?.width ?? 1440;
   await page.screenshot({ path: `${SHOTS}${name}-${width}-real.png` });
+  await rows(page, `${SHOTS}${name}-${width}-rows.json`);
   await proto.goto(`${PROTOTYPE}${opts.query ? `?${opts.query}` : ""}#${opts.proto ?? route}`);
   await settle(proto);
 
@@ -456,6 +488,53 @@ async function pair(
   await proto.screenshot({ path: `${SHOTS}${name}-${width}-proto.png` });
 
   if (opts.marks) await measure(page, proto, `${SHOTS}${name}-${width}-marks.json`, opts.marks);
+}
+
+/** Each theme of the name menu's setting, dark and light: the home and a code file (the app alone: the prototype has no Cloudflare or Pando light), and the menu open. */
+async function themes(page: Page) {
+  if (!wanted("theme-")) return;
+
+  for (const theme of ["pando", "plannotator", "iris", "cloudflare"]) {
+    for (const mode of ["dark", "light"]) {
+      for (const [name, route] of [
+        ["home", "/"],
+        ["code-file", "/ramos/pando/projects/pando/blob/worker/src/index.ts"],
+      ] as const) {
+        await page.goto(`${route}?theme=${theme}-${mode}`);
+        await settle(page);
+        await page.screenshot({ path: `${SHOTS}theme-${theme}-${mode}-${name}-1440-real.png` });
+      }
+    }
+  }
+
+  for (const pair of ["pando-dark", "cloudflare-light"]) {
+    await page.goto(`/?theme=${pair}`);
+    await settle(page);
+    await page.getByRole("button", { name: "ramos", exact: true }).click();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${SHOTS}theme-menu-${pair}-1440-real.png`, clip: { x: 1440 - 360, y: 0, width: 360, height: 480 } });
+    await page.keyboard.press("Escape");
+  }
+
+  await page.goto("/?theme=pando");
+}
+
+/** The home's What's new block, close, at both widths. */
+async function whatsNew(page: Page) {
+  if (!wanted("whatsnew-")) return;
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    await page.goto("/");
+    await settle(page);
+    const block = page.getByRole("link", { name: "Changelog" }).locator("xpath=..");
+    await block.scrollIntoViewIfNeeded();
+    const b = await block.boundingBox();
+
+    if (b) await page.screenshot({ path: `${SHOTS}whatsnew-${width}-real.png`, clip: { x: Math.max(0, b.x - 24), y: Math.max(0, b.y - 24), width: Math.min(width, b.width + 48), height: b.height + 48 } });
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 test.use({ deviceScaleFactor: 2, colorScheme: "dark", reducedMotion: "reduce" });
@@ -548,6 +627,10 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
 
     await proto.close();
   }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await themes(page);
+  await whatsNew(page);
 
   for (const ws of shown.sockets) ws.close();
 

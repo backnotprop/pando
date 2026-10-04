@@ -30,7 +30,7 @@ function Counts({ f }: { f: ChangedFile }) {
   if (f.additions === null || f.deletions === null || f.additions + f.deletions === 0) return null;
 
   return (
-    <span className="flex flex-none gap-2 font-mono text-[12.5px] leading-[15px]">
+    <span className="flex flex-none gap-2 text-[12.5px] leading-[15px]">
       <span className="text-[var(--diffs-token-inserted)]">+{f.additions.toLocaleString("en-US")}</span>
       <span className="text-[var(--diffs-token-deleted)]">−{f.deletions.toLocaleString("en-US")}</span>
     </span>
@@ -43,7 +43,7 @@ const breakable = (path: string) => path.split("/").map((part, i, all) => (i < a
 function Path({ f }: { f: ChangedFile }) {
   return (
     // On a phone a long path wraps after a folder, so its file name is never cut off.
-    <span className="min-w-0 flex-1 overflow-hidden font-mono text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-bark phone:whitespace-normal phone:[overflow-wrap:anywhere]">
+    <span className="min-w-0 flex-1 overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-bark phone:whitespace-normal phone:[overflow-wrap:anywhere]">
       {f.old_path ? <span className="text-ash">{breakable(f.old_path)} → </span> : null}
       {breakable(f.path)}
     </span>

@@ -33,20 +33,20 @@ export const serviceName = (service: string) => (service === "buildkite" ? "Buil
 /** The service's mark, where that service ran it (Buildkite only, for the contest). */
 export const ServiceMark = ({ service, height }: { service: string; height?: number }) => (service === "buildkite" ? <CheckMark height={height} /> : null);
 
-/** A build's facts in mono: #1285, its pipeline, branch and commit; `branch` replaces the branch's plain name (a link). */
+/** A build's facts: #1285 and its pipeline, then its branch and commit in mono; `branch` replaces the branch's plain name (a link). */
 export function BuildFacts({ b, branch }: { b: CiBuild; branch?: ReactNode }) {
   return (
     <>
       <b className="font-normal text-bark-dim">#{b.number}</b>
       <span>{b.pipeline}</span>
-      {branch ?? (b.branch ? <span>{b.branch}</span> : null)}
-      {b.sha ? <span>{b.sha.slice(0, 7)}</span> : null}
+      {branch ?? (b.branch ? <span className="font-mono">{b.branch}</span> : null)}
+      {b.sha ? <span className="font-mono">{b.sha.slice(0, 7)}</span> : null}
     </>
   );
 }
 
-/** One line of a build's facts, ash on mono, its size given where it is used; on a phone it wraps. */
-export const facts = "flex items-center gap-2.5 overflow-hidden font-mono whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal";
+/** One line of a build's facts, in ash, its size given where it is used; on a phone it wraps. */
+export const facts = "flex items-center gap-2.5 overflow-hidden whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal";
 
 const cols = "grid-cols-[72px_minmax(0,1fr)_140px_96px] phone:grid-cols-[64px_minmax(0,1fr)_auto]";
 
@@ -80,7 +80,7 @@ export function BuildList({ full, builds, label }: { full: string; builds: reado
                 </>
               ) : null}
             </span>
-            <span className="flex flex-col items-end gap-0.5 font-mono text-[12.5px] whitespace-nowrap text-ash">
+            <span className="flex flex-col items-end gap-0.5 text-[12.5px] whitespace-nowrap text-ash">
               <span>{b.created_at ? ago(b.created_at, clock) : ""}</span>
               <span>{elapsed(b, clock)}</span>
             </span>

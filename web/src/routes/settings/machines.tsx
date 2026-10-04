@@ -72,9 +72,9 @@ function YourMachines() {
               return (
                 <li key={c.id} className="border-t border-rule-faint">
                   <div className={`${row} ${cols}`}>
-                    <span className="overflow-hidden font-mono text-[13px] text-ellipsis whitespace-nowrap">{here ? "this browser" : c.name}</span>
+                    <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">{here ? "this browser" : c.name}</span>
                     <span className="text-bark-dim phone:hidden">{c.kind}</span>
-                    <span className="font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">
+                    <span className="text-[12.5px] whitespace-nowrap text-ash phone:hidden">
                       {used === null ? "never" : since(used, clock) === "now" ? "now" : ago(used, clock)}
                     </span>
                     <span className="text-right">{here ? <span className="text-ash">this session</span> : <Revoke id={c.id} />}</span>

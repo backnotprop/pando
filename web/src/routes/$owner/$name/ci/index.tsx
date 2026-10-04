@@ -59,9 +59,9 @@ function Service({ c, owner }: { c: CiConnection; owner: boolean }) {
       <div className="flex items-center gap-3.5 rounded-[10px] border border-rootline px-[18px] py-4 phone:flex-wrap phone:gap-y-2.5">
         {c.service === "buildkite" ? <img src={buildkiteMark} alt="" width={27} height={18} className="flex-none" /> : null}
         <span className="text-[15px] font-semibold">{name}</span>
-        <span className="font-mono text-[13px] leading-4 text-bark-dim">{c.organization}</span>
+        <span className="text-[13px] leading-4 text-bark-dim">{c.organization}</span>
         <span className="ml-auto flex items-center gap-4 phone:ml-0 phone:basis-full phone:flex-wrap phone:gap-y-2">
-          <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">connected {ago(c.created_at, clock)}</span>
+          <span className="text-[12.5px] whitespace-nowrap text-ash">connected {ago(c.created_at, clock)}</span>
           <a href={c.web_url} target="_blank" rel="noopener noreferrer" className={lnk}>
             Open in {name}
           </a>
@@ -75,7 +75,7 @@ function Service({ c, owner }: { c: CiConnection; owner: boolean }) {
           <code className="min-w-0 flex-1 overflow-hidden text-[12.5px] text-ellipsis whitespace-nowrap text-bark">{c.webhook_url}</code>
           <CopyButton text={c.webhook_url} className={copyInCmd} />
         </span>
-        <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{c.last_event ? `last event ${ago(c.last_event.at, clock)}` : "no event yet"}</span>
+        <span className="text-[12.5px] whitespace-nowrap text-ash">{c.last_event ? `last event ${ago(c.last_event.at, clock)}` : "no event yet"}</span>
       </div>
     </div>
   );
@@ -91,7 +91,7 @@ function Checks({ checks, ran, service }: { checks: readonly string[]; ran: Read
     <Fragment key={c}>
       {i ? <span className="text-ash">, </span> : null}
       {ran.has(c) ? <ServiceMark service={service} /> : null}
-      <code>{c}</code>
+      <span className="text-[13px]">{c}</span>
     </Fragment>
   ));
 }
@@ -104,16 +104,16 @@ function PipelineRow({ p, ran }: { p: CiPipeline; ran: ReadonlySet<string> }) {
 
   return (
     <div className={`${row} ${pipeCols}`}>
-      <code className="overflow-hidden text-ellipsis whitespace-nowrap">{p.repo_path ?? <span className="text-ash">none</span>}</code>
-      <code className="overflow-hidden text-ellipsis whitespace-nowrap phone:row-start-2">
+      <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">{p.repo_path ?? <span className="text-ash">none</span>}</span>
+      <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap phone:row-start-2">
         <Link {...ciPipelineLink(monorepo.full, p.slug)} className="hover:underline hover:decoration-ash hover:underline-offset-3">
           {p.slug}
         </Link>
-      </code>
+      </span>
       <span className="min-w-0 phone:hidden">
         <Checks checks={p.required_checks ?? []} ran={ran} service={p.service} />
       </span>
-      <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">
+      <span className="text-right text-[12.5px] whitespace-nowrap text-ash">
         {last ? (
           <>
             <BuildState state={last.state} /> {last.created_at ? since(last.created_at, clock) : ""}
@@ -137,7 +137,7 @@ function Pipelines() {
 
   return (
     <div className="mt-10">
-      <SectionHead title="Pipelines" right={<span className="font-mono text-[12.5px] text-ash">.pando/pando.toml</span>} />
+      <SectionHead title="Pipelines" right={<span className="text-[12.5px] text-ash">.pando/pando.toml</span>} />
       <div className={`${thead} ${pipeCols} phone:hidden`}>
         <span>Project</span>
         <span>Pipeline</span>
@@ -153,7 +153,7 @@ function Pipelines() {
         {without.map((r) => (
           <li key={r.repo} className="border-t border-rule-faint">
             <div className={`${row} ${pipeCols}`}>
-              <code className="overflow-hidden text-ellipsis whitespace-nowrap">{r.path}</code>
+              <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">{r.path}</span>
               <span className="text-ash phone:row-start-2">none</span>
               <span className="min-w-0 phone:hidden">
                 <Checks checks={r.checks ?? []} ran={new Set()} service="" />

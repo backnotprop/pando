@@ -89,13 +89,15 @@
 	/* Used only by the API reference (registry: api-layout); harmless elsewhere. */
 	--nb-code-rail-width: 34rem;
 
-	/* Typography: the web app's (web/src/theme.css). SF Pro Text only when the
-	   build copies it in (scripts/sf-fonts.ts); Ioskeley Mono in every build. */
+	/* Typography: the web app's (web/src/theme.css). SF Pro Text and SF Mono
+	   only when the build copies them in (scripts/sf-fonts.ts, which sets
+	   --mono-face); otherwise Ioskeley Mono, in every build. */
 	--nb-font-sans:
 		"SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI",
 		sans-serif;
 	--nb-font-mono:
-		"Ioskeley Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		var(--mono-face, "Ioskeley Mono"), ui-monospace, SFMono-Regular, Menlo,
+		Consolas, monospace;
 	--nb-h1-size: 2.1875rem;
 	--nb-h1-weight: 600;
 	--nb-h1-tracking: -0.025em;

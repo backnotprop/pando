@@ -72,8 +72,8 @@ function Side({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
                   className="-mx-2.5 grid min-h-10 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-air focus-visible:bg-air"
                 >
                   <RepoIcon className="block size-4 text-bark-dim" />
-                  <span className="font-mono text-[13px] leading-[16px] text-bark">{r.path}</span>
-                  <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{open[i] === undefined ? "" : `${open[i]} open`}</span>
+                  <span className="text-[13px] leading-[16px] text-bark">{r.path}</span>
+                  <span className="text-[12.5px] whitespace-nowrap text-ash">{open[i] === undefined ? "" : `${open[i]} open`}</span>
                 </Link>
               </li>
             ))}
@@ -101,7 +101,7 @@ function MiniNeeds({ rows }: { rows: readonly NeedRow[] }) {
               <span className="font-mono text-[12.5px] leading-[15px] text-bark">{n.branch}</span>
               <NeedState row={n} />
             </span>
-            <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{n.repo_path.split("/").pop()}</span>
+            <span className="text-[12.5px] whitespace-nowrap text-ash">{n.repo_path.split("/").pop()}</span>
           </Link>
         </li>
       ))}
@@ -144,7 +144,7 @@ function Root({ monorepo, repos, open }: { monorepo: MonorepoRef; repos: readonl
             </Lnk>
           ) : null}
           {total === null ? null : (
-            <span className="font-mono text-[13px] leading-[16px] text-ash">
+            <span className="text-[13px] leading-[16px] text-ash">
               {total} open branch{total === 1 ? "" : "es"}
             </span>
           )}

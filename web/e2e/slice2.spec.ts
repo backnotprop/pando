@@ -35,6 +35,9 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const PNG2 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 
 /** The distance between the first three rows' tops. */
+/** The face an element is set in: the first family of its computed stack. */
+const face = (el: Locator) => el.evaluate((e) => getComputedStyle(e).fontFamily.split(",")[0]?.replaceAll('"', "").trim());
+
 const pitch = (rows: Locator) => rows.evaluateAll((els) => els.slice(0, 3).map((e) => e.getBoundingClientRect().top)).then(([a = 0, b = 0, c = 0]) => [b - a, c - b]);
 
 interface Made {
@@ -218,6 +221,16 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(page).toHaveURL(`${project}/branches/feature`);
       await expect(page.getByRole("list", { name: "Commits" }).getByText("Two is better")).toBeVisible();
       await expect(page.getByText("and Claude")).toBeVisible();
+
+      // Mono only for code, commit ids and branch names (owner ruling, variant C): a time is SF Pro Text, with tabular figures.
+      const commit = page.getByRole("list", { name: "Commits" }).getByRole("listitem").first();
+      const time = commit.getByText(/^(now|\d+ (s|min|h|d|w))$/);
+      const mono = /^(SF Mono|Ioskeley Mono)$/;
+
+      expect(await face(commit.getByText(/^[0-9a-f]{7}$/))).toMatch(mono);
+      expect(await face(page.locator("main p code", { hasText: /^feature$/ }))).toMatch(mono);
+      expect(await face(time)).toBe("SF Pro Text");
+      expect(await time.evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toBe("tabular-nums");
     });
 
     await test.step("a failing check reported by Buildkite arrives live: its mark, and Merge anyway", async () => {

@@ -64,11 +64,11 @@ function PipelinePage() {
         <div className="mb-5 flex items-center justify-between gap-8 phone:flex-col phone:items-start phone:gap-4">
           <div className="min-w-0">
             <h2 className="text-[22px] leading-7 tracking-[-.018em]">
-              <span className="font-mono text-[20px]">{p.slug}</span>
+              <span className="text-[20px]">{p.slug}</span>
             </h2>
-            <p className="mt-1.5 flex items-center gap-2.5 overflow-hidden font-mono text-[13px] leading-4 whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal">
+            <p className="mt-1.5 flex items-center gap-2.5 overflow-hidden text-[13px] leading-4 whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal">
               {p.repo_path ? <span>{p.repo_path}</span> : null}
-              <span>{branch}</span>
+              <span className="font-mono">{branch}</span>
               {(p.required_checks ?? []).map((c) => (
                 <span key={c}>
                   {ran.has(c) ? <ServiceMark service={p.service} /> : null}
@@ -86,7 +86,7 @@ function PipelinePage() {
         </div>
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pb-2.5">
-            <span className="mr-auto font-mono text-[12.5px] leading-[15px] text-ash phone:basis-full">pipeline.yml</span>
+            <span className="mr-auto text-[12.5px] leading-[15px] text-ash phone:basis-full">pipeline.yml</span>
             {p.configuration === null ? null : <CopyButton text={p.configuration} className={tool} />}
           </div>
           {p.configuration === null ? (

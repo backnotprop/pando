@@ -69,11 +69,11 @@ function People({ owner }: { owner: boolean }) {
                 <Avatar name={m.login} size={28} />
                 <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
                   <span>{m.name ?? m.login}</span>
-                  <code className="text-ash">{m.login}</code>
+                  <span className="text-[13px] text-ash">{m.login}</span>
                 </span>
               </span>
               <span className="text-bark-dim">{m.role}</span>
-              <span className="font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">{lastSeen(m.last_active_at, clock)}</span>
+              <span className="text-[12.5px] whitespace-nowrap text-ash phone:hidden">{lastSeen(m.last_active_at, clock)}</span>
               <span className="text-right phone:hidden">{m.login === me.login ? <span className="text-ash">you</span> : owner ? <Remove member={m} /> : null}</span>
             </div>
           </li>
@@ -152,9 +152,9 @@ function Invited({ invites, owner }: { invites: readonly Invite[]; owner: boolea
         {invites.map((i) => (
           <li key={i.email} className="border-t border-rule-faint">
             <div className={`${row} ${cols}`}>
-              <code className="overflow-hidden text-ellipsis whitespace-nowrap">{i.email}</code>
+              <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">{i.email}</span>
               <span className="text-bark-dim">{i.role}</span>
-              <span className="font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">{ago(i.created_at, clock)}</span>
+              <span className="text-[12.5px] whitespace-nowrap text-ash phone:hidden">{ago(i.created_at, clock)}</span>
               <span className="text-right phone:hidden">{owner ? <RevokeInvite email={i.email} /> : null}</span>
             </div>
           </li>

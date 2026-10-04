@@ -4,10 +4,13 @@
    (research/design/pando-ui-2026-10-03/v3/prototype.html). Components use them
    through the Tailwind names below (bg-loam, text-bark-dim, border-rootline). */
 
-/* Monospace: Ioskeley Mono (SIL OFL 1.1; fonts/IoskeleyMono-OFL.txt), in every
-   build. Regular text: SF Pro Text, declared only when the build copies it in
-   (vite.config.ts, PANDO_SF_FONTS=1); otherwise the system's (owner ruling on
-   web app fonts, 2026-10-03). */
+/* Monospace: SF Mono while in development, declared only when the build
+   copies it in (vite.config.ts, PANDO_SF_FONTS=1, which sets --mono-face);
+   otherwise Ioskeley Mono (SIL OFL 1.1; fonts/IoskeleyMono-OFL.txt), which is
+   committed. Regular text: SF Pro Text by the same switch, else the system's.
+   Mono is only for code, commit ids and versions, commands you copy and branch
+   names (owner ruling on mono use, variant C); everything else is SF Pro Text,
+   with tabular figures for times and counts (body, below). */
 @font-face {
   font-family: "Ioskeley Mono";
   src: url("./fonts/IoskeleyMono-Regular.woff2") format("woff2");
@@ -57,9 +60,17 @@
   }
 }
 
-/* The three themes from the prototype's panel (Pando above; Plannotator and
-   Workspaces Iris, dark and light), values from
-   research/design/pando-2026-10-02/landing/THEMES-SOURCE-2026-10-03.md. */
+/* The themes of the name menu's setting (public/theme.js sets data-theme to
+   the pair shown). Pando's dark is :root above. Plannotator and Workspaces
+   Iris: research/design/pando-2026-10-02/landing/THEMES-SOURCE-2026-10-03.md.
+   Pando's light: its Daylight palette (research/design/pando-ui-2026-10-03/
+   mocks/SCREENS.md, "Visual rules"). Cloudflare: cloudflare-docs' colours
+   (MIT, NOTICE), mapped in research/design/pando-ui-2026-10-03/themes/
+   CLOUDFLARE-TOKENS.md: Foxfire is its cyan, Rust its danger red, clay its
+   orange. The rules, hovers and dim text mix from each theme's roles. */
+html[data-theme="pando-light"],
+html[data-theme="cloudflare-dark"],
+html[data-theme="cloudflare-light"],
 html[data-theme="plannotator-dark"],
 html[data-theme="plannotator-light"],
 html[data-theme="iris-dark"],
@@ -72,6 +83,55 @@ html[data-theme="iris-light"] {
   --rule-hi: color-mix(in srgb, var(--rootline) 80%, var(--bark));
   --ash-half: color-mix(in srgb, var(--ash) 50%, transparent);
   --rust-half: color-mix(in srgb, var(--rust) 50%, transparent);
+}
+html[data-theme="pando-light"] {
+  --soil: #f0ece1;
+  --air: #f6f3eb;
+  --loam: #e9e3d7;
+  --pop: #f6f3eb;
+  --rootline: #cbc9bf;
+  --bark: #18201b;
+  --bark-dim: #3f463f;
+  --ash: #5d615a;
+  --clay: #6e5038;
+  /* By day Foxfire is the highlighter behind the text, which stays ink (the arrival, below). */
+  --fox: #18201b;
+  --fox-fill: rgba(173, 207, 15, 0.42);
+  --rust: #a8442a;
+  --bark-hi: #2a332d;
+  --shadow: rgba(24, 32, 27, 0.14);
+  color-scheme: light;
+}
+html[data-theme="cloudflare-dark"] {
+  --soil: #141414;
+  --air: #262626;
+  --loam: #1c1c1c;
+  --pop: #252525;
+  --rootline: #2a2a2a;
+  --rule-hi: #404040;
+  --bark: #f0e3de;
+  --ash: #a1a1a1;
+  --clay: #ff5e1e;
+  --fox: #69c4d4;
+  --rust: #f07f77;
+  --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+html[data-theme="cloudflare-light"] {
+  --soil: #fcfcfc;
+  --air: #ffffff;
+  --loam: #f4f4f4;
+  --pop: #ffffff;
+  --rootline: #e4e4e4;
+  --rule-hi: #d4d4d4;
+  --bark: #181818;
+  --ash: #696969;
+  --clay: #b84c00;
+  --fox: #006677;
+  --rust: #a9131f;
+  --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
+  --shadow: rgba(0, 0, 0, 0.14);
+  color-scheme: light;
 }
 html[data-theme="plannotator-dark"] {
   --soil: oklch(0.15 0.02 260);
@@ -179,6 +239,21 @@ html[data-theme$="-light"] {
   --diffs-token-function: oklch(0.48 0.075 245);
   --diffs-token-constant: oklch(0.5 0.08 108);
 }
+/* Cloudflare's own: its brand scale (cloudflare-docs agent-setup-tokens.css),
+   indigo, green, blue and gold, each far from its cyan (Foxfire) and its red
+   (Rust); the proposal in CLOUDFLARE-TOKENS.md, measured in the web-look renders. */
+html[data-theme="cloudflare-dark"] {
+  --diffs-token-keyword: #9d94ec;
+  --diffs-token-string: #55d584;
+  --diffs-token-function: #4693ff;
+  --diffs-token-constant: #ffce4b;
+}
+html[data-theme="cloudflare-light"] {
+  --diffs-token-keyword: #4b3bdc;
+  --diffs-token-string: #196535;
+  --diffs-token-function: #0045a6;
+  --diffs-token-constant: #735400;
+}
 
 @theme inline {
   --color-*: initial;
@@ -203,7 +278,7 @@ html[data-theme$="-light"] {
   --color-doc: var(--doc);
   --color-transparent: transparent;
   --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: "Ioskeley Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--mono-face, "Ioskeley Mono"), ui-monospace, SFMono-Regular, Menlo, monospace;
   --ease-pando: cubic-bezier(0.23, 1, 0.32, 1);
   --shadow-pop: 0 14px 40px var(--shadow);
 }
@@ -253,7 +328,8 @@ html[data-theme$="-light"] {
 }
 
 /* An activity line that just arrived: it slides in, takes Foxfire for two
-   seconds, then cools over four (the prototype's only motion). */
+   seconds, then cools over four (the prototype's only motion). By day, in
+   Pando's light, Foxfire is a highlighter fill behind the text instead. */
 @keyframes arrive {
   from {
     opacity: 0;
@@ -264,6 +340,7 @@ html[data-theme$="-light"] {
   from,
   33% {
     color: var(--fox);
+    background-color: var(--fox-fill, transparent);
   }
 }
 .arrived {

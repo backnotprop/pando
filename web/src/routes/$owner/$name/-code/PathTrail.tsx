@@ -8,7 +8,7 @@ export function PathTrail({ root, folder, path, inline = false }: { root: string
   const crumb = "text-bark-dim hover:text-bark";
 
   const trail = (
-    <span className="font-mono text-[13px] leading-[16px] text-ash">
+    <span className="text-[13px] leading-[16px] text-ash">
         <Link {...folder("")} className={crumb}>
           {root}
         </Link>

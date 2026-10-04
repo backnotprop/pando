@@ -78,13 +78,13 @@ export function SectionHead({ title, count, right, className = "mb-2.5" }: { tit
   return (
     <h2 className={`${className} flex items-baseline gap-2.5 text-[14px] leading-5 font-semibold`}>
       {title}
-      {count === undefined ? null : <span className="font-mono text-[12.5px] leading-[15px] font-normal text-ash">{count}</span>}
+      {count === undefined ? null : <span className="text-[12.5px] leading-[15px] font-normal text-ash">{count}</span>}
       {right ? <span className="ml-auto text-[13px] font-normal">{right}</span> : null}
     </h2>
   );
 }
 
-/** A time in the lists' mono style. */
+/** A time in a list: SF Pro Text with tabular figures (body), so a column of times lines up. */
 export const Time = ({ children, left = false }: { children: ReactNode; left?: boolean }) => (
-  <span className={`font-mono text-[12.5px] whitespace-nowrap text-ash ${left ? "text-left" : "text-right"}`}>{children}</span>
+  <span className={`text-[12.5px] whitespace-nowrap text-ash ${left ? "text-left" : "text-right"}`}>{children}</span>
 );

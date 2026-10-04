@@ -12,6 +12,7 @@ import { extractFrontmatter, parseMarkdownToBlocks } from "@plannotator/ui/utils
 import { SHIKI_THEME_MAP } from "@plannotator/ui/utils/syntaxTheme";
 import DOMPurify from "dompurify";
 import { use, useEffect, useMemo } from "react";
+import { shownMode, useShownMode } from "../theme";
 import type { DocProps } from "./Doc";
 
 const remote = /^(https?:|data:|blob:|mailto:)/i;
@@ -46,13 +47,10 @@ configurePlannotatorUI({
   mathRendererLoader: () => Promise.all([import("katex"), import("katex/dist/katex.min.css")]).then(([katex]) => katex.default),
 });
 
-/** Pando's theme is set before the page paints (public/theme.js) and does not change after. */
-const pandoMode = (): "dark" | "light" => (document.documentElement.dataset.theme?.endsWith("-light") ? "light" : "dark");
-
-/** Keeps the viewer's mode on Pando's (its code colours and diagrams follow it). */
+/** Keeps the viewer's mode on Pando's, also when the theme changes in the name menu (its code colours and diagrams follow it). */
 function FollowPando() {
   const { mode, setMode } = useTheme();
-  const want = pandoMode();
+  const want = useShownMode();
 
   useEffect(() => {
     if (mode !== want) setMode(want);
@@ -148,7 +146,7 @@ export default function PlannotatorDoc({ path, text, raw, openFile }: DocProps) 
   };
 
   return (
-    <ThemeProvider defaultTheme={pandoMode()} defaultColorTheme="plannotator">
+    <ThemeProvider defaultTheme={shownMode()} defaultColorTheme="plannotator">
       <FollowPando />
       {/\.html?$/i.test(name) ? (
         <div className="pn-doc isolate pb-3">

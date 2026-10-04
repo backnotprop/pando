@@ -61,7 +61,7 @@ export function FileTools({ name, text, raw, views }: { name: string; text: stri
     // On a phone: the name (with Preview | Code) on its own line, the four tools on one row below (design review, 2026-10-03).
     <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pb-2.5">
       <span
-        className={`mr-auto overflow-hidden font-mono text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash ${views ? "phone:min-w-0 phone:flex-1" : "phone:basis-full"}`}
+        className={`mr-auto overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash ${views ? "phone:min-w-0 phone:flex-1" : "phone:basis-full"}`}
       >
         {name}
       </span>

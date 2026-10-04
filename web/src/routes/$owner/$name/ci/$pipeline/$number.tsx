@@ -89,7 +89,7 @@ function Annotations({ b }: { b: CiBuildDetail }) {
       {list.map((a, i) => (
         <section key={a.id ?? i} aria-label={a.context ?? "Annotation"} className="rounded-[10px] border border-rootline px-4 py-3 text-[13.5px] leading-5">
           {/* The prototype sets these fonts with the shorthand, so each line is its font's own height. */}
-          <p className="mb-1.5 flex gap-2.5 font-mono text-[12px] leading-[15px] text-ash">
+          <p className="mb-1.5 flex gap-2.5 text-[12px] leading-[15px] text-ash">
             {a.style ? <span className={a.style === "error" ? "text-rust" : ""}>{a.style}</span> : null}
             {a.context ? <span>{a.context}</span> : null}
           </p>
@@ -150,7 +150,7 @@ function Job({ b, job, opened, arrived }: { b: CiBuildDetail; job: CiJob; opened
           {job.check ? <ServiceMark service={b.service} /> : null}
           {name}
         </span>
-        <span className="fox-cool text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{elapsed(job, clock)}</span>
+        <span className="fox-cool text-right text-[12.5px] whitespace-nowrap text-ash">{elapsed(job, clock)}</span>
         <Chevron className={`block size-3.5 text-ash ${open ? "" : "-rotate-90"}`} />
       </button>
       {open ? (
@@ -181,8 +181,8 @@ function Artifacts({ b }: { b: CiBuildDetail }) {
         {list.map((a, i) => (
           <li key={a.id ?? i} className="border-t border-rule-faint">
             <div className="-mx-2.5 grid min-h-[38px] grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-4 rounded-[7px] px-2.5 py-2">
-              <code className="overflow-hidden text-ellipsis whitespace-nowrap phone:[overflow-wrap:anywhere] phone:whitespace-normal">{a.path ?? a.filename ?? ""}</code>
-              <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{size(a.size)}</span>
+              <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap phone:[overflow-wrap:anywhere] phone:whitespace-normal">{a.path ?? a.filename ?? ""}</span>
+              <span className="text-right text-[12.5px] whitespace-nowrap text-ash">{size(a.size)}</span>
               <span className="text-right">
                 {a.id ? (
                   <a href={Routes.ciArtifactDownloadPath(monorepo.owner, monorepo.name, b.id, a.id)} className={lnk}>
@@ -225,7 +225,7 @@ function BuildPage() {
                 b={b}
                 branch={
                   branch && b.repo_path ? (
-                    <Link {...branchLink(monorepo.full, b.repo_path, branch)} className="text-bark-dim hover:underline hover:decoration-ash hover:underline-offset-3">
+                    <Link {...branchLink(monorepo.full, b.repo_path, branch)} className="font-mono text-bark-dim hover:underline hover:decoration-ash hover:underline-offset-3">
                       {branch}
                     </Link>
                   ) : undefined

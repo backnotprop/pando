@@ -13,6 +13,13 @@ export const Mark = (p: Props) => (
   </svg>
 );
 
+/** The chosen row in a menu. */
+export const CheckIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export const Chevron = (p: Props) => (
   <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
     <path

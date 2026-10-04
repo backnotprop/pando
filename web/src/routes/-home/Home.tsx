@@ -50,7 +50,7 @@ function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
           >
             <Avatar name={m.name} org size={28} />
             <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">
-              <span className="font-mono text-[14px] leading-[17px] text-bark">
+              <span className="text-[14px] leading-[17px] text-bark">
                 <span className="text-ash">{m.owner}/</span>
                 {m.name}
               </span>
@@ -58,7 +58,7 @@ function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
                 <Line m={m} />
               </span>
             </span>
-            <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{m.last_activity_at ? since(m.last_activity_at, clock) : ""}</span>
+            <span className="text-[12.5px] whitespace-nowrap text-ash">{m.last_activity_at ? since(m.last_activity_at, clock) : ""}</span>
           </Link>
         </li>
       ))}
@@ -74,7 +74,7 @@ function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current
     <Menu.Root>
       <Menu.Trigger className="inline-flex h-[30px] cursor-pointer items-center gap-2 rounded-[7px] border border-rootline pr-2 pl-3 text-[13px] text-bark-dim hover:border-rule-hi hover:text-bark data-popup-open:border-rule-hi data-popup-open:text-bark">
         {shown ? (
-          <span className="font-mono text-[12.5px] text-bark">
+          <span className="text-[12.5px] text-bark">
             <span className="text-ash">{shown.owner}/</span>
             {shown.name}
           </span>
@@ -90,7 +90,7 @@ function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current
         {lines.map((m) => (
           <MenuLink key={m.id} link={{ to: "/", search: { in: m.full_name } }} current={m.full_name === current}>
             <Avatar name={m.name} org size={16} />
-            <span className="font-mono text-[13px]">
+            <span className="text-[13px]">
               <span className="text-ash">{m.owner}/</span>
               {m.name}
             </span>
@@ -117,7 +117,7 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
         <aside className="sticky top-7 flex min-h-[calc(100vh-140px)] flex-col narrow:static narrow:min-h-0 phone:contents">
           <div>
             {owner ? (
-              <h1 className="mb-6 flex items-center gap-3.5 font-mono text-[24px] leading-[30px] tracking-[-.01em]">
+              <h1 className="mb-6 flex items-center gap-3.5 text-[24px] leading-[30px] tracking-[-.01em]">
                 <Avatar name={owner} size={36} />
                 {owner}
               </h1>

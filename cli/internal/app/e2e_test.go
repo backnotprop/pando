@@ -233,6 +233,17 @@ func TestMonorepoEndToEnd(t *testing.T) {
 		strings.Contains(string(b), "meta sync") || strings.Contains(strings.ToLower(string(b)), "meta layer") {
 		t.Errorf("pando help:\n%s", b)
 	}
+	// The docs' CLI reference lists every command exactly as pando help does.
+	help, _ := exec.Command(bin, "help").CombinedOutput()
+	page, err := os.ReadFile("../../../site/docs/src/content/docs/cli.mdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, block, _ := strings.Cut(string(page), "## Every command\n\n```text\n")
+	block, _, _ = strings.Cut(block, "\n```")
+	if block != strings.TrimRight(string(help), "\n") {
+		t.Errorf("site/docs/src/content/docs/cli.mdx, Every command, is not pando help. pando help prints:\n%s", help)
+	}
 	for _, args := range [][]string{{"help"}, {"worktree"}, {"worktree", "add", "-h"}} {
 		b, _ := exec.Command(bin, args...).CombinedOutput()
 		if !strings.Contains(string(b), "usage: pando") || strings.Contains(strings.ToLower(string(b)), "agent") {

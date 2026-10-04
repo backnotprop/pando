@@ -24,6 +24,9 @@ type Monorepo struct {
 	Kind      string `json:"kind"`      // "monorepo" or "repo"
 	Role      string `json:"role"`      // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
+	// ReplacedAlias is set by a rename that took another monorepo's old name.
+	ReplacedAlias *ReplacedAlias `json:"replaced_alias,omitempty"`
+	JSON          []byte         `json:"-"` // the answer as sent, from an HTTP server: what --json prints
 }
 
 // Full is owner/name (from full_name, or built when the server left it out).
@@ -174,7 +177,14 @@ type Branch struct {
 	Checks        Checks `json:"checks"`
 	State         string `json:"state"`
 	MergeCommit   string `json:"merge_commit"`
-	UpdatedAt     string `json:"updated_at"`
+	// ConflictPaths: with mergeable conflicts, the paths both sides changed.
+	ConflictPaths []string `json:"conflict_paths,omitempty"`
+	MergedBy      string   `json:"merged_by,omitempty"`
+	MergedAt      string   `json:"merged_at,omitempty"`
+	PushedMachine string   `json:"pushed_machine,omitempty"`
+	Forced        bool     `json:"forced,omitempty"`
+	UpdatedAt     string   `json:"updated_at"`
+	JSON          []byte   `json:"-"` // the answer as sent, from an HTTP server: what --json prints
 }
 
 type BranchList struct {
@@ -200,13 +210,37 @@ type ReviewIn struct {
 }
 
 type Review struct {
-	ID        string `json:"id"`
-	Branch    string `json:"branch"`
-	Head      string `json:"head"`
-	Verdict   string `json:"verdict"`
-	Body      string `json:"body"`
-	Author    string `json:"author"`
-	CreatedAt string `json:"created_at"`
+	ID        string          `json:"id"`
+	Branch    string          `json:"branch"`
+	Head      string          `json:"head"`
+	Verdict   string          `json:"verdict"`
+	Body      string          `json:"body"`
+	Comments  []ReviewComment `json:"comments,omitempty"`
+	Author    string          `json:"author"`
+	CreatedAt string          `json:"created_at"`
+}
+
+// Commit is one commit of a branch (branchCommits).
+type Commit struct {
+	SHA     string   `json:"sha"`
+	Parents []string `json:"parents"`
+	Title   string   `json:"title"`
+	Author  struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+		Date  string `json:"date"`
+	} `json:"author"`
+}
+
+// BranchCommits is the branch's own commits, newest first.
+type BranchCommits struct {
+	Branch    string   `json:"branch"`
+	Head      string   `json:"head"`
+	MergeBase string   `json:"merge_base"`
+	Total     int      `json:"total"`
+	Truncated bool     `json:"truncated"`
+	Commits   []Commit `json:"commits"`
+	JSON      []byte   `json:"-"`
 }
 
 type MergeResult struct {

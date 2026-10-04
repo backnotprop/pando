@@ -12,18 +12,27 @@ import (
 )
 
 // CI is `pando ci connect | status | disconnect`: a monorepo's CI service
-// (Buildkite) as the person sees it, with their own credential.
+// (Buildkite) as the person sees it, with their own credential. Its
+// pipelines, builds and jobs have their own subcommands (pipeline, build,
+// job, run).
 //
 // The webhook token is a secret. It reaches only the person's own terminal
 // (or a file they name, mode 600), never a pipe: an agent's session reads
 // pipes. It is shown once and kept nowhere on this machine.
 func CI(e *Env, args []string) error {
-	usage := UsageError{"pando ci connect --org <slug> | status | disconnect --org <slug> | pipeline add|list|remove   [--monorepo <owner/name>]"}
+	usage := UsageError{"pando ci connect --org <slug> | status | disconnect --org <slug> | pipeline add|list|remove | build list|view|log|rebuild|cancel | job retry | run   [--monorepo <owner/name>]"}
 	if len(args) == 0 {
 		return usage
 	}
-	if args[0] == "pipeline" {
+	switch args[0] {
+	case "pipeline":
 		return ciPipeline(e, args[1:])
+	case "build", "builds":
+		return ciBuild(e, args[1:])
+	case "job":
+		return ciJob(e, args[1:])
+	case "run":
+		return ciRun(e, args[1:])
 	}
 	fs := flags("ci")
 	org := fs.String("org", "", "the Buildkite organization's slug (buildkite.com/<slug>)")
@@ -55,7 +64,7 @@ func CI(e *Env, args []string) error {
 	default:
 		return usage
 	}
-	h, full, err := ciTarget(e, *srvFlag, *mono)
+	h, full, err := e.target(*srvFlag, *mono)
 	if err != nil {
 		return err
 	}
@@ -76,33 +85,6 @@ var stdoutTerminal = func(e *Env) bool {
 	}
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
-// ciTarget is the signed-in server (a Pando server, not file://) and the monorepo's owner/name.
-func ciTarget(e *Env, srvFlag, mono string) (*server.HTTP, string, error) {
-	if mono == "" {
-		root, err := e.root()
-		if err != nil {
-			return nil, "", UsageError{"which monorepo? add --monorepo <owner/name>, or run this inside its folder"}
-		}
-		mono = root.FullName()
-	}
-	srv, _, err := e.signedIn(srvFlag)
-	if err != nil {
-		return nil, "", err
-	}
-	h, ok := srv.(*server.HTTP)
-	if !ok {
-		return nil, "", errors.New("CI needs a Pando server; this one is a local file:// server")
-	}
-	if _, _, full := splitFull(mono); !full {
-		m, err := resolveMonorepo(e, srv, mono)
-		if err != nil {
-			return nil, "", err
-		}
-		mono = m.Full()
-	}
-	return h, mono, nil
 }
 
 func ciConnect(e *Env, h *server.HTTP, full, org, out string, paste bool) error {
@@ -245,7 +227,7 @@ func ciPipeline(e *Env, args []string) error {
 	if n, ok := want[args[0]]; !ok || len(pos) != n {
 		return usage
 	}
-	h, full, err := ciTarget(e, *srvFlag, *mono)
+	h, full, err := e.target(*srvFlag, *mono)
 	if err != nil {
 		return err
 	}
@@ -276,8 +258,8 @@ func ciPipeline(e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	var same []server.BuildkiteHook
-	for _, k := range hooks {
+	var same []server.Hook
+	for _, k := range hooks.Hooks {
 		if k.Type == "buildkite" && k.Buildkite != nil && strings.EqualFold(k.Buildkite.Organization, slug) && k.Buildkite.Pipeline == pipeline {
 			same = append(same, k)
 		}
@@ -374,7 +356,7 @@ func ciPipelineList(e *Env, h *server.HTTP, full string, repos []server.Repo) er
 		if err != nil {
 			return err
 		}
-		for _, k := range hooks {
+		for _, k := range hooks.Hooks {
 			if k.Type != "buildkite" || k.Buildkite == nil {
 				continue
 			}

@@ -5,11 +5,11 @@
   "body": {
     "status": "merged",
     "branch": "feat/ready",
-    "head": "4df471f0a8e51038aab60e7e9010161444c6c53b",
-    "sha": "fbaab58aa4cc1e4c6a2eae45424785611b6ca09f",
-    "base_before": "f0b6886ddb0bffe091a2d0200cb83fd0f903f7b9",
-    "merge_base": "c6a914b4318733382b9ad43250ee5c051e65b0b0",
+    "head": "8a0b12034040273ed0f600550d5791233e66f883",
+    "sha": "88848ba1b2707b1ed3d6de20cdef6da86a327771",
+    "base_before": "98b26bad825f440b2cf34b1bbe7f503bfd008120",
+    "merge_base": "f5a4c90b4685e936e93cf6b90f34497cf4f3205f",
     "forced": false,
-    "merged_by": "rec-mutuzslr"
+    "merged_by": "rec-mutvywkn"
   }
 }

@@ -36,7 +36,7 @@ function Line({ m }: { m: MonorepoSummary }) {
   );
 }
 
-function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
+export function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
   const clock = useNow();
 
   if (!lines.length) return <Empty>No repositories yet.</Empty>;

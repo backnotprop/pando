@@ -12,6 +12,9 @@ const split = (full: string) => {
 
 export const ownerLink = (owner: string) => linkOptions({ to: "/$owner", params: { owner } });
 
+/** An organization's People or Settings (its overview is ownerLink). */
+export const orgLink = (org: string, tab: "people" | "settings") => linkOptions({ to: `/orgs/$org/${tab}`, params: { org } });
+
 export const monoLink = (full: string) => linkOptions({ to: "/$owner/$name", params: split(full) });
 
 export const treeLink = (full: string, dir: string) =>
@@ -119,6 +122,7 @@ export const codeRawHref = (full: string, repoPath: string, path: string, ref: s
 
 export type AppLink =
   | ReturnType<typeof ownerLink>
+  | ReturnType<typeof orgLink>
   | ReturnType<typeof monoLink>
   | ReturnType<typeof treeLink>
   | ReturnType<typeof blobLink>

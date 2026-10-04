@@ -75,7 +75,10 @@ export function startFeed(qc: QueryClient): () => void {
           break;
         case "joined":
         case "left":
+          // Joining or leaving an org also changes your orgs and its page.
           refetchAll();
+          void qc.invalidateQueries({ queryKey: ["orgs"] });
+          void qc.invalidateQueries({ queryKey: ["owner"] });
           break;
         case "error":
           break;

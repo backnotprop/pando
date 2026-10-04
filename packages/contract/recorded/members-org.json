@@ -1,0 +1,39 @@
+{
+  "schema": "MemberList",
+  "route": "GET .../members (an org's monorepo: via both, org and direct)",
+  "status": 200,
+  "body": {
+    "members": [
+      {
+        "login": "bo-mutvywkn",
+        "name": "Bo Diaz",
+        "picture_url": null,
+        "role": "member",
+        "added_at": "2026-10-04T13:58:40.483Z",
+        "added_by": "rec-mutvywkn",
+        "last_active_at": null,
+        "via": "org"
+      },
+      {
+        "login": "cy-mutvywkn",
+        "name": "Cy Ortiz",
+        "picture_url": null,
+        "role": "member",
+        "added_at": "2026-10-04T13:58:42.040Z",
+        "added_by": "rec-mutvywkn",
+        "last_active_at": null,
+        "via": "direct"
+      },
+      {
+        "login": "rec-mutvywkn",
+        "name": "Ana Lima",
+        "picture_url": null,
+        "role": "owner",
+        "added_at": "2026-10-04T13:58:15.941Z",
+        "added_by": null,
+        "last_active_at": "2026-10-04T13:58:15.929Z",
+        "via": "both"
+      }
+    ]
+  }
+}

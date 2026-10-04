@@ -11,25 +11,25 @@
     ],
     "connections": [
       {
-        "id": "m_073abf87b436d424--cic_183e4a580d86",
+        "id": "m_b03271178f23aa74--cic_f99ed9c62372",
         "service": "buildkite",
         "organization": "o",
         "web_url": "https://buildkite.com/o",
         "token": "worker_secret",
-        "created_at": "2026-10-04T13:31:12.060Z",
-        "created_by": "rec-mutuzslr",
+        "created_at": "2026-10-04T13:58:26.545Z",
+        "created_by": "rec-mutvywkn",
         "last_event": {
-          "at": "2026-10-04T13:31:12.078Z",
+          "at": "2026-10-04T13:58:26.560Z",
           "event": "build.finished",
           "result": "recorded"
         },
         "last_refused": null,
-        "webhook_url": "http://localhost:8797/v1/integrations/buildkite/m_073abf87b436d424--cic_183e4a580d86"
+        "webhook_url": "http://localhost:8821/v1/integrations/buildkite/m_b03271178f23aa74--cic_f99ed9c62372"
       }
     ],
     "pipelines": [
       {
-        "connection": "m_073abf87b436d424--cic_183e4a580d86",
+        "connection": "m_b03271178f23aa74--cic_f99ed9c62372",
         "service": "buildkite",
         "slug": "web",
         "name": "web",
@@ -39,23 +39,23 @@
         "default_branch": "main",
         "hook_id": null,
         "last_build": {
-          "id": "cib_5df4074ea99cc9e0",
+          "id": "cib_04afa2cfab65740e",
           "service": "buildkite",
-          "connection": "m_073abf87b436d424--cic_183e4a580d86",
+          "connection": "m_b03271178f23aa74--cic_f99ed9c62372",
           "pipeline": "web",
           "number": 1,
           "repo": "projects-web",
           "repo_path": "projects/web",
-          "sha": "4df471f0a8e51038aab60e7e9010161444c6c53b",
+          "sha": "8a0b12034040273ed0f600550d5791233e66f883",
           "branch": "feat/ready",
           "message": "Add the ready file",
           "state": "passed",
           "service_state": "passed",
           "web_url": "https://buildkite.com/o/web/builds/1",
-          "pushed_by": "rec-mutuzslr",
-          "created_at": "2026-10-04T13:31:12.063Z",
-          "started_at": "2026-10-04T13:31:13.063Z",
-          "finished_at": "2026-10-04T13:31:22.063Z",
+          "pushed_by": "rec-mutvywkn",
+          "created_at": "2026-10-04T13:58:26.548Z",
+          "started_at": "2026-10-04T13:58:27.548Z",
+          "finished_at": "2026-10-04T13:58:36.548Z",
           "duration_s": 9,
           "rebuilt_from": null
         },

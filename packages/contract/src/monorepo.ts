@@ -20,8 +20,15 @@ export const Monorepo = Schema.Struct({
 
 export interface Monorepo extends Schema.Schema.Type<typeof Monorepo> {}
 
-/** A monorepo in the person's list, with their role in it. */
-export const MonorepoEntry = Monorepo.pipe(Schema.fieldsAssign({ role: MemberRole }));
+/** Whose namespace `owner` is: a person's login (`user`) or an organization (`org`). */
+export const OwnerType = Schema.Literals(["user", "org"]);
+
+/**
+ * A monorepo in the person's list, with their role in it: the higher of
+ * their own row in the monorepo and, when an org owns it, their role in the
+ * org (an org's owners own all its monorepos).
+ */
+export const MonorepoEntry = Monorepo.pipe(Schema.fieldsAssign({ role: MemberRole, owner_type: OwnerType }));
 
 export interface MonorepoEntry extends Schema.Schema.Type<typeof MonorepoEntry> {}
 
@@ -94,7 +101,7 @@ export const MonorepoSummary = MonorepoEntry.pipe(
 
 export interface MonorepoSummary extends Schema.Schema.Type<typeof MonorepoSummary> {}
 
-/** GET /v1/monorepos: by owner, then name. */
+/** GET /v1/monorepos[?owner=]: by owner (the person's own first), then name. */
 export const MonorepoList = Schema.Struct({ monorepos: Schema.Array(MonorepoEntry) });
 
 export interface MonorepoList extends Schema.Schema.Type<typeof MonorepoList> {}

@@ -5,7 +5,52 @@ sidebar:
   order: 20
 ---
 
-`pando help` prints the same list. Flags can go before or after a command's other arguments.
+`pando help` prints every command, as below. Flags can go before or after a command's other arguments. Commands that read the API take `--json` and print the API's own JSON; see [For scripts and agents](#for-scripts-and-agents). [`pando api`](#pando-api) reaches every route of the [API](/api/).
+
+## Every command
+
+```text
+usage: pando <command> [args]
+
+  pando login [--server <url>] [--bootstrap | --with-credential]   sign this machine in (in the browser)
+  pando logout [--server <url>]                                   sign this machine out
+  pando auth status                                               who this machine is signed in as
+  pando init [folder] [--name <name>] [--yes] [--dry-run]         make a Pando repo or monorepo from a folder
+  pando clone <owner/name | name> [folder] [--text-only]         set up a Pando repo or monorepo on this machine
+  pando worktree add <repo> <branch> | list | remove <path> | follow | mount   one branch, one folder
+  pando branch list [--repo <path>] [--all]                       branches with ahead, behind and checks
+  pando branch view [<branch>] [--commits]                        one branch: checks, merge, reviews, head commit
+  pando diff [<branch>] [--json | --patch] [paths...]             the branch diff against main
+  pando review [<branch>] [-m <comment>]                          review in Plannotator, or comment
+  pando merge [<branch>] [--force]                                land a branch on main with a merge commit
+  pando reference update <path> | sync                            move a reference to its newest commit
+  pando status                                                    this folder, its worktrees and references
+  pando status <pending|success|failure|error> [--context ci] [--target-url u] [--description d]
+                                                                  in a CI build: a check on its commit (PANDO_STATUS_TOKEN)
+  pando monorepo list | view [<owner/name>]                       your monorepos; one with its repos and members
+  pando monorepo rename <new-name>                                rename one (owners); the old name keeps working
+  pando monorepo delete <owner/name> [--yes]                      delete one (owners)
+  pando members list | invite <email> [--owner] | remove <who>    who belongs to a monorepo
+  pando members invites | revoke <email>                          invites still waiting; withdraw one
+  pando mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)
+  pando ci connect --org <slug> | status | disconnect --org <slug>   a monorepo's Buildkite connection [--monorepo <owner/name>]
+  pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>   the pipeline a push starts
+  pando ci build list [--pipeline p] [--branch b] [--state s]     builds, newest first
+  pando ci build view | log | rebuild | cancel <build>            one build: its jobs, a job's log [--job j] [--follow]
+  pando ci job retry <build> <job>                                run a job again
+  pando ci run <pipeline> [--branch b]                            start a build of a branch (default: main)
+  pando credential create --name <sandbox> | list | revoke <id>   credentials that act as you
+  pando hook list | create <url> | delete <id>                    a repo's web hooks [--repo <path>] (owners write)
+  pando hook deliveries <id> | redeliver <delivery-id>            what a hook sent; send one again
+  pando machine list                                              machines that acted in the monorepo, and which are connected
+  pando activity [--monorepo <owner/name> | --all] [--limit n]    what happened, newest first
+  pando api <path> [-X method] [-f k=v] [-F k=v] [--paginate]     any API call, signed as this machine (like gh api)
+  pando sync [--once]                                             keep the monorepo's files outside projects/ live (the daemon)
+  pando history <path> [--limit n] [--json]                       every saved version of a file outside projects/
+  pando restore <path> --to <version | HH:MM>                     write an old version back, as a new save
+  pando resolve [<path>...]                                       unfreeze a file after a conflict
+  pando fetch <path>...                                           download large files outside projects/ kept as pointers
+```
 
 ## Sign in
 
@@ -124,7 +169,21 @@ Lists open branches with ahead, behind, author, checks, whether they merge clean
 | --- | --- |
 | `--repo <path>` | One repo. Default: the repo you are in, or every repo. |
 | `--all` | Include merged branches. |
-| `--json` | Print JSON. |
+| `--json` | Print JSON: for each repo, its branches as the API lists them. |
+
+### pando branch view
+
+```sh
+pando branch view [<branch>] [--commits]
+```
+
+Shows one branch as its page does: its state and title, its head commit, who made it and the machine that last pushed it, how far it is ahead of and behind main, whether it merges cleanly (and, when not, the paths changed on both sides), each check, and its reviews. With no branch, the branch of the worktree you are in.
+
+| Flag | What it does |
+| --- | --- |
+| `--commits` | Also list the commits the branch adds (those not on main), newest first, at most 250. |
+| `--repo <path>` | The repo. Default: the one you are in. |
+| `--json` | Print `{"branch", "reviews", "commits"}`: the API's answers for the [branch](/api/branches/getBranch/), its [reviews](/api/reviews/listReviews/) and its [commits](/api/branches/branchCommits/) (the newest only, without `--commits`). |
 
 ## Review and merge
 
@@ -196,6 +255,7 @@ A reference is someone else's repo inside the monorepo, kept as a pointer to one
 
 ```sh
 pando members list | invite <email> [--owner] | remove <who>
+pando members invites | revoke <email>
 ```
 
 Each subcommand takes the monorepo as `owner/name` before its other arguments, or uses the monorepo you are in.
@@ -205,10 +265,13 @@ Each subcommand takes the monorepo as `owner/name` before its other arguments, o
 | `list` | Members and their roles, then invites still waiting. |
 | `invite <email>` | Adds the person now if they have an account, else they join when they first run `pando login`. |
 | `remove <who>` | A login removes that member. An email withdraws that invite. |
+| `invites` | Invites still waiting, with who sent them. |
+| `revoke <email>` | Withdraws the invite for that email. |
 
 | Flag | What it does |
 | --- | --- |
 | `--owner` | With `invite`: invite as an owner. Default: member. |
+| `--json` | With `list` or `invites`: print the API's answer ([members](/api/monorepos/listMembers/), [invites](/api/monorepos/listInvites/)). |
 | `--server <url>` | The Pando server. Default: the configured one. |
 
 ### pando credential
@@ -235,16 +298,22 @@ git also runs `pando credential` as its credential helper for Pando URLs. You ne
 ### pando monorepo
 
 ```sh
-pando monorepo list | delete <owner/name> [--yes]
+pando monorepo list | view [<owner/name>]
+pando monorepo rename <new-name>
+pando monorepo delete <owner/name> [--yes]
 ```
 
 | Subcommand | What it does |
 | --- | --- |
 | `list` | Your monorepos and plain repos, with your role in each. |
+| `view [<owner/name>]` | The monorepo you name, or the one you are in: its id, your role, how many members, and each repo with main's head and its clone URL. |
+| `rename <new-name>` | Owners only. Renames the monorepo within its owner. The old `owner/name` keeps leading to it, for the API and for git, until it is given to another monorepo. Run in the monorepo's folder, the folder takes the new name and its git remotes the new clone URLs. A `pando sync` already running keeps the old name until it restarts. |
 | `delete <owner/name>` | Owners only. Deletes every repo in it, their history, and its shared files. There is no undo. You type the full name to confirm. Folders on this machine stay. |
 
 | Flag | What it does |
 | --- | --- |
+| `--monorepo <owner/name>` | With `rename`: the monorepo. Default: the one you are in. |
+| `--json` | With `view`: print `{"monorepo", "repos", "members"}`, the API's answers for the [monorepo](/api/monorepos/getMonorepo/), its [repos](/api/repos/listRepos/) and [members](/api/monorepos/listMembers/). With `rename`: the API's [answer](/api/monorepos/renameMonorepo/). |
 | `--yes` | Delete without typing the name. For scripts. |
 | `--server <url>` | The Pando server. Default: the configured one. |
 
@@ -276,6 +345,51 @@ pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>
 | `--paste-token` | With `connect`: use the token Buildkite made, typed with no echo, instead of a new one. |
 | `--server <url>` | The Pando server. Default: the configured one. |
 
+### pando ci build
+
+```sh
+pando ci build list [--pipeline p] [--branch b] [--state s]
+pando ci build view | log | rebuild | cancel <build>
+```
+
+Builds as Pando has them from Buildkite's webhooks, newest first. Name a build by its number (`12` or `#12`, with `--pipeline` unless the monorepo has one pipeline), by its pipeline and number (`pando-ci/12`, as in its page's address), or by its id (`cib_...`).
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | Builds: number, pipeline, state, repo, branch, commit, who pushed it, when, how long it took, and its id. |
+| `view <build>` | One build and its jobs: each job's state, check, exit status and time. |
+| `log <build>` | Each job's log, its last 1 MiB, from Buildkite. Buildkite's timestamps are taken out, and colours too when the output is not a terminal. |
+| `rebuild <build>` | Starts a new build of the same commit, with fresh tokens. |
+| `cancel <build>` | Cancels a build that is running. |
+
+| Flag | What it does |
+| --- | --- |
+| `--pipeline <slug>` | With `list`: that pipeline's builds. With a build number: the build's pipeline. |
+| `--branch <name>` | With `list`: builds of that branch. |
+| `--state <state>` | With `list`: builds in that state: `queued`, `running`, `blocked`, `passed`, `failed`, `canceled` or `skipped`. |
+| `--repo <path>` | With `list`: builds of that repo. |
+| `--limit <n>` | With `list`: how many builds. Default 30. |
+| `--job <job>` | With `log`: one job, by its key, name or id. |
+| `--follow` | With `log`: keep printing the job's log as it grows, until the job finishes. It follows one job. |
+| `--json` | Print the API's answer: [list](/api/ci/listCiBuilds/), [view](/api/ci/getCiBuild/), [log](/api/ci/getCiJobLog/) (an array, one answer per job), [rebuild](/api/ci/rebuildCiBuild/), [cancel](/api/ci/cancelCiBuild/). |
+| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
+
+### pando ci job retry
+
+```sh
+pando ci job retry <build> <job>
+```
+
+Runs a job again in Buildkite, with the build's first environment, so it can still clone for 24 hours after the build started. Name the job by its key, name or id. Its check goes back to pending. It takes `--pipeline`, `--monorepo` and `--json` (the API's [answer](/api/ci/retryCiJob/)).
+
+### pando ci run
+
+```sh
+pando ci run <pipeline> [--branch b]
+```
+
+Starts a build of the pipeline for the head of a branch as Pando has it (default: its repo's main), with fresh tokens, the way a push starts one. It takes `--monorepo` and `--json` (the API's [answer](/api/ci/startCiBuild/)).
+
 ### pando status in a CI build
 
 ```sh
@@ -289,6 +403,99 @@ Only in a build Pando started. Posts a check on the build's commit, using `PANDO
 | `--context <name>` | The check's name. Default `ci`. |
 | `--target-url <url>` | A link for the check. Default: `BUILDKITE_BUILD_URL`. |
 | `--description <text>` | A short line for the check. |
+
+## Hooks
+
+### pando hook
+
+```sh
+pando hook list | create <url> | delete <id>
+pando hook deliveries <id> | redeliver <delivery-id>
+```
+
+A repo's web hooks: on a push, a new branch or a merge, Pando POSTs JSON to a URL, signed with a secret you choose (`X-Pando-Signature-256`). Buildkite hooks are added with `pando ci pipeline add` and show in the list too. Adding, deleting and sending again need an owner.
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | The repo's hooks: id, type, where it sends, events, app, and who added it when. |
+| `create <url>` | Adds a web hook. It asks for the signing secret with no echo, or reads it with `--secret-file`; the secret is never an argument. With a URL that has a hook already, it adds nothing. |
+| `delete <id>` | Removes a hook. |
+| `deliveries <id>` | What the hook sent, newest first (the last 100): event, seq, status, tries and the answer. |
+| `redeliver <delivery-id>` | Sends one delivery again, with the same id and seq. |
+| `redeliver <hook-id> --since <seq>` | After an outage: sends again every delivery of the hook after that seq, oldest first, at most 1,000. |
+
+| Flag | What it does |
+| --- | --- |
+| `--event <event>` | With `create`: `push`, `branch.opened` or `merged`. Repeat it. Default: all three. |
+| `--app <slug>` | With `create`: the CI service behind the URL (`github-actions`, `circleci`, ...), shown on the checks its builds post. |
+| `--secret-file <file>` | With `create`: read the secret from the file, or from standard input with `-`. |
+| `--since <seq>` | With `redeliver`: send again every delivery after this seq. |
+| `--repo <path>` | The repo. Default: the one you are in, or the only one. |
+| `--json` | Print the API's answer: [list](/api/hooks/listHooks/), [create](/api/hooks/createHook/), [deliveries](/api/hooks/listDeliveries/), [redeliver](/api/hooks/redeliver/) or, with `--since`, [replay](/api/hooks/replayHook/). |
+| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
+
+## Machines and activity
+
+`pando worktree list` shows every worktree on every machine.
+
+### pando machine list
+
+```sh
+pando machine list
+```
+
+Each machine (a credential: a laptop, a cloud sandbox) that acted in the monorepo or is connected to it, latest activity first: whose it is, its kind, whether it is connected now and since when, how many worktrees it has open, and its last action. It takes `--monorepo` and `--json` (the API's [answer](/api/worktrees/listMachines/)).
+
+### pando activity
+
+```sh
+pando activity [--monorepo <owner/name> | --all] [--limit n]
+```
+
+What happened, newest first, one line each, as the home page shows it: pushes, new and deleted branches, merges, reviews, checks that changed, worktrees added and removed, and shared files saved. Inside a monorepo's folder, that monorepo's lines; elsewhere, or with `--all`, those of every monorepo you belong to.
+
+| Flag | What it does |
+| --- | --- |
+| `--monorepo <owner/name>` | One monorepo's lines. |
+| `--all` | Every monorepo's lines, even inside a monorepo's folder. |
+| `--limit <n>` | How many lines. Default 30. |
+| `--json` | Print the API's [answer](/api/monorepos/listActivity/), its pages joined. |
+
+## The API
+
+### pando api
+
+```sh
+pando api <path> [-X method] [-f k=v] [-F k=v] [--paginate]
+```
+
+Calls any route of the [API](/api/) with this machine's credential, like `gh api`, and prints the answer: indented on a terminal, on one line in a pipe. The path may leave out `/v1`. In the path, `{owner}` and `{monorepo}` stand for the monorepo you are in (or `--monorepo`), `{repo}` for the repo you are in (or `--repo`), and `{branch}` for the branch of the worktree you are in.
+
+```sh
+pando api /monorepos/{owner}/{monorepo}/repos/{repo}/branches --paginate
+pando api /monorepos/{owner}/{monorepo}/repos/{repo}/branches -f name=fix-login -f title="Fix the login page"
+pando api -X PATCH /monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch} --input body.json
+```
+
+| Flag | What it does |
+| --- | --- |
+| `-X <method>` | The method. Default `GET`, or `POST` when there are fields or `--input`. |
+| `-f key=value` | A string field. Repeat it. With `POST`, `PUT` and `PATCH` the fields make a JSON body; with `GET` and `DELETE` they go in the query. `a[b]=x` makes `{"a": {"b": "x"}}`, and `a[]=x` adds `x` to the array `a`. |
+| `-F key=value` | A field with a type: `true`, `false`, `null`, a whole number, or `@file` (the file's text; `@-` for standard input). Anything else is a string. |
+| `--input <file>` | Send the file as the body (`-` for standard input). Fields then go in the query. |
+| `-H 'Name: value'` | A request header. Repeat it. |
+| `--paginate` | Follow a list's cursor (`next_cursor`, or `next` in the activity log) and print every page as one answer: the lists end to end, the cursor null. `GET` only. |
+| `-i` | Print the status line and the headers first. |
+| `--monorepo <owner/name>` | The monorepo for `{owner}` and `{monorepo}`. |
+| `--repo <path>` | The repo for `{repo}`: its path, or its name in URLs. |
+
+It exits 0 on a 2xx or 3xx answer; a 3xx with no body (an artifact's download) prints where it leads. Any other answer puts the API's error body on stderr and exits 1. A full URL is refused: the credential goes only to the server you signed in to. There is no `--jq`; pipe the output to `jq`.
+
+## For scripts and agents
+
+- **`--json` is the API's JSON.** Each command above links the answer it prints, and the [API reference](/api/) holds every field. Three commands put several answers together under fixed keys: `branch view` (`branch`, `reviews`, `commits`), `monorepo view` (`monorepo`, `repos`, `members`), and `ci build log` (an array, one answer per job). A list read in several pages comes out as one answer, the lists end to end. On a terminal the JSON is indented; in a pipe it is one line.
+- **Exit codes.** 0 when the command worked. 1 when it did not, with one line on stderr that says why and ends with the API's code and HTTP status, as in `pando: no pipeline nope here (not_found, HTTP 404)`. 2 when the command was used wrongly, with its usage.
+- **Running a write again.** The API takes no idempotency key, so a write retried after a lost answer may happen twice. These are safe to run again; a second run changes nothing (a delete or revoke already done answers `not_found`): `pando hook create` and `pando ci pipeline add` (they look first, and add nothing when it is there), `pando monorepo rename`, `pando members invite`, `revoke` and `remove`, `pando hook delete`, `pando ci build cancel` and `pando merge`. These are not: `pando ci run` and `pando ci build rebuild` start another build (look with `pando ci build list --branch <b>` first); `pando review -m` posts another review; `pando credential create` makes another credential; `pando hook redeliver` sends again (the receiver sees the same `X-Pando-Delivery` id and can drop it). `pando ci job retry` with a job's key retries that job's newest run, so once a first retry has finished, a second runs it again; name the job by its id to retry it once.
 
 ## Shared files
 

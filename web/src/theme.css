@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./avatars.css";
+@import "./graph.css";
 
 /* Pando's tokens, taken as they are from the v3 prototype
    (research/design/pando-ui-2026-10-03/v3/prototype.html). Components use them

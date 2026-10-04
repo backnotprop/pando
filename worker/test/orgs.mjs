@@ -209,8 +209,8 @@ try {
   check("GET /v1/users/{org}: an org, with no role or count for someone outside it", r.status === 200 && r.json?.type === "org" && r.json?.role === null && r.json?.members === null, JSON.stringify(r.json));
   r = await call("GET", `/v1/users/${L.ramos.toUpperCase()}`, S.ben);
   check(
-    "GET /v1/users/{login}: a person, today's fields only (no email)",
-    r.status === 200 && r.json?.type === "user" && r.json?.login === L.ramos && Object.keys(r.json).sort().join() === "created_at,login,name,picture_url,type",
+    "GET /v1/users/{login}: a person's profile header (no email)",
+    r.status === 200 && r.json?.type === "user" && r.json?.login === L.ramos && Object.keys(r.json).sort().join() === "bio,created_at,links,location,login,name,orgs,picture_url,type",
     JSON.stringify(r.json),
   );
   r = await call("GET", `/v1/users/nobody-${id}`, S.ben);

@@ -26,6 +26,15 @@ export function monorepoRef(owner: string, name: string): MonorepoRef {
   return { owner: o.success, name: n.success, full: f.success };
 }
 
+/** A namespace (a person's login or an org) from the address bar; one that cannot be a login is not found. */
+export function loginRef(name: string): Login {
+  const o = login(name.toLowerCase());
+
+  if (Result.isFailure(o)) throw new NotFound({ code: "not_found", message: `no person or organization ${name}` });
+
+  return o.success;
+}
+
 /** A monorepo's `owner/name`, as the `in` filter takes it; null for anything else. */
 export function fullNameOf(value: string | undefined): FullName | null {
   if (!value) return null;

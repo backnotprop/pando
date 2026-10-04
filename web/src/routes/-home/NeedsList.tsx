@@ -1,7 +1,8 @@
 // "Needs you": open branches that are ready, conflicting or failing, and the
 // open issues assigned to you, one row per repository (owner ruling). Each
 // row opens the branch's page, or the issues assigned to you; there is no
-// Merge here (owner ruling).
+// Merge here (owner ruling). The branch is the row's name, in Link (links R);
+// who and where are plain context.
 import type { AssignedIssues, FullName, MonorepoId, NeedRow } from "@pando/contract";
 import { Link } from "@tanstack/react-router";
 import { CheckMark } from "../../ui/activity";
@@ -9,6 +10,7 @@ import { Avatar } from "../../ui/Avatar";
 import { Chevron } from "../../ui/Icons";
 import { OpenIcon } from "../../ui/IssueIcons";
 import { branchLink, issuesLink } from "../../ui/paths";
+import { IssueRef, refClass } from "../../ui/Ref";
 import { since, useNow } from "../../ui/time";
 
 /** Words first, colour second: ready in Bark, conflicts and failures in Rust. */
@@ -34,21 +36,19 @@ export interface AssignedRow extends AssignedIssues {
   monorepo_id: MonorepoId;
 }
 
+/** One repository's issues assigned to you: the row opens the list (yours, filtered); the newest one is its own link, with its state glyph. */
 function Assigned({ row, clock }: { row: AssignedRow; clock: number }) {
   const [owner = "", name = ""] = row.monorepo.split("/");
+  const words = `${row.count} issue${row.count === 1 ? "" : "s"} assigned to you`;
 
   return (
     <li className="border-t border-rule-soft first:border-t-0">
-      <Link
-        {...issuesLink(row.monorepo, { assignee: "@me" })}
-        className="group -mx-2 grid min-h-[60px] grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2 py-2.5 phone:grid-cols-[minmax(0,1fr)]"
-      >
+      <div className="group relative -mx-2 grid min-h-[60px] grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[7px] px-2 py-2.5 phone:grid-cols-[minmax(0,1fr)]">
+        <Link {...issuesLink(row.monorepo, { assignee: "@me" })} aria-label={`${words}, in ${row.monorepo}`} className="absolute inset-0 rounded-[7px] focus-visible:outline-offset-[-1.5px]" />
         <div className="min-w-0">
           <p className="flex items-center gap-2.5 text-[14px] font-semibold text-bark">
             <OpenIcon className="size-4 flex-none" />
-            <span className="group-hover:underline group-hover:decoration-ash group-hover:underline-offset-3 group-focus-visible:underline">
-              {row.count} issue{row.count === 1 ? "" : "s"} assigned to you
-            </span>
+            <span className="decoration-1 underline-offset-3 group-hover:underline group-has-focus-visible:underline">{words}</span>
           </p>
           <p className="mt-[3px] overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-ash">
             in{" "}
@@ -56,14 +56,14 @@ function Assigned({ row, clock }: { row: AssignedRow; clock: number }) {
               <span className="text-ash">{owner}/</span>
               {name}
             </span>
-            , the newest #{row.newest.number} {row.newest.title}
+            , the newest <IssueRef full={row.monorepo} number={row.newest.number} state="open" text above /> <span className="text-bark-dim">{row.newest.title}</span>
           </p>
         </div>
         <div className="flex items-center gap-3.5 phone:hidden">
           <span className="text-[12.5px] whitespace-nowrap text-ash">{since(row.newest.updated_at, clock)}</span>
           <Chevron className="block size-3.5 -rotate-90 text-ash" />
         </div>
-      </Link>
+      </div>
     </li>
   );
 }
@@ -84,7 +84,7 @@ export function NeedsList({ rows, assigned = [] }: { rows: readonly NeedRow[]; a
             >
               <div>
                 <p className="flex items-baseline gap-2.5 text-[14px]">
-                  <span className="font-mono text-[14px] leading-[17px] text-bark group-hover:underline group-hover:decoration-ash group-hover:underline-offset-3 group-focus-visible:underline group-focus-visible:decoration-ash group-focus-visible:underline-offset-3">{n.branch}</span>
+                  <span className={`${refClass("name", { mono: true })} leading-[17px] group-focus-visible:underline`}>{n.branch}</span>
                   <NeedState row={n} />
                 </p>
                 <p className="mt-[3px] flex items-center gap-2 text-[13px] text-ash">

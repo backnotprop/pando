@@ -733,8 +733,8 @@ export class IssueStore {
 
     for (const l of input.link) this.addLink(n, l, "link", null, who);
     this.publish("issue.opened", n, who, []);
-
-    if (input.assignees.length) this.host.summaryChanged();
+    // The repository's row counts open issues; Needs you, those assigned.
+    this.host.summaryChanged();
 
     return { issue: this.get(n), replayed: false };
   }

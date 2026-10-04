@@ -788,6 +788,10 @@ try {
 
   if (needsIssues) record("needs-issues.json", "NeedsPage", "GET /v1/branches (an issue assigned to the person)", needsIssues.status, needsIssues.json);
 
+  // Settings: its one-line description (it shows in GET and ?summary=1 from now on).
+  r = await call("PATCH", base, secret, { description: "The web app, its API and the sync engine." });
+  record("described.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {description}", r.status, r.json);
+
   // Settings: rename, last (the old name keeps working; the cleanup deletes by the new one).
   r = await call("PATCH", base, secret, { name: `${name}-renamed` });
   record("renamed.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {name}", r.status, r.json);

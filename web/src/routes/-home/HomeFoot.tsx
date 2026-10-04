@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { lnk } from "../../ui/controls";
 import { BookIcon, ChatIcon, LaptopIcon } from "../../ui/Icons";
 import { DOCS } from "../../ui/paths";
+import { refClass } from "../../ui/Ref";
 
 /** site/docs/src/pages/whats-new.json.ts: the date (YYYY-MM-DD), the entry's headline and its link in the changelog. */
 const WhatsNew = Schema.Struct({
@@ -55,7 +56,8 @@ export function HomeFoot() {
             <p className="text-[12.5px] leading-[15px] text-ash">
               <span className="text-bark-dim">What's new</span> · {shortDate(news.date)}
             </p>
-            <a href={news.link} className="text-[13.5px] leading-[19px] font-semibold text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
+            {/* The headline is set as who is in a sentence: semibold Bark, Link under the pointer (links R). */}
+            <a href={news.link} className={`text-[13.5px] leading-[19px] ${refClass("person")}`}>
               {news.headline}
             </a>
           </>

@@ -1,5 +1,5 @@
 // An organization's page, /{org} (mock `org`): its repositories you can open,
-// most recently active first, with the home's line; your activity in them;
+// most recently active first, as GitHub lists them (links R); your activity in them;
 // and at the side its people, the command that makes a repository in it, and
 // your role. Someone outside the org sees its head and the repositories they
 // were added to, nothing more.
@@ -13,8 +13,9 @@ import { ActivityList } from "../../ui/activity";
 import { Avatar } from "../../ui/Avatar";
 import { Cmd, Empty, lnk, SectionHead } from "../../ui/controls";
 import { Page } from "../../ui/pages";
-import { orgLink } from "../../ui/paths";
-import { MonorepoList } from "../-home/Home";
+import { orgLink, ownerLink } from "../../ui/paths";
+import { Ref } from "../../ui/Ref";
+import { RepoRows } from "../-home/RepoRows";
 import { OrgHead } from "./OrgHead";
 
 /** The most people the side lists; People has them all. */
@@ -43,7 +44,9 @@ function People({ org }: { org: OrgProfile }) {
         {people.slice(0, SIDE_PEOPLE).map((p) => (
           <li key={p.login} className="flex min-h-[34px] items-center gap-2.5 text-[14px]">
             <Avatar name={p.login} size={22} />
-            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{p.name ?? p.login}</span>
+            <Ref kind="person" link={ownerLink(p.login)} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+              {p.name ?? p.login}
+            </Ref>
             <span className="ml-auto text-[12.5px] text-ash">{p.role}</span>
           </li>
         ))}
@@ -72,11 +75,11 @@ export function OrgOverview({ org }: { org: OrgProfile }) {
         <div>
           <section aria-label="Repositories">
             <SectionHead title="Repositories" count={lines.length} className="mb-3" />
-            <MonorepoList lines={lines} />
+            <RepoRows lines={lines} />
           </section>
           <section aria-label="Activity" className="mt-10">
             <SectionHead title="Activity" />
-            {events.length ? <ActivityList events={events} withMonorepo older={older} /> : <Empty>Nothing yet.</Empty>}
+            {events.length ? <ActivityList events={events} withMonorepo owner={org.login} older={older} /> : <Empty>Nothing yet.</Empty>}
           </section>
         </div>
         {org.role ? (

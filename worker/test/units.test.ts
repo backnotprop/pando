@@ -242,7 +242,7 @@ describe("names", () => {
 describe("the auth cache keeps successes only", () => {
   const user = { login: "ana", name: null, email: null, picture_url: null, created_at: "" };
   const credential = { id: "c", name: "m", kind: "machine" as const, created_at: "", last_used_at: null };
-  const mono = { id: "m_1", owner: "ana", name: "acme", full_name: "ana/acme", kind: "monorepo" as const, created_at: "", owner_type: "user" as const };
+  const mono = { id: "m_1", owner: "ana", name: "acme", full_name: "ana/acme", kind: "monorepo" as const, created_at: "", owner_type: "user" as const, description: null };
   const auth = (over: Partial<Auth>): Auth => ({ user, credential, role: "member", monorepo: mono, ...over });
 
   it("caches a member of an existing monorepo", () => {

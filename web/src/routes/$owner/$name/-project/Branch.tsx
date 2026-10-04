@@ -18,7 +18,8 @@ import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
 import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
-import { branchLink, ciBuildLink } from "../../../../ui/paths";
+import { branchLink, ciBuildLink, codeBlobLink, ownerLink } from "../../../../ui/paths";
+import { Ref, refClass } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
@@ -103,7 +104,9 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
               <span className="self-center">
                 <Avatar name={r.author} size={16} />
               </span>
-              <span className="text-bark">{r.author}</span>
+              <Ref kind="person" link={ownerLink(r.author)}>
+                {r.author}
+              </Ref>
               <span className="text-bark-dim">{VERDICT[r.verdict]}</span>
               {r.body ? <span className="overflow-hidden text-[13px] text-ellipsis text-ash">{r.body}</span> : null}
             </span>
@@ -163,22 +166,22 @@ function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch;
           // A monorepo's build has its page here; a plain repo's opens in the service.
           const page = run && info.kind === "monorepo" ? ciBuildLink(monorepo.full, run.build.pipeline, run.build.number) : null;
           const url = run?.job.web_url ?? s?.target_url ?? null;
-          const label = <span className="fox-cool text-bark">{name}</span>;
+          const label = <span className="fox-cool">{name}</span>;
 
           return (
             <li key={`${name}:${word}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px] ${arrived(name) ? "arrived" : ""}`}>
               <span className="text-bark-dim">
                 {mark ? <CheckMark /> : null}
                 {page && run ? (
-                  <Link {...page} search={{ job: run.job.id }} className="hover:underline hover:decoration-ash hover:underline-offset-3">
+                  <Link {...page} search={{ job: run.job.id }} className={refClass("person")}>
                     {label}
                   </Link>
                 ) : url ? (
-                  <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:decoration-ash hover:underline-offset-3">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className={refClass("person")}>
                     {label}
                   </a>
                 ) : (
-                  label
+                  <span className="font-semibold text-bark">{label}</span>
                 )}{" "}
                 <span className={`fox-cool text-[13px] whitespace-nowrap ${toneOf(word)}`}>{word}</span>
               </span>
@@ -271,8 +274,10 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
         {paths.length ? (
           <p className={`${q} mt-1.5`}>
             {paths.map((p) => (
-              <span key={p} className="block text-bark">
-                {p}
+              <span key={p} className="block">
+                <Ref kind="object" link={codeBlobLink(monorepo.full, repo.path, p, b.name)}>
+                  {p}
+                </Ref>
               </span>
             ))}
           </p>

@@ -14,6 +14,14 @@ import { STANDIN_PORT, WORKER_PORT } from "./ports.ts";
 
 export const BASE = `http://localhost:${WORKER_PORT}`;
 
+/**
+ * The first visible step after page.goto: the page waits on its server reads
+ * (a tree, then a file, each about 1 s in wrangler dev against the real
+ * Artifacts, retried after 1 s and 2 s on a 5xx), so it gets 30 s rather than
+ * expect's 15. The run's slowest read is named at the end (e2e/reads.ts).
+ */
+export const HARD_LOAD = { timeout: 30_000 };
+
 const STANDIN = `http://127.0.0.1:${STANDIN_PORT}`;
 
 export interface Person {

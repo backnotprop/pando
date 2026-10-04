@@ -22,6 +22,9 @@ import { INSPECTOR_PORT, STANDIN_PORT, WORKER_PORT } from "./e2e/ports.ts";
 
 const state = "../web/e2e/.state/wrangler";
 
+// The Worker's stdout (its pando.timing lines, one per request), for the run's slowest read (e2e/reads.ts). Its errors stay on stderr, shown here.
+const log = "../web/e2e/.state/worker.log";
+
 const fanout = Number(process.env.PANDO_E2E_FEED_FANOUT_MAX ?? 1);
 
 export default defineConfig({
@@ -29,7 +32,7 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   workers: 1,
-  reporter: [["list"]],
+  reporter: [["list"], ["./e2e/reads.ts"]],
   use: { baseURL: `http://localhost:${WORKER_PORT}`, viewport: { width: 1440, height: 900 }, trace: "retain-on-failure" },
   // `e2e` is the test; `shots` makes the fidelity screenshots for review (npm run shots); `org-shots` the org screens'.
   projects: [
@@ -40,7 +43,7 @@ export default defineConfig({
   webServer: [
     { command: "node e2e/workos.ts", url: `http://127.0.0.1:${STANDIN_PORT}/healthz`, reuseExistingServer: false },
     {
-      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site --var FEED_FANOUT_MAX:${fanout}`,
+      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site --var FEED_FANOUT_MAX:${fanout} > ${log}`,
       url: `http://localhost:${WORKER_PORT}/healthz`,
       reuseExistingServer: false,
       timeout: 180_000,

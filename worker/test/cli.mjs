@@ -176,6 +176,8 @@ const pando = (args, o = {}) =>
     child.stdout.on("data", (d) => (out.stdout += d));
     child.stderr.on("data", (d) => (out.stderr += d));
     child.on("close", (code) => resolve({ ...out, status: code }));
+    // A spawn that cannot start (its folder is missing) is a failed run, not a crash before the cleanup.
+    child.on("error", (err) => resolve({ ...out, status: -1, stderr: out.stderr + String(err.message) }));
     child.stdin.end(o.input ?? "");
   });
 

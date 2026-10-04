@@ -6,11 +6,15 @@
 //   PANDO_URL=http://localhost:8797 node test/busy.mjs
 //
 // With DOOR_TEST=1, a push carrying X-Pando-Test-Busy: 1 has its first attempt
-// taken as busy without being sent, so both paths run on demand. Real git,
-// real Artifacts. Credentials stay in memory; git never reaches the keychain.
+// taken as busy without being sent, so both paths run on demand; one carrying
+// X-Pando-Test-Record-Fail: 1 lands in Artifacts but is not recorded, and the
+// next branch list reconciles it (C2). Real git, real Artifacts, a web hook
+// receiver on this machine. Credentials stay in memory; git never reaches the
+// keychain.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
@@ -109,6 +113,59 @@ try {
   check("a push over 1 MiB whose Artifacts call fails gets a plain message, not a 500", !g.ok && /couldn't take this push right now; push again/.test(g.out) && !/HTTP 500|RPC failed/.test(g.out), g.out.split("\n").filter(Boolean).slice(0, 2).join(" | "));
   b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches/large-fail`, S);
   check("and nothing was pushed", b.status === 404, `${b.status}`);
+
+  // C2: Artifacts accepts a push but recording it fails. git still gets its report; the next branch list
+  // reconciles it from Artifacts' refs: the branch row, its events and its hook delivery are written then.
+  const got = [];
+
+  const receiver = createServer((req, res) => {
+    let raw = "";
+
+    req.on("data", (d) => (raw += d));
+    req.on("end", () => {
+      try {
+        got.push({ event: req.headers["x-pando-event"], body: JSON.parse(raw) });
+      } catch {}
+
+      res.writeHead(200).end();
+    });
+  });
+
+  await new Promise((res) => receiver.listen(0, "127.0.0.1", res));
+
+  try {
+    const hook = (await call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/hooks`, S, { type: "web", url: `http://127.0.0.1:${receiver.address().port}/h`, secret: "c2-secret", events: ["push"] })).json?.id;
+    const RECORD_FAIL = ["-c", "http.extraHeader=X-Pando-Test-Record-Fail: 1"];
+    git(["checkout", "-qb", "lost", "main"], src);
+    writeFileSync(join(src, "lost.txt"), "lost\n");
+    git(["add", "-A"], src);
+    git(["commit", "-qm", "lost"], src);
+    const lostHead = git(["rev-parse", "HEAD"], src).out.trim();
+    g = git(["push", url, "lost"], src, RECORD_FAIL);
+    check("a push whose record fails still tells git it landed (no error)", g.ok && !/error|rejected|failed/i.test(g.out), g.out.split("\n").filter(Boolean).slice(-2).join(" | "));
+    const eventsOf = async () => ((await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500`, S)).json?.events ?? []).filter((e) => e.collection === "branches" && e.row?.name === "lost");
+    const deliveries = async () => ((await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/hooks/${hook}/deliveries`, S)).json?.deliveries ?? []).filter((d) => d.event === "push");
+    await new Promise((res) => setTimeout(res, 1_000));
+    check("and nothing was recorded yet: no event, no hook delivery", (await eventsOf()).length === 0 && (await deliveries()).length === 0 && !got.some((x) => x.body?.branch === "lost"));
+    b = await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches?state=open`, S);
+    const listed = b.json?.branches?.find((x) => x.name === "lost");
+    check("the next branch list reconciles it from Artifacts' refs: the branch, at the pushed head", listed?.head === lostHead, JSON.stringify(listed?.head));
+    const ev = await eventsOf();
+    check("with its event (a new branch: branch.opened at the pushed head), as the pusher", ev.length === 1 && ev[0].kind === "branch.opened" && ev[0].head === lostHead && ev[0].actor === `busy-${id}`, ev.map((e) => `${e.kind}@${e.head?.slice(0, 7)}`).join(","));
+    let delivered = null;
+
+    for (let i = 0; i < 80 && !delivered; i++) {
+      delivered = got.find((x) => x.event === "push" && x.body?.branch === "lost" && x.body?.head === lostHead) ?? null;
+
+      if (!delivered) await new Promise((res) => setTimeout(res, 250));
+    }
+
+    check("and its hook delivery arrives", !!delivered, `${got.length} received`);
+    await call("GET", `/v1/monorepos/${O}/${M}/repos/${M}/branches?state=open`, S);
+    check("a second list writes nothing again", (await eventsOf()).length === ev.length && (await deliveries()).length === 1, `${(await eventsOf()).length} events, ${(await deliveries()).length} deliveries`);
+  } finally {
+    receiver.close();
+  }
 
   // Without DOOR_TEST the headers do nothing (checked when the server runs without it).
 } catch (err) {

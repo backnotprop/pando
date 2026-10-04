@@ -45,6 +45,8 @@ export interface BranchList {
   next_cursor: string | null;
   /** Stale branches past the grace period, for the caller to compute (facts.ts). */
   due: string[];
+  /** A push Artifacts accepted was not recorded: the caller reads Artifacts' refs and calls reconcile (C2). */
+  reconcile: boolean;
 }
 
 /** A dry run's answer: mergeable, and the paths that conflict when it is "conflicts" (else null). */

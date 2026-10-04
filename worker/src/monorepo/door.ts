@@ -6,7 +6,7 @@
 import type { Env } from "../env";
 import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
 import { gitRequest } from "./artifacts";
-import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal } from "./pktline";
+import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal, type RefCommand } from "./pktline";
 import { isBusy, LEASE_MS } from "./gate";
 import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
 
@@ -403,10 +403,37 @@ async function receivePack(
   if (report.error) console.warn(`receive-pack on ${repo.artifacts_name}: ${report.error}`);
   const accepted = report.unpack === "ok" ? section.commands.filter((c) => report.refs.get(c.ref) === null) : [];
 
-  // The object writes the branch rows, their events and their hook deliveries in one step (C2, C9).
-  if (accepted.length) await stub.recordPush(repo.name, identity, accepted, {}, origin);
+  // The object writes the branch rows, their events and their hook deliveries in one step (C2, C9). If that fails,
+  // the push still landed: git gets its report, and the commands are kept for the next branch read to reconcile.
+  if (accepted.length) {
+    try {
+      if (env.DOOR_TEST === "1" && req.headers.get("x-pando-test-record-fail") === "1") throw new Error("door test: the record failed");
+      await stub.recordPush(repo.name, identity, accepted, {}, origin);
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+
+      console.error(`recording a push to ${repo.name} failed; kept for a reconcile: ${why}`);
+      note({ record_error: why.slice(0, 200) });
+      ctx.waitUntil(keepUnrecorded(stub, repo.name, identity, accepted, origin));
+    }
+  }
 
   return new Response(bytes, { headers });
+}
+
+/** Store a push the object could not record, trying again a few times while the object is unreachable. */
+async function keepUnrecorded(stub: ReturnType<typeof monorepoStub>, repo: string, identity: Identity, commands: RefCommand[], origin: string | null): Promise<void> {
+  for (const wait of [0, 1_000, 3_000, 10_000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+
+    try {
+      await stub.markUnrecorded(repo, identity, commands, origin);
+
+      return;
+    } catch (err) {
+      console.error(`keeping an unrecorded push to ${repo} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 }
 
 /** Every ref refused with `message` (side-band aware: git prints it, then "! [remote rejected] ... (busy; push again)"). */

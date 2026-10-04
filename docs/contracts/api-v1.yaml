@@ -3334,7 +3334,7 @@ components:
         title: { type: [string, "null"] }
         description: { type: [string, "null"] }
         author: { type: [string, "null"], description: The branch's author (a user). }
-        pusher: { type: string, description: "The user who pushed; for `merged`, who merged." }
+        pusher: { type: [string, "null"], description: "The user who pushed; for `merged`, who merged. Null only when Pando found a push in Artifacts' refs whose pusher it never learned (its record and its keep both failed)." }
         seq: { type: [integer, "null"], description: "The event stream's seq for this change: drop repeats, sort by it." }
         merge_commit: { type: string, description: Only for `merged`. }
         diff_url: { type: string }

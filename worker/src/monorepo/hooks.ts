@@ -247,7 +247,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
       commit: p.head,
       branch: p.branch,
       message: p.title ?? `${p.event} ${p.branch}`,
-      author: { name: p.pusher },
+      author: { name: p.pusher ?? "" },
       env: pandoBuildEnv({
         clone_url: u.clone_url, read_token: read.token, status_url: u.status_url, status_token: status?.token ?? null,
         monorepo: p.monorepo, repo: p.repo, branch: p.branch, head: p.head, delivery: deliveryId, seq: p.seq ?? null,

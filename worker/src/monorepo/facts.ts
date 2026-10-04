@@ -24,6 +24,7 @@ import { commitReader, compareWith, type CommitReader } from "./graph";
 import { MainMoved, mergeableOf, pool } from "./views";
 import type { RepoRecord } from "./types";
 import { sendPushSummary } from "../feed/push";
+import { runReconcile } from "./reconcile";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
 export const SWEEP_DAYS = 7;
@@ -55,6 +56,8 @@ export type FactsMessage = (
   // monorepo: the monorepo's id (for one made before namespaces, its old name).
   | { type: "sweep"; monorepo: string; repo: string; main: string }
   | { type: "branch"; monorepo: string; repo: string; branch: string; head: string }
+  // The refs compare (CODE-VS-MODEL.md P1): Artifacts' refs against the records, every branch.
+  | { type: "refs"; monorepo: string; repo: string }
 ) & {
   /** The push behind this job (C25): its event waits for the commit count and head title computed here. */
   push?: { seq: number; before: string };
@@ -124,7 +127,7 @@ export class FactsDrain extends WorkerEntrypoint<Env> {
     const idx = jobs.map((_, i) => i);
     await pool(idx.filter((i) => jobs[i].type === "branch"), SWEEP_PARALLEL, one);
 
-    for (const i of idx.filter((i) => jobs[i].type === "sweep")) await one(i);
+    for (const i of idx.filter((i) => jobs[i].type !== "branch")) await one(i);
 
     return { ok, error };
   }
@@ -135,6 +138,8 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
   const [r, info] = await Promise.all([stub.getRepo(m.repo), stub.info()]);
 
   if (!r || !info) return { computed: 0, abandoned: true };
+
+  if (m.type === "refs") return { computed: await runReconcile(env, stub, r, { all: true }), abandoned: false };
 
   if (m.push) {
     const t0 = Date.now();

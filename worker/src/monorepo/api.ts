@@ -14,6 +14,7 @@ import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
 import type { BranchList } from "./views";
 import { computeFacts, INLINE_MAX, SWEEP_PARALLEL } from "./facts";
+import { runReconcile } from "./reconcile";
 import * as files from "./files";
 import { objectsClient } from "../objects";
 import { EVENT_STREAM, parseTopics } from "./stream";
@@ -648,11 +649,11 @@ async function branchViews(
   const ask = { names: names ?? undefined, state, limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
   let list: BranchList = await stub.branchRows(r.name, ask);
 
-  // A push Artifacts accepted was not recorded (C2): write what was missed from Artifacts' refs, then read again.
+  // Kept pushes (C2): catch the records up to Artifacts' refs, then read again.
   if (list.reconcile) {
-    const refs = await listRefs(c.env, r).catch(() => null);
+    const pause = c.env.DOOR_TEST === "1" ? Math.min(Number(c.req.header("x-pando-test-reconcile-pause-ms") ?? 0), 10_000) : 0;
 
-    if (refs && (await stub.reconcile(r.name, Object.fromEntries(refs)))) list = await stub.branchRows(r.name, ask);
+    if (await runReconcile(c.env, stub, r, { pauseMs: pause > 0 ? pause : 0 }).catch(() => 0)) list = await stub.branchRows(r.name, ask);
   }
 
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);

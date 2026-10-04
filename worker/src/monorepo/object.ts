@@ -43,6 +43,7 @@ import type {
   StatusRecord,
   StreamEvent,
   KeyedEvent,
+  ReconcileSeen,
   RefusalExtra,
   MergeResult,
   EventSocketAttachment,
@@ -84,7 +85,8 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
 CREATE INDEX IF NOT EXISTS delivery_attempts_d ON delivery_attempts (delivery_id);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS unrecorded (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, repo TEXT NOT NULL, identity TEXT NOT NULL, commands TEXT NOT NULL, origin TEXT, at TEXT NOT NULL);
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo TEXT NOT NULL, identity TEXT NOT NULL, commands TEXT NOT NULL, origin TEXT, at TEXT NOT NULL,
+  ref TEXT, old TEXT, new TEXT, landed TEXT NOT NULL DEFAULT 'yes');
 CREATE TABLE IF NOT EXISTS object_sizes (repo TEXT NOT NULL, oid TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (repo, oid));
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL, machine TEXT NOT NULL,
@@ -230,6 +232,22 @@ export const SCAN_MAX = 5_000;
 /** Ref commands sent in one receive-pack. */
 export const REF_BATCH_MAX = 200;
 
+/** After a push, Artifacts' refs are compared with the records this long after, twice (CODE-VS-MODEL.md P1). */
+const REFS_CHECK_MS = 5 * 60_000;
+
+/**
+ * A push kept for later (C2), one ref per row: landed 'yes' (Artifacts took
+ * it; its record waits for its old head) or 'unknown' (Artifacts' answer was
+ * lost). keepPush is the only writer.
+ */
+type KeptRow = { id: number; identity: string; origin: string | null; ref: string; old: string; new: string; landed: string };
+
+/** A kept push's pusher, as keepPush wrote it (null: not known, a catch-up by the refs compare). */
+function keptIdentity(k: KeptRow): Identity | null {
+  // SAFETY: keepPush is the only writer of unrecorded.identity: JSON.stringify of an Identity or null.
+  return JSON.parse(k.identity) as Identity | null;
+}
+
 function who(by: Identity | null): EventWho {
   const out: EventWho = { actor: by?.login ?? null, machine: by?.credential_name ?? null, agent: by?.agent ?? null };
 
@@ -327,6 +345,30 @@ export class MonorepoObject extends DurableObject<Env> {
     }
 
     const rcols = this.rows<{ name: string }>("PRAGMA table_info(repos)").map((c) => c.name);
+
+    // Each move of a ref's record counts (a reconcile reads again when one slipped in after its refs read), and the refs compare's schedule.
+    for (const [col, type] of [["record_moves", "INTEGER NOT NULL DEFAULT 0"], ["refs_check_at", "INTEGER"], ["refs_check_ms", "INTEGER"], ["refs_checks_left", "INTEGER"]]) {
+      if (!rcols.includes(col)) this.sql.exec(`ALTER TABLE repos ADD COLUMN ${col} ${type}`);
+    }
+
+    const ucols = this.rows<{ name: string }>("PRAGMA table_info(unrecorded)").map((c) => c.name);
+
+    if (!ucols.includes("ref")) {
+      for (const [col, type] of [["ref", "TEXT"], ["old", "TEXT"], ["new", "TEXT"], ["landed", "TEXT NOT NULL DEFAULT 'yes'"]]) this.sql.exec(`ALTER TABLE unrecorded ADD COLUMN ${col} ${type}`);
+
+      // Rows from before held a whole push; now one ref each.
+      for (const p of this.rows<{ id: number; repo: string; identity: string; commands: string; origin: string | null; at: string }>("SELECT id, repo, identity, commands, origin, at FROM unrecorded")) {
+        // SAFETY: markUnrecorded was the only writer of commands: JSON of the door's RefCommands.
+        for (const c of JSON.parse(p.commands) as RefCommand[]) {
+          this.sql.exec(
+            "INSERT INTO unrecorded (repo, identity, commands, origin, at, ref, old, new, landed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yes')",
+            p.repo, p.identity, JSON.stringify([c]), p.origin, p.at, c.ref, c.old, c.new,
+          );
+        }
+
+        this.sql.exec("DELETE FROM unrecorded WHERE id = ?", p.id);
+      }
+    }
 
     if (!rcols.includes("default_head")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head TEXT");
 
@@ -560,10 +602,17 @@ export class MonorepoObject extends DurableObject<Env> {
   /** Main's head as Pando last moved or saw it (pushes through the door, merges, and the Worker's reads). */
   /** Main moved (or was read once): its head, and its commit's title when known here (else null, never a stale one). */
   rememberHead(repo: string, sha: string | null, title: string | null = null): void {
-    this.sql.exec(
+    const moved = this.sql.exec(
       "UPDATE repos SET default_head = ?, default_head_at = ?, default_head_title = ? WHERE name = ? AND (default_head IS NOT ? )",
       sha, now(), title, repo, sha,
-    );
+    ).rowsWritten;
+
+    if (moved) this.recordMoved(repo);
+  }
+
+  /** Count a move of one of the repo's records (a branch head or main): a reconcile that read Artifacts' refs before it reads them again. */
+  private recordMoved(repo: string): void {
+    this.sql.exec("UPDATE repos SET record_moves = record_moves + 1 WHERE name = ?", repo);
   }
 
   /**
@@ -612,15 +661,64 @@ export class MonorepoObject extends DurableObject<Env> {
     )?.base_before ?? null;
   }
 
-  /** The door's one rule: main moves only by a merge (creating it is allowed). */
-  checkPush(repo: string, commands: RefCommand[]): PushVerdict[] {
+  /**
+   * The door's one rule: main moves only by a merge (creating it is allowed).
+   * A push let through schedules the refs compare for its repo
+   * (`checkEveryMs`: tests only, else REFS_CHECK_MS).
+   */
+  checkPush(repo: string, commands: RefCommand[], checkEveryMs: number | null = null): PushVerdict[] {
     const r = this.repoRow(repo);
     const main = `refs/heads/${r?.default_branch ?? DEFAULT_BRANCH}`;
 
-    return commands.flatMap((c) => (c.ref === main && c.old !== ZERO ? [{ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }] : []));
+    const refused = commands.flatMap((c) => (c.ref === main && c.old !== ZERO ? [{ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }] : []));
+
+    if (!refused.length && r) this.scheduleRefsCheck(repo, checkEveryMs ?? REFS_CHECK_MS);
+
+    return refused;
   }
 
-  /** Record branch heads after Artifacts accepted a push. Returns the events to deliver. */
+  // ── The refs compare (CODE-VS-MODEL.md P1) ───────────────────────────────
+  //
+  // A push whose record and keep both failed leaves no trace here. After any
+  // push, a refs job (facts outbox, FactsDrain) compares Artifacts' refs with
+  // the records twice, an interval apart (a push slower than one interval is
+  // still found), and the reconcile catches the records up.
+
+  private scheduleRefsCheck(repo: string, every: number): void {
+    const at = Date.now() + every;
+
+    this.sql.exec(
+      "UPDATE repos SET refs_check_at = MIN(COALESCE(refs_check_at, ?), ?), refs_check_ms = ?, refs_checks_left = 2 WHERE name = ?",
+      at, at, every, repo,
+    );
+    this.feed.armAt(at);
+  }
+
+  /** On the alarm: a refs job for each repo whose compare is due, and the next one scheduled. */
+  private refsChecks(): void {
+    const t = Date.now();
+
+    const due = this.rows<{ name: string; every: number; left: number }>(
+      "SELECT name, refs_check_ms AS every, refs_checks_left AS left FROM repos WHERE refs_check_at IS NOT NULL AND refs_check_at <= ?", t,
+    );
+
+    for (const r of due) {
+      this.queueFacts({ type: "refs", repo: r.name });
+      this.sql.exec("UPDATE repos SET refs_check_at = ?, refs_checks_left = ? WHERE name = ?", r.left > 1 ? t + r.every : null, r.left - 1, r.name);
+    }
+
+    const next = this.row<{ t: number | null }>("SELECT MIN(refs_check_at) AS t FROM repos")?.t;
+
+    if (next) this.feed.armAt(next);
+  }
+
+  /**
+   * Record branch heads after Artifacts accepted a push. Records follow
+   * Artifacts' order (CODE-VS-MODEL.md P2): a branch moves only from the
+   * push's own old head. A push whose old head is not the record (another
+   * push's record landed first, or an earlier one was lost) is kept and
+   * applied once its old head is recorded. Returns the events to deliver.
+   */
   recordPush(
     repo: string,
     identity: Identity,
@@ -628,87 +726,135 @@ export class MonorepoObject extends DurableObject<Env> {
     made: { title?: string | null; description?: string | null } = {},
     origin: string | null = null,
   ): RepoEvent[] {
-    const r = this.repoRow(repo);
-    const main = r?.default_branch ?? DEFAULT_BRANCH;
-    const at = now();
     const events: RepoEvent[] = [];
+    const refs = updates.filter((u) => u.ref.startsWith("refs/heads/"));
 
-    for (const u of updates) {
-      if (!u.ref.startsWith("refs/heads/")) continue;
-      const name = u.ref.slice(11);
-
-      const base: Omit<RepoEvent, "event"> = {
-        repo, branch: name, ref: u.ref, before: u.old, head: u.new, base: null,
-        author: null, pusher: identity.login, title: null, description: null,
-      };
-
-      if (name === main) {
-        this.rememberHead(repo, u.new === ZERO ? null : u.new);
-        this.forgetRequiredIfConfig(repo);
-
-        const seq = this.publish({
-          kind: "push", collection: "default_heads", key: repo, op: "upsert", repo, ...who(identity),
-          row: { repo, default_branch: main, default_head: u.new === ZERO ? null : u.new }, before: u.old, head: u.new,
-        });
-
-        if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new, push: seq ? { seq, before: u.old } : undefined });
-        events.push({ ...base, event: "push", author: identity.login, seq: seq || null });
-        continue;
-      }
-
-      let b = this.branchRecord(repo, name);
-
-      if (u.new === ZERO) {
-        if (b) this.sql.exec("UPDATE branches SET deleted_at = ?, head = NULL, updated_at = ? WHERE repo = ? AND name = ?", at, at, repo, name);
-        const seq = this.publish({ kind: "branch.deleted", collection: "branches", key: `${repo}/${name}`, op: "delete", repo, ...who(identity), row: { repo, name }, before: u.old, head: u.new });
-        events.push({ ...base, event: "push", author: b?.creator ?? null, title: b?.title ?? null, description: b?.description ?? null, seq: seq || null });
-        continue;
-      }
-
-      const opened = !b;
-
-      if (!b) {
-        this.sql.exec(
-          `INSERT INTO branches (repo, name, head, creator, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (repo, name) DO UPDATE SET head = excluded.head, creator = excluded.creator,
-             title = excluded.title, description = excluded.description, created_at = excluded.created_at, updated_at = excluded.updated_at,
-             merge_commit = NULL, merged_head = NULL, merged_at = NULL, merged_by = NULL, deleted_at = NULL`,
-          repo, name, u.new, identity.login, made.title ?? null, made.description ?? null, at, at,
-        );
-      } else {
-        this.sql.exec("UPDATE branches SET head = ?, updated_at = ? WHERE repo = ? AND name = ?", u.new, at, repo, name);
-      }
-
-      this.sql.exec("UPDATE branches SET pushed_machine = ? WHERE repo = ? AND name = ?", identity.credential_name, repo, name);
-      b = this.branchRecord(repo, name)!;
-      const seq = this.publishBranch(opened ? "branch.opened" : "push", repo, name, identity, { before: u.old, head: u.new });
-      const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
-
-      if (opened) events.push({ ...e, event: "branch.opened" });
-      events.push({ ...e, event: "push" });
-      this.queueFacts({ type: "branch", repo, branch: name, head: u.new, push: seq ? { seq, before: u.old } : undefined });
+    for (const u of refs) {
+      if (!this.moveRef(repo, identity, u, made, events)) this.keepPush(repo, identity, u, origin, "yes");
     }
 
     // Hook deliveries, in the same step as the change (C9).
     this.queueDeliveries(events, origin);
 
+    for (const u of refs) this.drainKept(repo, u.ref);
+
     return events;
   }
 
-  // ── Pushes Artifacts accepted but Pando did not record (C2) ─────────────
-  //
-  // When the record fails after Artifacts accepted a push, git still gets its
-  // report (the push landed) and the door stores the commands here. The next
-  // branch read (the list or one branch) reads Artifacts' refs and calls
-  // reconcile(), which writes what was missed: the branch rows, the push
-  // events and the hook deliveries, through recordPush.
+  /**
+   * Move one ref's record from `u.old` to `u.new`, with its events and its
+   * facts job. False, and nothing written, when a branch's record is not at
+   * `u.old`. Main moves only by a merge or its first push, so it always moves.
+   */
+  private moveRef(repo: string, identity: Identity | null, u: RefCommand, made: { title?: string | null; description?: string | null }, events: RepoEvent[]): boolean {
+    const r = this.repoRow(repo);
+    const main = r?.default_branch ?? DEFAULT_BRANCH;
+    const name = u.ref.slice(11);
+    const at = now();
+    const pusher = identity?.login ?? null;
 
-  /** The door could not record a push Artifacts accepted: keep it for the reconcile. */
-  markUnrecorded(repo: string, identity: Identity, commands: RefCommand[], origin: string | null): void {
+    const base: Omit<RepoEvent, "event"> = {
+      repo, branch: name, ref: u.ref, before: u.old, head: u.new, base: null,
+      author: null, pusher, title: null, description: null,
+    };
+
+    if (name === main) {
+      this.rememberHead(repo, u.new === ZERO ? null : u.new);
+      this.forgetRequiredIfConfig(repo);
+
+      const seq = this.publish({
+        kind: "push", collection: "default_heads", key: repo, op: "upsert", repo, ...who(identity),
+        row: { repo, default_branch: main, default_head: u.new === ZERO ? null : u.new }, before: u.old, head: u.new,
+      });
+
+      if (u.new !== ZERO) this.queueFacts({ type: "sweep", repo, main: u.new, push: seq ? { seq, before: u.old } : undefined });
+      events.push({ ...base, event: "push", author: identity?.login ?? null, seq: seq || null });
+
+      return true;
+    }
+
+    let b = this.branchRecord(repo, name);
+
+    if ((b?.head ?? ZERO) !== u.old) return false;
+    this.recordMoved(repo);
+
+    if (u.new === ZERO) {
+      if (b) this.sql.exec("UPDATE branches SET deleted_at = ?, head = NULL, updated_at = ? WHERE repo = ? AND name = ?", at, at, repo, name);
+      const seq = this.publish({ kind: "branch.deleted", collection: "branches", key: `${repo}/${name}`, op: "delete", repo, ...who(identity), row: { repo, name }, before: u.old, head: u.new });
+      events.push({ ...base, event: "push", author: b?.creator ?? null, title: b?.title ?? null, description: b?.description ?? null, seq: seq || null });
+
+      return true;
+    }
+
+    const opened = !b;
+
+    if (!b) {
+      this.sql.exec(
+        `INSERT INTO branches (repo, name, head, creator, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (repo, name) DO UPDATE SET head = excluded.head, creator = excluded.creator,
+           title = excluded.title, description = excluded.description, created_at = excluded.created_at, updated_at = excluded.updated_at,
+           merge_commit = NULL, merged_head = NULL, merged_at = NULL, merged_by = NULL, deleted_at = NULL`,
+        repo, name, u.new, identity?.login ?? null, made.title ?? null, made.description ?? null, at, at,
+      );
+    } else {
+      this.sql.exec("UPDATE branches SET head = ?, updated_at = ? WHERE repo = ? AND name = ?", u.new, at, repo, name);
+    }
+
+    if (identity) this.sql.exec("UPDATE branches SET pushed_machine = ? WHERE repo = ? AND name = ?", identity.credential_name, repo, name);
+    b = this.branchRecord(repo, name)!;
+    const seq = this.publishBranch(opened ? "branch.opened" : "push", repo, name, identity, { before: u.old, head: u.new });
+    const e = { ...base, author: b.creator, title: b.title, description: b.description, seq: seq || null };
+
+    if (opened) events.push({ ...e, event: "branch.opened" });
+    events.push({ ...e, event: "push" });
+    this.queueFacts({ type: "branch", repo, branch: name, head: u.new, push: seq ? { seq, before: u.old } : undefined });
+
+    return true;
+  }
+
+  /** Keep one ref of a push for later: landed 'yes' (waits for its old head) or 'unknown' (only a reconcile's catch-up covers it). */
+  private keepPush(repo: string, identity: Identity | null, u: RefCommand, origin: string | null, landed: "yes" | "unknown"): void {
     this.sql.exec(
-      "INSERT INTO unrecorded (repo, identity, commands, origin, at) VALUES (?, ?, ?, ?, ?)",
-      repo, JSON.stringify(identity), JSON.stringify(commands), origin, now(),
+      "INSERT INTO unrecorded (repo, identity, commands, origin, at, ref, old, new, landed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      repo, JSON.stringify(identity), JSON.stringify([u]), origin, now(), u.ref, u.old, u.new, landed,
     );
+  }
+
+  /** Apply a ref's kept pushes that landed, in order, while each one's old head is the record. */
+  private drainKept(repo: string, ref: string): void {
+    for (let i = 0; i < 1_000; i++) {
+      const k = this.row<KeptRow>(
+        "SELECT id, identity, origin, ref, old, new, landed FROM unrecorded WHERE repo = ? AND ref = ? AND old = ? AND landed = 'yes' ORDER BY id LIMIT 1",
+        repo, ref, this.recordedHead(repo, ref) ?? ZERO,
+      );
+
+      if (!k) return;
+      this.sql.exec("DELETE FROM unrecorded WHERE id = ?", k.id);
+      const events: RepoEvent[] = [];
+
+      if (this.moveRef(repo, keptIdentity(k), { ref, old: k.old, new: k.new }, {}, events)) this.queueDeliveries(events, k.origin);
+    }
+  }
+
+  // ── Kept pushes and the reconcile (C2; CODE-VS-MODEL.md P1 to P3) ───────
+  //
+  // `unrecorded` keeps pushes not yet in the records, one ref per row:
+  // - 'yes': Artifacts took it, and either the door's record failed or the
+  //   record was not at its old head yet (another push's record landed
+  //   first); drainKept applies it once its old head is recorded;
+  // - 'unknown': Artifacts' answer was lost and the refs did not show it
+  //   landed; only a reconcile's catch-up covers it, never a replay.
+  // A reconcile (reconcile.ts: a branch list with kept pushes, the door after
+  // a lost answer, the refs compare) reads Artifacts' refs and catches the
+  // records up: the branch rows, the push events and the hook deliveries.
+
+  /**
+   * The door could not record a push (landed 'yes': Artifacts accepted it) or
+   * could not tell whether it landed ('unknown': Artifacts' answer was lost):
+   * keep it for the reconcile, one row per ref.
+   */
+  markUnrecorded(repo: string, identity: Identity, commands: RefCommand[], origin: string | null, landed: "yes" | "unknown" = "yes"): void {
+    for (const c of commands) this.keepPush(repo, identity, c, origin, landed);
   }
 
   /** A ref's head as recorded here: main from the repo's record, a branch from its row; null when unknown or deleted. */
@@ -722,54 +868,69 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.branchRecord(repo, ref.slice(11))?.head ?? null;
   }
 
+  /** What a reconcile saw before reading Artifacts' refs: the record-move count and the kept pushes. */
+  reconcileSeen(repo: string): ReconcileSeen {
+    const moves = this.row<{ n: number }>("SELECT record_moves AS n FROM repos WHERE name = ?", repo)?.n ?? 0;
+
+    return { moves, ids: this.rows<{ id: number }>("SELECT id FROM unrecorded WHERE repo = ? ORDER BY id", repo).map((r) => r.id) };
+  }
+
   /**
-   * Write the missed pushes of a repo, given Artifacts' refs now (ref to sha).
-   * Each stored push is replayed, in order, for the refs whose record is still
-   * where that push started (a later recorded push wins). A ref a stored push
-   * named that still differs from Artifacts after that (an earlier push whose
-   * mark was lost too) is caught up from its record to Artifacts, by the last
-   * stored pusher. Returns how many ref updates were written.
+   * Catch a repo's records up to Artifacts' refs as read (ref to sha), after
+   * reconcileSeen (CODE-VS-MODEL.md P3). "retry" when a record moved since:
+   * the caller reads the refs again. Else, in one step: replay the seen
+   * pushes that landed, in order, where each starts at the record; make one
+   * catch-up move per ref still not at the head read (one push event, so CI
+   * runs on it; an 'unknown' push is covered only this way, never replayed);
+   * delete only the rows seen (later ones wait for their old head or the next
+   * reconcile); then apply kept pushes that now follow. The refs named are the
+   * seen rows' refs, or with `all` (the refs compare) every branch Artifacts
+   * has but main (moved only by merges). Returns how many moves it wrote.
    */
-  reconcile(repo: string, refs: Record<string, string>): number {
-    const pending = this.rows<{ id: number; identity: string; commands: string; origin: string | null }>(
-      "SELECT id, identity, commands, origin FROM unrecorded WHERE repo = ? ORDER BY id", repo,
-    );
-
+  reconcile(repo: string, refs: Record<string, string>, seen: ReconcileSeen, all = false): number | "retry" {
+    if (this.reconcileSeen(repo).moves !== seen.moves) return "retry";
+    const ids = new Set(seen.ids);
+    const rows = this.rows<KeptRow>("SELECT id, identity, origin, ref, old, new, landed FROM unrecorded WHERE repo = ? ORDER BY id", repo).filter((k) => ids.has(k.id));
+    const main = `refs/heads/${this.repoRow(repo)?.default_branch ?? DEFAULT_BRANCH}`;
     let written = 0;
-    let last: { identity: Identity; origin: string | null } | null = null;
-    const named = new Set<string>();
 
-    for (const p of pending) {
-      // SAFETY: markUnrecorded is the only writer of these columns: JSON of an Identity and of the door's RefCommands.
-      const identity = JSON.parse(p.identity) as Identity;
-      // SAFETY: as above.
-      const commands = JSON.parse(p.commands) as RefCommand[];
-      const due = commands.filter((c) => (this.recordedHead(repo, c.ref) ?? ZERO) === c.old);
+    for (const k of rows) {
+      if (k.landed !== "yes" || (this.recordedHead(repo, k.ref) ?? ZERO) !== k.old) continue;
+      const events: RepoEvent[] = [];
 
-      for (const c of commands) named.add(c.ref);
-
-      if (due.length) {
-        this.recordPush(repo, identity, due, {}, p.origin);
-        written += due.length;
+      if (this.moveRef(repo, keptIdentity(k), { ref: k.ref, old: k.old, new: k.new }, {}, events)) {
+        this.queueDeliveries(events, k.origin);
+        written++;
       }
-
-      this.sql.exec("DELETE FROM unrecorded WHERE id = ?", p.id);
-
-      last = { identity, origin: p.origin };
     }
 
-    const behind = [...named].flatMap((ref) => {
+    const named = new Set(rows.map((k) => k.ref));
+
+    if (all) for (const ref of Object.keys(refs)) if (ref.startsWith("refs/heads/") && ref !== main) named.add(ref);
+
+    for (const ref of named) {
       const recorded = this.recordedHead(repo, ref) ?? ZERO;
       const there = refs[ref] ?? ZERO;
 
-      return recorded === there ? [] : [{ ref, old: recorded, new: there }];
-    });
+      if (recorded === there) continue;
+      // By the kept push that brought this head, else the ref's last kept push, else no one known.
+      const mine = rows.filter((k) => k.ref === ref);
+      const by = mine.findLast((k) => k.new === there) ?? mine.at(-1) ?? null;
+      const events: RepoEvent[] = [];
 
-    if (last && behind.length) {
-      console.warn(`reconcile ${repo}: ${behind.length} ref(s) caught up to Artifacts`);
-      this.recordPush(repo, last.identity, behind, {}, last.origin);
-      written += behind.length;
+      if (this.moveRef(repo, by ? keptIdentity(by) : null, { ref, old: recorded, new: there }, {}, events)) {
+        console.warn(`reconcile ${repo}: ${ref} caught up to Artifacts`);
+        this.queueDeliveries(events, by?.origin ?? null);
+        written++;
+      }
     }
+
+    for (let i = 0; i < rows.length; i += 90) {
+      const chunk = rows.slice(i, i + 90).map((k) => k.id);
+      this.sql.exec(`DELETE FROM unrecorded WHERE id IN (${chunk.map(() => "?").join(",")})`, ...chunk);
+    }
+
+    for (const ref of named) this.drainKept(repo, ref);
 
     return written;
   }
@@ -790,6 +951,7 @@ export class MonorepoObject extends DurableObject<Env> {
            ON CONFLICT (repo, name) DO UPDATE SET head = excluded.head, deleted_at = NULL`,
           repo, name, head, now(), now(),
         );
+        this.recordMoved(repo);
         b = this.branchRecord(repo, name)!;
       }
 
@@ -1210,6 +1372,7 @@ export class MonorepoObject extends DurableObject<Env> {
   /** The one alarm: the feed's outbox and tick, then the facts' and the hooks' retries. */
   async alarm(): Promise<void> {
     await this.feed.alarm();
+    this.refsChecks();
     await this.factsOut.alarm();
     await this.hooksOut.alarm();
   }

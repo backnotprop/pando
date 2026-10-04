@@ -87,7 +87,8 @@ export interface RepoEvent {
   head: string;
   base: string | null;
   author: string | null;
-  pusher: string;
+  /** Null when the refs compare caught up a push whose pusher Pando never learned. */
+  pusher: string | null;
   title: string | null;
   description: string | null;
   merge_commit?: string;
@@ -134,6 +135,14 @@ export interface KeyedEvent {
   source: string;
   version: number;
   event: StreamEvent;
+}
+
+/** What a reconcile saw before it read Artifacts' refs (object.ts reconcileSeen). */
+export interface ReconcileSeen {
+  /** The repo's record-move count then. */
+  moves: number;
+  /** The kept pushes then. */
+  ids: number[];
 }
 
 /** A merge's result, as the merge route answers and merged events carry it. */

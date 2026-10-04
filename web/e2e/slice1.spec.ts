@@ -30,6 +30,13 @@ const RULINGS = "# Rulings in force\n\n- **One monorepo per project.** Code sits
 
 const WEB = fileURLToPath(new URL("..", import.meta.url));
 
+/**
+ * Where an SF build copies Apple's fonts from, as vite.config.ts finds them:
+ * PANDO_FONTS_DIR, else the landing page's folder in the meta layer. A
+ * checkout outside the monorepo's layout (a public clone) has neither.
+ */
+const APPLE_FONTS = process.env.PANDO_FONTS_DIR ?? fileURLToPath(new URL("../../../../../../research/design/pando-2026-10-02/landing/fonts", import.meta.url));
+
 /** The app built into a folder of its own (not the dist the Worker serves), with or without Apple's fonts; its files by path. */
 function build(sf: boolean) {
   const out = mkdtempSync(join(tmpdir(), "pando-build-"));
@@ -96,12 +103,19 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
     });
 
     await test.step("a default build ships no font file of Apple's; an SF build ships SF Pro Text and SF Mono, with SF Mono first in the mono stack", async () => {
-      const sf = build(true);
+      // The SF half needs Apple's files, which a public checkout never has: without them it is left out, and says so.
+      if (existsSync(APPLE_FONTS)) {
+        const sf = build(true);
+
+        expect(sf.files).toEqual(expect.arrayContaining(["fonts/SF-Pro-Text-Regular.otf", "fonts/SF-Pro-Text-Semibold.otf", "fonts/SFNSMono.ttf"]));
+        expect(sf.text).toContain('font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf")');
+        expect(sf.text).toContain('--mono-face:"SF Mono","Ioskeley Mono"');
+      } else {
+        test.info().annotations.push({ type: "skipped", description: `the SF build's half: no Apple fonts at ${APPLE_FONTS} (set PANDO_FONTS_DIR to run it)` });
+      }
+
       const plain = build(false);
 
-      expect(sf.files).toEqual(expect.arrayContaining(["fonts/SF-Pro-Text-Regular.otf", "fonts/SF-Pro-Text-Semibold.otf", "fonts/SFNSMono.ttf"]));
-      expect(sf.text).toContain('font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf")');
-      expect(sf.text).toContain('--mono-face:"SF Mono","Ioskeley Mono"');
       expect(plain.files.filter((f) => f.startsWith("fonts") || /SF-?Pro|SFNS|SF-?Mono/i.test(f))).toEqual([]);
       expect(plain.text).not.toMatch(/SF-Pro-Text|SFNSMono|"SF Mono"|--mono-face:/);
       // The SF build copied Apple's files into public/fonts; the default build cleared them again.

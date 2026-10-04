@@ -331,21 +331,8 @@ signin.get("/v1/login/callback", async (c) => {
   return new Response(null, { status: 302, headers });
 });
 
-/** A one-button page that posts to /v1/logout (until the web app has its own). */
-signin.get("/v1/logout", () => {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign out of Pando</title>
-<style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:20vh auto;max-width:28rem;text-align:center}button{font:inherit;padding:.6rem 1.4rem;border-radius:.5rem;border:1px solid #888;background:#111;color:#fff;cursor:pointer}</style></head>
-<body><h1>Sign out of Pando</h1><p>This ends the session in this browser and your WorkOS sign-in.</p>
-<form method="post" action="/v1/logout"><button type="submit">Sign out</button></form></body></html>`;
-
-  return new Response(html, {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-    },
-  });
-});
+/** Opened in a browser: the app, where the name menu signs out (a GET never ends a session). */
+signin.get("/v1/logout", (c) => new Response(null, { status: 303, headers: { location: `${new URL(c.req.url).origin}/`, "cache-control": "no-store" } }));
 
 /**
  * Sign out: revoke this browser session, clear the cookie, and end the WorkOS

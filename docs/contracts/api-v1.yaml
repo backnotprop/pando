@@ -391,11 +391,12 @@ paths:
   /v1/logout:
     get:
       operationId: logoutPage
-      summary: A one-button page that posts to /v1/logout
+      summary: Opened in a browser, goes to the app
+      description: A GET never ends a session. It sends the browser to the app (`/`), where the name menu signs out (POST).
       tags: [users]
       security: []
       responses:
-        "200": { description: HTML }
+        "303": { description: "To `/`." }
     post:
       operationId: logout
       summary: Sign out this browser (and end its WorkOS session)

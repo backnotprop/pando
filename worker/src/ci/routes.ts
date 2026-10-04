@@ -365,12 +365,14 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const lists = await pool(repos, 4, (r) => requiredKept(c.env, info, r));
     // A repo's list, null while unknown (pando.toml unreadable or broken).
     const required = new Map(repos.map((r, i) => [r.name, lists[i].list]));
+    // A pipeline with no repo, or one whose repo is gone, requires nothing; one whose repo's list is unknown says null.
+    const pipelineChecks = (repo: string | null) => (repo !== null && required.has(repo) ? (required.get(repo) ?? null) : []);
 
     return c.json({
       services: SERVICES,
       connections: o.connections.map((x) => ({ ...x, webhook_url: webhookUrl(c, x.service, x.id) })),
-      pipelines: o.pipelines.map((x) => ({ ...x, required_checks: x.repo ? (required.get(x.repo) ?? []) : [] })),
-      required_checks: repos.map((r) => ({ repo: r.name, path: r.path, checks: required.get(r.name) ?? [] })),
+      pipelines: o.pipelines.map((x) => ({ ...x, required_checks: pipelineChecks(x.repo) })),
+      required_checks: repos.map((r, i) => ({ repo: r.name, path: r.path, checks: lists[i].list })),
     });
   });
 

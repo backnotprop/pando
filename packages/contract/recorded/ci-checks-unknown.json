@@ -1,0 +1,22 @@
+{
+  "schema": "CiOverview",
+  "route": "GET .../ci (pando.toml broken: required checks null)",
+  "status": 200,
+  "body": {
+    "services": [
+      {
+        "service": "buildkite",
+        "name": "Buildkite"
+      }
+    ],
+    "connections": [],
+    "pipelines": [],
+    "required_checks": [
+      {
+        "repo": "projects-web",
+        "path": "projects/web",
+        "checks": null
+      }
+    ]
+  }
+}

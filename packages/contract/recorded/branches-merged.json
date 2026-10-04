@@ -4,20 +4,75 @@
   "status": 200,
   "body": {
     "default_branch": "main",
-    "default_head": "13d5a375d8f4698fb606eca2649fd12f5a215166",
+    "default_head": "421b0bea184e0daaef6f06b828d33f6b633a84ef",
     "branches": [
       {
+        "name": "feat/ready",
+        "head": "6cc2b842aa432544682225869b281f18ba60806e",
+        "base": "6cc2b842aa432544682225869b281f18ba60806e",
+        "author": "rec-mut4cnpt",
+        "title": null,
+        "description": null,
+        "ahead": 0,
+        "behind": 2,
+        "mergeable": "up_to_date",
+        "checks": {
+          "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+          "state": "success",
+          "required": [
+            "ci/test"
+          ],
+          "missing": [],
+          "statuses": [
+            {
+              "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+              "context": "ci/test",
+              "state": "success",
+              "target_url": "https://ci.example/builds/1",
+              "description": null,
+              "creator": "rec-mut4cnpt",
+              "app": null,
+              "created_at": "2026-10-04T01:05:25.497Z"
+            },
+            {
+              "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+              "context": "lint",
+              "state": "success",
+              "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
+              "description": "#1 passed in 8 s",
+              "creator": "app:buildkite",
+              "app": "buildkite",
+              "created_at": "2026-10-04T01:05:26.368Z"
+            }
+          ]
+        },
+        "state": "merged",
+        "merge_commit": "421b0bea184e0daaef6f06b828d33f6b633a84ef",
+        "merged_by": "rec-mut4cnpt",
+        "merged_at": "2026-10-04T01:05:32.331Z",
+        "merged_machine": "ana-mbp",
+        "merged_agent": null,
+        "forced": false,
+        "pushed_machine": "ana-mbp",
+        "created_at": "2026-10-04T01:05:21.770Z",
+        "updated_at": "2026-10-04T01:05:21.770Z",
+        "stale": false,
+        "last_mergeable": null,
+        "conflict_paths": null,
+        "facts_at": "2026-10-04T01:05:28.719Z"
+      },
+      {
         "name": "feat/merge-me",
-        "head": "aa0cadc8c1b00b30143b78d27c14efb3b02f7632",
-        "base": "aa0cadc8c1b00b30143b78d27c14efb3b02f7632",
-        "author": "rec-mut00rpe",
+        "head": "09e16b3c13e496cb4941651dedf5b666590e1021",
+        "base": "09e16b3c13e496cb4941651dedf5b666590e1021",
+        "author": "rec-mut4cnpt",
         "title": null,
         "description": null,
         "ahead": 0,
         "behind": 0,
         "mergeable": "up_to_date",
         "checks": {
-          "sha": "aa0cadc8c1b00b30143b78d27c14efb3b02f7632",
+          "sha": "09e16b3c13e496cb4941651dedf5b666590e1021",
           "state": "missing",
           "required": [
             "ci/test"
@@ -28,72 +83,19 @@
           "statuses": []
         },
         "state": "merged",
-        "merge_commit": "32f0815a3c810eb298b99c482117efc86017ac73",
-        "merged_by": "rec-mut00rpe",
-        "merged_at": "2026-10-03T23:04:08.596Z",
+        "merge_commit": "d63dcdfcea97e11a6c9a750c557d9e805bc08c64",
+        "merged_by": "rec-mut4cnpt",
+        "merged_at": "2026-10-04T01:05:27.340Z",
         "merged_machine": "ana-mbp",
         "merged_agent": null,
         "forced": true,
         "pushed_machine": "ana-mbp",
-        "created_at": "2026-10-03T23:04:05.458Z",
-        "updated_at": "2026-10-03T23:04:05.458Z",
+        "created_at": "2026-10-04T01:05:23.354Z",
+        "updated_at": "2026-10-04T01:05:23.354Z",
         "stale": false,
         "last_mergeable": null,
-        "facts_at": "2026-10-03T23:04:06.952Z"
-      },
-      {
-        "name": "feat/ready",
-        "head": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-        "base": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-        "author": "rec-mut00rpe",
-        "title": null,
-        "description": null,
-        "ahead": 0,
-        "behind": 2,
-        "mergeable": "up_to_date",
-        "checks": {
-          "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-          "state": "success",
-          "required": [
-            "ci/test"
-          ],
-          "missing": [],
-          "statuses": [
-            {
-              "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-              "context": "ci/test",
-              "state": "success",
-              "target_url": "https://ci.example/builds/1",
-              "description": null,
-              "creator": "rec-mut00rpe",
-              "app": null,
-              "created_at": "2026-10-03T23:04:06.899Z"
-            },
-            {
-              "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-              "context": "lint",
-              "state": "success",
-              "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
-              "description": "#1 passed in 8 s",
-              "creator": "app:buildkite",
-              "app": "buildkite",
-              "created_at": "2026-10-03T23:04:07.597Z"
-            }
-          ]
-        },
-        "state": "merged",
-        "merge_commit": "13d5a375d8f4698fb606eca2649fd12f5a215166",
-        "merged_by": "rec-mut00rpe",
-        "merged_at": "2026-10-03T23:04:13.334Z",
-        "merged_machine": "ana-mbp",
-        "merged_agent": null,
-        "forced": false,
-        "pushed_machine": "ana-mbp",
-        "created_at": "2026-10-03T23:04:04.077Z",
-        "updated_at": "2026-10-03T23:04:04.077Z",
-        "stale": false,
-        "last_mergeable": null,
-        "facts_at": "2026-10-03T23:04:09.773Z"
+        "conflict_paths": null,
+        "facts_at": "2026-10-04T01:05:25.486Z"
       }
     ],
     "next_cursor": null

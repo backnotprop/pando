@@ -245,6 +245,11 @@ try {
   commit(src, "merged.txt", "merged\n", "Add the merged file");
   git(["push", "-q", clone, "feat/merge-me"], src);
   git(["checkout", "-q", "main"], src);
+  // Adds merged.txt with other bytes: once feat/merge-me lands, its dry run conflicts on it (Branch.conflict_paths).
+  git(["checkout", "-qb", "feat/clash"], src);
+  commit(src, "merged.txt", "clash\n", "Add the merged file another way");
+  git(["push", "-q", clone, "feat/clash"], src);
+  git(["checkout", "-q", "main"], src);
   git(["checkout", "-qb", "chore/gone"], src);
   commit(src, "gone.txt", "gone\n", "A branch to delete");
   git(["push", "-q", clone, "chore/gone"], src);
@@ -439,6 +444,42 @@ try {
   record("branches-merged.json", "BranchList", "GET .../repos/{repo}/branches?state=merged", r.status, r.json);
   r = await call("GET", `${base}/heads`, secret);
   record("heads.json", "HeadList", "GET .../heads (after the merges: main's title)", r.status, r.json);
+
+  // feat/clash after feat/merge-me landed: its dry run conflicts on merged.txt (computed on the read when stale).
+  const clash = await waitFor(async () => {
+    const b = await call("GET", `${repoPath}/branches/feat%2Fclash?fresh=1`, secret);
+
+    return b.json?.mergeable === "conflicts" ? b : null;
+  }, 60_000);
+
+  if (clash === null) throw new Error("feat/clash never showed its conflicts");
+  record("branch-conflicts.json", "Branch", "GET .../branches/{branch} (conflicting: conflict_paths)", clash.status, clash.json);
+
+  // A project's files at main: the root folder, each entry's last commit, the root's history (merges carry merged_branch), one file's history.
+  r = await call("GET", `${repoPath}/tree?ref=main`, secret);
+  record("tree.json", "TreePage", "GET .../repos/{repo}/tree?ref=main", r.status, r.json);
+
+  const lastCommits = await waitFor(async () => {
+    const l = await call("GET", `${repoPath}/tree/last-commits?ref=main`, secret);
+
+    return l.json?.complete ? l : null;
+  }, 60_000);
+
+  if (lastCommits === null) throw new Error("last commits never completed");
+  record("last-commits.json", "LastCommits", "GET .../repos/{repo}/tree/last-commits?ref=main", lastCommits.status, lastCommits.json);
+  r = await call("GET", `${repoPath}/history?ref=main`, secret);
+  record("history.json", "HistoryPage", "GET .../repos/{repo}/history?ref=main", r.status, r.json);
+  r = await call("GET", `${repoPath}/history?ref=main&path=merged.txt`, secret);
+  record("history-path.json", "HistoryPage", "GET .../repos/{repo}/history?ref=main&path=merged.txt", r.status, r.json);
+  r = await call("GET", `${base}/worktrees?repo=projects%2Fweb`, secret);
+  record("worktrees.json", "WorktreeList", "GET .../worktrees?repo=projects/web", r.status, r.json);
+
+  // One build and its jobs (lint, from the webhook above).
+  const buildId = (await call("GET", `${base}/ci/builds?branch=feat%2Fready`, secret)).json?.builds?.[0]?.id;
+
+  if (!buildId) throw new Error("no build to read");
+  r = await call("GET", `${base}/ci/builds/${encodeURIComponent(buildId)}`, secret);
+  record("ci-build.json", "CiBuildDetail", "GET .../ci/builds/{build} (with its jobs)", r.status, r.json);
 
   // Restore: README.md saved again, then written back as it was, then again (unchanged).
   const first = meta.frames.find((f) => f.type === "accepted" && f.path === "README.md")?.version;

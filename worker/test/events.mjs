@@ -239,6 +239,17 @@ try {
     }
   }
 
+  // Lists go newest push first (feat/b was pushed after feat/a, though it sorts after it by name), one per page across the cursor.
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches?state=open&limit=1`, A);
+  const page1 = r.json;
+  r = page1?.next_cursor ? await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches?state=open&limit=1&cursor=${encodeURIComponent(page1.next_cursor)}`, A) : null;
+  const page2 = r?.json;
+  check(
+    "branches are listed newest push first, and the next page continues after the cursor",
+    page1?.branches?.[0]?.name === "feat/b" && page2?.branches?.[0]?.name === "feat/a" && page2?.next_cursor === null,
+    `${page1?.branches?.map((b) => b.name)} | ${page2?.branches?.map((b) => b.name)}`,
+  );
+
   // The branch moved since the caller looked: a merge naming the older head is refused.
   const parentA = git(["rev-parse", "HEAD~1"], src).out.trim();
   r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/feat%2Fa/merge`, A, { expected_head: parentA });

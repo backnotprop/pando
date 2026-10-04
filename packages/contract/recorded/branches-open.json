@@ -4,20 +4,58 @@
   "status": 200,
   "body": {
     "default_branch": "main",
-    "default_head": "32f0815a3c810eb298b99c482117efc86017ac73",
+    "default_head": "d63dcdfcea97e11a6c9a750c557d9e805bc08c64",
     "branches": [
       {
+        "name": "feat/clash",
+        "head": "1ec0949eeb695458b7463ee300b1b4a6888e1c95",
+        "base": "6f8dd6e53fd3e78d3a995da423d449615513c73e",
+        "author": "rec-mut4cnpt",
+        "title": null,
+        "description": null,
+        "ahead": 1,
+        "behind": 2,
+        "mergeable": "conflicts",
+        "checks": {
+          "sha": "1ec0949eeb695458b7463ee300b1b4a6888e1c95",
+          "state": "missing",
+          "required": [
+            "ci/test"
+          ],
+          "missing": [
+            "ci/test"
+          ],
+          "statuses": []
+        },
+        "state": "open",
+        "merge_commit": null,
+        "merged_by": null,
+        "merged_at": null,
+        "merged_machine": null,
+        "merged_agent": null,
+        "forced": null,
+        "pushed_machine": "ana-mbp",
+        "created_at": "2026-10-04T01:05:24.074Z",
+        "updated_at": "2026-10-04T01:05:24.074Z",
+        "stale": false,
+        "last_mergeable": null,
+        "conflict_paths": [
+          "merged.txt"
+        ],
+        "facts_at": "2026-10-04T01:05:28.370Z"
+      },
+      {
         "name": "feat/failing",
-        "head": "7c074f8a0928615266aced298f64d4019cf5e333",
-        "base": "e0a9f8645fcc85724aa367524e8dcb13a9e26e04",
-        "author": "rec-mut00rpe",
+        "head": "4df8b1582f79d3f13137d42e86e44afc957a1027",
+        "base": "6f8dd6e53fd3e78d3a995da423d449615513c73e",
+        "author": "rec-mut4cnpt",
         "title": null,
         "description": null,
         "ahead": 1,
         "behind": 2,
         "mergeable": "clean",
         "checks": {
-          "sha": "7c074f8a0928615266aced298f64d4019cf5e333",
+          "sha": "4df8b1582f79d3f13137d42e86e44afc957a1027",
           "state": "failure",
           "required": [
             "ci/test"
@@ -25,14 +63,14 @@
           "missing": [],
           "statuses": [
             {
-              "sha": "7c074f8a0928615266aced298f64d4019cf5e333",
+              "sha": "4df8b1582f79d3f13137d42e86e44afc957a1027",
               "context": "ci/test",
               "state": "failure",
               "target_url": null,
               "description": "2 tests failed",
-              "creator": "rec-mut00rpe",
+              "creator": "rec-mut4cnpt",
               "app": null,
-              "created_at": "2026-10-03T23:04:06.892Z"
+              "created_at": "2026-10-04T01:05:25.479Z"
             }
           ]
         },
@@ -44,24 +82,25 @@
         "merged_agent": null,
         "forced": null,
         "pushed_machine": "ana-mbp",
-        "created_at": "2026-10-03T23:04:04.748Z",
-        "updated_at": "2026-10-03T23:04:04.748Z",
+        "created_at": "2026-10-04T01:05:22.575Z",
+        "updated_at": "2026-10-04T01:05:22.575Z",
         "stale": false,
         "last_mergeable": null,
-        "facts_at": "2026-10-03T23:04:09.777Z"
+        "conflict_paths": null,
+        "facts_at": "2026-10-04T01:05:28.616Z"
       },
       {
         "name": "feat/ready",
-        "head": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-        "base": "e0a9f8645fcc85724aa367524e8dcb13a9e26e04",
-        "author": "rec-mut00rpe",
+        "head": "6cc2b842aa432544682225869b281f18ba60806e",
+        "base": "6f8dd6e53fd3e78d3a995da423d449615513c73e",
+        "author": "rec-mut4cnpt",
         "title": null,
         "description": null,
         "ahead": 1,
         "behind": 2,
         "mergeable": "clean",
         "checks": {
-          "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
+          "sha": "6cc2b842aa432544682225869b281f18ba60806e",
           "state": "success",
           "required": [
             "ci/test"
@@ -69,24 +108,24 @@
           "missing": [],
           "statuses": [
             {
-              "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
+              "sha": "6cc2b842aa432544682225869b281f18ba60806e",
               "context": "ci/test",
               "state": "success",
               "target_url": "https://ci.example/builds/1",
               "description": null,
-              "creator": "rec-mut00rpe",
+              "creator": "rec-mut4cnpt",
               "app": null,
-              "created_at": "2026-10-03T23:04:06.899Z"
+              "created_at": "2026-10-04T01:05:25.497Z"
             },
             {
-              "sha": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
+              "sha": "6cc2b842aa432544682225869b281f18ba60806e",
               "context": "lint",
               "state": "success",
               "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
               "description": "#1 passed in 8 s",
               "creator": "app:buildkite",
               "app": "buildkite",
-              "created_at": "2026-10-03T23:04:07.597Z"
+              "created_at": "2026-10-04T01:05:26.368Z"
             }
           ]
         },
@@ -98,11 +137,12 @@
         "merged_agent": null,
         "forced": null,
         "pushed_machine": "ana-mbp",
-        "created_at": "2026-10-03T23:04:04.077Z",
-        "updated_at": "2026-10-03T23:04:04.077Z",
+        "created_at": "2026-10-04T01:05:21.770Z",
+        "updated_at": "2026-10-04T01:05:21.770Z",
         "stale": false,
         "last_mergeable": null,
-        "facts_at": "2026-10-03T23:04:09.773Z"
+        "conflict_paths": null,
+        "facts_at": "2026-10-04T01:05:28.719Z"
       }
     ],
     "next_cursor": null

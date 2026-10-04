@@ -5,14 +5,14 @@
   "body": {
     "monorepos": [
       {
-        "id": "m_326a047c6b391051",
-        "owner": "rec-mut00rpe",
-        "name": "rec-mut00rpe",
-        "full_name": "rec-mut00rpe/rec-mut00rpe",
+        "id": "m_fd500b7e2da1ea9f",
+        "owner": "rec-mut4cnpt",
+        "name": "rec-mut4cnpt",
+        "full_name": "rec-mut4cnpt/rec-mut4cnpt",
         "kind": "monorepo",
-        "created_at": "2026-10-03T23:03:55.243Z",
+        "created_at": "2026-10-04T01:05:08.411Z",
         "role": "owner",
-        "last_activity_at": "2026-10-03T23:04:08.861Z",
+        "last_activity_at": "2026-10-04T01:05:25.497Z",
         "worktrees_active": 0,
         "machines_active": 0,
         "needs": {
@@ -23,7 +23,7 @@
         "members": 1,
         "large": false,
         "repos": 1,
-        "open_branches": 2
+        "open_branches": 4
       }
     ]
   }

@@ -24,6 +24,8 @@ export * from "./branch.ts";
 
 export * from "./ci.ts";
 
+export * from "./files.ts";
+
 export * from "./decode.ts";
 
 export * as Routes from "./routes.ts";

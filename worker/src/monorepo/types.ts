@@ -68,6 +68,8 @@ export interface BranchRecord {
   behind?: number | null;
   merge_base?: string | null;
   mergeable?: string | null;
+  /** The stored dry run's conflicting paths, JSON (with mergeable "conflicts"). */
+  conflict_paths?: string | null;
   facts_main?: string | null;
   facts_head?: string | null;
   facts_at?: string | null;

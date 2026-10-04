@@ -5,14 +5,32 @@
   "body": {
     "branches": [
       {
-        "monorepo": "rec-mut00rpe/rec-mut00rpe",
-        "monorepo_id": "m_326a047c6b391051",
+        "monorepo": "rec-mut4cnpt/rec-mut4cnpt",
+        "monorepo_id": "m_fd500b7e2da1ea9f",
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "feat/clash",
+        "title": null,
+        "head": "1ec0949eeb695458b7463ee300b1b4a6888e1c95",
+        "author": "rec-mut4cnpt",
+        "pushed_machine": "ana-mbp",
+        "state": "conflicts",
+        "checks": {
+          "state": "missing",
+          "failing": [],
+          "failing_apps": {}
+        },
+        "updated_at": "2026-10-04T01:05:24.074Z"
+      },
+      {
+        "monorepo": "rec-mut4cnpt/rec-mut4cnpt",
+        "monorepo_id": "m_fd500b7e2da1ea9f",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
         "title": null,
-        "head": "7c074f8a0928615266aced298f64d4019cf5e333",
-        "author": "rec-mut00rpe",
+        "head": "4df8b1582f79d3f13137d42e86e44afc957a1027",
+        "author": "rec-mut4cnpt",
         "pushed_machine": "ana-mbp",
         "state": "failing",
         "checks": {
@@ -24,17 +42,17 @@
             "ci/test": null
           }
         },
-        "updated_at": "2026-10-03T23:04:04.748Z"
+        "updated_at": "2026-10-04T01:05:22.575Z"
       },
       {
-        "monorepo": "rec-mut00rpe/rec-mut00rpe",
-        "monorepo_id": "m_326a047c6b391051",
+        "monorepo": "rec-mut4cnpt/rec-mut4cnpt",
+        "monorepo_id": "m_fd500b7e2da1ea9f",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/ready",
         "title": null,
-        "head": "8c277cb747ef44b81862565afb5a3dbcf36a650d",
-        "author": "rec-mut00rpe",
+        "head": "6cc2b842aa432544682225869b281f18ba60806e",
+        "author": "rec-mut4cnpt",
         "pushed_machine": "ana-mbp",
         "state": "ready",
         "checks": {
@@ -42,7 +60,7 @@
           "failing": [],
           "failing_apps": {}
         },
-        "updated_at": "2026-10-03T23:04:04.077Z"
+        "updated_at": "2026-10-04T01:05:21.770Z"
       }
     ],
     "truncated": false,

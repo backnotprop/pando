@@ -1,0 +1,46 @@
+{
+  "schema": "CiBuildDetail",
+  "route": "GET .../ci/builds/{build} (with its jobs)",
+  "status": 200,
+  "body": {
+    "id": "cib_9cc398f1d19fcf03",
+    "service": "buildkite",
+    "connection": "m_fd500b7e2da1ea9f--cic_dc4d802554a5",
+    "pipeline": "web",
+    "number": 1,
+    "repo": "projects-web",
+    "repo_path": "projects/web",
+    "sha": "6cc2b842aa432544682225869b281f18ba60806e",
+    "branch": "feat/ready",
+    "message": "Add the ready file",
+    "state": "passed",
+    "service_state": "passed",
+    "web_url": "https://buildkite.com/o/web/builds/1",
+    "pushed_by": "rec-mut4cnpt",
+    "created_at": "2026-10-04T01:05:26.353Z",
+    "started_at": "2026-10-04T01:05:27.353Z",
+    "finished_at": "2026-10-04T01:05:36.353Z",
+    "duration_s": 9,
+    "rebuilt_from": null,
+    "jobs": [
+      {
+        "id": "job-lint-1",
+        "build": "cib_9cc398f1d19fcf03",
+        "name": "lint",
+        "step_key": "lint",
+        "type": "script",
+        "state": "passed",
+        "service_state": "passed",
+        "exit_status": 0,
+        "soft_failed": false,
+        "retried": false,
+        "web_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
+        "created_at": "2026-10-04T01:05:26.853Z",
+        "started_at": "2026-10-04T01:05:27.353Z",
+        "finished_at": "2026-10-04T01:05:35.353Z",
+        "duration_s": 8,
+        "check": "lint"
+      }
+    ]
+  }
+}

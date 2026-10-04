@@ -30,6 +30,8 @@ export const Branch = Schema.Struct({
   stale: Schema.Boolean,
   /** When stale: the last known mergeable answer. */
   last_mergeable: Schema.NullOr(Mergeable),
+  /** The paths changed differently on both sides, from the dry run behind `mergeable` (or `last_mergeable` while stale); null unless that answer is `conflicts`. */
+  conflict_paths: Schema.NullOr(Schema.Array(Schema.String)),
   facts_at: Schema.NullOr(Timestamp),
   checks: Checks,
   state: BranchState,
@@ -48,13 +50,17 @@ export const Branch = Schema.Struct({
 
 export interface Branch extends Schema.Schema.Type<typeof Branch> {}
 
-/** GET .../repos/{repo}/branches: the default branch is not in the list; its name and head are at the top. */
+/**
+ * GET .../repos/{repo}/branches: newest first (an open branch by its last
+ * push, a merged one by its merge; ties by name). The default branch is not
+ * in the list; its name and head are at the top.
+ */
 export const BranchList = Schema.Struct({
   default_branch: Schema.String,
   /** Null while the repo is empty. */
   default_head: Schema.NullOr(Sha),
   branches: Schema.Array(Branch),
-  /** Pass as `cursor` for the next page; null on the last. */
+  /** Pass as `cursor` for the next page, as it came (the last row's time and name); null on the last. */
   next_cursor: Schema.NullOr(Schema.String),
 });
 

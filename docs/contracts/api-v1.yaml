@@ -1144,6 +1144,11 @@ paths:
         list computes at most 25 rows itself, those stale for over 30 s (a
         branch no sweep reaches). The default branch is not in the list; its
         name and head are at the top.
+
+        Newest first, as GitHub lists active branches: an open branch by its
+        last push, a merged one by its merge time; branches with the same time
+        by name. Pages stay stable when two share a time: `next_cursor` holds
+        the last row's time and name.
       tags: [branches]
       parameters:
         - name: state
@@ -1157,7 +1162,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
         - name: cursor
           in: query
-          description: "`next_cursor` from the previous page."
+          description: "`next_cursor` from the previous page, as it came (the last row's time and name)."
           schema: { type: string }
       responses:
         "200":
@@ -2822,6 +2827,10 @@ components:
           description: "From the merge engine's dry run. `up_to_date`: the branch adds nothing. `pending`: not yet computed for the current main and head (see `last_mergeable`)."
         stale: { type: boolean, description: "True while ahead, behind, base and mergeable are not yet for the current main and head." }
         last_mergeable: { type: [string, "null"], description: "When stale: the last known mergeable answer." }
+        conflict_paths:
+          type: [array, "null"]
+          items: { type: string }
+          description: "The paths changed differently on both sides, from the same dry run as `mergeable` (or `last_mergeable` while stale), so a branch page shows them before Merge is pressed. Null unless that answer is `conflicts`. No cap: the same list a refused merge's 409 carries in `paths`."
         facts_at: { type: [string, "null"], format: date-time, description: When the facts were computed. }
         checks: { $ref: "#/components/schemas/Checks" }
         state:

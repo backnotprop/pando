@@ -47,6 +47,8 @@ export interface Facts {
   behind: number | null;
   merge_base: string | null;
   mergeable: string;
+  /** On "conflicts": every path changed differently on both sides (the dry run's own list). */
+  conflict_paths: string[] | null;
 }
 
 export type FactsMessage = (
@@ -71,9 +73,9 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
       /* too far apart: unknown */
     }
 
-    const mergeable = base ? await mergeableOf(env, r, main, head, ahead) : "unknown";
+    const dry = base ? await mergeableOf(env, r, main, head, ahead) : { mergeable: "unknown", conflict_paths: null };
 
-    return { main, head, ahead, behind, merge_base: base, mergeable };
+    return { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths };
   };
 
   return read ? go(read) : withRepo(env, r.artifacts_name, (repo) => go(commitReader(repo)));

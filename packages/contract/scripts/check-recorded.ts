@@ -22,7 +22,10 @@ import {
   MachineList,
   Me,
   MemberList,
+  CiBuildDetail,
   HeadList,
+  HistoryPage,
+  LastCommits,
   MergeResult,
   MetaFileHeaders,
   MetaHistory,
@@ -37,6 +40,8 @@ import {
   Restored,
   ReviewList,
   SignedOut,
+  TreePage,
+  WorktreeList,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -64,6 +69,11 @@ const decoders = {
   MonorepoEntry: refuses(MonorepoEntry),
   RepoList: refuses(RepoList),
   HeadList: refuses(HeadList),
+  TreePage: refuses(TreePage),
+  LastCommits: refuses(LastCommits),
+  HistoryPage: refuses(HistoryPage),
+  WorktreeList: refuses(WorktreeList),
+  CiBuildDetail: refuses(CiBuildDetail),
   Repo: refuses(Repo),
   MemberList: refuses(MemberList),
   MachineList: refuses(MachineList),

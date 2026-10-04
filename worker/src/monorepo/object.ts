@@ -17,7 +17,7 @@ import { combine, requiredChecks } from "./checks";
 import { hookView, wants, type HookRow, type StoredPayload } from "./hooks";
 import { gitWriteCode, gitwrite } from "./merge-port";
 import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
-import { STALE_GRACE_MS } from "./facts";
+import { STALE_GRACE_MS, type Facts } from "./facts";
 import { FactsOut, type FactsRequest } from "./facts-out";
 import { HooksOut } from "./hooks-out";
 import type { BranchList, BranchView } from "./views";
@@ -161,6 +161,17 @@ interface BranchEventRow {
   pushed_machine: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+/**
+ * A branch list's cursor: the last row's time and name, "<time> <name>"
+ * (a branch name never holds a space). Null for the first page, or a cursor
+ * from before lists were ordered by time.
+ */
+function branchCursor(cursor: string | null): { at: string; name: string } | null {
+  const i = cursor ? cursor.indexOf(" ") : -1;
+
+  return cursor && i >= 0 ? { at: cursor.slice(0, i), name: cursor.slice(i + 1) } : null;
 }
 
 /** A code repo's main as the object last moved it (GET .../heads). */
@@ -308,7 +319,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (!cols.includes("agent")) this.sql.exec("ALTER TABLE merges ADD COLUMN agent TEXT");
     const bcols = this.rows<{ name: string }>("PRAGMA table_info(branches)").map((c) => c.name);
 
-    for (const [col, type] of [["ahead", "INTEGER"], ["behind", "INTEGER"], ["merge_base", "TEXT"], ["mergeable", "TEXT"], ["facts_main", "TEXT"], ["facts_head", "TEXT"], ["facts_at", "TEXT"]]) {
+    for (const [col, type] of [["ahead", "INTEGER"], ["behind", "INTEGER"], ["merge_base", "TEXT"], ["mergeable", "TEXT"], ["conflict_paths", "TEXT"], ["facts_main", "TEXT"], ["facts_head", "TEXT"], ["facts_at", "TEXT"]]) {
       if (!bcols.includes(col)) this.sql.exec(`ALTER TABLE branches ADD COLUMN ${col} ${type}`);
     }
 
@@ -1416,14 +1427,14 @@ export class MonorepoObject extends DurableObject<Env> {
    * current head (else a newer job is coming), keep the required checks they
    * were computed with, and publish the full row. False when stale.
    */
-  writeFacts(repo: string, name: string, f: { main: string; head: string; ahead: number | null; behind: number | null; merge_base: string | null; mergeable: string }, required: string[]): boolean {
+  writeFacts(repo: string, name: string, f: Facts, required: string[]): boolean {
     if (this.currentMain(repo) !== f.main) return false;
     const b = this.branchRecord(repo, name);
 
     if (!b || b.head !== f.head) return false;
     this.sql.exec(
-      "UPDATE branches SET ahead = ?, behind = ?, merge_base = ?, mergeable = ?, facts_main = ?, facts_head = ?, facts_at = ? WHERE repo = ? AND name = ?",
-      f.ahead, f.behind, f.merge_base, f.mergeable, f.main, f.head, now(), repo, name,
+      "UPDATE branches SET ahead = ?, behind = ?, merge_base = ?, mergeable = ?, conflict_paths = ?, facts_main = ?, facts_head = ?, facts_at = ? WHERE repo = ? AND name = ?",
+      f.ahead, f.behind, f.merge_base, f.mergeable, f.conflict_paths ? JSON.stringify(f.conflict_paths) : null, f.main, f.head, now(), repo, name,
     );
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     const row = this.branchRows(repo, { names: [name], state: "all", required }).branches[0];
@@ -1431,6 +1442,14 @@ export class MonorepoObject extends DurableObject<Env> {
     if (row) this.publish({ kind: "branch.updated", collection: "branches", key: `${repo}/${name}`, op: "upsert", repo, actor: null, machine: null, agent: null, row: { repo, ...row }, partial: false });
 
     return true;
+  }
+
+  /** The stored dry run's conflicting paths, when its answer was "conflicts". */
+  private conflictPaths(b: BranchRecord): string[] | null {
+    if (b.mergeable !== "conflicts" || !b.conflict_paths) return null;
+    const paths = parseJson(b.conflict_paths);
+
+    return isTextList(paths) ? paths : null;
   }
 
   /**
@@ -1450,23 +1469,33 @@ export class MonorepoObject extends DurableObject<Env> {
     const mainAt = Date.parse(this.row<{ t: string | null }>("SELECT default_head_at AS t FROM repos WHERE name = ?", repo)?.t ?? "") || 0;
     const required = o.required ?? this.storedRequired(repo) ?? [];
     const limit = Math.min(Math.max(o.limit ?? 100, 1), 500);
-    const all = this.branchRecords(repo).filter((b) => b.head && b.name !== r.default_branch && (!o.names || o.names.includes(b.name)));
+
+    // Newest first, as GitHub lists active branches: an open branch by its last push, a merged one by its merge; ties by name.
+    const all = this.branchRecords(repo)
+      .filter((b) => b.head && b.name !== r.default_branch && (!o.names || o.names.includes(b.name)))
+      .map((b) => ({ b, at: (b.merged_head === b.head ? b.merged_at : b.updated_at) ?? "" }))
+      .sort((x, y) => (x.at !== y.at ? (x.at < y.at ? 1 : -1) : x.b.name < y.b.name ? -1 : x.b.name > y.b.name ? 1 : 0));
+
+    const after = branchCursor(o.cursor ?? null);
     const t = Date.now();
     const rows: BranchView[] = [];
     const due: string[] = [];
     let next: string | null = null;
+    let lastAt = "";
 
-    for (const b of all) {
-      if (o.cursor && b.name <= o.cursor) continue;
+    for (const { b, at } of all) {
+      if (after && (at > after.at || (at === after.at && b.name <= after.name))) continue;
       const merged = b.merged_head === b.head;
       const state = merged ? "merged" : "open";
 
       if (o.state !== "all" && state !== o.state) continue;
 
       if (rows.length >= limit) {
-        next = rows[rows.length - 1].name;
+        next = `${lastAt} ${rows[rows.length - 1].name}`;
         break;
       }
+
+      lastAt = at;
 
       const fresh = merged || (b.facts_main === main && b.facts_head === b.head && main !== null);
 
@@ -1494,6 +1523,7 @@ export class MonorepoObject extends DurableObject<Env> {
         updated_at: b.updated_at,
         stale: !fresh,
         last_mergeable: !fresh ? (b.mergeable ?? null) : null,
+        conflict_paths: merged ? null : this.conflictPaths(b),
         facts_at: b.facts_at ?? null,
       });
     }

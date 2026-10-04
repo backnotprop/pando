@@ -172,7 +172,7 @@ above:
   after writing on Linux, after 50 ms for other changes on Linux, after
   100 ms on macOS. A full walk every 30 s, and whenever the OS says it lost
   events, is the safety net. Without notifications (another OS, inotify out
-  of watches, `PANDO_META_WATCH=off`, `pando meta sync --once`) it scans
+  of watches, `PANDO_META_WATCH=off`, `pando sync --once`) it scans
   every 100 ms instead (a big tree spaces its scans out: each waits ten
   times the last scan's length), and a changed file goes out once one scan
   sees it unchanged. Either way a file still changing goes out after 5

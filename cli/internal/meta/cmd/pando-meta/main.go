@@ -1,7 +1,7 @@
-// pando-meta runs the meta layer commands on their own, for testing the live
-// lane before they are wired into the pando command. The same commands will
-// be `pando meta sync`, `pando history`, `pando restore`, `pando resolve`,
-// and Init and Clone run inside `pando init` and `pando clone`.
+// pando-meta runs the live sync's commands on their own, for testing the
+// live lane without the rest of the pando command. In pando they are
+// `pando sync`, `pando history`, `pando restore`, `pando resolve` and
+// `pando fetch`, and Init and Clone run inside `pando init` and `pando clone`.
 //
 //	go run ./internal/meta/cmd/pando-meta sync --root <folder>
 package main
@@ -22,6 +22,7 @@ func main() {
 		"sync":    func(a []string) int { return meta.CmdSync(a, meta.Hooks{}) },
 		"init":    meta.CmdInit,
 		"clone":   meta.CmdClone,
+		"fetch":   meta.CmdFetch,
 		"history": meta.CmdHistory,
 		"restore": meta.CmdRestore,
 		"resolve": meta.CmdResolve,

@@ -48,7 +48,7 @@ func Monorepo(e *Env, args []string) error {
 			if !e.isTerminal() {
 				return errors.New("deleting needs the name typed at a terminal, or --yes")
 			}
-			e.printf("This deletes %s on %s: every repo in it, their history, and its meta layer. There is no undo.\n", name, serverURL)
+			e.printf("This deletes %s on %s: every repo in it, their history, and its files outside projects/. There is no undo.\n", name, serverURL)
 			e.printf("Type its full name (%s) to delete it: ", name)
 			typed, err := e.readLine()
 			if err != nil {

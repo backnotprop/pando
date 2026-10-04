@@ -99,7 +99,10 @@ func worktreeMount(e *Env, args []string) error {
 
 func worktreeAdd(e *Env, args []string) error {
 	fs := flags("worktree add")
-	agent := fs.String("agent", "", "the agent working in it (default: PANDO_AGENT); written as the Pando-Agent trailer")
+	// Hidden (decisions/RULINGS.md, no agent identity in the product): no
+	// help or usage line names it. Still taken, with PANDO_AGENT, for the
+	// Pando-Agent trailer.
+	agent := fs.String("agent", "", "")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse (default: fuse on Linux with artifact-fs, fskit on a Mac with Pando.app on, else sparse)")
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -198,10 +201,8 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	}
 	e.printf("%s: %s (%s), %s worktree, ready in %.1fs\n", wpath, branch, how, drv.Kind(), time.Since(start).Seconds())
 	if !readOnly {
+		// The Pando-Agent trailer, when set, is written but not named here.
 		trail := fmt.Sprintf("Pando-Worktree: %s, Pando-Machine: %s", wpath, e.Home.Machine)
-		if agent != "" {
-			trail = "Pando-Agent: " + agent + ", " + trail
-		}
 		if acct.Name != "" {
 			e.printf("  commits are authored as %s, with the trailers %s\n", who(acct), trail)
 		} else {
@@ -288,7 +289,7 @@ func worktreeList(e *Env, args []string) error {
 		}
 	}
 	tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "PATH\tBRANCH\tMACHINE\tAGENT\tKIND\tAHEAD\tBEHIND\tSEEN")
+	fmt.Fprintln(tw, "PATH\tBRANCH\tMACHINE\tKIND\tAHEAD\tBEHIND\tSEEN")
 	for _, w := range all {
 		c, ok := counts[w.Repo+"\x00"+w.Branch]
 		if !ok {
@@ -298,7 +299,7 @@ func worktreeList(e *Env, args []string) error {
 		if machine == e.Home.Machine {
 			machine += " (here)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", w.Path, w.Branch, machine, dash(w.Agent), w.Kind,
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", w.Path, w.Branch, machine, w.Kind,
 			c.ahead, c.behind, ago(w.LastSeenAt))
 	}
 	return tw.Flush()

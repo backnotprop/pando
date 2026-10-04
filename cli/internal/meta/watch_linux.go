@@ -183,7 +183,7 @@ func (w *inotifyWatcher) read() {
 			}
 			if name == "" { // about the watched folder itself
 				if dir == "" && mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
-					w.q.needRescan("the meta layer folder itself was moved or deleted")
+					w.q.needRescan("the monorepo's folder itself was moved or deleted")
 				}
 				continue // its parent reports it
 			}

@@ -6,6 +6,7 @@
 import * as Schema from "effect/Schema";
 
 import { ActivityFrame, MonorepoFeedFrame } from "./feed.ts";
+import { MonorepoEventFrame } from "./stream.ts";
 
 /** Runtime, for clients: unknown fields are ignored. Answers a Result (success, or a Schema.SchemaError). */
 export const decodeResponse = <A, I>(schema: Schema.Codec<A, I>) => Schema.decodeUnknownResult(schema, { onExcessProperty: "ignore" });
@@ -25,3 +26,6 @@ export const decodeActivityFrame = Schema.decodeUnknownOption(Schema.fromJsonStr
 
 /** One text frame from a monorepo's `?topics=feed` socket, the same way: Some(frame), or None to skip. */
 export const decodeMonorepoFeedFrame = Schema.decodeUnknownOption(Schema.fromJsonString(MonorepoFeedFrame), { onExcessProperty: "ignore" });
+
+/** A frame of a monorepo's event socket opened with row topics; none for a kind the web does not patch from. */
+export const decodeMonorepoEventFrame = Schema.decodeUnknownOption(Schema.fromJsonString(MonorepoEventFrame), { onExcessProperty: "ignore" });

@@ -662,7 +662,7 @@ func Follow(e *Env, args []string) error {
 }
 
 // StartFollower runs the follower in the background for the Pando root
-// above dir, for as long as ctx lives. `pando meta sync` starts it so one
+// above dir, for as long as ctx lives. `pando sync` starts it so one
 // daemon keeps a monorepo's meta layer and its mains current.
 func StartFollower(ctx context.Context, dir string) {
 	root, err := config.FindRoot(dir)

@@ -64,11 +64,15 @@ export const branchesLink = (full: string, repoPath: string, merged = false) =>
     ? linkOptions({ to: "/$owner/$name/branches", params: split(full), search: merged ? { tab: "merged" } : {} })
     : linkOptions({ to: "/$owner/$name/projects/$project/branches", params: { ...split(full), project: project(repoPath) }, search: merged ? { tab: "merged" } : {} });
 
-/** A branch's page: the pull request. */
-export const branchLink = (full: string, repoPath: string, branch: string) =>
+/** A branch's page: the pull request; `files` for its Files changed tab. */
+export const branchLink = (full: string, repoPath: string, branch: string, files = false) =>
   repoPath === "."
-    ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch } })
-    : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch } });
+    ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: files ? { tab: "files" } : {} })
+    : linkOptions({
+        to: "/$owner/$name/projects/$project/branches/$",
+        params: { ...split(full), project: project(repoPath), _splat: branch },
+        search: files ? { tab: "files" } : {},
+      });
 
 /** A code file's bytes (the Worker's raw route; members only). */
 export const codeRawHref = (full: string, repoPath: string, path: string, ref: string | null) =>

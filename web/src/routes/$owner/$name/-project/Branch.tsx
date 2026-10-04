@@ -1,27 +1,35 @@
-// A branch's page is the pull request: its title, its commits (with
-// co-authors), its reviews, and on the right the Merge box, its checks (each
-// with its CI service's mark and a link to the run) and its worktree. Merge
-// lands exactly the head on screen (expected_head); a refusal is shown in the
-// box, in words.
+// A branch's page is the pull request: its title, then two tabs. Overview:
+// its commits (with co-authors), its reviews, and on the right the Merge box,
+// its checks (each with its CI service's mark and a link to the run) and its
+// worktree. Merge lands exactly the head on screen (expected_head); a refusal
+// is shown in the box, in words. Files changed: each file's diff, read only
+// (FilesChanged.tsx).
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Branch, Checks, Commit, Repo, Review } from "@pando/contract";
-import { branchQuery, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
+import { branchDiffQuery, branchQuery, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
+import { branchLink } from "../../../../ui/paths";
+import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, since, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf } from "./state";
 
-export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string) {
+/** `files`: the Files changed tab waits for the diff; Overview fetches it alongside, for the tab's count. */
+export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean) {
+  const diff = qc.prefetchQuery(branchDiffQuery(m, repo.name, branch));
+
   await Promise.all([
     qc.ensureQueryData(branchQuery(m, repo.name, branch)),
     qc.ensureQueryData(commitsQuery(m, repo.name, branch)),
     qc.ensureQueryData(reviewsQuery(m, repo.name, branch)),
+    files ? diff : null,
   ]);
 }
 
@@ -293,11 +301,22 @@ function Worktree({ repo, branch }: { repo: Repo; branch: string }) {
   );
 }
 
-export function BranchPage({ repo, branch }: { repo: Repo; branch: string }) {
+/** The Files changed tab's body: the diff, or why there is none. */
+function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
+  const { monorepo } = useMonorepo();
+  const diff = useQuery(branchDiffQuery(monorepo, repo.name, branch));
+
+  if (diff.data) return <FilesChanged diff={diff.data} />;
+
+  return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
+}
+
+export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string; files: boolean }) {
   const { monorepo } = useMonorepo();
   const b = useSuspenseQuery(branchQuery(monorepo, repo.name, branch)).data;
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
+  const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.files_total;
   const n = b.state === "merged" ? commits.total : (b.ahead ?? commits.total);
 
   return (
@@ -310,24 +329,34 @@ export function BranchPage({ repo, branch }: { repo: Repo; branch: string }) {
           {b.behind ? `, ${b.behind} behind main` : ""}.
         </p>
       </div>
-      <div className="mt-8 grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
-        <section>
-          <SectionHead title="Commits" count={commits.commits.length} />
-          {commits.commits.length ? <Commits commits={commits.commits} /> : <Empty>No commits ahead of main.</Empty>}
-          <div className="mt-10">
-            <SectionHead title="Reviews" />
-            <Reviews reviews={reviews} />
-          </div>
-        </section>
-        <aside>
-          <MergeBox repo={repo} b={b} />
-          <div className="mt-10">
-            <SectionHead title="Checks" />
-            <CheckRows repo={repo} branch={b} checks={b.checks} />
-          </div>
-          <Worktree repo={repo} branch={branch} />
-        </aside>
-      </div>
+      <TabBar label="Branch">
+        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files} label="Overview" />
+        <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
+      </TabBar>
+      {files ? <FilesTab repo={repo} branch={branch} /> : <Overview repo={repo} b={b} commits={commits.commits} reviews={reviews} />}
     </>
+  );
+}
+
+function Overview({ repo, b, commits, reviews }: { repo: Repo; b: Branch; commits: readonly Commit[]; reviews: readonly Review[] }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
+      <section>
+        <SectionHead title="Commits" count={commits.length} />
+        {commits.length ? <Commits commits={commits} /> : <Empty>No commits ahead of main.</Empty>}
+        <div className="mt-10">
+          <SectionHead title="Reviews" />
+          <Reviews reviews={reviews} />
+        </div>
+      </section>
+      <aside>
+        <MergeBox repo={repo} b={b} />
+        <div className="mt-10">
+          <SectionHead title="Checks" />
+          <CheckRows repo={repo} branch={b} checks={b.checks} />
+        </div>
+        <Worktree repo={repo} branch={b.name} />
+      </aside>
+    </div>
   );
 }

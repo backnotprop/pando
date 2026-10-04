@@ -1,5 +1,6 @@
 // A plain repo's branch page.
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { branchSearch } from "../../../../api/search";
 import { BranchPage, loadBranch } from "../-project/Branch";
 import { plainRepo } from "../-project/Branches";
 
@@ -11,10 +12,12 @@ export const Route = createFileRoute("/$owner/$name/branches/$")({
 
     return { repo };
   },
-  loader: ({ context: { queryClient, monorepo, repo }, params }) => loadBranch(queryClient, monorepo, repo, params._splat ?? ""),
+  validateSearch: branchSearch,
+  loaderDeps: ({ search }) => ({ files: search.tab === "files" }),
+  loader: ({ context: { queryClient, monorepo, repo }, params, deps }) => loadBranch(queryClient, monorepo, repo, params._splat ?? "", deps.files),
   component: function Branch() {
     const { repo } = Route.useRouteContext();
 
-    return <BranchPage repo={repo} branch={Route.useParams()._splat ?? ""} />;
+    return <BranchPage repo={repo} branch={Route.useParams()._splat ?? ""} files={Route.useLoaderDeps().files} />;
   },
 });

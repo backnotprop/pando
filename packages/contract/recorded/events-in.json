@@ -1,0 +1,46 @@
+{
+  "schema": "EventsPage",
+  "route": "GET /v1/events?limit=2&in=<owner/name>",
+  "status": 200,
+  "body": {
+    "events": [
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "rec-muu2mhw1/rec-muu2mhw1",
+        "seq": 35,
+        "at": "2026-10-04T17:04:51.710Z",
+        "kind": "meta.saved",
+        "summary": {
+          "path": "docs/deep/notes.md",
+          "version": 4,
+          "deleted": false
+        },
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "rec-muu2mhw1/rec-muu2mhw1",
+        "seq": 34,
+        "at": "2026-10-04T17:04:51.709Z",
+        "kind": "meta.saved",
+        "summary": {
+          "path": "docs/guide.md",
+          "version": 3,
+          "deleted": false
+        },
+        "repo": "meta",
+        "repo_path": ".",
+        "branch": null,
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      }
+    ],
+    "next": "MjAyNi0xMC0wNFQxNzowNDo1MS43MDlafG1fNDVkNjljNGEwM2JhNmQ0ZXwzNA",
+    "from_logs": false,
+    "skipped": []
+  }
+}

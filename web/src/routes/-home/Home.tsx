@@ -1,0 +1,112 @@
+// The home: your monorepos on the left, then "Needs you" and the activity
+// log across them.
+// Merging happens on a branch's page only (owner ruling), so "Needs you" links.
+import { Menu } from "@base-ui/react/menu";
+import type { FullName } from "@pando/contract";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { MonorepoSummary } from "@pando/contract";
+import { activityQuery, assignedQuery, meQuery, monoreposQuery, needsQuery } from "../../api/queries";
+import { LARGE_REFETCH_MS, useLargeFeeds } from "../../live/feed";
+import { ActivityList } from "../../ui/activity";
+import { Avatar } from "../../ui/Avatar";
+import { Empty, SectionHead } from "../../ui/controls";
+import { Caret } from "../../ui/dropdown";
+import { MenuLink, MenuPopup } from "../../ui/menu";
+import { Page } from "../../ui/pages";
+import { HomeFoot } from "./HomeFoot";
+import { MonorepoList } from "./RepoRows";
+import { type AssignedRow, NeedsList } from "./NeedsList";
+
+/** The log's picker: all monorepos, or one (owner ruling: nothing finer). */
+function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current: FullName | null }) {
+  const shown = current ? lines.find((m) => m.full_name === current) : null;
+
+  return (
+    <Menu.Root>
+      <Menu.Trigger className="inline-flex h-[30px] cursor-pointer items-center gap-2 rounded-[7px] border border-rootline pr-2 pl-3 text-[13px] text-bark-dim hover:border-rule-hi hover:text-bark data-popup-open:border-rule-hi data-popup-open:text-bark">
+        {shown ? (
+          <span className="text-[12.5px] text-bark">
+            <span className="text-ash">{shown.owner}/</span>
+            {shown.name}
+          </span>
+        ) : (
+          <span>All repositories</span>
+        )}
+        <Caret />
+      </Menu.Trigger>
+      <MenuPopup>
+        <MenuLink link={{ to: "/" }} current={!current}>
+          All repositories
+        </MenuLink>
+        {lines.map((m) => (
+          <MenuLink key={m.id} link={{ to: "/", search: { in: m.full_name } }} current={m.full_name === current}>
+            <Avatar name={m.name} org size={16} />
+            <span className="text-[13px]">
+              <span className="text-ash">{m.owner}/</span>
+              {m.name}
+            </span>
+          </MenuLink>
+        ))}
+      </MenuPopup>
+    </Menu.Root>
+  );
+}
+
+/**
+ * The open issues assigned to you, one row per repository, most recently
+ * updated first: as Needs you read them, then as each repository's summary
+ * line moves them live (the person's socket's `summary` frame).
+ */
+function useAssigned(lines: readonly MonorepoSummary[], inMonorepo: FullName | null): AssignedRow[] {
+  const me = useQuery(meQuery).data?.login;
+  const read = useQuery(assignedQuery(inMonorepo)).data ?? [];
+
+  if (!me) return [];
+
+  const rows = new Map(read.map((r) => [r.monorepo_id, r]));
+
+  for (const m of lines) {
+    if (m.assigned === null || (inMonorepo && m.full_name !== inMonorepo)) continue;
+    const mine = m.assigned[me];
+
+    if (mine) rows.set(m.id, { monorepo: m.full_name, monorepo_id: m.id, ...mine });
+    else rows.delete(m.id);
+  }
+
+  return [...rows.values()].sort((a, b) => b.newest.updated_at.localeCompare(a.newest.updated_at));
+}
+
+export function Home({ inMonorepo }: { inMonorepo: FullName | null }) {
+  const all = useQuery(monoreposQuery).data ?? [];
+  const needs = useQuery(needsQuery(inMonorepo)).data ?? [];
+  const assigned = useAssigned(all, inMonorepo);
+  // Large monorepos' lines come by their own sockets; past 5 of them, the log is read again each minute.
+  const beyond = useLargeFeeds(all);
+  const activity = useInfiniteQuery({ ...activityQuery(inMonorepo), refetchInterval: beyond ? LARGE_REFETCH_MS : false });
+  const events = (activity.data?.pages ?? []).flatMap((p) => p.events);
+  const older = { more: activity.hasNextPage, loading: activity.isFetchingNextPage, load: () => void activity.fetchNextPage() };
+
+  return (
+    <Page crumbs={[]}>
+      <div className="grid grid-cols-[300px_minmax(0,1fr)] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
+        {/* On a phone the aside dissolves into the column, so What's new can follow the activity. */}
+        <aside className="sticky top-7 flex min-h-[calc(100vh-140px)] flex-col narrow:static narrow:min-h-0 phone:contents">
+          <div>
+            <SectionHead title="Repositories" count={all.length} />
+            <MonorepoList lines={all} />
+          </div>
+          <HomeFoot />
+        </aside>
+        <section aria-label="Needs you and activity">
+          <SectionHead title="Needs you" count={needs.length + assigned.length} />
+          {needs.length || assigned.length ? <NeedsList rows={needs} assigned={assigned} /> : <Empty>Nothing needs you{inMonorepo ? ` in ${inMonorepo}` : ""}.</Empty>}
+          <div className="mt-10 mb-2 flex items-center gap-3">
+            <h2 className="text-[14px] leading-5 font-semibold">Activity</h2>
+            <Filter lines={all} current={inMonorepo} />
+          </div>
+          {events.length ? <ActivityList events={events} withMonorepo={!inMonorepo} older={older} /> : <Empty>Nothing yet.</Empty>}
+        </section>
+      </div>
+    </Page>
+  );
+}

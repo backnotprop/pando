@@ -1,0 +1,17 @@
+{
+  "schema": "MonorepoRenamed",
+  "route": "PATCH /v1/monorepos/{owner}/{monorepo} {owner: <org>}",
+  "status": 200,
+  "body": {
+    "id": "m_45d69c4a03ba6d4e",
+    "owner": "org-muu2mhw1",
+    "name": "rec-muu2mhw1-renamed",
+    "full_name": "org-muu2mhw1/rec-muu2mhw1-renamed",
+    "kind": "monorepo",
+    "created_at": "2026-10-04T17:04:34.363Z",
+    "owner_type": "org",
+    "description": "The web app, its API and the sync engine.",
+    "role": "owner",
+    "replaced_alias": null
+  }
+}

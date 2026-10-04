@@ -1,6 +1,7 @@
 // End to end: real git and real Artifacts through the Pando Worker.
 //
-//   PANDO_URL=http://localhost:8797 node test/e2e.mjs      (wrangler dev)
+//   PANDO_URL=http://localhost:8797 node test/e2e.mjs      (wrangler dev; first
+//   `npm run db:local` once, for the accounts tables in the local D1)
 //   PANDO_URL=https://pando-dev.<subdomain>.workers.dev node test/e2e.mjs
 //
 // PANDO_BOOTSTRAP comes from the environment, or from worker/.dev.vars. No
@@ -16,43 +17,45 @@ import { mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSyn
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeError, retryResetFetch } from "./errors.mjs";
+import { request } from "./http.mjs";
+
+retryResetFetch();
 
 const URL_ = (process.env.PANDO_URL ?? "http://localhost:8797").replace(/\/$/, "");
+
 const HOOKS = process.env.PANDO_HOOKS !== "0" && /localhost|127\.0\.0\.1/.test(URL_);
+
 let BOOT = process.env.PANDO_BOOTSTRAP;
+
 if (!BOOT) {
   try {
     BOOT = /^PANDO_BOOTSTRAP=(.*)$/m.exec(readFileSync(new URL("../.dev.vars", import.meta.url), "utf8"))?.[1];
   } catch {}
 }
+
 if (!BOOT) {
   console.error("Set PANDO_BOOTSTRAP (or worker/.dev.vars).");
   process.exit(2);
 }
 
 const scrub = (s) => String(s).replace(/pando_[a-f0-9]{20,}/g, "<credential>").replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<artifacts-token>");
+
 const say = (s) => console.log(scrub(s));
+
 const results = [];
+
 function check(name, pass, detail = "") {
   results.push([name, !!pass]);
   say(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`);
 }
 
-async function call(method, path, secret, body) {
-  const res = await fetch(URL_ + path, {
-    method,
-    headers: { ...(secret ? { authorization: `Bearer ${secret}` } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(text);
-  } catch {}
-  return { status: res.status, json, text, headers: res.headers };
+function call(method, path, secret, body) {
+  return request(URL_, method, path, { secret, body });
 }
 
 const work = mkdtempSync(join(tmpdir(), "pando-e2e-"));
+
 function git(args, cwd, secret, extra = {}) {
   const env = {
     ...process.env,
@@ -66,13 +69,16 @@ function git(args, cwd, secret, extra = {}) {
     GIT_COMMITTER_EMAIL: "e2e@pando.invalid",
     ...extra,
   };
+
   // Never let git hand a login to the macOS keychain (Apple's git has
   // credential.helper=osxkeychain in its system config): skip the system
   // config, clear the helper list, then add ours only when there is a secret.
   const helper = ["-c", "credential.helper=", ...(secret ? ["-c", 'credential.helper=!f() { echo username=x; echo "password=$PANDO_SECRET"; }; f'] : [])];
   const r = spawnSync("git", [...helper, "-c", "init.defaultBranch=main", ...args], { cwd, env, encoding: "utf8" });
+
   return { ok: r.status === 0, out: (r.stdout || "") + (r.stderr || "") };
 }
+
 const write = (dir, path, text) => {
   mkdirSync(join(dir, path, ".."), { recursive: true });
   writeFileSync(join(dir, path), text);
@@ -80,10 +86,15 @@ const write = (dir, path, text) => {
 
 // A hook receiver that checks the signature.
 const HOOK_SECRET = "e2e-hook-secret";
+
 const received = [];
+
 const buildkite = [];
+
 let server;
+
 let hookPort = 0;
+
 if (HOOKS) {
   server = createServer((req, res) => {
     let raw = "";
@@ -91,20 +102,26 @@ if (HOOKS) {
     req.on("end", () => {
       if (req.url.startsWith("/buildkite/")) {
         let body = null;
+
         try {
           body = JSON.parse(raw);
         } catch {}
+
         buildkite.push({ path: req.url, bearer: /^Bearer \S+$/.test(String(req.headers.authorization ?? "")), body });
         res.writeHead(201, { "content-type": "application/json" }).end("{}");
+
         return;
       }
+
       const sig = String(req.headers["x-pando-signature-256"] ?? "");
       const want = "sha256=" + createHmac("sha256", HOOK_SECRET).update(raw).digest("hex");
       const valid = sig.length === want.length && timingSafeEqual(Buffer.from(sig), Buffer.from(want));
       let payload = null;
+
       try {
         payload = JSON.parse(raw);
       } catch {}
+
       received.push({ valid, event: req.headers["x-pando-event"], delivery: req.headers["x-pando-delivery"], payload });
       res.writeHead(valid ? 200 : 401).end();
     });
@@ -112,19 +129,28 @@ if (HOOKS) {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   hookPort = server.address().port;
 }
+
 const waitFor = async (pred, ms = 20_000) => {
   const end = Date.now() + ms;
+
   while (Date.now() < end) {
     const v = pred();
+
     if (v) return v;
     await new Promise((r) => setTimeout(r, 250));
   }
+
   return null;
 };
 
 const id = Date.now().toString(36);
+
 const M = `e2e-${id}`;
+
 const MM = `e2emono-${id}`;
+
+const O = `ana-${id}`; // the owner of both (namespaces: owner/name)
+
 const made = [];
 
 try {
@@ -142,11 +168,13 @@ try {
   check("bootstrap makes user bo", r.status === 201 && !!B);
   r = await call("GET", "/v1/user", A);
   check("GET /v1/user names ana and her credential", r.json?.login === `ana-${id}` && r.json?.credential?.name === "ana-mbp");
+  check("a user made by the bootstrap path has picture_url null", r.json && "picture_url" in r.json && r.json.picture_url === null);
 
   // ── A plain repo ──
   r = await call("POST", "/v1/monorepos", A, { name: M, kind: "repo" });
   check("ana makes a plain repo (kind repo)", r.status === 201 && r.json?.repos?.[0]?.path === "." && r.json?.monorepo?.role === "owner", `${r.status} ${scrub(r.text).slice(0, 200)}`);
-  made.push(`${M}--${M}`);
+  made.push(`${r.json?.monorepo?.id}--${M}`);
+  check("it is ana/<name> with a permanent id, and its git URL is /owner/name.git", r.json?.monorepo?.full_name === `${O}/${M}` && /^m_[0-9a-f]{16}$/.test(r.json?.monorepo?.id) && r.json?.repos?.[0]?.clone_url?.endsWith(`/${O}/${M}.git`), `${r.json?.monorepo?.full_name} ${r.json?.repos?.[0]?.clone_url}`);
   const cloneUrl = r.json?.repos?.[0]?.clone_url;
   const repoName = r.json?.repos?.[0]?.name;
   r = await call("GET", "/v1/monorepos", A);
@@ -176,27 +204,39 @@ try {
   const boDir = join(work, "bo");
   g = git(["clone", "-q", cloneUrl, boDir], work, B);
   check("bo, not a member, cannot clone", !g.ok && /403/.test(g.out), g.out.split("\n")[0]);
-  r = await call("PUT", `/v1/monorepos/${M}/members/bo-${id}`, B, { role: "member" });
+  r = await call("PUT", `/v1/monorepos/${O}/${M}/members/bo-${id}`, B, { role: "member" });
   check("bo cannot add himself", r.status === 403, `${r.status}`);
-  r = await call("PUT", `/v1/monorepos/${M}/members/bo-${id}`, A, { role: "member" });
+  r = await call("PUT", `/v1/monorepos/${O}/${M}/members/bo-${id}`, A, { role: "member" });
   check("ana (owner) adds bo as a member", r.status === 200 && r.json?.role === "member", `${r.status}`);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/members`, A);
+  {
+    const ana = r.json?.members?.find((m) => m.login === `ana-${id}`);
+    const bo = r.json?.members?.find((m) => m.login === `bo-${id}`);
+    check(
+      "members carry name, picture_url and last_active_at",
+      ana?.name === "Ana" && ana?.picture_url === null && Date.parse(ana?.last_active_at) > Date.now() - 5 * 60_000 && bo && bo.name === null && "last_active_at" in bo && "picture_url" in bo,
+      JSON.stringify({ ana: ana && { name: ana.name, last_active_at: ana.last_active_at }, bo: bo && { name: bo.name, last_active_at: bo.last_active_at } }),
+    );
+  }
+
   g = git(["clone", "-q", cloneUrl, boDir], work, B);
   check("bo clones through the door (Basic, credential helper)", g.ok, g.ok ? "" : g.out.slice(-300));
 
   // ── Hooks ──
   let hookId = null;
+
   if (HOOKS) {
-    r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/hooks`, B, { type: "web", url: `http://127.0.0.1:${hookPort}/hook`, secret: HOOK_SECRET });
+    r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks`, B, { type: "web", url: `http://127.0.0.1:${hookPort}/hook`, secret: HOOK_SECRET });
     check("a member cannot register a hook", r.status === 403, `${r.status}`);
-    r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/hooks`, A, { type: "web", url: `http://127.0.0.1:${hookPort}/hook`, secret: HOOK_SECRET });
+    r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks`, A, { type: "web", url: `http://127.0.0.1:${hookPort}/hook`, secret: HOOK_SECRET });
     hookId = r.json?.id;
     check("the owner registers a web hook", r.status === 201 && !!hookId, `${r.status} ${scrub(r.text).slice(0, 200)}`);
-    r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/hooks`, A, {
+    r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks`, A, {
       type: "buildkite",
       buildkite: { organization: "pando", pipeline: "ci", api_url: `http://127.0.0.1:${hookPort}/buildkite/builds` },
     });
     check("the owner registers a buildkite hook (local stand-in for the API)", r.status === 201 && r.json?.events?.join() === "push", `${r.status} ${scrub(r.text).slice(0, 200)}`);
-    r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/hooks`, A, { type: "buildkite", buildkite: { organization: "o", pipeline: "p", api_url: "https://evil.example/" } });
+    r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks`, A, { type: "buildkite", buildkite: { organization: "o", pipeline: "p", api_url: "https://evil.example/" } });
     check("a buildkite api_url off this machine is refused", r.status === 400);
   }
 
@@ -216,12 +256,13 @@ try {
   if (HOOKS) {
     const got = await waitFor(() => received.find((x) => x.event === "push" && x.payload?.branch === B1));
     check("the push hook arrives, signed", !!got && got.valid, got ? `valid=${got.valid}` : "nothing arrived");
-    const opened = received.find((x) => x.event === "branch.opened" && x.payload?.branch === B1);
+    // Deliveries are unordered (a queue): branch.opened may come after push.
+    const opened = await waitFor(() => received.find((x) => x.event === "branch.opened" && x.payload?.branch === B1));
     check("branch.opened arrives too", !!opened);
     const p = got?.payload ?? {};
     check(
-      "the payload has clone_url, status_url, a read token and the base",
-      p.clone_url === cloneUrl && /\/statuses\/[0-9a-f]{40}$/.test(p.status_url ?? "") && /^art_v\d+_/.test(p.read_token ?? "") && /^[0-9a-f]{40}$/.test(p.base ?? "") && p.author === `bo-${id}`,
+      "the payload has owner/name, the monorepo id, clone_url, status_url, a read token and the base",
+      p.clone_url === cloneUrl && p.monorepo === `${O}/${M}` && /^m_[0-9a-f]{16}$/.test(p.monorepo_id ?? "") && /\/statuses\/[0-9a-f]{40}$/.test(p.status_url ?? "") && /^art_v\d+_/.test(p.read_token ?? "") && /^[0-9a-f]{40}$/.test(p.base ?? "") && p.author === `bo-${id}`,
     );
     const bk = await waitFor(() => buildkite.find((x) => x.body?.branch === B1));
     const e = bk?.body?.env ?? {};
@@ -230,6 +271,7 @@ try {
       !!bk && bk.bearer && bk.body.commit === p.head && e.PANDO_CLONE_URL === cloneUrl && /^art_v\d+_/.test(e.PANDO_READ_TOKEN ?? "") && e.PANDO_STATUS_URL === p.status_url,
       bk ? `commit=${bk.body?.commit?.slice(0, 8)} env=${Object.keys(e).join(",")}` : "nothing arrived",
     );
+
     if (p.read_token) {
       const ci = join(work, "ci");
       g = git(["-c", `http.extraHeader=Authorization: Bearer ${p.read_token}`, "clone", "-q", "-b", B1, cloneUrl, ci], work, null);
@@ -242,27 +284,37 @@ try {
   }
 
   // ── Branch list ──
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches`, B);
-  const br = r.json?.branches?.find((b) => b.name === B1);
-  check("the branch list shows the branch", r.status === 200 && !!br, `${r.status}`);
+  // The list answers at once; ahead, behind and mergeable land when the queue computes them.
+  let br = null;
+  const factsBy = Date.now() + 30_000;
+
+  while (Date.now() < factsBy) {
+    r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches`, B);
+    br = r.json?.branches?.find((b) => b.name === B1);
+
+    if (br && !br.stale) break;
+    await new Promise((res) => setTimeout(res, 300));
+  }
+
+  check("the branch list shows the branch, its facts fresh", r.status === 200 && !!br && br.stale === false, `${r.status} stale=${br?.stale}`);
   check("its author is bo, ahead 1, behind 0", br?.author === `bo-${id}` && br?.ahead === 1 && br?.behind === 0, JSON.stringify({ a: br?.author, ahead: br?.ahead, behind: br?.behind }));
   check("mergeable is clean (gitwrite dry run)", br?.mergeable === "clean", br?.mergeable);
   check("checks pass with no statuses and no required checks", br?.checks?.state === "success", br?.checks?.state);
 
   // ── The branch diff ──
   const enc = encodeURIComponent(B1);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/diff`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/diff`, B);
   const files = Object.fromEntries((r.json?.files ?? []).map((f) => [f.path, f]));
   check("diff JSON lists 4 files", r.status === 200 && r.json?.files?.length === 4, `${r.status} ${(r.json?.files ?? []).map((f) => f.path + ":" + f.status).join(", ")}`);
   check("modified src/a.txt: +2 -1", files["src/a.txt"]?.status === "modified" && files["src/a.txt"]?.additions === 2 && files["src/a.txt"]?.deletions === 1);
   check("added src/new.txt, deleted src/gone.txt", files["src/new.txt"]?.status === "added" && files["src/gone.txt"]?.status === "deleted");
   check("renamed docs/old-name.md to docs/guide/new-name.md", files["docs/guide/new-name.md"]?.status === "renamed" && files["docs/guide/new-name.md"]?.old_path === "docs/old-name.md");
   check("no hunks without hunks=1", !files["src/a.txt"]?.hunks);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches/${B1}/diff?hunks=1&paths=src/a.txt`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${B1}/diff?hunks=1&paths=src/a.txt`, B);
   check("raw slashes in the branch, paths filter, hunks=1", r.json?.files?.length === 1 && r.json.files[0].hunks?.[0]?.lines?.includes("+THREE"));
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/diff?hunks=1&max_bytes=10`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/diff?hunks=1&max_bytes=10`, B);
   check("max_bytes leaves files out with patch_omitted budget", r.json?.truncated === true && r.json.files.some((f) => f.patch_omitted === "budget"));
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/diff?format=patch`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/diff?format=patch`, B);
   check("format=patch is text/x-patch", r.status === 200 && /text\/x-patch/.test(r.headers.get("content-type") ?? "") && r.text.startsWith("diff --git"));
   const patchFile = join(work, "branch.patch");
   writeFileSync(patchFile, r.text);
@@ -273,30 +325,65 @@ try {
   check("git apply --check accepts the patch on the merge base", g.ok, g.ok ? "" : g.out.slice(-300));
   g = git(["diff", "--stat", `${r.headers.get("x-pando-merge-base")}`, "origin/" + B1], boDir);
 
+  // ── Files changed (?patches=1): each file with its own patch, binaries and large files listed without one ──
+  const FC = `${B1}-files`;
+  git(["checkout", "-qb", FC], boDir);
+  writeFileSync(join(boDir, "bin.dat"), Buffer.from([0, 1, 2, 3, 0, 255, 254, 0]));
+  write(boDir, "big.txt", "x".repeat(1_200_000) + "\n");
+  git(["add", "-A"], boDir);
+  git(["commit", "-qm", "a binary and a large file"], boDir);
+  check("bo pushes a branch with a binary and a large file", git(["push", "-q", "origin", FC], boDir, B).ok);
+  const fcPath = `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${encodeURIComponent(FC)}/diff?patches=1`;
+  r = await call("GET", fcPath, B);
+  const fc = r.json;
+  const fcTag = r.headers.get("etag");
+  const shown = Object.fromEntries((fc?.files ?? []).map((f) => [f.path, f]));
+  const fcHead = git(["rev-parse", "HEAD"], boDir).out.trim();
+  check(
+    "Files changed lists every file with its status, against main's head and the branch's head",
+    r.status === 200 && fc.head === fcHead && fc.files_total === 6 && fc.too_many_files === false && shown["src/a.txt"]?.status === "modified" && shown["src/new.txt"]?.status === "added" &&
+      shown["src/gone.txt"]?.status === "deleted" && shown["docs/guide/new-name.md"]?.status === "renamed",
+    `${r.status} ${(fc?.files ?? []).map((f) => `${f.path}:${f.status}`).join(", ")}`,
+  );
+  check(
+    "a binary and a file over 1 MiB are listed without a patch",
+    shown["bin.dat"]?.binary === true && shown["bin.dat"].patch === null && shown["bin.dat"].patch_omitted === "binary" && shown["big.txt"]?.patch === null && shown["big.txt"].patch_omitted === "too_large",
+    `${shown["bin.dat"]?.patch_omitted} ${shown["big.txt"]?.patch_omitted}`,
+  );
+  const fcPatch = join(work, "files-changed.patch");
+  writeFileSync(fcPatch, (fc?.files ?? []).map((f) => f.patch ?? "").join(""));
+  git(["fetch", "-q", "origin", FC], base, A);
+  git(["checkout", "-q", "--detach", fc?.merge_base ?? "HEAD"], base);
+  g = git(["apply", "--index", fcPatch], base);
+  const same = git(["diff", "--cached", "--quiet", fcHead, "--", "src", "docs"], base);
+  check("each file's patch is git's own format: applied on the merge base, it gives the branch's files exactly", g.ok && same.ok, g.ok ? (same.ok ? "" : "the result differs from the head") : g.out.slice(-300));
+  r = await request(URL_, "GET", fcPath, { secret: B, headers: { "if-none-match": fcTag ?? "" } });
+  check("asked again with its ETag (main and head unchanged): 304", r.status === 304, `${r.status}`);
+
   // ── File at a ref ──
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/files/src/new.txt?ref=${enc}`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/files/src/new.txt?ref=${enc}`, B);
   check("GET files/src/new.txt at the branch", r.status === 200 && r.text === "brand new\n");
 
   // ── Reviews ──
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/reviews`, B, { verdict: "comment", body: "looks fine", comments: [{ path: "src/a.txt", line: 3, body: "why upper case?" }] });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/reviews`, B, { verdict: "comment", body: "looks fine", comments: [{ path: "src/a.txt", line: 3, body: "why upper case?" }] });
   check("a comment review", r.status === 201 && r.json?.author === `bo-${id}`, `${r.status}`);
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/reviews`, A, { verdict: "approve" });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/reviews`, A, { verdict: "approve" });
   check("an approval", r.status === 201);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/reviews`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/reviews`, B);
   check("reviews list both", r.json?.reviews?.length === 2);
 
   // ── Statuses and merge ──
   const head = br?.head;
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/statuses/${head}`, B, { state: "pending", context: "ci", description: "running" });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/statuses/${head}`, B, { state: "pending", context: "ci", description: "running" });
   check("POST a pending status", r.status === 201);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/commits/${enc}/status`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/commits/${enc}/status`, B);
   check("combined status is pending", r.json?.state === "pending" && r.json?.sha === head, r.json?.state);
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/merge`, B);
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/merge`, B);
   check("merge is refused while checks are pending (412)", r.status === 412 && r.json?.error?.code === "checks_not_green", `${r.status}`);
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/statuses/${head}`, B, { state: "success", context: "ci", target_url: "https://ci.example/1" });
-  r = await call("PATCH", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}`, B, { title: "Feature", description: "Edit, add, delete, rename." });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/statuses/${head}`, B, { state: "success", context: "ci", target_url: "https://ci.example/1" });
+  r = await call("PATCH", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}`, B, { title: "Feature", description: "Edit, add, delete, rename." });
   check("PATCH title and description", r.json?.title === "Feature");
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/${enc}/merge`, B, { expected_head: head });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/merge`, B, { expected_head: head });
   check("a member (bo, as an agent would) merges with green checks", r.status === 200 && r.json?.status === "merged" && /^[0-9a-f]{40}$/.test(r.json?.sha ?? ""), `${r.status} ${scrub(r.text).slice(0, 300)}`);
   const mergeSha = r.json?.sha;
   g = git(["fetch", "-q", "origin"], boDir, B);
@@ -304,15 +391,25 @@ try {
   check("main is the merge commit, with two parents (main, branch)", parents[0] === mergeSha && parents.length === 3 && parents[2] === head, parents.join(" ").slice(0, 130));
   const msg = git(["log", "-1", "--format=%an|%s", "origin/main"], boDir).out.trim();
   check("the merge commit is authored as the user, titled from the branch", msg.startsWith(`bo-${id}|Feature`) || msg.startsWith("bo-") , msg);
+
   if (HOOKS) {
     const m = await waitFor(() => received.find((x) => x.event === "merged"));
     check("the merged hook arrives", !!m && m.payload?.merge_commit === mergeSha);
   }
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches?state=merged`, B);
+
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches?state=merged`, B);
   check("the branch shows as merged", r.json?.branches?.some((b) => b.name === B1 && b.state === "merged"));
+  // A merged branch keeps its Files changed, as GitHub keeps a merged pull request's: against main just before the merge.
+  r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${enc}/diff?patches=1`, B);
+  const kept = Object.fromEntries((r.json?.files ?? []).map((f) => [f.path, f.status]));
+  check(
+    "a merged branch's Files changed still lists its changes, against the merge commit's first parent",
+    r.status === 200 && r.json?.base === parents[1] && r.json?.head === head && r.json?.files_total === 4 && kept["src/a.txt"] === "modified" && kept["src/new.txt"] === "added" && kept["src/gone.txt"] === "deleted" && kept["docs/guide/new-name.md"] === "renamed",
+    `${r.status} base ${r.json?.base?.slice(0, 7)} vs ${parents[1]?.slice(0, 7)}: ${JSON.stringify(kept)}`,
+  );
 
   // ── A conflict, and force ──
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches`, B, { name: "agent-2/conflict", title: "Conflicting" });
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches`, B, { name: "agent-2/conflict", title: "Conflicting" });
   check("createBranch makes a branch off main", r.status === 201 && r.json?.head === mergeSha && r.json?.author === `bo-${id}`, `${r.status} ${scrub(r.text).slice(0, 200)}`);
   git(["fetch", "-q", "origin"], boDir, B);
   git(["checkout", "-qb", "agent-2/conflict", "origin/agent-2/conflict"], boDir);
@@ -323,20 +420,32 @@ try {
   write(boDir, "README.md", "# a different edit\n");
   git(["commit", "-qam", "other edit"], boDir);
   git(["push", "-q", "origin", "agent-2/other"], boDir, B);
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/agent-2%2Fother/merge?force=1`, A);
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/agent-2%2Fother/merge?force=1`, A);
   check("force=1 merges with no statuses needed", r.status === 200 && r.json?.status === "merged", `${r.status} ${r.json?.error?.code ?? ""}`);
-  r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/branches/agent-2%2Fconflict/merge`, A);
+  r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/agent-2%2Fconflict/merge`, A);
   check("a conflicting branch answers 409 conflict with the paths", r.status === 409 && r.json?.error?.code === "conflict" && r.json?.error?.paths?.includes("README.md"), `${r.status} ${r.json?.error?.code}`);
-  r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/branches`, B);
-  check("the list says conflicts", r.json?.branches?.find((b) => b.name === "agent-2/conflict")?.mergeable === "conflicts");
+  // Branch facts are computed on change (a queue): the list says "pending" until they land.
+  let listed = null;
+  const until = Date.now() + 30_000;
+
+  while (Date.now() < until) {
+    r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/branches`, B);
+    listed = r.json?.branches?.find((b) => b.name === "agent-2/conflict");
+
+    if (listed && !listed.stale) break;
+    await new Promise((res) => setTimeout(res, 500));
+  }
+
+  check("the list says conflicts once the facts land", listed?.mergeable === "conflicts" && listed?.stale === false, `${listed?.mergeable} stale=${listed?.stale}`);
+  check("and names the conflicting paths before anyone presses Merge (the dry run's list, as the 409's)", JSON.stringify(listed?.conflict_paths) === '["README.md"]', JSON.stringify(listed?.conflict_paths));
 
   // ── Worktrees ──
   const wt = `wt_${id}`;
-  r = await call("PUT", `/v1/monorepos/${M}/worktrees/${wt}`, B, { repo: ".", branch: B1, path: "worktrees/agent-2-feature", machine: "bo-box", agent: "agent-2", kind: "sparse" });
+  r = await call("PUT", `/v1/monorepos/${O}/${M}/worktrees/${wt}`, B, { repo: ".", branch: B1, path: "worktrees/agent-2-feature", machine: "bo-box", agent: "agent-2", kind: "sparse" });
   check("PUT a worktree", r.status === 200 && r.json?.reported_by === `bo-${id}`, `${r.status}`);
-  r = await call("GET", `/v1/monorepos/${M}/worktrees`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/worktrees`, A);
   check("GET worktrees lists it for every member", r.json?.worktrees?.some((w) => w.id === wt && w.machine === "bo-box"));
-  r = await call("DELETE", `/v1/monorepos/${M}/worktrees/${wt}`, B);
+  r = await call("DELETE", `/v1/monorepos/${O}/${M}/worktrees/${wt}`, B);
   check("DELETE the worktree", r.status === 204);
 
   // ── Credentials ──
@@ -353,43 +462,44 @@ try {
 
   // ── Deliveries ──
   if (HOOKS && hookId) {
-    r = await call("GET", `/v1/monorepos/${M}/repos/${repoName}/hooks/${hookId}/deliveries`, A);
+    r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks/${hookId}/deliveries`, A);
     const ds = r.json?.deliveries ?? [];
     check("deliveries are listed as delivered", ds.length > 0 && ds.every((d) => d.status === "delivered"), ds.map((d) => `${d.event}:${d.status}`).join(" "));
     const before = received.length;
-    r = await call("POST", `/v1/monorepos/${M}/repos/${repoName}/hooks/deliveries/${ds[0]?.id}/redeliver`, A);
-    check("redeliver queues a new delivery", r.status === 202 && r.json?.id !== ds[0]?.id);
+    r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks/deliveries/${ds[0]?.id}/redeliver`, A);
+    check("redeliver sends the same delivery again (one row per hook, event and seq)", r.status === 202 && r.json?.id === ds[0]?.id && r.json?.status === "queued");
     check("and it arrives", !!(await waitFor(() => received.length > before)));
   }
 
   // ── A monorepo with a project repo ──
   // Asking about a name before it exists must not make it look missing afterwards.
-  for (let i = 0; i < 3; i++) await call("GET", `/v1/monorepos/${MM}`, A);
-  r = await call("GET", `/v1/monorepos/${MM}`, A);
+  for (let i = 0; i < 3; i++) await call("GET", `/v1/monorepos/${O}/${MM}`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}`, A);
   check("a monorepo that does not exist yet is 404", r.status === 404);
-  git(["ls-remote", `${URL_}/${MM}/meta.git`], work, A);
+  git(["ls-remote", `${URL_}/${O}/${MM}/meta.git`], work, A);
   r = await call("POST", "/v1/monorepos", A, { name: MM });
-  const now1 = await call("GET", `/v1/monorepos/${MM}`, A);
+  const now1 = await call("GET", `/v1/monorepos/${O}/${MM}`, A);
   check("right after creating it, the same name answers 200 (no cached 404)", now1.status === 200, `${now1.status}`);
   check("ana makes a monorepo (kind monorepo)", r.status === 201 && r.json?.repos?.length === 0, `${r.status}`);
-  made.push(`${MM}--meta`);
-  r = await call("POST", `/v1/monorepos/${MM}/repos`, A, { path: "projects/web" });
-  check("a project repo at projects/web is named projects-web", r.status === 201 && r.json?.name === "projects-web" && r.json?.clone_url.endsWith(`/${MM}/projects-web.git`), `${r.status} ${scrub(r.text).slice(0, 200)}`);
-  made.push(`${MM}--projects-web`);
+  const MMID = r.json?.monorepo?.id;
+  made.push(`${MMID}--meta`);
+  r = await call("POST", `/v1/monorepos/${O}/${MM}/repos`, A, { path: "projects/web" });
+  check("a project repo at projects/web is named projects-web", r.status === 201 && r.json?.name === "projects-web" && r.json?.clone_url.endsWith(`/${O}/${MM}/projects-web.git`), `${r.status} ${scrub(r.text).slice(0, 200)}`);
+  made.push(`${MMID}--projects-web`);
   g = git(["ls-remote", r.json?.clone_url], work, B);
   check("bo is not a member of the second monorepo", !g.ok);
 
   // ── The meta layer: live routes, and .pando/** through a reviewed merge ──
-  r = await call("GET", `/v1/monorepos/${MM}/meta/status`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}/meta/status`, A);
   check("the owner reaches the meta layer (live lane)", r.status === 200, `${r.status} ${scrub(r.text).slice(0, 120)}`);
-  r = await call("GET", `/v1/monorepos/${MM}/meta/status`, B);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}/meta/status`, B);
   check("a non-member does not", r.status === 403);
-  r = await call("GET", `/v1/monorepos/${M}/meta/status`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${M}/meta/status`, A);
   check("a plain repo has no meta layer", r.status === 404);
-  r = await call("GET", `/v1/monorepos/${MM}/repos/meta`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}/repos/meta`, A);
   const metaUrl = r.json?.clone_url;
-  check("the meta layer is the repo named meta (path .)", r.status === 200 && r.json?.path === "." && metaUrl?.endsWith(`/${MM}/meta.git`), `${r.status}`);
-  r = await call("GET", `/v1/monorepos/${MM}/repos`, A);
+  check("the meta layer is the repo named meta (path .)", r.status === 200 && r.json?.path === "." && metaUrl?.endsWith(`/${O}/${MM}/meta.git`), `${r.status}`);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}/repos`, A);
   check("and it is not in the repo list", r.json?.repos?.every((x) => x.name !== "meta"));
   const metaDir = join(work, "meta");
   mkdirSync(metaDir);
@@ -404,48 +514,55 @@ try {
   git(["add", "-A"], metaDir);
   git(["commit", "-qm", "Require ci on projects/web"], metaDir);
   g = git(["push", "-q", metaUrl, "require-ci"], metaDir, A);
-  r = await call("POST", `/v1/monorepos/${MM}/repos/meta/branches/require-ci/merge`, A);
+  r = await call("POST", `/v1/monorepos/${O}/${MM}/repos/meta/branches/require-ci/merge`, A);
   check("a reviewed branch merges into the meta layer", r.status === 200 && r.json?.status === "merged", `${r.status} ${scrub(r.text).slice(0, 200)}`);
-  r = await call("GET", `/v1/monorepos/${MM}/repos/projects-web`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}/repos/projects-web`, A);
   check("projects/web now requires ci (read from .pando/pando.toml on main)", JSON.stringify(r.json?.required_checks) === '["ci"]', JSON.stringify(r.json?.required_checks));
-  r = await call("GET", `/v1/monorepos/${MM}/meta/history?path=.pando/pando.toml`, A);
+  r = await call("GET", `/v1/monorepos/${O}/${MM}/meta/history?path=.pando/pando.toml`, A);
   check("the merge reached the live meta layer (applyFromMain)", r.json?.versions?.some((v) => v.source === "main"), `${r.status} ${scrub(r.text).slice(0, 200)}`);
 } catch (err) {
-  check("no exception", false, scrub(err?.stack ?? err));
+  check("no exception", false, scrub(describeError(err)));
 } finally {
   server?.close();
+
   if (process.env.PANDO_KEEP !== "1") {
     for (const [m, secret] of [[M, globalThis.__A], [MM, globalThis.__A]]) {
       if (!secret) continue;
-      const r = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, secret);
-      const after = await call("GET", `/v1/monorepos/${m}`, secret);
-      check(`DELETE /v1/monorepos/${m} removes it`, r.status === 204 && after.status === 404, `${r.status}, then ${after.status}`);
+      const r = await call("DELETE", `/v1/monorepos/${O}/${m}?confirm=${O}/${m}`, secret);
+      const after = await call("GET", `/v1/monorepos/${O}/${m}`, secret);
+      check(`DELETE /v1/monorepos/${O}/${m} removes it`, r.status === 204 && after.status === 404, `${r.status}, then ${after.status}`);
+
       if (r.status === 204) {
         // The same name can be made again, and starts empty.
         const kind = m === M ? "repo" : "monorepo";
         const again = await call("POST", "/v1/monorepos", secret, { name: m, kind });
-        const repos = await call("GET", `/v1/monorepos/${m}/repos`, secret);
+        const repos = await call("GET", `/v1/monorepos/${O}/${m}/repos`, secret);
         const fresh = kind === "repo" ? repos.json?.repos?.length === 1 : repos.json?.repos?.length === 0;
         let branchesEmpty = true;
+
         if (kind === "repo") {
-          const b = await call("GET", `/v1/monorepos/${m}/repos/${m}/branches?state=all`, secret);
+          const b = await call("GET", `/v1/monorepos/${O}/${m}/repos/${m}/branches?state=all`, secret);
           branchesEmpty = b.status === 200 && b.json?.branches?.length === 0 && b.json?.default_head === null;
         }
+
         check(`${m} can be made again after the delete, and starts empty`, again.status === 201 && fresh && branchesEmpty, `${again.status} ${scrub(JSON.stringify(again.json)).slice(0, 120)}`);
-        const r2 = await call("DELETE", `/v1/monorepos/${m}?confirm=${m}`, secret);
+        const r2 = await call("DELETE", `/v1/monorepos/${O}/${m}?confirm=${O}/${m}`, secret);
         check(`and deleted again`, r2.status === 204, `${r2.status}`);
       }
     }
+
     for (const name of made) {
       const r = spawnSync("npx", ["wrangler", "artifacts", "repos", "delete", name, "--namespace", "pando-dev", "--force"], {
         cwd: new URL("..", import.meta.url).pathname,
         encoding: "utf8",
         input: "y\n",
       });
+
       // After DELETE /v1/monorepos, each repo should already be gone.
       say(`cleanup ${name}: ${r.status === 0 ? "deleted by wrangler (the API delete may still be finishing)" : "already gone"}`);
     }
   }
+
   rmSync(work, { recursive: true, force: true });
   const failed = results.filter(([, ok]) => !ok).length;
   say(`\n${results.length - failed} of ${results.length} checks passed`);

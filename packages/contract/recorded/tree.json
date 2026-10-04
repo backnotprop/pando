@@ -1,0 +1,32 @@
+{
+  "schema": "TreePage",
+  "route": "GET .../repos/{repo}/tree?ref=main",
+  "status": 200,
+  "body": {
+    "ref": "main",
+    "commit": "03cdb29aeb9fbbd7e95b9bd748fe443722f3ef27",
+    "path": "",
+    "entries": [
+      {
+        "name": "README.md",
+        "type": "file",
+        "mode": "100644",
+        "oid": "6bf181f7ce49264d2508f4ef853fd8126e2351e2"
+      },
+      {
+        "name": "merged.txt",
+        "type": "file",
+        "mode": "100644",
+        "oid": "20b117fdd3804508359ec883abe519486f0d19dd"
+      },
+      {
+        "name": "ready.txt",
+        "type": "file",
+        "mode": "100644",
+        "oid": "395527df662d5fdf4b00c5f1cd9b8d7ac048e127"
+      }
+    ],
+    "total": 3,
+    "next": null
+  }
+}

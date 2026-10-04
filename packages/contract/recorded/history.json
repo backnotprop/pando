@@ -1,0 +1,50 @@
+{
+  "schema": "HistoryPage",
+  "route": "GET .../repos/{repo}/history?ref=main",
+  "status": 200,
+  "body": {
+    "ref": "main",
+    "path": "",
+    "commits": [
+      {
+        "sha": "03cdb29aeb9fbbd7e95b9bd748fe443722f3ef27",
+        "title": "Merge branch 'feat/ready'",
+        "author": {
+          "name": "Ana Lima",
+          "email": "rec-muu2mhw1@users.pando.invalid"
+        },
+        "at": "2026-10-04T17:04:56.000Z",
+        "merged_branch": {
+          "branch": "feat/ready",
+          "title": null
+        }
+      },
+      {
+        "sha": "89d824c9703c63d48bceb4fc56462f506f50cfc8",
+        "title": "Merge branch 'feat/merge-me'",
+        "author": {
+          "name": "Ana Lima",
+          "email": "rec-muu2mhw1@users.pando.invalid"
+        },
+        "at": "2026-10-04T17:04:51.000Z",
+        "merged_branch": {
+          "branch": "feat/merge-me",
+          "title": null
+        }
+      },
+      {
+        "sha": "5e44f241062d0bbede1f1c0aaca478e4cf50aa08",
+        "title": "First commit",
+        "author": {
+          "name": "Ana Lima",
+          "email": "ana@pando.invalid"
+        },
+        "at": "2026-10-04T17:04:43.000Z",
+        "merged_branch": null
+      }
+    ],
+    "next": null,
+    "capped": false,
+    "complete_page": true
+  }
+}

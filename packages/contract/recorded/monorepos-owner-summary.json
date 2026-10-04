@@ -1,0 +1,68 @@
+{
+  "schema": "MonorepoSummaryList",
+  "route": "GET /v1/monorepos?owner=<org>&summary=1",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_45d69c4a03ba6d4e",
+        "owner": "org-muu2mhw1",
+        "name": "rec-muu2mhw1-renamed",
+        "full_name": "org-muu2mhw1/rec-muu2mhw1-renamed",
+        "kind": "monorepo",
+        "created_at": "2026-10-04T17:04:34.363Z",
+        "owner_type": "org",
+        "description": "The web app, its API and the sync engine.",
+        "role": "owner",
+        "last_activity_at": "2026-10-04T17:05:15.979Z",
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 0,
+          "conflicts": 1,
+          "failing": 1
+        },
+        "members": 3,
+        "large": false,
+        "repos": 1,
+        "open_branches": 2,
+        "assigned": {
+          "rec-muu2mhw1": {
+            "count": 1,
+            "newest": {
+              "number": 1,
+              "title": "Login fails an hour after sign-in",
+              "updated_at": "2026-10-04T17:05:12.884Z"
+            }
+          }
+        },
+        "open_issues": 1
+      },
+      {
+        "id": "m_66fe0c14f6c7268e",
+        "owner": "org-muu2mhw1",
+        "name": "in-muu2mhw1",
+        "full_name": "org-muu2mhw1/in-muu2mhw1",
+        "kind": "repo",
+        "created_at": "2026-10-04T17:05:17.276Z",
+        "owner_type": "org",
+        "description": null,
+        "role": "owner",
+        "last_activity_at": null,
+        "worktrees_active": 0,
+        "machines_active": 0,
+        "needs": {
+          "ready": 0,
+          "conflicts": 0,
+          "failing": 0
+        },
+        "members": 2,
+        "large": false,
+        "repos": 1,
+        "open_branches": 0,
+        "assigned": {},
+        "open_issues": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+---
+title: Privacy
+description: What Pando stores, where it is kept, and how to delete it.
+sidebar:
+  order: 96
+---
+
+This page lists what Pando stores, where, and for how long, as the code does it today. Pando runs on Cloudflare: Workers, Durable Objects, D1, R2 and Artifacts. Sign-in runs through WorkOS.
+
+## What Pando keeps about you
+
+You sign in through WorkOS. WorkOS holds your account there. From it, Pando keeps, in D1:
+
+- your login, name and email;
+- your WorkOS user id;
+- the address of your WorkOS profile picture, if you have one. Pando stores the address only, not the picture, and refreshes it at each sign-in;
+- when your account was made.
+
+For each machine, sandbox and browser signed in as you, Pando keeps a credential row: its name, its kind, when it was made, when it was last used (written at most once a minute) and, once revoked, when. A browser's name is made from its user agent, such as `browser: Chrome on macOS`. Pando stores only a SHA-256 hash of each credential, never the credential itself. A browser session also keeps its WorkOS session id, so signing out ends the WorkOS session too.
+
+Membership is kept in D1 as well: which repositories you belong to, your role, and who added you. An invite keeps the invited email, the role, who invited, and when, until it is used or revoked.
+
+## Your repositories
+
+- **Code.** Each project is a git repo in Cloudflare Artifacts: its files, commits and branches.
+- **The repository's shared files**, outside `projects/`. Every saved version of a file up to 1.5 MiB is kept in a Durable Object for the repository's shared files. Larger files and binaries go to R2, stored under their SHA-256. Changes are also committed to the repository's `meta` git repo in Artifacts, after 10 seconds of quiet.
+- **What happens in a repository.** Its Durable Object keeps branches, reviews, checks, merges, worktrees and the machines working in it, and an event log of every push, merge, review and save, with who and which machine. Events are kept with no cap.
+- **Hooks.** A hook's settings, and its latest 1,000 deliveries with the last 10 tries of each.
+- **CI.** For a connected Buildkite organization: the connection, its pipelines, and the builds and jobs Buildkite reported.
+- **Your home's activity feed.** One Durable Object per person keeps the last 7 days of lines from your repositories, at most 1,000,000 lines. Older pages are read from each repository's own log.
+
+## Where it is kept
+
+| What | Where | How long |
+| --- | --- | --- |
+| Your account, credentials, memberships, invites | D1 | until changed; there is no account deletion yet |
+| Your WorkOS account | WorkOS | as WorkOS keeps it |
+| Projects' files and history | Artifacts | until the repository is deleted |
+| The repository's shared files, every version | Durable Objects, and the `meta` repo in Artifacts | until the repository is deleted |
+| Large files and binaries among them | R2 | until the repository is deleted |
+| Branches, reviews, checks, events, hooks, CI builds | the repository's Durable Object | until the repository is deleted; deliveries: the latest 1,000 per hook |
+| Your activity feed | your feed's Durable Object | 7 days, at most 1,000,000 lines |
+| Saved answers for file pages (last commit per folder, history pages) and copies of Buildkite logs and details | R2 | until the repository is deleted or the CI connection removed; the server's settings note a 90-day expiry rule on this bucket, which is set in Cloudflare rather than in Pando's code |
+| Request logs | Workers logs | as Cloudflare keeps Workers logs |
+
+Each request logs one line: the route, the repository and project, the status and timings. Never a token, a credential or a request body.
+
+## On your machine
+
+`pando` keeps its files in `~/.pando/` (or `PANDO_HOME`):
+
+- `config.toml`: the server and who this machine is signed in as;
+- `credentials/<host>`: this machine's credential, readable only by you (mode 600).
+
+A repository's folder keeps its own machine-only settings in `.pando/local/`, never synced.
+
+## Deleting a repository
+
+An owner deletes a repository in the web app (its Settings, Delete this repository), or with:
+
+```sh
+pando monorepo delete <owner/name>
+```
+
+It asks you to type the name, or takes `--yes`. Through the API it is `DELETE /v1/monorepos/{owner}/{monorepo}?confirm=<owner/name>`; see the [API reference](/api/).
+
+That deletes:
+
+- every git repo of the repository in Artifacts, its `meta` repo included;
+- its large files in R2, and its saved file-page answers and Buildkite copies in R2;
+- its Durable Objects' storage: branches, reviews, checks, events, hooks, CI builds, and every version of its shared files;
+- its row, members, invites and old names in D1;
+- its lines in its members' activity feeds.
+
+Copies outside Pando stay where they are: clones and worktrees on machines, Buildkite's own builds and logs, and anything a hook already sent elsewhere. For up to about 15 seconds after the delete, a Cloudflare server that cached the repository's record can still answer a git request (see [Limits](/limits/)).
+
+## Signing out and revoking
+
+- `pando logout` deletes this machine's credential file. The credential still works on the server until you revoke it.
+- `pando credential list` shows your credentials; `pando credential revoke <id>` ends one. A revoked credential's row stays, marked revoked.
+- Signing out in the browser revokes that browser's session and ends its WorkOS session.
+- A browser session also ends after 30 days without use.
+- A revoked credential can keep working for up to 15 seconds, while Cloudflare servers hold a cached check.

@@ -99,14 +99,18 @@ func worktreeMount(e *Env, args []string) error {
 
 func worktreeAdd(e *Env, args []string) error {
 	fs := flags("worktree add")
-	agent := fs.String("agent", "", "the agent working in it (default: PANDO_AGENT); written as the Pando-Agent trailer")
+	// Hidden (decisions/RULINGS.md, no agent identity in the product): no
+	// help or usage line names it. Still taken, with PANDO_AGENT, for the
+	// Pando-Agent trailer.
+	agent := fs.String("agent", "", "")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse (default: fuse on Linux with artifact-fs, fskit on a Mac with Pando.app on, else sparse)")
+	issue := fs.Int("issue", 0, "link the branch to this issue: merging it closes the issue")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(pos) < 2 {
-		return UsageError{"pando worktree add <repo path> <branch> [folders...]"}
+	if len(pos) < 2 || *issue < 0 {
+		return UsageError{"pando worktree add <repo path> <branch> [folders...] [--issue n]"}
 	}
 	root, err := e.root()
 	if err != nil {
@@ -117,9 +121,32 @@ func worktreeAdd(e *Env, args []string) error {
 		return err
 	}
 	e.Agent = agentName(*agent)
+	// The issue first: a wrong number stops before anything is made.
+	var h *server.HTTP
+	if *issue > 0 {
+		srv, err := e.open(root)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		if h, ok = srv.(*server.HTTP); !ok {
+			return errors.New("--issue needs a Pando server; this one is a local file:// server")
+		}
+		if _, err := h.GetIssue(e.Ctx, root.FullName(), *issue); err != nil {
+			return fmt.Errorf("issue #%d: %w", *issue, err)
+		}
+	}
 	w, err := addWorktree(e, root, repo, pos[1], e.Agent, *kind, pos[2:])
 	if err != nil {
 		return err
+	}
+	if h != nil {
+		ref := []server.BranchRef{{Repo: repoName(root, repo), Branch: pos[1]}}
+		i, err := h.UpdateIssue(e.Ctx, root.FullName(), *issue, map[string]any{"link": ref})
+		if err != nil {
+			return fmt.Errorf("the worktree is made, but %s is not linked to #%d (%w); link it with: pando issue link %d %s", pos[1], *issue, err, *issue, pos[1])
+		}
+		e.printf("Linked %s to #%d %s: merging it closes #%d.\n", pos[1], i.Number, i.Title, i.Number)
 	}
 	e.printf("Next: cd %s\n", rel(e.Cwd, root.Abs(w.Path)))
 	return nil
@@ -133,7 +160,7 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	}
 	entry, ok := root.Repo(repo)
 	if !ok || entry.CloneURL == "" {
-		r, err := srv.GetRepo(e.Ctx, root.Name, repoName(root, repo))
+		r, err := srv.GetRepo(e.Ctx, root.FullName(), repoName(root, repo))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", repo, err)
 		}
@@ -160,7 +187,7 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	readOnly := branch == "main"
 	made := false
 	if !readOnly {
-		made, err = srv.CreateBranch(e.Ctx, root.Name, entry.Name, branch)
+		made, err = srv.CreateBranch(e.Ctx, root.FullName(), entry.Name, branch)
 		if err != nil {
 			return nil, fmt.Errorf("branch %s: %w", branch, err)
 		}
@@ -198,10 +225,8 @@ func addWorktree(e *Env, root *config.Root, repo, branch, agent, kind string, pa
 	}
 	e.printf("%s: %s (%s), %s worktree, ready in %.1fs\n", wpath, branch, how, drv.Kind(), time.Since(start).Seconds())
 	if !readOnly {
+		// The Pando-Agent trailer, when set, is written but not named here.
 		trail := fmt.Sprintf("Pando-Worktree: %s, Pando-Machine: %s", wpath, e.Home.Machine)
-		if agent != "" {
-			trail = "Pando-Agent: " + agent + ", " + trail
-		}
 		if acct.Name != "" {
 			e.printf("  commits are authored as %s, with the trailers %s\n", who(acct), trail)
 		} else {
@@ -220,7 +245,7 @@ func report(e *Env, srv server.Server, root *config.Root, w config.Worktree) err
 		a := w.Agent
 		in.Agent = &a
 	}
-	return srv.PutWorktree(e.Ctx, root.Name, w.ID, in)
+	return srv.PutWorktree(e.Ctx, root.FullName(), w.ID, in)
 }
 
 func worktreeList(e *Env, args []string) error {
@@ -237,7 +262,7 @@ func worktreeList(e *Env, args []string) error {
 	srv, err := e.open(root)
 	var all []server.Worktree
 	if err == nil {
-		all, err = srv.ListWorktrees(e.Ctx, root.Name)
+		all, err = srv.ListWorktrees(e.Ctx, root.FullName())
 	}
 	if err != nil {
 		e.warnf("the server's list is not available (%v); showing this machine only", err)
@@ -272,7 +297,7 @@ func worktreeList(e *Env, args []string) error {
 		return nil
 	}
 	// Ahead and behind come from each repo's branch list.
-	type ab struct{ ahead, behind *int }
+	type ab struct{ ahead, behind string }
 	counts := map[string]ab{}
 	if srv != nil {
 		repos := map[string]bool{}
@@ -280,23 +305,26 @@ func worktreeList(e *Env, args []string) error {
 			repos[w.Repo] = true
 		}
 		for r := range repos {
-			if bl, err := srv.ListBranches(e.Ctx, root.Name, repoName(root, r), "all"); err == nil {
+			if bl, err := srv.ListBranches(e.Ctx, root.FullName(), repoName(root, r), "all"); err == nil {
 				for _, b := range bl.Branches {
-					counts[r+"\x00"+b.Name] = ab{b.Ahead, b.Behind}
+					counts[r+"\x00"+b.Name] = ab{count(b, b.Ahead), count(b, b.Behind)}
 				}
 			}
 		}
 	}
 	tw := tabwriter.NewWriter(e.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "PATH\tBRANCH\tMACHINE\tAGENT\tKIND\tAHEAD\tBEHIND\tSEEN")
+	fmt.Fprintln(tw, "PATH\tBRANCH\tMACHINE\tKIND\tAHEAD\tBEHIND\tSEEN")
 	for _, w := range all {
-		c := counts[w.Repo+"\x00"+w.Branch]
+		c, ok := counts[w.Repo+"\x00"+w.Branch]
+		if !ok {
+			c = ab{"-", "-"}
+		}
 		machine := w.Machine
 		if machine == e.Home.Machine {
 			machine += " (here)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", w.Path, w.Branch, machine, dash(w.Agent), w.Kind,
-			num(c.ahead), num(c.behind), ago(w.LastSeenAt))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", w.Path, w.Branch, machine, w.Kind,
+			c.ahead, c.behind, ago(w.LastSeenAt))
 	}
 	return tw.Flush()
 }
@@ -390,7 +418,7 @@ func worktreeRemove(e *Env, args []string) error {
 		return err
 	}
 	if srv, err := e.open(root); err == nil {
-		if err := srv.DeleteWorktree(e.Ctx, root.Name, w.ID); err != nil {
+		if err := srv.DeleteWorktree(e.Ctx, root.FullName(), w.ID); err != nil {
 			e.warnf("removed here, but the server's worktree list still has it: %v", err)
 		}
 	}
@@ -419,6 +447,18 @@ func unsaved(e *Env, dir string) string {
 // refreshMain moves this machine's read-only main of a repo to the
 // server's main, after a merge.
 func refreshMain(e *Env, root *config.Root, repo string) {
+	// Waits for a refresh already running for this repo (see coalesce.go),
+	// then moves main to whatever is newest.
+	lk, err := lockRefresh(root, repo, true)
+	if err == nil {
+		defer lk.release()
+	}
+	refreshMainLocked(e, root, repo)
+}
+
+// refreshMainLocked moves a repo's read-only mains here; the caller holds
+// the repo's refresh lock.
+func refreshMainLocked(e *Env, root *config.Root, repo string) {
 	ws, _ := root.LoadWorktrees()
 	entry, _ := root.Repo(repo)
 	for _, w := range ws {

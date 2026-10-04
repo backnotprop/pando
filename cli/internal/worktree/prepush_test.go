@@ -96,7 +96,7 @@ func TestPrePushRefuses(t *testing.T) {
 	}
 	commit("random")
 	out, err = gitIn(t, wt, limits, "push", "-q", "origin", "HEAD:refs/heads/b1")
-	if err == nil || !strings.Contains(out, "over the 0.2 MB one push to Pando can carry") || !strings.Contains(out, "split it") {
+	if err == nil || !strings.Contains(out, "over the 0.2 MiB one push to Pando can carry") || !strings.Contains(out, "split it") {
 		t.Fatalf("large push: err=%v\n%s", err, out)
 	}
 	must(t, wt, nil, "reset", "-q", "--hard", "HEAD~1")

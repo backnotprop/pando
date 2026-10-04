@@ -1,0 +1,51 @@
+---
+title: A plain git repository
+description: Use Pando with one ordinary git repo, a repository with no projects.
+sidebar:
+  order: 4
+---
+
+A repository on Pando does not need projects. Any ordinary git repo works on its own.
+
+```sh
+cd ~/code/acme          # any existing git repo
+pando init              # it becomes a Pando repo, ramos/acme
+```
+
+`pando init` pushes your default branch as `main` and changes nothing else in the checkout. It adds `worktrees/` and `.pando/local/` to the repo's `.git/info/exclude`, so git ignores them.
+
+On another machine:
+
+```sh
+pando clone ramos/acme
+```
+
+From then on, the repo looks like this on every machine:
+
+```
+acme/
+  worktrees/
+    main/          main, read-only, follows every merge
+    fix-login/     a branch, one agent
+```
+
+## What you get
+
+Everything Pando gives code:
+
+- agents working side by side, each on its own branch in its own [worktree](/worktrees/);
+- review of a branch's diff and commits, and Merge to land it;
+- checks run by Buildkite or any CI, with Merge waiting for the ones you require (see [Checks and CI](/ci/));
+- a main nobody can push to directly.
+
+Plain `git clone`, `git pull` and `git push` against the repo's address (`https://<server>/<owner>/<name>.git`) work too. git asks for a password: give it a credential from `pando credential create`.
+
+Settings that a repository with projects keeps in its shared `.pando/pando.toml` live on this repo's main branch instead, at `.pando/pando.toml`, so they change through a reviewed branch like any other file. Required checks go under `[repos."."]`.
+
+## What you do not get
+
+The shared files around the projects, and [references](/references/). A plain repository is one git repo, with nothing around it.
+
+## How Pando tells the difference
+
+`pando init` in a folder that is a git repo makes a plain repository. In a folder that is not, it makes a repository with projects: each git repo under `projects/` becomes one of its projects.

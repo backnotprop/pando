@@ -1,0 +1,14 @@
+{
+  "schema": "OrgMember",
+  "route": "PUT /v1/orgs/{org}/members/{login}",
+  "status": 200,
+  "body": {
+    "login": "bo-muu2mhw1",
+    "name": "Bo Diaz",
+    "picture_url": null,
+    "role": "member",
+    "added_at": "2026-10-04T17:05:17.259Z",
+    "added_by": "rec-muu2mhw1",
+    "last_active_at": null
+  }
+}

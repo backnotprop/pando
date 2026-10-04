@@ -17,13 +17,21 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
 const workerDir = join(here, "..", "..", "..");
+
 const PORT = 8799;
+
 let BASE = process.env.GW_HARNESS_URL;
+
 let dev = null;
+
 const created = [];
+
 const tokens = new Map(); // repo name -> token, memory only
+
 let passed = 0;
+
 let failed = 0;
 
 function check(label, ok, detail = "") {
@@ -48,6 +56,7 @@ function api(path, body) {
         }
       });
     });
+
     req.on("error", reject);
     req.end(JSON.stringify(body));
   });
@@ -65,16 +74,19 @@ function gitEnv(name) {
 
 function git(name, cwd, ...args) {
   const base = ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-c", "core.fileMode=true"];
+
   return execFileSync("git", [...base, ...args], { cwd, env: gitEnv(name), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
 function write(dir, files) {
   for (const [p, content] of Object.entries(files)) {
     const full = join(dir, p);
+
     if (content === null) {
       rmSync(full, { force: true });
       continue;
     }
+
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content);
   }
@@ -83,6 +95,7 @@ function write(dir, files) {
 async function newRepo(kind) {
   const name = `gw-test-${kind}-${Math.random().toString(36).slice(2, 8)}`;
   const r = await api("/create", { name });
+
   if (r.status !== 200) throw new Error(`create ${name}: ${JSON.stringify(r.json)}`);
   created.push(name);
   const t = await api("/token", { name });
@@ -90,27 +103,32 @@ async function newRepo(kind) {
   const dir = mkdtempSync(join(tmpdir(), `${name}-`));
   git(name, dir, "init", "-q", "-b", "main");
   git(name, dir, "remote", "add", "origin", r.json.remote);
+
   return { name, remote: r.json.remote, dir };
 }
 
 function commitAll(repo, message) {
   git(repo.name, repo.dir, "add", "-A");
   git(repo.name, repo.dir, "commit", "-q", "-m", message);
+
   return git(repo.name, repo.dir, "rev-parse", "HEAD");
 }
 
 function cloneFresh(repo) {
   const dir = mkdtempSync(join(tmpdir(), `${repo.name}-clone-`));
   git(repo.name, dir, "clone", "-q", repo.remote, ".");
+
   return dir;
 }
 
 function fsckOk(repo, dir) {
   try {
     git(repo.name, dir, "fsck", "--full", "--strict", "--no-dangling");
+
     return true;
   } catch (e) {
     console.log(String(e.stderr || e.message));
+
     return false;
   }
 }
@@ -121,10 +139,12 @@ function gitMergeTree(repo, ours, theirs) {
   git(repo.name, repo.dir, "merge", "-q", "--no-ff", "--no-edit", theirs);
   const tree = git(repo.name, repo.dir, "rev-parse", "HEAD^{tree}");
   git(repo.name, repo.dir, "checkout", "-q", "main");
+
   return tree;
 }
 
 const AUTHOR = { name: "Ana Reviewer", email: "ana@example.com", date: "2026-10-01T12:00:00Z" };
+
 const PANDO = { name: "Pando", email: "pando@example.com" };
 
 async function testMerge() {
@@ -205,7 +225,7 @@ async function testMerge() {
 
   // Artifacts itself refuses a ref update with a stale old sha.
   r = await api("/raw-push", { name, ref: "refs/heads/main", old: main1, new: head });
-  check("Artifacts refuses a push with a stale old sha", typeof r.json.refused === "string", `refused: ${r.json.refused}`);
+  check("Artifacts refuses a push with a stale old sha", r.json.refused !== null && r.json.refused !== undefined, `refused: ${r.json.refused}`);
   check("main did not move", git(name, c, "ls-remote", "origin", "refs/heads/main").startsWith(merged));
 
   // Conflicts.
@@ -228,11 +248,13 @@ async function testMerge() {
   // The fix the contract names: merge main into the branch, push, merge again.
   console.log("\n== conflict fixed on the branch");
   git(name, dir, "checkout", "-q", "agent/test/conflict");
+
   try {
     git(name, dir, "merge", "-q", "--no-edit", "main");
   } catch {
     // README.md and b/three.txt conflict, as expected
   }
+
   write(dir, { "README.md": "# resolved\n", "b/three.txt": "three branch\n" });
   git(name, dir, "add", "-A");
   git(name, dir, "commit", "-q", "--no-edit");
@@ -272,6 +294,7 @@ async function testWide() {
   const repo = await newRepo("wide");
   const { name, dir } = repo;
   const files = {};
+
   for (let p = 0; p < 300; p++) for (let f = 0; f < 10; f++) files[`pkg-${String(p).padStart(3, "0")}/src/f${f}.txt`] = `${p}.${f}\n`;
   write(dir, files);
   commitAll(repo, "3000 files");
@@ -300,6 +323,7 @@ async function testCommit() {
   const repo = await newRepo("commit");
   const { name } = repo;
   const bytes = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+
   let r = await api("/commit", {
     name,
     branch: "main",
@@ -317,6 +341,7 @@ async function testCommit() {
       author: AUTHOR,
     },
   });
+
   check("root commit on an empty repo", r.json.status === "committed", JSON.stringify(r.json));
   const sha1 = r.json.sha;
   const c = cloneFresh(repo);
@@ -384,13 +409,16 @@ async function startHarness() {
   let log = "";
   await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`wrangler dev did not start:\n${log}`)), 90_000);
+
     const on = (d) => {
       log += d;
+
       if (log.includes("Ready on")) {
         clearTimeout(t);
         resolve();
       }
     };
+
     dev.stdout.on("data", on);
     dev.stderr.on("data", on);
     dev.on("exit", (code) => reject(new Error(`wrangler dev exited ${code}:\n${log}`)));
@@ -410,6 +438,7 @@ try {
     const r = await api("/delete", { name }).catch((e) => ({ json: { error: String(e) } }));
     console.log(`deleted ${name}: ${JSON.stringify(r.json)}`);
   }
+
   if (dev) dev.kill();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;

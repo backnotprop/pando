@@ -1,0 +1,105 @@
+{
+  "schema": "BranchList",
+  "route": "GET .../repos/{repo}/branches?state=merged",
+  "status": 200,
+  "body": {
+    "default_branch": "main",
+    "default_head": "03cdb29aeb9fbbd7e95b9bd748fe443722f3ef27",
+    "branches": [
+      {
+        "name": "feat/ready",
+        "head": "ec2a63d55a41070e53dccdded163c94161f90746",
+        "base": "ec2a63d55a41070e53dccdded163c94161f90746",
+        "author": "rec-muu2mhw1",
+        "title": null,
+        "description": null,
+        "ahead": 0,
+        "behind": 2,
+        "mergeable": "up_to_date",
+        "checks": {
+          "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
+          "state": "success",
+          "required": [
+            "ci/test"
+          ],
+          "missing": [],
+          "statuses": [
+            {
+              "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
+              "context": "ci/test",
+              "state": "success",
+              "target_url": "https://ci.example/builds/1",
+              "description": null,
+              "creator": "rec-muu2mhw1",
+              "app": null,
+              "created_at": "2026-10-04T17:04:49.496Z"
+            },
+            {
+              "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
+              "context": "lint",
+              "state": "success",
+              "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
+              "description": "#1 passed in 8 s",
+              "creator": "app:buildkite",
+              "app": "buildkite",
+              "created_at": "2026-10-04T17:04:50.356Z"
+            }
+          ],
+          "checks_unknown": null
+        },
+        "state": "merged",
+        "merge_commit": "03cdb29aeb9fbbd7e95b9bd748fe443722f3ef27",
+        "merged_by": "rec-muu2mhw1",
+        "merged_at": "2026-10-04T17:04:57.218Z",
+        "merged_machine": "ana-mbp",
+        "merged_agent": null,
+        "forced": false,
+        "pushed_machine": "ana-mbp",
+        "created_at": "2026-10-04T17:04:45.672Z",
+        "updated_at": "2026-10-04T17:04:45.672Z",
+        "stale": false,
+        "last_mergeable": null,
+        "conflict_paths": null,
+        "facts_at": "2026-10-04T17:04:53.158Z"
+      },
+      {
+        "name": "feat/merge-me",
+        "head": "c679a942ac97dbd47e10fd22e67ef3f7332112aa",
+        "base": "c679a942ac97dbd47e10fd22e67ef3f7332112aa",
+        "author": "rec-muu2mhw1",
+        "title": null,
+        "description": null,
+        "ahead": 0,
+        "behind": 0,
+        "mergeable": "up_to_date",
+        "checks": {
+          "sha": "c679a942ac97dbd47e10fd22e67ef3f7332112aa",
+          "state": "missing",
+          "required": [
+            "ci/test"
+          ],
+          "missing": [
+            "ci/test"
+          ],
+          "statuses": [],
+          "checks_unknown": null
+        },
+        "state": "merged",
+        "merge_commit": "89d824c9703c63d48bceb4fc56462f506f50cfc8",
+        "merged_by": "rec-muu2mhw1",
+        "merged_at": "2026-10-04T17:04:51.436Z",
+        "merged_machine": "ana-mbp",
+        "merged_agent": null,
+        "forced": true,
+        "pushed_machine": "ana-mbp",
+        "created_at": "2026-10-04T17:04:47.224Z",
+        "updated_at": "2026-10-04T17:04:47.224Z",
+        "stale": false,
+        "last_mergeable": null,
+        "conflict_paths": null,
+        "facts_at": "2026-10-04T17:04:49.409Z"
+      }
+    ],
+    "next_cursor": null
+  }
+}

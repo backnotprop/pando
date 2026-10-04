@@ -24,10 +24,12 @@ type Config struct {
 	Machine string
 	Agent   string // PANDO_AGENT, optional
 
-	Poll        time.Duration   // the shortest gap between scans (default 500 ms; longer on big trees)
+	Poll        time.Duration   // the shortest gap between scans (default 100 ms; longer on big trees)
 	MaxHold     time.Duration   // a file still changing is sent after this (default 5 min)
 	Backoff     []time.Duration // reconnect waits (default 5, 10, 30, 60 s)
 	PingEvery   time.Duration   // default 30 s
+	FullScan    time.Duration   // with file-change notifications: the safety-net scan (default 30 s)
+	NoWatch     bool            // scan instead of OS file-change notifications (PANDO_META_WATCH=off)
 	MaxInFlight int             // default 64
 
 	Log *log.Logger
@@ -35,7 +37,7 @@ type Config struct {
 
 func (c *Config) defaults() {
 	if c.Poll == 0 {
-		c.Poll = 500 * time.Millisecond
+		c.Poll = 100 * time.Millisecond
 	}
 	if c.MaxHold == 0 {
 		c.MaxHold = 5 * time.Minute
@@ -46,11 +48,14 @@ func (c *Config) defaults() {
 	if c.PingEvery == 0 {
 		c.PingEvery = 30 * time.Second
 	}
+	if c.FullScan == 0 {
+		c.FullScan = fullScanEvery
+	}
 	if c.MaxInFlight == 0 {
 		c.MaxInFlight = 64
 	}
 	if c.Log == nil {
-		c.Log = log.New(os.Stderr, "pando meta: ", log.LstdFlags)
+		c.Log = log.New(os.Stderr, "pando sync: ", log.LstdFlags)
 	}
 	if c.Machine == "" {
 		c.Machine = defaultMachine()
@@ -81,9 +86,9 @@ func LoadConfig(root string) (Config, error) {
 	c := Config{Root: root}
 	if r, err := config.LoadRoot(root); err == nil {
 		if r.Kind == config.KindRepo {
-			return c, errors.New("a plain git repo has no meta layer")
+			return c, errors.New("a plain git repo has no shared files: those are a monorepo's files outside projects/")
 		}
-		c.Monorepo, c.Server = r.Name, r.Server
+		c.Monorepo, c.Server = r.FullName(), r.Server // owner/name
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return c, err
 	}
@@ -106,6 +111,7 @@ func LoadConfig(root string) (Config, error) {
 		c.Author = v // "Name <email>"; once the Worker checks credentials, the account decides
 	}
 	c.Agent = os.Getenv("PANDO_AGENT")
+	c.NoWatch = os.Getenv("PANDO_META_WATCH") == "off"
 	c.defaults()
 	return c, nil
 }

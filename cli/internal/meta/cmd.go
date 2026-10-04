@@ -6,7 +6,7 @@ package meta
 //	pando fetch <path>...:         CmdFetch(args)           a large file's bytes on a --text-only clone
 //	pando init, after root.json:   Init(ctx, root)          the first upload, .pando/ included
 //	the daemon:                    Sync(ctx, root, hooks)   the live sync until ctx ends
-//	pando meta sync [--once]:      CmdSync(args, hooks)
+//	pando sync [--once]:           CmdSync(args, hooks)
 //	pando history <path>:          CmdHistory(args)
 //	pando restore <path> --to X:   CmdRestore(args)
 //	pando resolve [<path>]:        CmdResolve(args)
@@ -68,7 +68,7 @@ func Init(ctx context.Context, root string) error {
 	if err := c.initAction(ctx, "start"); err != nil {
 		return fmt.Errorf("starting the first upload: %w", err)
 	}
-	e.rules.first = true
+	e.rules.setFirst(true)
 	e.untilSynced = true
 	if err := e.Run(ctx); err != nil {
 		return err
@@ -141,7 +141,7 @@ func metaPath(root, arg string) (string, error) {
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("%s is not in the meta layer at %s", arg, root)
+		return "", fmt.Errorf("%s is not in the monorepo at %s", arg, root)
 	}
 	return filepath.ToSlash(rel), nil
 }
@@ -149,12 +149,14 @@ func metaPath(root, arg string) (string, error) {
 func setup(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", "", "the monorepo root (default: found from the current folder)")
+	root := fs.String("root", "", "the monorepo's folder (default: found from the current folder)")
 	return fs, root
 }
 
 // CmdSync runs the live sync until interrupted; with --once, until this
 // machine's changes are all on the server and it has every other change.
+// --once exits 3 when some are not: a path frozen after a conflict, or a
+// change the server refused; it names each (CODE-VS-MODEL M8).
 func CmdSync(args []string, hooks Hooks) int {
 	fs, rootFlag := setup("sync", os.Stderr)
 	once := fs.Bool("once", false, "send and receive what is waiting, then exit")
@@ -178,6 +180,16 @@ func CmdSync(args []string, hooks Hooks) int {
 	if err := e.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "pando:", err)
 		return 1
+	}
+	if !*once {
+		return 0
+	}
+	if left := e.notSent(); len(left) > 0 {
+		fmt.Fprintln(os.Stderr, "pando: synced, except these, which are not in Pando:")
+		for _, l := range left {
+			fmt.Fprintln(os.Stderr, "  "+l)
+		}
+		return 3
 	}
 	return 0
 }
@@ -227,15 +239,11 @@ func cmdHistory(args []string, stdout, stderr io.Writer) int {
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "VERSION\tWHEN\tWHO\tMACHINE\tWHAT\tCOMMIT")
 	for _, v := range h.Versions {
-		who := v.Author
-		if v.Agent != "" && !strings.Contains(who, v.Agent) {
-			who += " (" + v.Agent + ")"
-		}
 		commit := "pending"
 		if v.Commit != "" {
 			commit = v.Commit[:min(len(v.Commit), 10)]
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", v.Version, v.Time().Local().Format("2006-01-02 15:04:05"), who, v.Machine, describe(v), commit)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", v.Version, v.Time().Local().Format("2006-01-02 15:04:05"), v.Author, v.Machine, describe(v), commit)
 	}
 	tw.Flush()
 	return 0

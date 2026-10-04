@@ -1,0 +1,51 @@
+{
+  "schema": "Issue",
+  "route": "GET .../issues/{n} (closed by a merge, a branch linked from a commit)",
+  "status": 200,
+  "body": {
+    "number": 2,
+    "title": "Fixed by a merge",
+    "state": "closed",
+    "state_reason": "completed",
+    "project": null,
+    "project_path": null,
+    "labels": [],
+    "assignees": [],
+    "author": "rec-muu2mhw1",
+    "comments": 0,
+    "tasks": null,
+    "linked_branches": 1,
+    "created_at": "2026-10-04T17:05:12.853Z",
+    "updated_at": "2026-10-04T17:05:16.983Z",
+    "closed_at": "2026-10-04T17:05:16.983Z",
+    "closed_by": "rec-muu2mhw1",
+    "closed_by_merge": {
+      "repo": "projects-web",
+      "repo_path": "projects/web",
+      "branch": "fix/login",
+      "merge_commit": "45b18812493e6c01b13f1a99d559ca822ef8ca08"
+    },
+    "body": "",
+    "body_version": 1,
+    "machine": "ana-mbp",
+    "links": [
+      {
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "fix/login",
+        "sources": [
+          "commit"
+        ],
+        "sha": "e4bb41e74cdb1bedd61bfa6523a112dde2e0516a",
+        "linked_by": null,
+        "branch_state": "merged",
+        "merged_at": "2026-10-04T17:05:15.978Z",
+        "closed_issue": true
+      }
+    ],
+    "participants": [
+      "rec-muu2mhw1"
+    ],
+    "reactions": []
+  }
+}

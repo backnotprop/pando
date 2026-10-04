@@ -1,0 +1,73 @@
+{
+  "schema": "Timeline",
+  "route": "GET .../issues/{n}/timeline",
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "id": 1,
+        "at": "2026-10-04T17:05:12.858Z",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp",
+        "kind": "comment",
+        "comment": {
+          "id": "ic_3f5a2dfb8fa18b2e",
+          "body": "Seen on staging too.",
+          "body_version": 1,
+          "author": "rec-muu2mhw1",
+          "machine": "ana-mbp",
+          "created_at": "2026-10-04T17:05:12.858Z",
+          "updated_at": "2026-10-04T17:05:12.858Z",
+          "reactions": [
+            {
+              "content": "heart",
+              "count": 1,
+              "by": [
+                "rec-muu2mhw1"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 2,
+        "at": "2026-10-04T17:05:12.876Z",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp",
+        "kind": "renamed",
+        "from": "Login fails after token refresh",
+        "to": "Login fails an hour after sign-in"
+      },
+      {
+        "id": 3,
+        "at": "2026-10-04T17:05:12.876Z",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp",
+        "kind": "unlabeled",
+        "label": {
+          "name": "area/web",
+          "color": "teal",
+          "description": "The web app"
+        }
+      },
+      {
+        "id": 4,
+        "at": "2026-10-04T17:05:12.879Z",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp",
+        "kind": "closed",
+        "reason": "not_planned",
+        "merge": null
+      },
+      {
+        "id": 5,
+        "at": "2026-10-04T17:05:12.884Z",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp",
+        "kind": "reopened"
+      }
+    ],
+    "total": 5,
+    "next_cursor": null
+  }
+}

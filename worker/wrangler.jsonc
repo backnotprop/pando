@@ -18,7 +18,15 @@
   "vars": {
     // The WorkOS environment "Pando" (public in a device flow). A secret of
     // the same name, if set, takes its place.
-    "WORKOS_CLIENT_ID": "client_01M3ZW5WYKNDQZE358DYA7VHY5"
+    "WORKOS_CLIENT_ID": "client_01M3ZW5WYKNDQZE358DYA7VHY5",
+    // The docs site (site/docs, the Worker pando-docs): the app's /docs
+    // redirects here, and the home reads What's new from it. docs.<domain>
+    // once the domain is bought.
+    "DOCS_URL": "https://pando-docs.plannotator.workers.dev",
+    // Shared files (the meta layer): everything due in one quiet window is
+    // one git commit, the others as Co-authored-by ("author": one per person).
+    // The owner's choice, 2026-10-04 (docs/contracts/meta-sync.md).
+    "META_COMMIT_GROUPING": "window"
   },
   "observability": { "enabled": true },
   "artifacts": [
@@ -27,20 +35,84 @@
   ],
   "r2_buckets": [
     // For the live lane's large files (M7).
-    { "binding": "BLOBS", "bucket_name": "pando-dev-blobs" }
+    { "binding": "BLOBS", "bucket_name": "pando-dev-blobs" },
+    // The file pages' computed answers (FILES.md): last commits per folder, a
+    // path's history pages, walk checkpoints. A 90-day lifecycle rule ends them.
+    { "binding": "CACHE", "bucket_name": "pando-dev-cache" }
+  ],
+  // Workers Caching (FILES.md, the spike's shape A): only the Objects
+  // entrypoint (git objects by hash, the repo in every key) is cached; the
+  // default entrypoint never is, whatever a handler's Cache-Control says.
+  "cache": { "enabled": true, "cross_version_cache": true },
+  "exports": {
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    "Objects": { "type": "worker", "cache": { "enabled": true } }
+    // FeedDrain is not listed: it has RPC methods only, which are never cached,
+    // and the platform refuses cache options for it ("unknown entrypoint", code
+    // 10375). Give it no fetch() while caching is on at the top level.
+  },
+  // Branch facts and hook deliveries go out from the monorepo object's outboxes
+  // by RPC (FactsDrain, HooksDrain), not by queue. The consumers are this Worker's queue().
+  "queues": {
+    "producers": [
+      // The home's activity feed (C25): membership changes. Lines and summaries drain by RPC (FeedDrain); kept until that is measured on pando-dev.
+      { "binding": "FEED_QUEUE", "queue": "pando-feed" },
+      // The file pages (FILES.md): a folder's last commits finished off the request.
+      { "binding": "HISTORY_QUEUE", "queue": "pando-history" }
+    ],
+    "consumers": [
+      {
+        "queue": "pando-feed",
+        "max_batch_size": 100,
+        // No wait: a line reaches the home one hop sooner (pando-ops ruling, 2026-10-03; about $4.56 a month at 1,000 agents).
+        "max_batch_timeout": 0,
+        "max_retries": 5,
+        "max_concurrency": 10,
+        "dead_letter_queue": "pando-feed-dlq"
+      },
+      {
+        "queue": "pando-history",
+        "max_batch_size": 5,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "max_concurrency": 5,
+        "dead_letter_queue": "pando-history-dlq"
+      }
+    ]
+  },
+  // Accounts (C8): users, credentials, monorepos, members, invites. The
+  // primary is in ENAM; the owner turns on read replication in the dashboard
+  // (D1 > pando-accounts-dev > Settings > Enable Read Replication).
+  // Schema: worker/migrations; apply with
+  //   npx wrangler d1 migrations apply pando-accounts-dev --local | --remote
+  "d1_databases": [
+    { "binding": "ACCOUNTS_DB", "database_name": "pando-accounts-dev", "database_id": "94185f0e-92b8-427f-ab29-c080cd79ad10", "migrations_dir": "migrations" }
   ],
   "durable_objects": {
     "bindings": [
       { "name": "MONOREPO", "class_name": "MonorepoObject" },
       { "name": "META", "class_name": "MetaLayerObject" },
-      // Users, credentials and membership: one instance for the whole Worker.
-      { "name": "ACCOUNTS", "class_name": "AccountsObject" }
+      // Where accounts lived before D1 (C8); kept for the one-time copy, goes after launch.
+      { "name": "ACCOUNTS", "class_name": "AccountsObject" },
+      // One per person: the home's activity feed (C25).
+      { "name": "FEED", "class_name": "FeedObject" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["MonorepoObject", "MetaLayerObject"] },
-    { "tag": "v2", "new_sqlite_classes": ["AccountsObject"] }
+    { "tag": "v2", "new_sqlite_classes": ["AccountsObject"] },
+    { "tag": "v3", "new_sqlite_classes": ["FeedObject"] }
   ],
   // The contract, served at /v1/openapi.yaml.
-  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }]
+  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }],
+  // The web app (projects/pando/web, built with `npm run build` there), on the
+  // same origin. The Worker runs first for every path but the app's hashed
+  // assets and fonts; app paths fall through to ASSETS (index.ts), and any
+  // path without a file gets index.html (the app's own router takes it).
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/*", "!/assets/*", "!/fonts/*"]
+  }
 }

@@ -3,13 +3,18 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"pando/internal/config"
 	"pando/internal/server"
@@ -37,6 +42,7 @@ func newHarness(t *testing.T) *harness {
 		})
 	})
 	t.Setenv("PANDO_HOME", filepath.Join(base, "home"))
+	t.Setenv("USER", "pat") // the file:// server's one user, so monorepos are pat/<name>
 	t.Setenv("PANDO_MACHINE", "test-box")
 	t.Setenv("PANDO_WORKTREE_KIND", "sparse")
 	t.Setenv("PANDO_AGENT", "")
@@ -50,6 +56,34 @@ func newHarness(t *testing.T) *harness {
 	for _, k := range []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"} {
 		t.Setenv(k, "pat@example.com")
 	}
+	// pando merge starts a one-off follower in the background; in tests,
+	// a goroutine instead of a second process (which would be this test
+	// binary). followed counts them.
+	prev := startFollowOnce
+	t.Cleanup(func() { startFollowOnce = prev })
+	startFollowOnce = func(root *config.Root) error {
+		refreshesRunning.Add(1) // counted from here, for the cleanup below
+		go func() {
+			defer refreshesRunning.Add(-1)
+			e, err := NewEnv(context.Background(), strings.NewReader(""), io.Discard, io.Discard)
+			if err == nil {
+				followMains(e, root)
+			}
+		}()
+		return nil
+	}
+	// A refresh of main still running in the background (one pando merge
+	// started, or a follower's) makes main read-only again as it ends. Let
+	// it end before the folders are made writable and removed (cleanups run
+	// last first, so this runs before the chmod at the top).
+	t.Cleanup(func() {
+		for start := time.Now(); refreshesRunning.Load() > 0; time.Sleep(20 * time.Millisecond) {
+			if time.Since(start) > 30*time.Second {
+				t.Errorf("a refresh of main was still running 30 s after the test")
+				return
+			}
+		}
+	})
 	return &harness{t: t, base: base, server: "file://" + filepath.Join(base, "server")}
 }
 
@@ -65,10 +99,27 @@ func (h *harness) pando(dir, stdin string, args ...string) (string, error) {
 	cmds := map[string]func(*Env, []string) error{
 		"login": Login, "init": Init, "clone": Clone, "worktree": Worktree, "branch": Branch,
 		"diff": Diff, "review": Review, "merge": Merge, "status": Status, "reference": Reference, "members": Members, "monorepo": Monorepo,
+		"auth": Auth,
 	}
 	err = cmds[args[0]](e, args[1:])
 	return out.String(), err
 }
+
+// pandoErr runs one command with stderr kept apart.
+func (h *harness) pandoErr(dir string, stderr *strings.Builder, args ...string) (string, error) {
+	h.t.Helper()
+	var out bytes.Buffer
+	e, err := NewEnv(context.Background(), strings.NewReader(""), &out, stderr)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	e.Cwd = dir
+	cmds := map[string]func(*Env, []string) error{"status": Status, "worktree": Worktree, "clone": Clone}
+	err = cmds[args[0]](e, args[1:])
+	return out.String(), err
+}
+
+func (h *harness) ctx() context.Context { return context.Background() }
 
 func (h *harness) ok(dir string, args ...string) string {
 	h.t.Helper()
@@ -125,14 +176,21 @@ func TestMonorepoEndToEnd(t *testing.T) {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
 	out := h.ok(ws, "init", "--yes")
-	if !strings.Contains(out, "pushed main") || !strings.Contains(out, "Pando monorepo ws is set up") {
+	if !strings.Contains(out, "pushed main") || !strings.Contains(out, "Pando monorepo pat/ws is set up") {
 		t.Fatalf("init:\n%s", out)
+	}
+	// "Meta layer" is an internal word, never shown (decisions/RULINGS.md).
+	if strings.Contains(strings.ToLower(out), "meta layer") {
+		t.Errorf("init says meta layer:\n%s", out)
 	}
 
 	clone := filepath.Join(h.base, "clone")
 	out = h.ok(h.base, "clone", "ws", clone, "--server", h.server)
 	if !strings.Contains(out, "projects/app/worktrees/main: main (main, read-only), sparse worktree") {
 		t.Fatalf("clone:\n%s", out)
+	}
+	if strings.Contains(strings.ToLower(out), "meta layer") {
+		t.Errorf("clone says meta layer:\n%s", out)
 	}
 	mainDir := filepath.Join(clone, "projects/app/worktrees/main")
 	if err := os.WriteFile(filepath.Join(mainDir, "x"), []byte("x"), 0o644); err == nil {
@@ -154,6 +212,46 @@ func TestMonorepoEndToEnd(t *testing.T) {
 		}
 	}
 	h.git(wt, "push", "-q")
+	// The agent name stays hidden (decisions/RULINGS.md): the trailer is
+	// written, but no list, status or help line names an agent.
+	if strings.Contains(out, "Pando-Agent") {
+		t.Errorf("worktree add names the agent:\n%s", out)
+	}
+	if out = h.ok(clone, "worktree", "list"); strings.Contains(out, "AGENT") || slices.Contains(strings.Fields(out), "agent-1") {
+		t.Errorf("worktree list names the agent:\n%s", out)
+	}
+	t.Setenv("PANDO_AGENT", "agent-1")
+	if out = h.ok(clone, "auth", "status"); !strings.Contains(out, "machine: test-box") || strings.Contains(out, "agent") {
+		t.Errorf("auth status names the agent:\n%s", out)
+	}
+	t.Setenv("PANDO_AGENT", "")
+	bin := filepath.Join(h.base, "pando")
+	if b, err := exec.Command("go", "build", "-o", bin, "pando/cmd/pando").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, b)
+	}
+	// The daemon is pando sync; pando meta sync, its old name, works but is
+	// not in the help, and the help never says "meta layer".
+	if b, _ := exec.Command(bin, "help").CombinedOutput(); !strings.Contains(string(b), "pando sync [--once]") ||
+		strings.Contains(string(b), "meta sync") || strings.Contains(strings.ToLower(string(b)), "meta layer") {
+		t.Errorf("pando help:\n%s", b)
+	}
+	// The docs' CLI reference lists every command exactly as pando help does.
+	help, _ := exec.Command(bin, "help").CombinedOutput()
+	page, err := os.ReadFile("../../../site/docs/src/content/docs/cli.mdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, block, _ := strings.Cut(string(page), "## Every command\n\n```text\n")
+	block, _, _ = strings.Cut(block, "\n```")
+	if block != strings.TrimRight(string(help), "\n") {
+		t.Errorf("site/docs/src/content/docs/cli.mdx, Every command, is not pando help. pando help prints:\n%s", help)
+	}
+	for _, args := range [][]string{{"help"}, {"worktree"}, {"worktree", "add", "-h"}} {
+		b, _ := exec.Command(bin, args...).CombinedOutput()
+		if !strings.Contains(string(b), "usage: pando") || strings.Contains(strings.ToLower(string(b)), "agent") {
+			t.Errorf("pando %s names an agent:\n%s", strings.Join(args, " "), b)
+		}
+	}
 
 	if _, err := h.pando(clone, "", "worktree", "remove", "projects/app/worktrees/agent-1-oauth"); err != nil {
 		t.Fatalf("a clean, pushed worktree should be removable: %v", err)
@@ -192,12 +290,13 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	}
 	out = h.ok(wt, "merge")
 	t.Setenv("PANDO_AGENT", "")
-	if !strings.Contains(out, "Merged agent-1/oauth into main of projects/app") || !strings.Contains(out, "projects/app/worktrees/main now at") {
+	if !strings.Contains(out, "Merged agent-1/oauth into main of projects/app") || !strings.Contains(out, "worktrees/main follows within a moment") {
 		t.Fatalf("merge:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(mainDir, "src/oauth.go")); err != nil {
-		t.Fatal("worktrees/main did not follow the merge")
-	}
+	waitUntil(t, "worktrees/main to follow the merge", func() bool {
+		_, err := os.Stat(filepath.Join(mainDir, "src/oauth.go"))
+		return err == nil
+	})
 	if parents := h.git(mainDir, "log", "-1", "--format=%p"); len(strings.Fields(parents)) != 2 {
 		t.Fatalf("main's head is not a merge commit: %q", parents)
 	}
@@ -233,7 +332,7 @@ func TestMonorepoEndToEnd(t *testing.T) {
 	}
 
 	out = h.ok(clone, "members", "invite", "ana@example.com")
-	if !strings.Contains(out, "Invited ana@example.com to ws as a member") {
+	if !strings.Contains(out, "Invited ana@example.com to pat/ws as a member") {
 		t.Fatalf("invite:\n%s", out)
 	}
 	if out = h.ok(clone, "members", "list"); !strings.Contains(out, "ana@example.com") || !strings.Contains(out, "owner") {
@@ -284,25 +383,69 @@ func TestPlainRepoInit(t *testing.T) {
 	}
 }
 
-func TestInitRefusesAnOversizedFirstPush(t *testing.T) {
+// pando init pushes a history over one push in steps: older commits first on
+// refs/pando/import, a commit too large for one push as carrier commits, then
+// main; no push over the (lowered) limit, and the side ref gone after.
+func TestInitPushesAHistoryInSteps(t *testing.T) {
 	h := newHarness(t)
 	acme := filepath.Join(h.base, "acme")
 	os.MkdirAll(acme, 0o755)
-	os.WriteFile(filepath.Join(acme, "README.md"), []byte(strings.Repeat("acme history\n", 1000)), 0o644)
 	h.git(acme, "init", "-q", "-b", "main")
+	random := func(name string, n int) {
+		b := make([]byte, n)
+		rand.Read(b)
+		os.WriteFile(filepath.Join(acme, name), b, 0o644)
+	}
+	for i := 0; i < 6; i++ { // 6 commits of 40 kB
+		random(fmt.Sprintf("c%d.bin", i), 40_000)
+		h.git(acme, "add", "-A")
+		h.git(acme, "commit", "-q", "-m", fmt.Sprintf("commit %d", i))
+	}
+	for i := 0; i < 5; i++ { // then one commit of 200 kB
+		random(fmt.Sprintf("big%d.bin", i), 40_000)
+	}
 	h.git(acme, "add", "-A")
-	h.git(acme, "commit", "-q", "-m", "first")
+	h.git(acme, "commit", "-q", "-m", "one large commit")
 	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
-	t.Setenv("PANDO_PUSH_LIMIT", "100")
-	out, err := h.pando(acme, "", "init")
-	if err == nil || !strings.Contains(out, "over the 0.0 MB one push to Pando can carry") || !strings.Contains(out, "main is not pushed") {
-		t.Fatalf("init should refuse: %v\n%s", err, out)
+	// The server's receive-pack, wrapped to write down the bytes of each push.
+	sizes := filepath.Join(h.base, "sizes")
+	wrap := filepath.Join(h.base, "counting-receive-pack")
+	os.WriteFile(wrap, []byte(`#!/bin/sh
+f=$(mktemp)
+tee "$f" | git-receive-pack "$@"
+s=$?
+wc -c < "$f" >> '`+sizes+`'
+rm -f "$f"
+exit $s
+`), 0o755)
+	bare := filepath.Join(h.base, "server", "acme", "repos", "acme.git")
+	h.git(acme, "remote", "add", "pando", "file://"+bare)
+	h.git(acme, "config", "remote.pando.receivepack", wrap)
+	t.Setenv("PANDO_PUSH_LIMIT", "100000")
+
+	out := h.ok(acme, "init", "--name", "acme")
+	if !strings.Contains(out, "pushing it in about") || !strings.Contains(out, "pushed a step") || !strings.Contains(out, "pushed main") {
+		t.Fatalf("init:\n%s", out)
 	}
-	t.Setenv("PANDO_PUSH_LIMIT", "")
-	if out := h.ok(acme, "init"); !strings.Contains(out, "pushed main") {
-		t.Fatalf("init again, under the limit:\n%s", out)
+	if got := h.git(acme, "ls-remote", "pando"); !strings.Contains(got, h.git(acme, "rev-parse", "HEAD")+"\trefs/heads/main") || strings.Contains(got, "refs/pando/") {
+		t.Fatalf("the server's refs: %q", got)
+	}
+	h.git(strings.TrimPrefix(h.git(acme, "remote", "get-url", "pando"), "file://"), "fsck", "--strict")
+	b, _ := os.ReadFile(sizes)
+	pushes := strings.Fields(string(b))
+	for _, n := range pushes {
+		if v, _ := strconv.Atoi(n); v > 100_000+1_000 {
+			t.Fatalf("a push of %d bytes, over the limit: %v", v, pushes)
+		}
+	}
+	// 6 steps, the large commit's files in 5 shares, main (its trees only), the side refs' delete.
+	if len(pushes) != 13 {
+		t.Fatalf("%d pushes: %v\n%s", len(pushes), pushes, out)
+	}
+	if main, _ := strconv.Atoi(pushes[11]); main > 2_000 {
+		t.Fatalf("main's push carried %d bytes: the files sent ahead were sent again", main)
 	}
 }
 
@@ -403,5 +546,156 @@ func TestAgentFor(t *testing.T) {
 	e.Cwd = h.base
 	if got := e.agentFor(root); got != "" {
 		t.Fatalf("outside any worktree, no agent: %q", got)
+	}
+}
+
+func TestMergeWord(t *testing.T) {
+	for _, c := range []struct {
+		b    server.Branch
+		want string
+	}{
+		{server.Branch{Mergeable: "clean"}, "clean"},
+		{server.Branch{Mergeable: "pending", Stale: true, LastMergeable: "conflicts"}, "pending (was conflicts)"},
+		{server.Branch{Mergeable: "pending", Stale: true}, "pending"},
+		{server.Branch{}, "-"},
+	} {
+		if got := mergeWord(c.b); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.b, got, c.want)
+		}
+	}
+	zero := 0
+	if count(server.Branch{Stale: true}, &zero) != "?" || count(server.Branch{}, &zero) != "0" || count(server.Branch{}, nil) != "-" {
+		t.Error("count: stale shows ?, known shows the number, unknown shows -")
+	}
+}
+
+// pando clone mounts many repos' mains at once: all land, each once, in
+// worktrees.json, with whole progress lines.
+func TestCloneMountsMainsInParallel(t *testing.T) {
+	h := newHarness(t)
+	ws := filepath.Join(h.base, "ws")
+	const n = 8
+	for i := 0; i < n; i++ {
+		d := filepath.Join(ws, "projects", fmt.Sprintf("p%d", i), "worktrees", "main")
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "README.md"), []byte(fmt.Sprintf("p%d\n", i)), 0o644)
+		h.git(d, "init", "-q", "-b", "main")
+		h.git(d, "add", "-A")
+		h.git(d, "commit", "-q", "-m", "first")
+	}
+	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	h.ok(ws, "init", "--yes")
+	clone := filepath.Join(h.base, "clone")
+	out := h.ok(h.base, "clone", "ws", clone, "--server", h.server)
+	if !strings.Contains(out, fmt.Sprintf("Mounting %d repos' main, 6 at a time", n)) || !strings.Contains(out, fmt.Sprintf("%d of %d mains ready", n, n)) {
+		t.Fatalf("clone:\n%s", out)
+	}
+	ready := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "(main, read-only), sparse worktree, ready in") {
+			if !strings.HasPrefix(line, "projects/p") {
+				t.Fatalf("a progress line was broken up: %q", line)
+			}
+			ready++
+		}
+	}
+	if ready != n {
+		t.Fatalf("%d ready lines, want %d:\n%s", ready, n, out)
+	}
+	root, _ := config.LoadRoot(clone)
+	wts, _ := root.LoadWorktrees()
+	seen := map[string]bool{}
+	for _, w := range wts {
+		seen[w.Path] = true
+	}
+	if len(wts) != n || len(seen) != n {
+		t.Fatalf("worktrees.json has %d entries (%d distinct), want %d", len(wts), len(seen), n)
+	}
+	for i := 0; i < n; i++ {
+		if _, err := os.Stat(filepath.Join(clone, "projects", fmt.Sprintf("p%d", i), "worktrees", "main", "README.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for start := time.Now(); time.Since(start) < 15*time.Second; time.Sleep(20 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// pando merge: with a follower running it does not start another; --wait
+// moves main before returning; a worktree that pushed one head refuses to
+// merge a branch that moved since.
+func TestMergeFollowerAndWait(t *testing.T) {
+	h := newHarness(t)
+	acme := filepath.Join(h.base, "acme")
+	os.MkdirAll(acme, 0o755)
+	os.WriteFile(filepath.Join(acme, "README.md"), []byte("acme\n"), 0o644)
+	h.git(acme, "init", "-q", "-b", "main")
+	h.git(acme, "add", "-A")
+	h.git(acme, "commit", "-q", "-m", "first")
+	if out, err := h.pando(h.base, "local-secret\n", "login", "--bootstrap", "--server", h.server, "--login", "pat"); err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	h.ok(acme, "init")
+	clone := filepath.Join(h.base, "c")
+	h.ok(h.base, "clone", "acme", clone, "--server", h.server)
+	root, _ := config.LoadRoot(clone)
+	started := 0
+	startFollowOnce = func(*config.Root) error { started++; return nil }
+
+	branch := func(name string) string {
+		h.ok(clone, "worktree", "add", ".", name)
+		wt := filepath.Join(clone, "worktrees", name)
+		os.WriteFile(filepath.Join(wt, name+".txt"), []byte(name), 0o644)
+		h.git(wt, "add", "-A")
+		h.git(wt, "commit", "-q", "-m", name)
+		h.git(wt, "push", "-q")
+		return wt
+	}
+	mainHead := func() string { return h.git(filepath.Join(clone, "worktrees", "main"), "rev-parse", "HEAD") }
+
+	// A follower holds the lock: merge starts nothing and says main follows.
+	holdFollowerLock(root)
+	if !followerRunning(root) {
+		t.Fatal("the lock is not seen as held")
+	}
+	before := mainHead()
+	out := h.ok(branch("b1"), "merge")
+	if started != 0 || !strings.Contains(out, "follows within a moment (the follower is running)") || mainHead() != before {
+		t.Fatalf("with a follower: started %d\n%s", started, out)
+	}
+	for _, f := range heldLocks {
+		f.Close()
+	}
+	heldLocks = nil
+
+	// --wait moves main before returning.
+	out = h.ok(branch("b2"), "merge", "--wait")
+	if !strings.Contains(out, "worktrees/main now at") || mainHead() == before {
+		t.Fatalf("--wait:\n%s", out)
+	}
+	// No follower: one background follower is started.
+	h.ok(branch("b3"), "merge")
+	if started != 1 {
+		t.Fatalf("background followers started: %d", started)
+	}
+	// The branch moved on the server after this worktree pushed: refused.
+	wt4 := branch("b4")
+	other := filepath.Join(h.base, "other")
+	h.git(h.base, "clone", "-q", "--branch", "b4", root.Repos[0].CloneURL, other)
+	os.WriteFile(filepath.Join(other, "late.txt"), []byte("late"), 0o644)
+	h.git(other, "add", "-A")
+	h.git(other, "commit", "-q", "-m", "late")
+	h.git(other, "push", "-q")
+	if out, err := h.pando(wt4, "", "merge"); err == nil || !strings.Contains(out+err.Error(), "is not what this worktree pushed") {
+		t.Fatalf("a moved branch must be refused: %v\n%s", err, out)
 	}
 }

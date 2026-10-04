@@ -36,6 +36,7 @@ type request struct {
 	body   any
 	bearer string // overrides the token (bootstrap)
 	accept string
+	header http.Header
 }
 
 func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []byte, error) {
@@ -72,6 +73,9 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 	if h.Agent != "" {
 		req.Header.Set("X-Pando-Agent", h.Agent)
 	}
+	for k, vs := range r.header {
+		req.Header[k] = vs
+	}
 	resp, err := h.Client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s %s: %w", r.method, h.Base+r.path, unwrapURLError(err))
@@ -100,7 +104,7 @@ func unwrapURLError(err error) error {
 }
 
 func decodeError(status int, data []byte) error {
-	ae := &APIError{Status: status}
+	ae := &APIError{Status: status, Body: data}
 	var e struct {
 		Error struct {
 			Code    string   `json:"code"`
@@ -119,7 +123,7 @@ func decodeError(status int, data []byte) error {
 
 func esc(s string) string { return url.PathEscape(s) }
 
-func monoPath(m string) string { return "/v1/monorepos/" + esc(m) }
+func monoPath(m string) string { return MonorepoPath(m) }
 
 func repoPath(m, repo string) string { return monoPath(m) + "/repos/" + esc(repo) }
 
@@ -203,23 +207,60 @@ func (h *HTTP) RevokeCredential(ctx context.Context, id string) error {
 	return err
 }
 
-func (h *HTTP) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
+func (h *HTTP) CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error) {
 	out := &Created{}
-	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/monorepos", body: map[string]string{"name": name, "kind": kind}}, out)
+	body := map[string]string{"name": name, "kind": kind}
+	if owner != "" {
+		body["owner"] = owner
+	}
+	_, _, err := h.do(ctx, request{method: "POST", path: "/v1/monorepos", body: body}, out)
 	return out, err
 }
 
-func (h *HTTP) ListMonorepos(ctx context.Context) ([]Monorepo, error) {
+func (h *HTTP) ListMonorepos(ctx context.Context, name string) ([]Monorepo, error) {
 	var out struct {
 		Monorepos []Monorepo `json:"monorepos"`
 	}
-	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/monorepos"}, &out)
+	q := url.Values{}
+	if name != "" {
+		q.Set("name", name)
+	}
+	_, _, err := h.do(ctx, request{method: "GET", path: "/v1/monorepos", query: q}, &out)
 	return out.Monorepos, err
 }
 
 func (h *HTTP) GetMonorepo(ctx context.Context, m string) (*Monorepo, error) {
 	out := &Monorepo{}
-	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m)}, out)
+	_, data, err := h.do(ctx, request{method: "GET", path: monoPath(m)}, out)
+	out.JSON = data
+	return out, err
+}
+
+// RenameMonorepo gives a monorepo a new name within its owner (owners). The
+// old owner/name keeps leading to it until its owner gives that name to
+// another monorepo.
+func (h *HTTP) RenameMonorepo(ctx context.Context, m, name string) (*Monorepo, error) {
+	out := &Monorepo{}
+	_, data, err := h.do(ctx, request{method: "PATCH", path: monoPath(m), body: map[string]string{"name": name}}, out)
+	out.JSON = data
+	return out, err
+}
+
+// DescribeMonorepo sets a monorepo's one-line description (owners); "" clears it.
+func (h *HTTP) DescribeMonorepo(ctx context.Context, m, description string) (*Monorepo, error) {
+	out := &Monorepo{}
+	var value any
+	if description != "" {
+		value = description
+	}
+	_, data, err := h.do(ctx, request{method: "PATCH", path: monoPath(m), body: map[string]any{"description": value}}, out)
+	out.JSON = data
+	return out, err
+}
+
+func (h *HTTP) Heads(ctx context.Context, m string) (*Heads, error) {
+	out := &Heads{}
+	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/heads"}, out)
 	return out, err
 }
 
@@ -243,19 +284,57 @@ func (h *HTTP) CreateRepo(ctx context.Context, m, path string) (*Repo, error) {
 	return out, err
 }
 
+// ListBranches reads every page of the branch list (500 a page).
 func (h *HTTP) ListBranches(ctx context.Context, m, repo, state string) (*BranchList, error) {
 	out := &BranchList{}
-	q := url.Values{}
-	if state != "" {
-		q.Set("state", state)
+	cursor := ""
+	for page := 0; page < 100; page++ {
+		q := url.Values{"limit": {"500"}}
+		if state != "" {
+			q.Set("state", state)
+		}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		pg := &BranchList{}
+		if _, _, err := h.do(ctx, request{method: "GET", path: repoPath(m, repo) + "/branches", query: q}, pg); err != nil {
+			return nil, err
+		}
+		if page == 0 {
+			out.DefaultBranch, out.DefaultHead = pg.DefaultBranch, pg.DefaultHead
+		}
+		out.Branches = append(out.Branches, pg.Branches...)
+		if pg.NextCursor == "" || pg.NextCursor == cursor {
+			break
+		}
+		cursor = pg.NextCursor
 	}
-	_, _, err := h.do(ctx, request{method: "GET", path: repoPath(m, repo) + "/branches", query: q}, out)
-	return out, err
+	return out, nil
 }
 
 func (h *HTTP) GetBranch(ctx context.Context, m, repo, b string) (*Branch, error) {
 	out := &Branch{}
-	_, _, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b)}, out)
+	_, data, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b)}, out)
+	out.JSON = data
+	return out, err
+}
+
+// ListReviews is a branch's reviews, oldest first, as the API sent them.
+func (h *HTTP) ListReviews(ctx context.Context, m, repo, b string) ([]Review, []byte, error) {
+	var out struct {
+		Reviews []Review `json:"reviews"`
+	}
+	_, data, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b) + "/reviews"}, &out)
+	return out.Reviews, data, err
+}
+
+// BranchCommits is the branch's own commits (those ahead of main), newest
+// first, at most limit (250 at most).
+func (h *HTTP) BranchCommits(ctx context.Context, m, repo, b string, limit int) (*BranchCommits, error) {
+	out := &BranchCommits{}
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	_, data, err := h.do(ctx, request{method: "GET", path: branchPath(m, repo, b) + "/commits", query: q}, out)
+	out.JSON = data
 	return out, err
 }
 
@@ -333,5 +412,115 @@ func (h *HTTP) DeleteWorktree(ctx context.Context, m, id string) error {
 	if StatusOf(err) == http.StatusNotFound {
 		return nil
 	}
+	return err
+}
+
+// PostStatusTo posts a commit status to a full statuses URL, the
+// PANDO_STATUS_URL a CI build gets, with a status token (PANDO_STATUS_TOKEN)
+// or a credential. The token goes in the Authorization header only.
+func PostStatusTo(ctx context.Context, statusURL, token string, s StatusIn) (*Status, error) {
+	u, err := url.Parse(statusURL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || !strings.Contains(u.Path, "/statuses/") {
+		return nil, fmt.Errorf("PANDO_STATUS_URL is not a Pando statuses URL (https://<host>/v1/monorepos/<owner>/<name>/repos/<repo>/statuses/<sha>)")
+	}
+	h := NewHTTP(u.Scheme+"://"+u.Host, token)
+	h.Client.Timeout = 30 * time.Second
+	var out Status
+	if _, _, err := h.do(ctx, request{method: "POST", path: u.EscapedPath(), body: s}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ── CI (the ci tag in api-v1.yaml): a Pando server only, not file:// ──
+
+// CIEvent is a connection's last webhook: its time, the event, and what Pando did with it.
+type CIEvent struct {
+	At     string `json:"at"`
+	Event  string `json:"event"`
+	Result string `json:"result"`
+	Reason string `json:"reason"`
+}
+
+// CIConnection is one CI service account (a Buildkite organization). It
+// holds no secret: the webhook token is shown only when connecting.
+type CIConnection struct {
+	ID           string   `json:"id"`
+	Service      string   `json:"service"`
+	Organization string   `json:"organization"`
+	WebURL       string   `json:"web_url"`
+	WebhookURL   string   `json:"webhook_url"`
+	Token        string   `json:"token"`
+	CreatedAt    string   `json:"created_at"`
+	CreatedBy    string   `json:"created_by"`
+	LastEvent    *CIEvent `json:"last_event"`
+	LastRefused  *CIEvent `json:"last_refused"`
+}
+
+// CIBuild is a build as Pando stores it (CiBuild in api-v1.yaml). State is
+// Pando's word for every service: queued, running, blocked, passed, failed,
+// canceled, skipped.
+type CIBuild struct {
+	ID           string `json:"id"`
+	Service      string `json:"service"`
+	Connection   string `json:"connection"`
+	Pipeline     string `json:"pipeline"`
+	Number       int    `json:"number"`
+	Repo         string `json:"repo"`
+	RepoPath     string `json:"repo_path"`
+	State        string `json:"state"`
+	ServiceState string `json:"service_state"`
+	SHA          string `json:"sha"`
+	Branch       string `json:"branch"`
+	Message      string `json:"message"`
+	WebURL       string `json:"web_url"`
+	PushedBy     string `json:"pushed_by"`
+	CreatedAt    string `json:"created_at"`
+	StartedAt    string `json:"started_at"`
+	FinishedAt   string `json:"finished_at"`
+	DurationS    *int   `json:"duration_s"`
+	RebuiltFrom  string `json:"rebuilt_from"`
+}
+
+type CIPipeline struct {
+	Connection     string   `json:"connection"`
+	Slug           string   `json:"slug"`
+	Repo           string   `json:"repo"`
+	RepoPath       string   `json:"repo_path"`
+	RequiredChecks []string `json:"required_checks"`
+	LastBuild      *CIBuild `json:"last_build"`
+}
+
+type CIOverview struct {
+	Connections []CIConnection `json:"connections"`
+	Pipelines   []CIPipeline   `json:"pipelines"`
+}
+
+// CIConnected is the answer to connecting: WebhookToken is shown this once.
+type CIConnected struct {
+	Connection   CIConnection `json:"connection"`
+	WebhookToken string       `json:"webhook_token"`
+}
+
+func (h *HTTP) CIOverview(ctx context.Context, m string) (*CIOverview, error) {
+	out := &CIOverview{}
+	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/ci"}, out)
+	return out, err
+}
+
+// CIConnect connects a Buildkite organization. webhookToken is Buildkite's
+// own token when the person pastes it; empty, and Pando makes one.
+func (h *HTTP) CIConnect(ctx context.Context, m, org, webhookToken string) (*CIConnected, error) {
+	body := map[string]string{"service": "buildkite", "organization": org}
+	if webhookToken != "" {
+		body["webhook_token"] = webhookToken
+	}
+	out := &CIConnected{}
+	_, _, err := h.do(ctx, request{method: "POST", path: monoPath(m) + "/ci/connections", body: body}, out)
+	return out, err
+}
+
+func (h *HTTP) CIDisconnect(ctx context.Context, m, id string) error {
+	_, _, err := h.do(ctx, request{method: "DELETE", path: monoPath(m) + "/ci/connections/" + esc(id)}, nil)
 	return err
 }

@@ -1,0 +1,435 @@
+@import "tailwindcss";
+@import "./avatars.css";
+@import "./graph.css";
+
+/* Pando's tokens, taken as they are from the v3 prototype
+   (research/design/pando-ui-2026-10-03/v3/prototype.html). Components use them
+   through the Tailwind names below (bg-loam, text-bark-dim, border-rootline). */
+
+/* Monospace: SF Mono while in development, declared only when the build
+   copies it in (vite.config.ts, PANDO_SF_FONTS=1, which sets --mono-face);
+   otherwise Ioskeley Mono (SIL OFL 1.1; fonts/IoskeleyMono-OFL.txt), which is
+   committed. Regular text: SF Pro Text by the same switch, else the system's.
+   Mono is only for code, commit ids and versions, commands you copy and branch
+   names (owner ruling on mono use, variant C); everything else is SF Pro Text,
+   with tabular figures for times and counts (body, below). */
+@font-face {
+  font-family: "Ioskeley Mono";
+  src: url("./fonts/IoskeleyMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --soil: #0c0f0c;
+  --air: #121614;
+  --loam: #1a1f18;
+  --rootline: #262a24;
+  --bark: #e6e0d1;
+  --bark-dim: #ada899;
+  --ash: #7e8476;
+  --clay: #9a7b5e;
+  --fox: #c4e86f;
+  /* Link: the thing a line is about (owner ruling, links R). A blue per theme, at least 4.5:1 on every ground and
+     clear of Foxfire and Rust (research/design/pando-ui-2026-10-03/links/INDEX.html, "Link colours, measured"). */
+  --link: oklch(0.78 0.08 243);
+  --rust: #e07a5f;
+  /* derived: menus, the faint row rules, hovers; a theme sets these from its own roles */
+  --pop: #1a1f18;
+  --pop-hi: #232920;
+  --rule-faint: #1f231d;
+  --rule-soft: #2c3229;
+  --rule-hi: #3a4136;
+  --bark-hi: #f4efe3;
+  --doc: #d6d0c1;
+  --ash-half: #7e847680;
+  --rust-half: #e07a5f80;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --margin: 48px;
+  /* An avatar's edge: none on a dark page; light themes draw a faint one (below). Its colours: avatars.css. */
+  --av-ring: transparent;
+  /* A link in running text keeps a faint underline in its own colour (WCAG 1.4.1: never colour alone). */
+  --link-line: color-mix(in srgb, var(--link) 38%, transparent);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --margin: 16px;
+  }
+}
+
+/* The themes of the name menu's setting (public/theme.js sets data-theme to
+   the pair shown). Pando's dark is :root above. Plannotator and Workspaces
+   Iris: research/design/pando-2026-10-02/landing/THEMES-SOURCE-2026-10-03.md.
+   Pando's light: its Daylight palette (research/design/pando-ui-2026-10-03/
+   mocks/SCREENS.md, "Visual rules"). Cloudflare: cloudflare-docs' colours
+   (MIT, NOTICE), mapped in research/design/pando-ui-2026-10-03/themes/
+   CLOUDFLARE-TOKENS.md: Foxfire is its cyan, Rust its danger red, clay its
+   orange. Black Rainbow: the owner's drawing-sheet concept
+   (research/design/themes/black-rainbow.html), plain black (no grid, owner),
+   dark only, mapped in the web-look README. The rules, hovers and dim text mix from each theme's roles. */
+html[data-theme="black-rainbow"],
+html[data-theme="pando-light"],
+html[data-theme="cloudflare-dark"],
+html[data-theme="cloudflare-light"],
+html[data-theme="plannotator-dark"],
+html[data-theme="plannotator-light"],
+html[data-theme="iris-dark"],
+html[data-theme="iris-light"] {
+  --bark-dim: color-mix(in srgb, var(--bark) 55%, var(--ash));
+  --doc: color-mix(in srgb, var(--bark) 82%, var(--ash));
+  --pop-hi: color-mix(in srgb, var(--pop) 90%, var(--bark));
+  --rule-faint: color-mix(in srgb, var(--rootline) 55%, var(--soil));
+  --rule-soft: color-mix(in srgb, var(--rootline) 70%, var(--loam));
+  --rule-hi: color-mix(in srgb, var(--rootline) 80%, var(--bark));
+  --ash-half: color-mix(in srgb, var(--ash) 50%, transparent);
+  --rust-half: color-mix(in srgb, var(--rust) 50%, transparent);
+}
+html[data-theme="pando-light"] {
+  --soil: #f0ece1;
+  --air: #f6f3eb;
+  --loam: #e9e3d7;
+  --pop: #f6f3eb;
+  --rootline: #cbc9bf;
+  --bark: #18201b;
+  --bark-dim: #3f463f;
+  --ash: #5d615a;
+  --clay: #6e5038;
+  /* By day Foxfire is the highlighter behind the text, which stays ink (the arrival, below). */
+  --fox: #18201b;
+  --link: oklch(0.47 0.11 250);
+  --fox-fill: rgba(173, 207, 15, 0.42);
+  --rust: #a8442a;
+  --bark-hi: #2a332d;
+  --shadow: rgba(24, 32, 27, 0.14);
+  color-scheme: light;
+}
+html[data-theme="cloudflare-dark"] {
+  --soil: #141414;
+  --air: #262626;
+  --loam: #1c1c1c;
+  --pop: #252525;
+  --rootline: #2a2a2a;
+  --rule-hi: #404040;
+  --bark: #f0e3de;
+  --ash: #a1a1a1;
+  --clay: #ff5e1e;
+  --fox: #69c4d4;
+  --link: oklch(0.7 0.16 263);
+  --rust: #f07f77;
+  --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+html[data-theme="cloudflare-light"] {
+  --soil: #fcfcfc;
+  --air: #ffffff;
+  --loam: #f4f4f4;
+  --pop: #ffffff;
+  --rootline: #e4e4e4;
+  --rule-hi: #d4d4d4;
+  --bark: #181818;
+  --ash: #696969;
+  --clay: #b84c00;
+  --fox: #006677;
+  --link: oklch(0.47 0.19 262);
+  --rust: #a9131f;
+  --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
+  --shadow: rgba(0, 0, 0, 0.14);
+  color-scheme: light;
+}
+/* Pure black, the grounds a touch above it (low enough that the concept's red
+   holds 4.5:1 on each), rules from its line white #dedede at 18%, ink and dim
+   as drawn. Ash is the concept's faint #6a6a6a (3.88:1 on black) lifted to
+   #7b7b7b (4.96:1 on black, 4.56:1 on the menus' ground). Rust is its red,
+   Foxfire its pink (red + blue in its key), clay the red + green of its
+   spectrum. */
+html[data-theme="black-rainbow"] {
+  --soil: #000000;
+  --air: #080808;
+  --loam: #0c0c0c;
+  --pop: #0e0e0e;
+  --rootline: #282828;
+  --bark: #e6e6e6;
+  --bark-dim: #a3a3a3;
+  --ash: #7b7b7b;
+  --clay: #e8c959;
+  --fox: #e48fe0;
+  --link: oklch(0.72 0.15 262);
+  --rust: #e23c2e;
+  --bark-hi: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.6);
+}
+html[data-theme="plannotator-dark"] {
+  --soil: oklch(0.15 0.02 260);
+  --air: oklch(0.22 0.02 260);
+  --loam: oklch(0.26 0.02 260);
+  --pop: oklch(0.28 0.025 260);
+  --rootline: oklch(0.35 0.02 260);
+  --bark: oklch(0.9 0.01 260);
+  --ash: oklch(0.72 0.02 260);
+  --clay: oklch(0.7 0.2 60);
+  --fox: oklch(0.75 0.18 280);
+  --link: oklch(0.8 0.1 232);
+  --rust: oklch(0.65 0.2 25);
+  --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+html[data-theme="plannotator-light"] {
+  --soil: oklch(0.97 0.005 260);
+  --air: oklch(1 0 0);
+  --loam: oklch(0.92 0.01 260);
+  --pop: oklch(1 0 0);
+  --rootline: oklch(0.88 0.01 260);
+  --bark: oklch(0.18 0.02 260);
+  --ash: oklch(0.4 0.02 260);
+  --clay: oklch(0.6 0.22 50);
+  --fox: oklch(0.5 0.25 280);
+  --link: oklch(0.5 0.15 245);
+  --rust: oklch(0.5 0.25 25);
+  --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
+  --shadow: rgba(17, 19, 26, 0.14);
+  color-scheme: light;
+}
+html[data-theme="iris-dark"] {
+  --soil: #08090c;
+  --air: #101116;
+  --loam: #15171e;
+  --pop: #15171e;
+  --rootline: #414244;
+  --bark: #f4f5f7;
+  --ash: oklch(0.72 0.02 260);
+  --clay: #d58f70;
+  --fox: #9496ff;
+  --link: oklch(0.8 0.1 228);
+  --rust: oklch(0.65 0.2 25);
+  --bark-hi: color-mix(in srgb, var(--bark) 55%, #fff);
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+html[data-theme="iris-light"] {
+  --soil: #f4f5f7;
+  --air: #ffffff;
+  --loam: #eceef2;
+  --pop: #ffffff;
+  --rootline: #bebfc2;
+  --bark: #11131a;
+  --ash: oklch(0.4 0.02 260);
+  --clay: #a75841;
+  --fox: #4f46e5;
+  --link: oklch(0.5 0.13 240);
+  --rust: oklch(0.53 0.21 25);
+  --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
+  --shadow: rgba(17, 19, 26, 0.14);
+  color-scheme: light;
+}
+html[data-theme$="-light"] {
+  --av-ring: color-mix(in srgb, var(--bark) 9%, transparent);
+}
+
+/* Syntax colour: the variables Pierre's CSS-variables theme reads, so one
+   highlighted result fits every theme. Four quiet earth tones (wood, sage,
+   slate, sand), one set for the dark themes and one for the light; text,
+   comments and punctuation take each theme's own roles. None reads as Rust
+   (conflicts, failures) or Foxfire (arrival). */
+:root {
+  --diffs-foreground: var(--bark);
+  --diffs-background: transparent;
+  --diffs-token-comment: var(--ash);
+  --diffs-token-punctuation: var(--bark-dim);
+  --diffs-token-parameter: var(--bark);
+  --diffs-token-keyword: oklch(0.76 0.06 68);
+  --diffs-token-string: oklch(0.79 0.05 168);
+  --diffs-token-string-expression: var(--diffs-token-string);
+  --diffs-token-function: oklch(0.79 0.045 240);
+  --diffs-token-constant: oklch(0.82 0.06 88);
+  --diffs-token-link: var(--diffs-token-function);
+  --diffs-token-inserted: var(--diffs-token-string);
+  --diffs-token-deleted: var(--diffs-token-keyword);
+  --diffs-token-changed: var(--diffs-token-function);
+}
+html[data-theme$="-light"] {
+  --diffs-token-keyword: oklch(0.48 0.08 58);
+  --diffs-token-string: oklch(0.5 0.07 170);
+  --diffs-token-function: oklch(0.48 0.075 245);
+  --diffs-token-constant: oklch(0.5 0.08 108);
+}
+/* Cloudflare's own: its brand scale (cloudflare-docs agent-setup-tokens.css),
+   indigo, green, blue and gold, each far from its cyan (Foxfire) and its red
+   (Rust); the proposal in CLOUDFLARE-TOKENS.md, measured in the web-look renders. */
+html[data-theme="cloudflare-dark"] {
+  --diffs-token-keyword: #9d94ec;
+  --diffs-token-string: #55d584;
+  --diffs-token-function: #4693ff;
+  --diffs-token-constant: #ffce4b;
+}
+/* Black Rainbow's own: its spectrum, never its red (Rust) or its pink
+   (Foxfire). Green as drawn; cyan and yellow are its additive mixes, green +
+   blue and red + green, as its pink is red + blue. Its blue is lifted 0.03 in
+   OKLab lightness (#3b6ff0 to #4379fb) and comments are a step above ash
+   (#818181), so both hold 4.5:1 on a diff's changed words. A diff's tints are
+   its green and blue at 0.45% of white's luminance on a changed line (Pierre
+   takes 15% of the mix targets below, in lab: #134a18 and #1e3c83) and 0.9% on
+   a changed word: dimmer than Pierre's, with the bar in the gutter still
+   marking each line. */
+html[data-theme="black-rainbow"] {
+  --diffs-token-comment: #818181;
+  --diffs-token-keyword: #4379fb;
+  --diffs-token-string: #3fc24c;
+  --diffs-token-function: #56daf9;
+  --diffs-token-constant: #e8c959;
+  --diffs-bg-addition-override: #134a18;
+  --diffs-bg-addition-number-override: #134a18;
+  --diffs-bg-deletion-override: #1e3c83;
+  --diffs-bg-deletion-number-override: #1e3c83;
+  --diffs-bg-addition-emphasis-override: #041d05;
+  --diffs-bg-deletion-emphasis-override: #07153a;
+}
+html[data-theme="cloudflare-light"] {
+  --diffs-token-keyword: #4b3bdc;
+  --diffs-token-string: #196535;
+  --diffs-token-function: #0045a6;
+  --diffs-token-constant: #735400;
+}
+
+@theme inline {
+  --color-*: initial;
+  --color-soil: var(--soil);
+  --color-air: var(--air);
+  --color-loam: var(--loam);
+  --color-rootline: var(--rootline);
+  --color-bark: var(--bark);
+  --color-bark-dim: var(--bark-dim);
+  --color-bark-hi: var(--bark-hi);
+  --color-ash: var(--ash);
+  --color-ash-half: var(--ash-half);
+  --color-clay: var(--clay);
+  --color-fox: var(--fox);
+  --color-rust: var(--rust);
+  --color-rust-half: var(--rust-half);
+  --color-link: var(--link);
+  --color-link-line: var(--link-line);
+  --color-pop: var(--pop);
+  --color-pop-hi: var(--pop-hi);
+  --color-rule-faint: var(--rule-faint);
+  --color-rule-soft: var(--rule-soft);
+  --color-rule-hi: var(--rule-hi);
+  --color-doc: var(--doc);
+  --color-transparent: transparent;
+  --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: var(--mono-face, "Ioskeley Mono"), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ease-pando: cubic-bezier(0.23, 1, 0.32, 1);
+  --shadow-pop: 0 14px 40px var(--shadow);
+}
+
+/* The prototype's two breakpoints, as it writes them (max-width, inclusive). */
+@custom-variant narrow (@media (max-width: 1100px));
+@custom-variant phone (@media (max-width: 640px));
+
+@layer base {
+  html {
+    background: var(--soil);
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--soil);
+    color: var(--bark);
+    font: 400 14px/20px var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 400;
+  }
+  /* Mono text without ligatures, as the prototype's SF Mono and GitHub show
+     code: Ioskeley Mono would draw => as one arrow. diffs-container is the
+     coloured code view (Colour.tsx); its shadow DOM inherits this. */
+  code,
+  pre,
+  kbd,
+  samp,
+  .font-mono,
+  diffs-container {
+    font-variant-ligatures: none;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 1.5px solid var(--bark);
+    outline-offset: 2px;
+    border-radius: 5px;
+  }
+}
+
+/* An activity line that just arrived: it slides in, takes Foxfire for two
+   seconds, then cools over four (the prototype's only motion). By day, in
+   Pando's light, Foxfire is a highlighter fill behind the text instead. */
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes cool {
+  from,
+  33% {
+    color: var(--fox);
+    background-color: var(--fox-fill, transparent);
+  }
+}
+.arrived {
+  animation: arrive 0.24s var(--ease-pando);
+}
+.arrived .fox-cool,
+.fox-arrive {
+  animation: cool 6s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arrived {
+    animation: none;
+  }
+}
+
+/* Issue labels: eight named colours (SPEC.md 2, Labels), a dot on a quiet
+   chip. Each theme sets them from its own lightness and chroma, and moves a
+   hue away from its Foxfire (arrival) where they would meet; none is red, so
+   a label never reads as Rust (a failure). Gray is the theme's Ash. Hues are
+   the mocks' (research/design/pando-ui-2026-10-03/issues/mocks.html). */
+:root {
+  --lb-l: 0.74;
+  --lb-c: 0.11;
+  --label-gray: var(--ash);
+  --label-orange: oklch(var(--lb-l) var(--lb-c) 54);
+  --label-yellow: oklch(var(--lb-l) var(--lb-c) 90);
+  --label-green: oklch(var(--lb-l) var(--lb-c) 162);
+  --label-teal: oklch(var(--lb-l) var(--lb-c) 189);
+  --label-blue: oklch(var(--lb-l) var(--lb-c) 225);
+  --label-purple: oklch(var(--lb-l) var(--lb-c) 270);
+  --label-pink: oklch(var(--lb-l) var(--lb-c) 315);
+}
+html[data-theme$="-light"] {
+  --lb-l: 0.67;
+  --lb-c: 0.14;
+}
+/* Plannotator's and Iris' Foxfire is violet (about 280): purple and pink step away from it. */
+html[data-theme^="plannotator-"],
+html[data-theme^="iris-"] {
+  --label-purple: oklch(var(--lb-l) var(--lb-c) 305);
+  --label-pink: oklch(var(--lb-l) var(--lb-c) 338);
+}
+/* Cloudflare's Foxfire is cyan (about 210): teal turns greener, blue deeper. */
+html[data-theme^="cloudflare-"] {
+  --label-teal: oklch(var(--lb-l) var(--lb-c) 176);
+  --label-blue: oklch(var(--lb-l) var(--lb-c) 252);
+}
+/* Black Rainbow's Foxfire is pink (about 328) and its Rust a red: its labels
+   take its spectrum's stronger chroma, and pink turns violet, away from both. */
+html[data-theme="black-rainbow"] {
+  --lb-c: 0.13;
+  --label-purple: oklch(var(--lb-l) var(--lb-c) 268);
+  --label-pink: oklch(var(--lb-l) 0.1 298);
+}

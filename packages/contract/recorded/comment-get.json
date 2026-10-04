@@ -1,0 +1,23 @@
+{
+  "schema": "IssueComment",
+  "route": "GET .../issues/{n}/comments/{id} (with a reaction)",
+  "status": 200,
+  "body": {
+    "id": "ic_3f5a2dfb8fa18b2e",
+    "body": "Seen on staging too.",
+    "body_version": 1,
+    "author": "rec-muu2mhw1",
+    "machine": "ana-mbp",
+    "created_at": "2026-10-04T17:05:12.858Z",
+    "updated_at": "2026-10-04T17:05:12.858Z",
+    "reactions": [
+      {
+        "content": "heart",
+        "count": 1,
+        "by": [
+          "rec-muu2mhw1"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "schema": "EventsPage",
+  "route": "GET /v1/events?owner=<org>&limit=5",
+  "status": 200,
+  "body": {
+    "events": [
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "org-muu2mhw1/rec-muu2mhw1-renamed",
+        "seq": 69,
+        "at": "2026-10-04T17:05:15.979Z",
+        "kind": "merged",
+        "summary": {
+          "merge_commit": "45b18812493e6c01b13f1a99d559ca822ef8ca08",
+          "forced": true,
+          "title": null,
+          "head": "e4bb41e74cdb1bedd61bfa6523a112dde2e0516a",
+          "closes": [
+            2
+          ]
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "fix/login",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "org-muu2mhw1/rec-muu2mhw1-renamed",
+        "seq": 67,
+        "at": "2026-10-04T17:05:14.562Z",
+        "kind": "branch.opened",
+        "summary": {
+          "head": "e4bb41e74cdb1bedd61bfa6523a112dde2e0516a",
+          "before": null,
+          "commits": 1,
+          "head_title": "Keep the session (fixes #2)"
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "fix/login",
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "org-muu2mhw1/rec-muu2mhw1-renamed",
+        "seq": 66,
+        "at": "2026-10-04T17:05:12.884Z",
+        "kind": "issue.reopened",
+        "summary": {
+          "number": 1,
+          "title": "Login fails an hour after sign-in",
+          "reason": null,
+          "excerpt": null
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": null,
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "org-muu2mhw1/rec-muu2mhw1-renamed",
+        "seq": 65,
+        "at": "2026-10-04T17:05:12.879Z",
+        "kind": "issue.closed",
+        "summary": {
+          "number": 1,
+          "title": "Login fails an hour after sign-in",
+          "reason": "not_planned",
+          "excerpt": null
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": null,
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_45d69c4a03ba6d4e",
+        "monorepo": "org-muu2mhw1/rec-muu2mhw1-renamed",
+        "seq": 60,
+        "at": "2026-10-04T17:05:12.858Z",
+        "kind": "issue.commented",
+        "summary": {
+          "number": 1,
+          "title": "Login fails after token refresh",
+          "reason": null,
+          "excerpt": "Seen on staging too."
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": null,
+        "actor": "rec-muu2mhw1",
+        "machine": "ana-mbp"
+      }
+    ],
+    "next": "MjAyNi0xMC0wNFQxNzowNToxMi44NThafG1fNDVkNjljNGEwM2JhNmQ0ZXw2MA",
+    "from_logs": false,
+    "skipped": []
+  }
+}

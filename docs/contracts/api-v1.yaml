@@ -4,40 +4,63 @@ info:
   version: "1"
   summary: The /v1 API of the Pando Worker.
   description: |
-    Owner: the server-git lane. Others ask pando-ops for changes.
-
     Shape:
-    - Every route is under `/v1/monorepos/{monorepo}`. A monorepo holds
-      repos. A plain git repo is a monorepo of kind `repo` holding exactly
-      one repo, at path `.`, and no meta layer; it uses the same routes.
-      The meta layer's routes (`/v1/monorepos/{monorepo}/meta/...`) are in
-      `meta-sync.md`.
-    - A repo has a `path` (as in `formats.md`: `projects/web`, or `.` in a
+    - A monorepo is `owner/name`, like GitHub: the owner is
+      a namespace (a person's login, or an organization's), the name is
+      unique within its owner, and a permanent `id` keys everything stored.
+      A rename or a transfer changes the label only; the old `owner/name`
+      keeps working (an alias) until its owner gives that name to another
+      monorepo, which the create or rename answer reports
+      (`replaced_alias`). Owners and names match without case and are
+      stored lower case.
+    - In payloads, `monorepo` is always the `owner/name` label and
+      `monorepo_id` always the id (repos, hook payloads, feed lines,
+      needs-you rows, socket frames). The Monorepo object itself has `id`,
+      `owner`, `name` and `full_name`.
+    - Every route is under `/v1/monorepos/{owner}/{monorepo}`, except the
+      user's own (`/v1/user`, `/v1/monorepos`) and the web home's, which
+      span all of the person's monorepos (`/v1/events`, `/v1/branches`). A
+      monorepo holds repos. A plain git repo is a monorepo of kind `repo`
+      holding exactly one repo, at path `.`, and no meta layer; it uses the
+      same routes. The meta layer's routes
+      (`/v1/monorepos/{owner}/{monorepo}/meta/...`) are not in this reference.
+    - A repo has a `path` (its folder from the root: `projects/web`, or `.` in a
       plain repo) and a `name`, its id in URLs: the path with each `/`
       turned into `-` (`projects-web`). A plain repo's name is the
-      monorepo's name. Names are unique in a monorepo.
+      monorepo's name when it was made (a rename does not change it).
+      Names are unique in a monorepo.
     - In a monorepo, the repo named `meta` (path `.`, clone_url
-      `<host>/<monorepo>/meta.git`) is the meta layer's own git history. It
+      `<host>/<owner>/<monorepo>/meta.git`) is the meta layer's own git history. It
       takes branches, diffs, reviews and merges like any repo, and it is how
       `.pando/**` changes: after a merge into it, the merged files go to the
       live meta layer on every machine. It is not in listRepos.
-    - Git goes through the git door at the repo's `clone_url`,
-      `https://<host>/<monorepo>/<name>.git` (smart HTTP; see the `git`
-      tag). Pushes to the default branch are refused, except the first push
+    - Git goes through the git door at the repo's `clone_url`:
+      `https://<host>/<owner>/<monorepo>/<name>.git` for a monorepo's repos,
+      `https://<host>/<owner>/<name>.git` for a plain repo (smart HTTP; see
+      the `git` tag). Pushes to the default branch are refused, except the first push
       that creates it. Every other push goes through.
     - Every other call is JSON with `Authorization: Bearer <credential>`.
 
-    Artifacts repos, in the namespace `pando-dev`: a project repo is
-    `<monorepo>--<name>` (`acme--projects-web`), a plain repo is
-    `<monorepo>--<monorepo>`, and the meta layer is `<monorepo>--meta`.
-    Artifacts allows letters, digits, `.`, `_` and `-`, starting with a
-    letter or digit. Pando names forbid `--`, so the split is never
+    Artifacts repos, in the namespace `pando-dev`, are named from the
+    monorepo's id and kept on each repo's record (Artifacts has no rename):
+    a project repo is `<id>--<name>` (`m_0123456789abcdef--projects-web`), a
+    plain repo `<id>--<name>`, and the meta layer `<id>--meta`. New ids are
+    `m_` and 16 hex characters; a monorepo made before namespaces kept its
+    old name as its id. Ids and names have no `--`, so the split is never
     ambiguous. These names are internal: clients use `clone_url`.
 
     Required checks: the server reads `required_checks` from
-    `.pando/pando.toml` on main (`formats.md`, section 2). In a monorepo
+    `.pando/pando.toml` on main. In a monorepo
     that is the meta layer's main, table `[repos."<repo path>"]`; in a plain
-    repo, the repo's own main, table `[repos."."]`.
+    repo, the repo's own main, table `[repos."."]`. No main or no file means
+    no required checks. When Artifacts fails to read it, or it does not
+    parse, they are unknown, and only the merge fails closed: reads (the
+    repo, the branch list, a branch, a commit's status, CI) answer as usual
+    with the list null and `checks_unknown` saying why (for a bad file,
+    "pando.toml line N: <what is wrong>"), checks `state` is `unknown`; an
+    unforced merge is refused with 503 `checks_unknown` and that reason, a
+    forced one goes through as forced. Nothing is kept, so the next request
+    reads it again.
 
     Identity works like GitHub's. A person has a user account and belongs to
     monorepos as `owner` or `member`. A machine signs in once
@@ -52,6 +75,16 @@ info:
     and approvals, not a gate. The merge gate is the checks, and `?force=1`
     merges past them. Owners also manage members and hooks.
 
+    Organizations: anyone signed in creates one (`POST /v1/orgs`); its name
+    is a namespace in the same space as logins. Roles are `owner` and
+    `member`. Everyone in an org can open and push to every monorepo the
+    org owns, and its owners are owners of all of them: a person's role in
+    an org's monorepo is the higher of their own row in the monorepo and
+    their org role. A monorepo can still add people from outside the org
+    itself. People are added at once (by login, or by an email that has
+    signed in), or at that email's first sign-in. Removal from an org takes
+    effect within 15 s, as for a monorepo.
+
     Signing in (`pando login`): WorkOS AuthKit's CLI Auth, the OAuth device
     flow, run through the Worker. `POST /v1/login/device` returns a code
     and a URL; the person confirms the code in the browser; the CLI polls
@@ -61,10 +94,26 @@ info:
     token. A user's login comes from their email (`ana@x.com` is `ana`, or
     `ana-2` if taken). Invites by email wait until that email first signs in.
 
+    In a browser: `GET /v1/login/browser?return_to=<path>` sends the person to
+    AuthKit's page; WorkOS sends them back to `/v1/login/callback`, which sets
+    the session cookie `__Host-pando_session` (HttpOnly, Secure,
+    SameSite=Lax, host-only) and returns them to `return_to` (a path on this
+    host, else `/`). The session is a credential of kind `browser` for the
+    same Pando user, so it sees the same monorepos. It works on `/v1` only:
+    never as a Bearer token and never at the git door. With the cookie, a
+    write (any method but GET and HEAD) or a WebSocket upgrade must carry
+    `Origin` equal to Pando's own origin, else 403 `bad_origin`. A session
+    ends after 30 days without use, on sign-out (`POST /v1/logout`, which also
+    ends the WorkOS session), or when revoked.
+
     Self-hosted, one person: the Worker secret `PANDO_BOOTSTRAP` makes users
     with `POST /v1/users` (it works there only). Either way, a user then makes
     more credentials (`POST /v1/user/credentials`) and monorepos
     (`POST /v1/monorepos`).
+
+    Agents: an agent acts as its user, through the user's credential. It may
+    also send `X-Pando-Agent: <name>` on API calls and pushes; Pando then
+    records the agent on merges (`merged_agent`) and on events.
 
     Branch names in paths: encode `/` as `%2F` (`agent-3%2Foauth`). Raw
     slashes are accepted too.
@@ -80,17 +129,22 @@ servers:
         default: example
 security:
   - credential: []
+  - session: []
 tags:
   - name: git
     description: |
       The git door. Plain git clients use it; no Pando client is needed.
 
       ```
-      GET  /{monorepo}/{repo}.git/info/refs?service=git-upload-pack
-      GET  /{monorepo}/{repo}.git/info/refs?service=git-receive-pack
-      POST /{monorepo}/{repo}.git/git-upload-pack
-      POST /{monorepo}/{repo}.git/git-receive-pack
+      GET  /{owner}/{monorepo}/{repo}.git/info/refs?service=git-upload-pack
+      GET  /{owner}/{monorepo}/{repo}.git/info/refs?service=git-receive-pack
+      POST /{owner}/{monorepo}/{repo}.git/git-upload-pack
+      POST /{owner}/{monorepo}/{repo}.git/git-receive-pack
       ```
+
+      A plain repo drops the repo segment: `/{owner}/{name}.git/...`. The
+      other shape answers 404 saying which one fits. An old `owner/name`
+      (after a rename or a transfer) still works.
 
       Credentials: HTTP Basic with the user's credential as the password
       (any username; this is what `pando credential`, the git credential
@@ -106,11 +160,19 @@ tags:
       first ask and kept forever. Every other v2 command goes to Artifacts
       unchanged.
 
-      Clone and fetch also accept the 30-minute read token from a hook
-      delivery (`read_token`), so CI clones from `clone_url` with no
-      credential of its own.
+      Clone and fetch also accept the read token from a hook delivery
+      (`read_token` for a web hook, 30 minutes; `PANDO_READ_TOKEN` for a
+      Buildkite build, at least 24 hours so Buildkite's Retry can still
+      clone), so CI clones from `clone_url` with no credential of its own.
 
       Only members of the monorepo get through.
+
+      Writes per repo: an Artifacts repo takes about two writes at once, so
+      every write (a push, a branch create or delete, a merge, a meta layer
+      commit) waits for one of the repo's two write slots, first come first
+      served. git just waits. A push that waits 120 s gets
+      `remote error: Pando: <repo> is busy with other writes; try the push again`.
+      The ceiling is about 5 to 10 small pushes a second per repo.
 
       Push rule (receive-pack). The door reads the command list before the
       pack. If any command updates or deletes the repo's default branch
@@ -119,9 +181,127 @@ tags:
       when it does not exist yet is allowed: that is the first push of
       `pando init`. Main moves only by a merge.
 
+      Busy repos. Artifacts runs about 2 receive-packs at once per repo and
+      answers others "busy". The door holds a push of up to 1 MiB in memory
+      and sends it again once, after 150 to 400 ms. A push that is still
+      refused, or is larger, is rejected with
+      `Pando: <repo> is busy with other pushes right now; push again` (every
+      ref `busy; push again`), and nothing is written: push again. A call to
+      Artifacts that fails outright is handled the same way: retried once
+      for a held push, else `Pando: <repo> couldn't take this push right
+      now; push again`, never a bare HTTP 500.
+
+      Push size. One push carries at most 64 MiB of receive-pack request
+      (67,108,864 bytes), Artifacts' limit. A push whose `Content-Length` is
+      over it is refused before anything goes to Artifacts; a streamed one is
+      cut off before its pack ends, so it cannot land. Either way git gets
+      `Pando: this push is over 64 MiB, the most one push can carry
+      (Artifacts' limit); nothing landed.`, how to push in steps (for a
+      first push of main: `pando init`, which pushes the history in steps on
+      `refs/pando/import` and `refs/pando/import-files`, then deletes them),
+      and every ref `over 64 MiB; push in steps`. Nothing is recorded.
+
+      Raw files, GET or HEAD, beside the git door:
+      `/{owner}/{monorepo}/projects/{project}/raw/{path}?ref=` for a
+      monorepo's project (the repo at `projects/{project}`, named
+      `projects-{project}`), `/{owner}/{name}/raw/{path}?ref=` for a plain
+      repo, and `/{owner}/{monorepo}/raw/{path}?v=` for a monorepo's own
+      files (the meta layer; `v` is a meta layer version).
+      Members only, by the session cookie or a Bearer credential. Served so
+      nothing runs: `Content-Security-Policy: sandbox`, nosniff, images as
+      images, everything else as `text/plain` (HTML and SVG included) or,
+      with a NUL in its first 8,000 bytes, `application/octet-stream`.
+      `ETag` is the content's hash (the git blob's; a large meta file's
+      SHA-256). By branch, or a meta file now: `private, no-cache` (a repeat
+      is a 304); by a 40-character sha or a `v`: `private, max-age=31536000,
+      immutable`.
+
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.
+  - name: issues
+    description: |
+      Issues, as on GitHub: one list per monorepo, numbered `#1`, `#2`, ...
+      in arrival order with no gaps (one counter, taken in one step), with an
+      optional `project` (the repo it is about). Members open, comment, edit,
+      label, assign, close and reopen any issue; owners manage labels and may
+      delete anyone's comment. Bodies and comments are Markdown, up to 65,536
+      characters; titles 1 to 256.
+
+      **Branches and merges.** A branch is linked to an issue three ways: a
+      closing keyword in its title or description ("Fixes #12"), one in a
+      commit on the branch (read with the branch's facts), or an explicit
+      `link`. Keywords are GitHub's: close, closes, closed, fix, fixes, fixed,
+      resolve, resolves, resolved, any case, an optional colon, then `#12` or
+      `owner/name#12` of this monorepo; one keyword per number; text in
+      backticks is skipped; a `git revert` commit never closes. A merge into
+      main decides, as it lands, the open issues it closes: the branch's links
+      and the keywords in its merge message and merged commits (MergeResult
+      `closes`, also on its `merged` line). Each closes about a second later,
+      in its own step, as completed, naming the merge (`issue.closed`); one a
+      person closed meanwhile is left as it is. Issues never refuse a merge.
+      A revert never reopens.
+
+      **Writes are safe to retry.** Create and comment take an
+      `Idempotency-Key` header (up to 64 characters, kept for good, per
+      person): a retry answers the first one (200, `Pando-Replayed: true`).
+      Labels, assignees, links, reactions and state are set operations. A
+      body edit with `base_version` never overwrites someone else's: a stale
+      one is 409 `edited` with `current`, the issue or comment as it is now.
+
+      **Live.** Every change is one event on the monorepo's stream (topics
+      `issues` and `issue:<n>`); `issue.opened`, `issue.commented`,
+      `issue.closed` (by a person) and `issue.reopened` are activity lines.
+      Open issues assigned to a person show in the home's "Needs you".
+  - name: ci
+    description: |
+      CI on one model for every service:
+      a **service** (`buildkite` today), a **connection** (one account of it:
+      a Buildkite organization), its **pipelines** (each builds one repo),
+      **builds**, **jobs**, and each job's **check**. Pando runs no CI.
+
+      - **Stored by Pando, pushed by the service.** A connection gets a
+        webhook URL; the service's webhooks keep builds and jobs (state,
+        times, links) in the monorepo's records, written in one step with
+        their events on the monorepo's stream (`ci.build`, `ci.job`) before
+        the webhook is answered. Viewers cost the service nothing.
+      - **A check is a job named by its step key**: a job keyed `ci` writes
+        the status `ci` (`app` `buildkite`, `creator` `app:buildkite`), so
+        `required_checks = ["ci"]` in `.pando/pando.toml` gates merges on it.
+        Commands and triggered builds report; waits and blocks do not. Only
+        the newest job with that key, in the newest build of that pipeline
+        for that commit, reports (a retry or a rebuild takes over). States:
+        passed is success; failed is failure (soft failed: success);
+        canceled, not run after a failure (`broken`) or not taken by an
+        agent (`expired`) are error; a skipped step is success.
+      - **Fetched from the service when opened**: a job's log (its last
+        1 MiB), a build's annotations and artifacts (first 100 of each), a
+        pipeline's configuration (read at most every 5 minutes). Cached once
+        settled (finished over 30 s ago), else for 10 s.
+      - **Actions**, any member: Rebuild (a new build of the same commit
+        with fresh tokens; the service's own rebuild would reuse the old
+        build's env), Cancel and Retry (passed through).
+      - **Mapping a build to a repo**: Pando's own builds carry
+        `meta_data.pando_delivery`, `pando_monorepo` and `pando_repo`; a
+        build started in the service maps through the buildkite hook that
+        names its pipeline. Other builds (another monorepo's, another
+        organization's, an unmapped pipeline's) are answered 200 and ignored.
+      - **Who pushed** comes from Pando's own records: the delivery that
+        started the build, else the push or merge that made the commit.
+      - **The service's rate limit**: Buildkite allows 200 REST calls a
+        minute per organization and 50 per user token. A connection makes at
+        most 40 a minute (10 are left for starting builds); past that, or
+        after Buildkite answers 429, calls answer 429 `ci_rate_limited`
+        ("try again in N s", with `retry_after_ms`). A reader of a log,
+        annotations or artifacts gets the last copy instead, when there is
+        one: 200 with `cached: true`, `complete: false` and
+        `retry_after_ms`. pipeline.yml shows its stored copy with
+        `configuration_error`. Never a 5xx for the hold.
+
+      Errors from the service: `ci_unauthorized` (502: the token lacks a
+      scope), `ci_refused` (409: Buildkite refused the action),
+      `ci_service` (502), `ci_rate_limited` (429), `ci_token_missing` (503:
+      the Worker secret BUILDKITE_API_TOKEN is not set).
 paths:
   /v1/users:
     post:
@@ -138,7 +318,7 @@ paths:
               type: object
               required: [login]
               properties:
-                login: { $ref: "#/components/schemas/Login" }
+                login: { $ref: "#/components/schemas/Login", description: "Lowered first. 400 `reserved_name` for a reserved one; 409 `namespace_taken` when a person or an organization has it." }
                 name: { type: string, description: A display name. }
                 email: { type: string, description: Used on merge commits. }
                 credential_name: { type: string, description: "A name for the first credential, for example the machine name. Default `bootstrap`." }
@@ -199,9 +379,9 @@ paths:
         400 with `error.code` `authorization_pending` (keep polling) or
         `slow_down` (add 5 seconds to the interval). `access_denied`,
         `expired_token` and `invalid_grant` end the attempt. On success,
-        `joined` lists the monorepos whose email invites were accepted, and
-        the CLI stores `credential.secret` where formats.md says
-        (`~/.pando/credentials/<host>`, mode 600).
+        `joined` lists the monorepos (`owner/name`) whose email invites were accepted, and
+        the CLI stores `credential.secret` in
+        `~/.pando/credentials/<host>` (mode 600).
       tags: [users]
       security: []
       requestBody:
@@ -213,7 +393,7 @@ paths:
               required: [device_code, credential_name]
               properties:
                 device_code: { type: string }
-                credential_name: { type: string, description: "The machine name (formats.md, section 7)." }
+                credential_name: { type: string, description: "The machine name." }
                 kind: { type: string, enum: [machine, sandbox], default: machine }
       responses:
         "200":
@@ -234,6 +414,60 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/login/browser:
+    get:
+      operationId: loginBrowser
+      summary: Sign in a browser (redirects to AuthKit)
+      tags: [users]
+      security: []
+      parameters:
+        - name: return_to
+          in: query
+          description: A path on this host to come back to. Anything else becomes `/`.
+          schema: { type: string, default: / }
+      responses:
+        "302": { description: "To AuthKit's sign-in page, with a 10-minute `__Host-pando_login` cookie holding state and the PKCE verifier." }
+  /v1/login/callback:
+    get:
+      operationId: loginCallback
+      summary: Where AuthKit sends the browser back (sets the session cookie)
+      tags: [users]
+      security: []
+      responses:
+        "302": { description: "To `return_to`, with `__Host-pando_session` set." }
+        "400":
+          description: "`bad_state` (no matching sign-in, or older than 10 minutes) or `sign_in_failed`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/logout:
+    get:
+      operationId: logoutPage
+      summary: Opened in a browser, goes to the app
+      description: A GET never ends a session. It sends the browser to the app (`/`), where the name menu signs out (POST).
+      tags: [users]
+      security: []
+      responses:
+        "303": { description: "To `/`." }
+    post:
+      operationId: logout
+      summary: Sign out this browser (and end its WorkOS session)
+      description: Revokes the session in the cookie, clears the cookie, and sends the browser to WorkOS's logout URL, which returns to `/`. Needs `Origin` equal to Pando's own.
+      tags: [users]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: "With `Accept: application/json`."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed_out: { type: boolean }
+                  logout_url: { type: string, description: Open this to end the WorkOS session too. }
+        "303": { description: To WorkOS's logout URL (a form post). }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/user:
     get:
       operationId: me
@@ -251,6 +485,37 @@ paths:
                     required: [credential]
                     properties:
                       credential: { $ref: "#/components/schemas/Credential" }
+        "401": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateProfile
+      summary: Change your profile's header (Edit profile)
+      description: >-
+        A field left out is kept; null or "" clears it. Once a name is saved
+        here, signing in no longer refreshes it from WorkOS. The picture is
+        always the sign-in's; the email is never shown on a profile.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: [string, "null"], maxLength: 100 }
+                bio: { type: [string, "null"], maxLength: 160 }
+                location: { type: [string, "null"], maxLength: 100 }
+                links:
+                  type: array
+                  maxItems: 4
+                  description: https URLs of at most 2,048 characters; empty ones are dropped.
+                  items: { type: string }
+      responses:
+        "200":
+          description: Your profile as anyone signed in sees its header.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
   /v1/user/credentials:
     post:
@@ -303,6 +568,296 @@ paths:
       responses:
         "204": { description: Revoked }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/users/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: A login or an org (any case).
+        schema: { $ref: "#/components/schemas/Login" }
+    get:
+      operationId: getOwner
+      summary: Whose namespace this is, a person or an organization (what `/{name}` shows)
+      tags: [users]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Profile"
+                  - $ref: "#/components/schemas/Org"
+                discriminator: { propertyName: type }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/users/{login}/contributions:
+    parameters:
+      - name: login
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Login" }
+      - name: tz
+        in: query
+        description: >-
+          The viewer's time zone, in minutes east of UTC (-420 for California
+          in summer; the browser's -getTimezoneOffset()). Days are counted in
+          it, at its offset today for the whole year: up to an hour off across
+          a daylight-saving change, half-hour zones rounded to the hour.
+        schema: { type: integer, minimum: -720, maximum: 840, default: 0 }
+      - name: day
+        in: query
+        description: One day of the window (YYYY-MM-DD) for its timeline alone.
+        schema: { type: string, format: date }
+    get:
+      operationId: getContributions
+      summary: A person's contribution graph and timeline for the last year
+      description: >-
+        A contribution is a commit that reached a repository's main (credited
+        to its author and to every Co-authored-by person whose sign-in email
+        it names, if they can open that repository; merge commits never), a
+        branch opened (by the person whose sign-in pushed it), a review, or a
+        repository made. Pushes, merges as such, checks and saves of the
+        shared files themselves do not count. A repository's past commits
+        count when its main first arrives (pando init in an existing repo, a
+        first push of main), read in the background a page at a time.
+
+        A viewer sees only the work in repositories they can open now, on
+        their own profile too. Counts are kept per UTC hour in the person's
+        feed; a credit shows about half a second after a merge. With `day`,
+        the answer is that day's ContributionPeriod. 404 for an org or no
+        such person.
+      tags: [users]
+      responses:
+        "200":
+          description: OK (Contributions; with `day`, ContributionPeriod)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Contributions"
+                  - $ref: "#/components/schemas/ContributionPeriod"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/user/orgs:
+    get:
+      operationId: listMyOrgs
+      summary: The organizations this user is in, with their role, by login
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orgs]
+                properties:
+                  orgs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Org" }
+  /v1/orgs:
+    post:
+      operationId: createOrg
+      summary: Create an organization; the caller is its first owner
+      description: |
+        The login follows the namespace rule (`Login`): one space with
+        people's logins, so a taken name (a person's or an org's) is 409
+        `namespace_taken` and a reserved one 400 `reserved_name`. The
+        namespace, the org and the caller's owner row are written in one
+        batch, so of two creates of one name at once, one wins.
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login]
+              properties:
+                login: { $ref: "#/components/schemas/Login" }
+                name: { type: string, maxLength: 100, description: "The display name (\"Plannotator\")." }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}:
+    parameters:
+      - $ref: "#/components/parameters/org"
+    get:
+      operationId: getOrg
+      summary: An organization's header (anyone signed in)
+      description: "`role` is the caller's (null when not in it); `members` is the count of its people, shown to its people only (null otherwise)."
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateOrg
+      summary: Change an organization's details (owners)
+      description: Fields left out are kept; null clears one.
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: [string, "null"], maxLength: 100 }
+                description: { type: [string, "null"], maxLength: 160 }
+                website: { type: [string, "null"], maxLength: 2048, description: An https URL. }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}/members:
+    parameters:
+      - $ref: "#/components/parameters/org"
+    get:
+      operationId: listOrgMembers
+      summary: An organization's people, by login (its people only)
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgMember" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}/members/{login}:
+    parameters:
+      - $ref: "#/components/parameters/org"
+      - name: login
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Login" }
+    put:
+      operationId: putOrgMember
+      summary: Add a person to the organization by login, or change their role (owners)
+      description: They are in at once, and gain every monorepo the org owns. 409 `last_owner` when it would leave the org with no owner.
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/MemberRole" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgMember" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: removeOrgMember
+      summary: Remove a person from the organization (owners), or leave it (yourself)
+      description: Their access to the org's monorepos ends within 15 s (plus replica lag); rows of their own in a monorepo stay. 409 `last_owner` for the org's only owner.
+      tags: [orgs]
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}/invites:
+    parameters:
+      - $ref: "#/components/parameters/org"
+    post:
+      operationId: orgInvite
+      summary: Add a person to the organization by email (owners)
+      description: |
+        As a monorepo's invite: someone who has already signed in with that
+        email is added now (200, `status: added`); otherwise the invite waits
+        (201, `status: invited`) and becomes a membership at that email's
+        first sign-in (a verified email only).
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+                role: { $ref: "#/components/schemas/MemberRole" }
+      responses:
+        "200":
+          description: Added now
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [added] }
+                  member: { $ref: "#/components/schemas/OrgMember" }
+        "201":
+          description: Invited; waiting for that email to sign in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [invited] }
+                  invite: { $ref: "#/components/schemas/Invite" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listOrgInvites
+      summary: Invites still waiting (its people)
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invites]
+                properties:
+                  invites:
+                    type: array
+                    items: { $ref: "#/components/schemas/Invite" }
+  /v1/orgs/{org}/invites/{email}:
+    parameters:
+      - $ref: "#/components/parameters/org"
+      - name: email
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: revokeOrgInvite
+      summary: Withdraw an invite (owners)
+      tags: [orgs]
+      responses:
+        "204": { description: Withdrawn }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos:
     post:
       operationId: createMonorepo
@@ -317,13 +872,14 @@ paths:
               required: [name]
               properties:
                 name: { $ref: "#/components/schemas/Name" }
+                owner: { $ref: "#/components/schemas/Login", description: "The namespace: your own login (the default), or an organization you are in (any member may). Else 403 `not_your_namespace`. In an org, the creator also gets their own owner row, so they can rename or delete what they made." }
                 kind:
                   type: string
                   enum: [monorepo, repo]
                   default: monorepo
                   description: |
                     `monorepo`: Pando also makes the meta layer's Artifacts repo
-                    (`<name>--meta`, empty); add code repos with createRepo.
+                    (`<id>--meta`, empty); add code repos with createRepo.
                     `repo`: a plain git repo; Pando makes its one repo (path `.`,
                     name = the monorepo's name) and returns it in `repos`.
       responses:
@@ -333,19 +889,45 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [monorepo, repos]
+                required: [monorepo, repos, replaced_alias]
                 properties:
-                  monorepo: { $ref: "#/components/schemas/Monorepo" }
+                  monorepo: { $ref: "#/components/schemas/MonorepoEntry" }
                   repos:
                     type: array
                     description: The plain repo for kind `repo`; empty for kind `monorepo`.
                     items: { $ref: "#/components/schemas/Repo" }
+                  replaced_alias: { $ref: "#/components/schemas/ReplacedAlias" }
         "401": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "`monorepo_exists`: the owner has a monorepo with that name.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
     get:
       operationId: listMonorepos
-      summary: The monorepos this user belongs to
+      summary: The monorepos this user belongs to (their own, by membership, and by organization)
+      description: |
+        By owner (the person's own first), then name. With `?owner=<owner>`: only
+        that owner's (an org's page). With `?name=<name>`: only those named so, under
+        any owner (`pando clone <name>`: the cli prefers your own namespace,
+        else the only match, else it asks). With `?summary=1` (the web home): most recently active first,
+        each with its one line (`MonorepoSummary`), answered from the person's
+        feed in one call, plus one call per monorepo of more than 100 members.
+        A small monorepo's line is up to 10 s behind: it sends it to its
+        members' feeds only when it changed, at most that often. A large one
+        sends none (2,000 members would be 2,000 feed writes per change); its
+        line is read from it here, current. A monorepo the feed has not
+        joined yet (seconds after it was made or joined) has nulls.
       tags: [monorepos]
+      parameters:
+        - name: summary
+          in: query
+          schema: { type: string, enum: ["1"] }
+        - name: name
+          in: query
+          description: A monorepo name (any case). No match is an empty list.
+          schema: { type: string }
+        - name: owner
+          in: query
+          description: One owner's monorepos only (a login or an org, any case). Works with `summary`. No match is an empty list.
+          schema: { $ref: "#/components/schemas/Login" }
       responses:
         "200":
           description: OK
@@ -357,26 +939,238 @@ paths:
                 properties:
                   monorepos:
                     type: array
-                    items: { $ref: "#/components/schemas/Monorepo" }
-  /v1/monorepos/{monorepo}:
+                    items:
+                      oneOf:
+                        - $ref: "#/components/schemas/MonorepoEntry"
+                        - $ref: "#/components/schemas/MonorepoSummary"
+  /v1/events:
+    get:
+      operationId: listActivity
+      summary: The activity log across the person's monorepos (JSON pages, or the person's WebSocket)
+      description: |
+        The web home's log: what happened in every monorepo the person belongs
+        to, newest first, each line with its `monorepo`. People, machines and
+        worktrees only: no agent field.
+
+        Lines are the activity kinds: `push`, `branch.opened`,
+        `branch.deleted`, `merged`, `review`, `status` (only when a check's
+        state changes), `worktree.reported` (a new worktree only),
+        `worktree.removed`, `meta.saved` (not files a merge brought in). The
+        cache-sync kinds stay on the per-monorepo stream.
+
+        Order and cursor: every line has the display key `(at, monorepo, seq)`.
+        `next` is an opaque cursor, "older than this line"; pass it back as
+        `cursor`. It is stable while lines arrive: new lines are newer, and a
+        late or repeated delivery never moves a line already paged past.
+
+        Where lines come from: each person has a feed (a Durable Object). A
+        monorepo of 100 members or fewer copies its lines into its members'
+        feeds; a larger one is read from its own log on every page. A feed
+        keeps 7 days (at most 1,000,000 lines); older pages, and a monorepo
+        the feed joined with a partial history, are read from the monorepos'
+        own logs, which keep everything. At most 20 logs are read for one
+        page, most recently active first; the rest are named in `skipped`
+        (narrow with `in` to read one of them).
+
+        With `Upgrade: websocket`: one socket per person, for every small
+        monorepo. Send `{"type": "hello", "since": <landed>}` (since
+        optional): the feed replays the lines that landed after it (at most
+        500, else one `resync` frame: refetch the first page), then
+        `{"type": "caught_up", "landed"}`. `landed` is the feed's own arrival
+        number, not a time: keep the highest seen and send it on reconnect.
+        Live frames:
+        - `{"type": "event", "landed", "event": FeedEvent}`: place it by its
+          display key. The same line can arrive again with a fuller
+          `summary` (a push's commit count); replace by `(monorepo_id, seq)`.
+        - `{"type": "summary", "monorepo", "monorepo_id", "summary": FeedSummary}`.
+        - `{"type": "needs", "monorepo", "monorepo_id", "changed": [{repo, branch, state}], "more"}`:
+          branches that entered or left "needs you" (`state` null: left);
+          `more`: over 50 changed, refetch listNeeds.
+          A large monorepo sends `summary` and `needs` only when it crosses
+          100 members (either way); its line is read again with the list.
+        - `{"type": "joined", "monorepo", "monorepo_id", "large"}`, `{"type": "left", "monorepo", "monorepo_id"}`:
+          refetch the first page and the list.
+        - `{"type": "contributed", "monorepo", "monorepo_id", "hour", "kind", "n"}`:
+          your own work was counted (`kind` commit, branch or review; `hour`
+          the UTC hour, `2026-10-03T17`), for work of the last two days;
+          refetch getContributions. Large monorepos send it here too.
+        - `{"type": "error", "message"}`: the frame sent was not understood
+          (anything but `hello` or the text `ping`). Nothing changed; the
+          socket stays open.
+        Every frame's `monorepo` is the `owner/name` label (as the index last
+        heard it; a rename shows within a minute) and `monorepo_id` the id.
+        The text `ping` gets `pong`. Lines of large monorepos do not come
+        here: open their own event socket with `topics=feed` (the home opens
+        at most 5; it refreshes the others every 60 s).
+
+        Cookie or Bearer. With the cookie, the upgrade must carry Pando's own
+        `Origin` (403 `bad_origin`).
+      tags: [monorepos]
+      parameters:
+        - name: cursor
+          in: query
+          description: A `next` from an earlier page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: in
+          in: query
+          description: "One monorepo's `owner/name` (an old name works too). The home narrows by monorepo only."
+          schema: { type: string }
+        - name: owner
+          in: query
+          description: "Only the person's monorepos under this owner (an org's page shows its activity this way). Not with `in` (400). An owner with none of the person's monorepos gives an empty page."
+          schema: { $ref: "#/components/schemas/Login" }
+      responses:
+        "200":
+          description: A page, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, next, from_logs, skipped]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/FeedEvent" }
+                  next: { type: [string, "null"], description: The cursor for the next (older) page; null at the end. }
+                  from_logs: { type: boolean, description: "True when the page went past the feed's window and read monorepos' own logs." }
+                  skipped:
+                    type: array
+                    description: Monorepos (`owner/name`) not read for this page (over 20 logs); narrow with `in` to read one.
+                    items: { type: string }
+        "101": { description: The person's WebSocket. }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/branches:
+    get:
+      operationId: listNeeds
+      summary: '"Needs you": open branches that are ready, conflicting or failing, and issues assigned to the person, across their monorepos'
+      description: |
+        `issues`: per monorepo, the open issues assigned to the person, read
+        from each monorepo's summary line (up to 10 s behind; the person's
+        socket's `summary` frame moves it, its `assigned`; a large monorepo's
+        is read from it, current), most recently updated first, with the
+        newest one.
+
+        Branches: from stored branch facts and statuses (no Artifacts call), asked only
+        of the monorepos whose counts in their summary line are not zero (up
+        to 10 s behind), most recently active first, at most 50 monorepos (the
+        rest in `skipped`). One state per branch, in this order:
+        - `conflicts`: the stored dry run for the branch's current head
+          conflicts with main;
+        - `failing`: a check on the head failed or errored;
+        - `ready`: facts for the current main and head say clean, and the
+          merge gate's checks pass.
+        Facts are computed for branches pushed in the last 7 days; an older
+        branch that is not re-pushed drops out of `ready` when main moves.
+        Rows are newest push first.
+      tags: [branches]
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [open], default: open }
+        - name: needs
+          in: query
+          description: Comma-separated, some of ready, conflicts, failing (default all three).
+          schema: { type: string, default: "ready,conflicts,failing" }
+        - name: in
+          in: query
+          description: "One monorepo's `owner/name`."
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branches, issues, truncated, skipped]
+                properties:
+                  branches:
+                    type: array
+                    items: { $ref: "#/components/schemas/NeedRow" }
+                  issues:
+                    type: array
+                    items:
+                      allOf:
+                        - type: object
+                          required: [monorepo, monorepo_id]
+                          properties:
+                            monorepo: { type: string, description: "`owner/name`." }
+                            monorepo_id: { type: string }
+                        - $ref: "#/components/schemas/AssignedIssues"
+                  truncated: { type: boolean }
+                  skipped:
+                    type: array
+                    description: Monorepos (`owner/name`) not asked (over 50).
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: getMonorepo
-      summary: Get a monorepo (members)
+      summary: Get a monorepo (members); an old name answers with the current one
       tags: [monorepos]
       responses:
         "200":
           description: OK
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Monorepo" }
+              schema: { $ref: "#/components/schemas/MonorepoEntry" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: renameMonorepo
+      summary: Rename or transfer a monorepo (owners)
+      description: |
+        The label moves; the id, repos, history, members, Artifacts repos and
+        feeds stay. The old `owner/name` keeps working for the API and the git
+        door (an alias) until that owner gives the name to another monorepo.
+        A transfer (`owner`) goes to an organization the caller is in (else
+        403 `not_your_namespace`), or to a person who already has their own
+        owner row in it (else 400 `bad_owner`). Its own members stay; moved
+        into an org, the org's people gain it, and moved out, they lose it.
+        409 `monorepo_exists` when the new name is taken. `replaced_alias`
+        reports an old name of another monorepo that this one took over.
+      tags: [monorepos]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { $ref: "#/components/schemas/Name" }
+                owner: { $ref: "#/components/schemas/Login" }
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MonorepoEntry"
+                  - type: object
+                    required: [replaced_alias]
+                    properties:
+                      replaced_alias: { $ref: "#/components/schemas/ReplacedAlias" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteMonorepo
       summary: Delete a monorepo, its repos and their history (owners)
-      description: Deletes every Artifacts repo it owns (`<monorepo>--*`, the meta layer's too), the meta layer's large files in R2 (`meta/<monorepo>/`), its records, invites and memberships. No soft delete. Needs `?confirm=<monorepo>`.
+      description: Deletes every Artifacts repo it owns (`<id>--*`, the meta layer's too), the meta layer's large files in R2 (`meta/<id>/`), its records, invites, memberships and old names. No soft delete. Needs `?confirm=<owner>/<name>`, typed out in full.
       tags: [monorepos]
       parameters:
         - name: confirm
@@ -387,12 +1181,565 @@ paths:
         "204": { description: Deleted }
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/members:
+  /v1/monorepos/{owner}/{monorepo}/heads:
     parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: heads
+      summary: Every code repo's main head (for followers; no Artifacts read)
+      description: |
+        Main as Pando last moved it: by the first push through the door, or by
+        a merge. Answered from the monorepo object's records. A repo made
+        before Pando kept heads is read once from Artifacts and kept. `head` is
+        null for an empty repo. The meta layer's repo is not listed.
+
+        A follower (`pando worktree follow`) calls this on connect, then opens
+        `GET /v1/monorepos/{owner}/{monorepo}/events?topics=main&since=<seq>` (WebSocket) to
+        hear each move, and calls it again every few minutes as a safety net.
+      tags: [repos]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heads, seq]
+                properties:
+                  heads:
+                    type: array
+                    items:
+                      type: object
+                      required: [repo, path, default_branch, head, head_title, updated_at]
+                      properties:
+                        repo: { type: string, description: The repo's name in URLs. }
+                        path: { type: string }
+                        default_branch: { type: string }
+                        head: { type: [string, "null"] }
+                        head_title:
+                          type: [string, "null"]
+                          description: >-
+                            The head commit's title (its first line), recorded when
+                            main moved: a merge's message, or the first push's
+                            commit (shortly after the push, once its numbers are
+                            read). A main recorded before titles were shows the
+                            last merge's branch title. Null when unknown, never
+                            a title from another commit.
+                        updated_at: { type: [string, "null"], format: date-time }
+                  seq:
+                    type: [integer, "null"]
+                    description: The event stream's newest seq when this was read; resume the socket from it. Null when the stream is off.
+  /v1/monorepos/{owner}/{monorepo}/events:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: events
+      summary: The monorepo's event stream (JSON pages, or a WebSocket)
+      description: |
+        Every change a screen shows is an event, written in the same step as
+        the change itself: a `seq`, a `kind`, and the changed `row` in its REST
+        shape, with the client-side `collection`, `key` and `op` (`upsert` or
+        `delete`) it applies to, so a client store (TanStack DB) can apply it
+        directly. Every event is kept; the one limit is the monorepo object's
+        storage (10 GB per Durable Object; an event is 0.3 to 1.3 KB).
+
+        Kinds, by collection:
+        - branches: `branch.opened`, `push`, `branch.updated`, `merged`
+          (upsert), `branch.deleted` (delete). The row has the branch's stored
+          fields only (name, head, author, title, description, state and the
+          merge facts) and the event says `partial: true`: `ahead`, `behind`,
+          `base`, `mergeable` and `checks` are computed per request, so
+          refetch getBranch for them.
+        - default_heads: `push` (the first push of main) and
+          `default_head.updated` (a merge). Row `{repo, default_branch,
+          default_head}`. When main moves, every open branch's ahead, behind
+          and mergeable change: refetch the branch list.
+        - statuses: `status` (Status row).
+        - ci_builds: `ci.build` (CiBuild row, upsert), on the build's repo.
+        - ci_jobs: `ci.job` (CiJob row, upsert; key `<build>/<job>`), on the
+          build's repo.
+        - ci_connections: `ci.connection` (CiConnection row; delete on
+          disconnect, row `{id}`).
+        - reviews: `review` (Review row).
+        - worktrees: `worktree.reported` (upsert), `worktree.removed` (delete).
+        - meta_files: `meta.saved` (a meta history entry, no bytes; not sent
+          during pando init's first upload).
+        - presence: `machine.connected`, `machine.disconnected`. Row
+          `{connections: [...]}`, the whole list of who is connected now (as in
+          meta/status), plus `connection`, the one that changed.
+        - machines: `machine.updated` (upsert, a Machine row; key
+          `<login>/<credential_id>`). Sent at once for a new machine, a
+          connect, a disconnect or a change of its worktrees; for activity
+          alone at most once a minute per machine (every activity event
+          already names its `actor` and `machine`).
+
+        - issues: `issue.opened`, `issue.commented`, `issue.closed`,
+          `issue.reopened`, `issue.updated` (everything else: title, body,
+          project, labels, assignees, links, reactions, a comment edited or
+          deleted, a merge naming a closed issue). Key `<n>`, with `number`,
+          `row` (the IssueRow), `body_version`, `items` (the new timeline
+          items; a comment's body is null over 16 KB), and when they apply
+          `removed` (item ids), `comment` (a comment edited or whose
+          reactions moved) and `reactions` (the issue's own).
+        - labels: `label.updated` (upsert, a Label, `from` its name before a
+          rename; delete, row `{name}`).
+
+        Topics (`?topics=`, comma-separated, at most 10): `all` (default),
+        `issues` (every issue and label event), `issue:<n>` (one issue's;
+        also `repo:<repo>` for its project and its linked branches' repos),
+        `main` (every default_heads event), `main:<repo>`, `repo:<repo>`,
+        `meta` (meta_files and presence), `kind:<kind>`, `feed` (the
+        activity lines as the person's feed shows them, as
+        `{"type": "feed", "n", "event": FeedEvent}` frames: the home uses it
+        for a monorepo of more than 100 members, and a monorepo's pages may).
+        `pando worktree follow` needs only `main:<repo>`.
+
+        The `feed` topic's lines are numbered `n` in the order they go out
+        (a push's line goes out when its commit count is known, so `n` is not
+        `seq` order). `caught_up` then carries `feed_n`, the last number
+        sent. A socket that drops reconnects with `feed_since=<the last n it
+        saw>` and first gets every line sent after it (at most 500, else one
+        `{"type": "feed_resync", "feed_n"}`: refetch, then reconnect with that
+        `feed_n`).
+
+        Presence (the home's `machines_active` and `worktrees_active`): a
+        follower sends, after the socket opens and whenever a worktree is
+        added or removed on its machine,
+        `{"type": "hello", "machine": "<machine>", "worktrees": ["<worktree id>", ...]}`:
+        the ids it reported with putWorktree for its branch worktrees in this
+        monorepo (not read-only mains), at most 1,000, each 1 to 64 of
+        `A-Z a-z 0-9 _ -`. `machine` is optional (default: the credential's
+        name). Each hello replaces the last one of that socket; presence ends
+        when the socket closes. The hello also marks the socket's credential
+        connected in listMachines, with these worktrees. Answer: `{"type": "hello_ok", "machine",
+        "worktrees", "machines_active", "worktrees_active"}`, or
+        `{"type": "error", "message"}` (the socket stays open).
+
+        Without `Upgrade`: JSON, `?since=<seq>&limit=<n>` (at most 500), or the
+        latest `limit` with no `since`, oldest first either way. The pull also
+        takes `before=<seq>` (only events before it: page back through the
+        log with the first event's seq), `repo=<repo>` (that repo's events;
+        `meta` for the meta layer's) and `kinds=<kind>,<kind>` (at most 20),
+        each answered from an index on (repo, seq) or (kind, seq), and with
+        `topics` (matched over at most 5,000 rows). With `Upgrade: websocket`: events after
+        `?since=` (at most 500, else one `{"type": "resync", "seq",
+        "oldest_seq"}` frame: refetch, then resume from `seq`), then
+        `{"type": "caught_up", "seq"}`, then live `{"type": "event", "seq", ...}`
+        frames. The text `ping` gets `pong`. Close code 4404: the monorepo was
+        deleted. Close code 4403: you no longer have access to it (an owner
+        removed you, you left the org that owns it, or a transfer moved it
+        away from that org); do not reconnect.
+
+        Numbers and shas: `seq`, `oldest_seq` are stream sequence numbers. In
+        an event, `head` and `before` (push and default_head events) are commit
+        shas. Set `EVENT_STREAM` false in
+        worker/src/monorepo/stream.ts and it answers 501 `event_stream_on_hold`.
+      tags: [monorepos]
+      parameters:
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: topics
+          in: query
+          schema: { type: string, default: all }
+        - name: feed_since
+          in: query
+          description: "With `topics` including `feed`, on a WebSocket: replay the `feed` lines numbered after this."
+          schema: { type: integer, minimum: 0 }
+        - name: before
+          in: query
+          description: "JSON only: events before this seq (the latest `limit` of them, oldest first)."
+          schema: { type: integer, minimum: 1 }
+        - name: repo
+          in: query
+          description: "JSON only: one repo's events (its name as in its URL; `meta` for the meta layer)."
+          schema: { type: string }
+        - name: kinds
+          in: query
+          description: "JSON only: these kinds, comma-separated, at most 20."
+          schema: { type: string }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, seq, oldest_seq, resync]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+                  seq: { type: integer, description: "The newest event's seq (0 when none)." }
+                  oldest_seq: { type: integer, description: The oldest kept. }
+                  resync: { type: boolean, description: "True when `since` is not in the stream; refetch everything." }
+        "101": { description: The WebSocket. }
+        "501":
+          description: "`event_stream_on_hold`"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listIssues
+      summary: A page of issues, and the open and closed counts for the same filters
+      description: |
+        Keyset paging: pass `next_cursor` back as `cursor`. `q` matches words
+        in titles and bodies (SQLite FTS5): each word must appear, the last as
+        a prefix, up to 10 words; comments are not searched. Results keep the
+        chosen sort.
+      tags: [issues]
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [open, closed, all], default: open } }
+        - { name: label, in: query, description: "Repeat for several: every one must match.", schema: { type: string } }
+        - { name: assignee, in: query, description: "A login, `@me`, or `none`.", schema: { type: string } }
+        - { name: author, in: query, description: "A login, or `@me`.", schema: { type: string } }
+        - { name: project, in: query, description: "A repo's name, or `none`.", schema: { type: string } }
+        - { name: linked, in: query, description: "`<repo>:<branch>`: the issues that branch is linked to (the branch page's Issues block).", schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [created, updated, comments], default: created } }
+        - { name: order, in: query, schema: { type: string, enum: [desc, asc], default: desc } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueList" }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createIssue
+      summary: Open an issue
+      description: |
+        `link`: branches to link at once (`pando worktree add --issue`). Send
+        an `Idempotency-Key`: a retry with the same key answers the first
+        issue (200, `Pando-Replayed: true`).
+      tags: [issues]
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 256 }
+                body: { type: string, maxLength: 65536 }
+                labels: { type: array, items: { type: string }, maxItems: 100 }
+                assignees: { type: array, items: { type: string }, maxItems: 10 }
+                project: { type: [string, "null"], description: "A repo's name." }
+                link: { type: array, items: { $ref: "#/components/schemas/BranchRef" } }
+      responses:
+        "201":
+          description: Opened.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "200":
+          description: "A retry with the same Idempotency-Key: the first issue (`Pando-Replayed: true`)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "400": { description: "`bad_request` (a title, an unknown label or project, a branch that does not exist) or `not_a_member` (an assignee)." }
+        "413": { description: "`too_large`: a body over 65,536 characters." }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: getIssue
+      summary: One issue, with its body, links, participants and reactions
+      tags: [issues]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateIssue
+      summary: Edit, label, assign, link, close or reopen an issue
+      description: |
+        Any of the fields, in one call; each change is its own timeline item
+        and the call is one event. Add and remove lists are set operations.
+        `state: closed` takes `state_reason` (default `completed`); setting
+        the state it already has changes nothing. `body` with `base_version`
+        is refused with 409 `edited` (and `current`) when the body moved;
+        without it the last writer wins.
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, minLength: 1, maxLength: 256 }
+                body: { type: string, maxLength: 65536 }
+                base_version: { type: integer }
+                project: { type: [string, "null"] }
+                state: { type: string, enum: [open, closed] }
+                state_reason: { type: string, enum: [completed, not_planned] }
+                add_labels: { type: array, items: { type: string } }
+                remove_labels: { type: array, items: { type: string } }
+                add_assignees: { type: array, items: { type: string } }
+                remove_assignees: { type: array, items: { type: string } }
+                link: { type: array, items: { $ref: "#/components/schemas/BranchRef" } }
+                unlink: { type: array, items: { $ref: "#/components/schemas/BranchRef" } }
+      responses:
+        "200":
+          description: The issue now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "`edited`: the body moved since `base_version`; `current` is the issue now." }
+        "413": { description: "`too_large`." }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/timeline:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: issueTimeline
+      summary: Comments and events together, oldest first
+      description: "`cursor` continues after a page; `last=N` (instead) is the newest N, oldest first. `total` counts every item."
+      tags: [issues]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: last, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Timeline" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/comments:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: addIssueComment
+      summary: Comment on an issue
+      tags: [issues]
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 65536 }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueComment" }
+        "200": { description: "A retry with the same Idempotency-Key: the first comment." }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { description: "`too_large`." }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/comments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getIssueComment
+      summary: One comment, whole (a live event leaves a body over 16 KB out)
+      tags: [issues]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueComment" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateIssueComment
+      summary: Edit your comment
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 65536 }
+                base_version: { type: integer }
+      responses:
+        "200":
+          description: The comment now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueComment" }
+        "403": { description: "`forbidden`: someone else's comment." }
+        "409": { description: "`edited`, with `current`, the comment now." }
+    delete:
+      operationId: deleteIssueComment
+      summary: Delete a comment (yours, or anyone's as an owner); it leaves the timeline
+      tags: [issues]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/reactions/{content}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: content, in: path, required: true, schema: { $ref: "#/components/schemas/ReactionContent" } }
+    put:
+      operationId: addIssueReaction
+      summary: React to an issue (once per person and reaction)
+      tags: [issues]
+      responses:
+        "200":
+          description: The issue's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+    delete:
+      operationId: removeIssueReaction
+      summary: Take your reaction back
+      tags: [issues]
+      responses:
+        "200":
+          description: The issue's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{number}/comments/{id}/reactions/{content}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: content, in: path, required: true, schema: { $ref: "#/components/schemas/ReactionContent" } }
+    put:
+      operationId: addCommentReaction
+      summary: React to a comment
+      tags: [issues]
+      responses:
+        "200":
+          description: The comment's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+    delete:
+      operationId: removeCommentReaction
+      summary: Take your reaction back
+      tags: [issues]
+      responses:
+        "200":
+          description: The comment's reactions now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+  /v1/monorepos/{owner}/{monorepo}/labels:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listLabels
+      summary: The monorepo's labels, by name, each with its open issues
+      description: A new monorepo starts with bug (orange), enhancement (blue), documentation (teal) and question (purple). At most 500.
+      tags: [issues]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LabelList" }
+    post:
+      operationId: createLabel
+      summary: Make a label (owners)
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, color]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 50 }
+                color: { $ref: "#/components/schemas/LabelColor" }
+                description: { type: [string, "null"], maxLength: 100 }
+      responses:
+        "201":
+          description: Made.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "`label_exists`: a label with that name, ignoring case." }
+  /v1/monorepos/{owner}/{monorepo}/labels/{label}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: label, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateLabel
+      summary: Rename, recolour or describe a label (owners); a rename moves it on every issue in one step
+      tags: [issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 50 }
+                color: { $ref: "#/components/schemas/LabelColor" }
+                description: { type: [string, "null"], maxLength: 100 }
+      responses:
+        "200":
+          description: The label now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteLabel
+      summary: Delete a label (owners); it leaves every issue, with no timeline items
+      tags: [issues]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/members:
+    parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: listMembers
       summary: The monorepo's members
+      description: Everyone who can open it, by login. In an org's monorepo that is its own members and the org's people; `via` says which, and `role` is the higher of the two.
       tags: [monorepos]
       responses:
         "200":
@@ -406,8 +1753,9 @@ paths:
                   members:
                     type: array
                     items: { $ref: "#/components/schemas/Member" }
-  /v1/monorepos/{monorepo}/invites:
+  /v1/monorepos/{owner}/{monorepo}/invites:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     post:
       operationId: invite
@@ -464,8 +1812,9 @@ paths:
                   invites:
                     type: array
                     items: { $ref: "#/components/schemas/Invite" }
-  /v1/monorepos/{monorepo}/invites/{email}:
+  /v1/monorepos/{owner}/{monorepo}/invites/{email}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - name: email
         in: path
@@ -478,8 +1827,9 @@ paths:
       responses:
         "204": { description: Withdrawn }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/members/{login}:
+  /v1/monorepos/{owner}/{monorepo}/members/{login}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - name: login
         in: path
@@ -488,6 +1838,7 @@ paths:
     put:
       operationId: putMember
       summary: Add a user to the monorepo, or change their role (owners)
+      description: Their own row; in an org's monorepo it adds to what the org gives them. 409 `last_owner` when it would leave a person's monorepo with no owner.
       tags: [monorepos]
       requestBody:
         required: true
@@ -508,14 +1859,16 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: removeMember
-      summary: Remove a user from the monorepo (owners; the last owner stays)
+      summary: Remove a user's own row from the monorepo (owners; a person's monorepo keeps one owner)
+      description: Removes their own row only (404 when they have none); someone in the owning org keeps the org's access. An org's monorepo needs no owner row of its own (its org's owners own it).
       tags: [monorepos]
       responses:
         "204": { description: Removed }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos:
+  /v1/monorepos/{owner}/{monorepo}/repos:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     post:
       operationId: createRepo
@@ -535,7 +1888,7 @@ paths:
               properties:
                 path:
                   type: string
-                  description: The repo path from the root, for example `projects/web` (formats.md). Its `name` is the path with `/` turned into `-`.
+                  description: The repo path from the root, for example `projects/web`. Its `name` is the path with `/` turned into `-`.
                 description: { type: string }
       responses:
         "201":
@@ -561,8 +1914,9 @@ paths:
                   repos:
                     type: array
                     items: { $ref: "#/components/schemas/Repo" }
-  /v1/monorepos/{monorepo}/repos/{repo}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
     get:
@@ -576,14 +1930,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Repo" }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
     get:
       operationId: listBranches
       summary: List branches with head, base, author, ahead and behind, mergeable and checks
-      description: The default branch is not in the list; its name and head are at the top.
+      description: |
+        Answered at once from stored facts. `ahead`, `behind`, `base` and
+        `mergeable` are computed on change, by a queue: when a branch is
+        pushed, and in a sweep when main moves (the 100 open branches pushed
+        most recently in the last 7 days). Until a row's facts are for the
+        current main and head it is `stale: true`, with `mergeable: "pending"`
+        and `last_mergeable`; a `branch.updated` event brings the fresh row. A
+        list computes at most 25 rows itself, those stale for over 30 s (a
+        branch no sweep reaches). The default branch is not in the list; its
+        name and head are at the top.
+
+        Newest first, as GitHub lists active branches: an open branch by its
+        last push, a merged one by its merge time; branches with the same time
+        by name. Pages stay stable when two share a time: `next_cursor` holds
+        the last row's time and name.
       tags: [branches]
       parameters:
         - name: state
@@ -592,6 +1961,13 @@ paths:
             type: string
             enum: [open, merged, all]
             default: open
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: cursor
+          in: query
+          description: "`next_cursor` from the previous page, as it came (the last row's time and name)."
+          schema: { type: string }
       responses:
         "200":
           description: OK
@@ -599,7 +1975,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [default_branch, default_head, branches]
+                required: [default_branch, default_head, branches, next_cursor]
                 properties:
                   default_branch: { type: string }
                   default_head:
@@ -608,13 +1984,15 @@ paths:
                   branches:
                     type: array
                     items: { $ref: "#/components/schemas/Branch" }
+                  next_cursor: { type: [string, "null"], description: "Pass as `cursor` for the next page; null on the last." }
     post:
       operationId: createBranch
       summary: Create a branch on the server, off main by default
       description: |
         Points a new branch at `from` (default: main's head) with no new
         commit. The caller becomes the branch's author. 409 `branch_exists` if
-        it exists.
+        it exists. The answer has `stale: true` until the branch's facts are
+        computed (a `branch.updated` event follows).
       tags: [branches]
       requestBody:
         required: true
@@ -635,15 +2013,27 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
         "409": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}:
+        "503":
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
     get:
       operationId: getBranch
       summary: One branch, as in the list
+      description: Answers from stored facts at once, like the list. It computes them first only when they have been stale for over 30 s, or with `?fresh=1`.
       tags: [branches]
+      parameters:
+        - name: fresh
+          in: query
+          description: "`1`: compute ahead, behind and mergeable now if stale (about 1 s)."
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: OK
@@ -651,6 +2041,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
         "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteBranch
+      summary: Delete a branch (not the default one)
+      tags: [branches]
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503":
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     patch:
       operationId: updateBranch
       summary: Set the branch's title and description
@@ -671,8 +2074,49 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Branch" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/diff:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/commits:
     parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/branch"
+    get:
+      operationId: branchCommits
+      summary: The branch's own commits, newest first, with Pando's trailers parsed
+      description: |
+        The commits on the branch that are not on the default branch (the
+        ones `ahead` counts), in git log's order: each commit before its
+        parents. `trailers` holds the who-made-it lines
+        (`Pando-Agent`, `Pando-Worktree`, `Pando-Machine`), read from
+        the message's last paragraph.
+      tags: [branches]
+      parameters:
+        - name: limit
+          in: query
+          description: At most 250.
+          schema: { type: integer, minimum: 1, maximum: 250, default: 250 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branch, head, base_branch, merge_base, total, truncated, commits]
+                properties:
+                  branch: { type: string }
+                  head: { type: string }
+                  base_branch: { type: string }
+                  merge_base: { type: [string, "null"] }
+                  total: { type: integer, description: Commits on the branch only; may be more than returned. }
+                  truncated: { type: boolean }
+                  commits:
+                    type: array
+                    items: { $ref: "#/components/schemas/Commit" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/diff:
+    parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -689,6 +2133,18 @@ paths:
         budget keep their entry with `patch_omitted: budget`. A text file over
         1 MiB on either side, or one whose diff is too big to compute, has
         `patch_omitted: too_large` and null counts.
+
+        **Files changed** (`patches=1`, the web's branch page): the answer is
+        a `BranchDiff`, each file with its own unified patch in git's format
+        (`patch`, ready for a diff view such as @pierre/diffs' `processFile`),
+        or null when left out: a binary (a NUL in the first 8,000 bytes), a
+        text file over 1 MiB on either side, a diff too big to compute (an
+        edit script over 20,000), or past 2 MiB of patches in all. At most
+        1,000 files are listed (`too_many_files`, with `files_total`). Main
+        and the head come from Pando's stored heads; the answer is kept by
+        (main, head), which never changes, so a repeat costs no Artifacts read,
+        and `ETag` is the two shas (a repeat with `If-None-Match` is a 304).
+        `format`, `hunks`, `max_bytes` and `paths` do not apply.
       tags: [branches]
       parameters:
         - name: format
@@ -709,27 +2165,36 @@ paths:
           in: query
           description: Path prefixes, comma-separated or repeated (`paths=src/auth/&paths=README.md`).
           schema: { type: string }
+        - name: patches
+          in: query
+          description: "`1`: Files changed, a `BranchDiff` (see above)."
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: |
-            JSON, or `text/x-patch` for `format=patch`: a unified diff with
+            JSON (a `BranchDiff` with `patches=1`), or `text/x-patch` for `format=patch`: a unified diff with
             `diff --git` headers, ready for `git apply` or
             `plannotator review --patch-file -`. In patch form, files past the
             budget are left out and the response carries
             `X-Pando-Diff-Omitted: <count>`.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Diff" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Diff"
+                  - $ref: "#/components/schemas/BranchDiff"
             text/x-patch:
               schema: { type: string }
+        "304": { description: "`patches=1` with `If-None-Match` naming this (main, head)." }
         "404": { $ref: "#/components/responses/Error" }
         "409":
           description: "`no_merge_base`: the branch shares no history with the default branch."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/reviews:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/reviews:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -777,8 +2242,9 @@ paths:
                   reviews:
                     type: array
                     items: { $ref: "#/components/schemas/Review" }
-  /v1/monorepos/{monorepo}/repos/{repo}/branches/{branch}/merge:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/merge:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/branch"
@@ -808,7 +2274,12 @@ paths:
                   description: The merge commit message. Default "<title>\n\n<description>\n\nMerge branch '<branch>'", or "Merge branch '<branch>'" with no title.
                 expected_head:
                   type: string
-                  description: Refuse with 409 `head_moved` unless the branch head is this sha.
+                  description: |
+                    Refuse with 409 `head_moved` unless the branch head is this
+                    sha. When it is the head Pando recorded for the branch (every
+                    push is recorded before git is told it landed), the merge
+                    uses the recorded heads and reads no refs, which is faster;
+                    exactly this commit is merged.
       responses:
         "200":
           description: Merged, or already in the default branch.
@@ -825,13 +2296,134 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries. `checks_unknown` (an unforced merge): .pando/pando.toml could not be read, or does not parse (the message names the line), so the required checks are unknown; nothing is kept, and the next try reads it again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "501":
           description: "`merge_engine_unavailable`: the server-side merge engine is not wired in yet."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/files/{path}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/tree:
     parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getTree
+      summary: A folder at any ref
+      description: |
+        Folders first, then by name; 1,000 entries a page. Read by hash
+        through the edge cache: a repeat view reaches no Artifacts call. A
+        branch name resolves from Pando's stored heads; a sha that is not in
+        this repo is a 404. No sizes (git trees have none).
+      tags: [repos]
+      parameters:
+        - { name: ref, in: query, description: "A branch name (`/` as is, URL-encoded) or a 40-character sha. Default: the default branch.", schema: { type: string } }
+        - { name: path, in: query, description: "The folder, `a/b/c`. Default: the root.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 } }
+        - { name: cursor, in: query, description: A `next` from an earlier page., schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ref, commit, path, entries, total, next]
+                properties:
+                  ref: { type: string }
+                  commit: { type: string, description: The commit the ref resolved to. }
+                  path: { type: string }
+                  entries: { type: array, items: { $ref: "#/components/schemas/TreeEntry" } }
+                  total: { type: integer }
+                  next: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { description: "`not_found` (ref, commit or path), or `not_a_folder`.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/tree/last-commits:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getLastCommits
+      summary: The last commit that changed each entry of a folder
+      description: |
+        First parents (`git log -1 --first-parent -- <entry>`): on main, a
+        change merged from a branch is the merge, with `merged_branch`. A
+        complete answer is stored (it never changes) and reused by later
+        commits' answers. A walk stops after about 40 Artifacts reads: the
+        answer then has `complete: false`, the entries found so far (null for
+        the rest), and `retry_after_ms`; a job finishes it. Entries unchanged
+        within 10,000 commits stay null with `older.before`.
+      tags: [repos]
+      parameters:
+        - { name: ref, in: query, schema: { type: string } }
+        - { name: path, in: query, schema: { type: string } }
+        - { name: names, in: query, description: "Comma-separated entry names (a page of a large folder). Default: all.", schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ref, commit, path, complete, entries, older, retry_after_ms]
+                properties:
+                  ref: { type: string }
+                  commit: { type: string }
+                  path: { type: string }
+                  complete: { type: boolean }
+                  entries:
+                    type: object
+                    additionalProperties:
+                      oneOf:
+                        - $ref: "#/components/schemas/CommitLine"
+                        - type: "null"
+                  older: { type: [object, "null"], properties: { before: { type: string, format: date-time } } }
+                  retry_after_ms: { type: [integer, "null"] }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/history:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getHistory
+      summary: Commits that changed one path, newest first
+      description: |
+        `git log --first-parent -- <path>`, paged. A page may stop short of
+        `limit` when its walk spent its budget (`complete_page: false`); ask
+        again with `next`. Renames are not followed. The walk stops at
+        10,000 commits from the ref (`capped`).
+      tags: [repos]
+      parameters:
+        - { name: ref, in: query, schema: { type: string } }
+        - { name: path, in: query, description: "A file or a folder. Default: the root (every commit).", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, description: A `next` from an earlier page., schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ref, path, commits, next, capped, complete_page]
+                properties:
+                  ref: { type: [string, "null"], description: Null on a page asked with a cursor. }
+                  path: { type: string }
+                  commits: { type: array, items: { $ref: "#/components/schemas/CommitLine" } }
+                  next: { type: [string, "null"] }
+                  capped: { type: boolean }
+                  complete_page: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/files/{path}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: path
@@ -855,8 +2447,9 @@ paths:
             application/octet-stream:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/monorepos/{monorepo}/repos/{repo}/statuses/{sha}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/statuses/{sha}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: sha
@@ -866,7 +2459,21 @@ paths:
     post:
       operationId: createStatus
       summary: Report a commit status (GitHub's body)
+      description: |
+        With a member's credential, the status shows that member as
+        `creator` and has `app` null, whatever the body says.
+
+        With a status token (`PANDO_STATUS_TOKEN` in a Buildkite build's
+        env, `status_token` in a web hook's payload), Pando stamps `app` from
+        the hook that delivered it (`buildkite`, a web hook's own `app`, or
+        null) and `creator` `app:<slug>` (`hook:<hook id>` when null). A
+        status token posts statuses for its one commit in its one repo, for
+        24 hours, on this route only: no other route and no git.
       tags: [statuses]
+      security:
+        - credential: []
+        - session: []
+        - statusToken: []
       requestBody:
         required: true
         content:
@@ -885,8 +2492,19 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Status" }
-  /v1/monorepos/{monorepo}/repos/{repo}/commits/{ref}/status:
+        "401":
+          description: "`unauthorized`: not a credential, or a status token that is not valid. `status_token_expired`: older than 24 hours. `status_tokens_off`: the Worker secret PANDO_STATUS_SECRET is not set."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: "`status_token_scope`: the token is for another commit, repo or monorepo. `status_token_route` (on any other route): a status token works here only."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/commits/{ref}/status:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: ref
@@ -904,8 +2522,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Checks" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
     post:
@@ -918,9 +2537,14 @@ paths:
         with the Worker secret `BUILDKITE_API_TOKEN`, for `push` events (by
         default) on branches that are not deleted. The build gets `commit`,
         `branch`, `message`, and `env`: `PANDO_CLONE_URL`, `PANDO_READ_TOKEN`
-        (30 minutes, read only, this repo), `PANDO_STATUS_URL`,
-        `PANDO_MONOREPO`, `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`,
-        `PANDO_DELIVERY`.
+        (read only, this repo, at least 24 hours: Buildkite's Retry reruns a
+        job with this env), `PANDO_STATUS_URL`, `PANDO_STATUS_TOKEN` (posts
+        checks on this commit for 24 hours, stamped `buildkite`; see
+        createStatus; `pando status <state>` uses it), `PANDO_MONOREPO`,
+        `PANDO_REPO`, `PANDO_BRANCH`, `PANDO_HEAD`, `PANDO_DELIVERY`,
+        `PANDO_SEQ`. Its `meta_data` has `pando_delivery`, `pando_monorepo`
+        (the id) and `pando_repo`, which Pando's Buildkite webhook uses to map
+        the build back (the `ci` tag).
       tags: [hooks]
       requestBody:
         required: true
@@ -949,6 +2573,10 @@ paths:
                   properties:
                     organization: { type: string }
                     pipeline: { type: string }
+                app:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{0,38}$"
+                  description: "For `web`: the CI service behind it (`github-actions`, `circleci`, ...), stamped as `app` on statuses posted with its deliveries' status tokens. Not `buildkite` (that is the `buildkite` type's)."
       responses:
         "201":
           description: Created
@@ -971,8 +2599,9 @@ paths:
                   hooks:
                     type: array
                     items: { $ref: "#/components/schemas/Hook" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/{hook_id}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: hook_id
@@ -985,8 +2614,9 @@ paths:
       tags: [hooks]
       responses:
         "204": { description: Removed }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/{hook_id}/deliveries:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/{hook_id}/deliveries:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: hook_id
@@ -1009,8 +2639,41 @@ paths:
                   deliveries:
                     type: array
                     items: { $ref: "#/components/schemas/Delivery" }
-  /v1/monorepos/{monorepo}/repos/{repo}/hooks/deliveries/{delivery_id}/redeliver:
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/{hook_id}/redeliver:
     parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: hook_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: replayHook
+      summary: Replay a hook from a seq, after an outage (owners)
+      description: Every delivery of this hook with a seq above `since` is sent again, oldest first, at most 1,000, each with a fresh round of five tries. Only changes made while the hook existed have deliveries.
+      tags: [hooks]
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued: { type: integer }
+                  ids:
+                    type: array
+                    items: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks/deliveries/{delivery_id}/redeliver:
+    parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - $ref: "#/components/parameters/repo"
       - name: delivery_id
@@ -1019,7 +2682,8 @@ paths:
         schema: { type: string }
     post:
       operationId: redeliver
-      summary: Send a delivery again, as a new delivery with a fresh read token (owners)
+      summary: Send a delivery again (owners)
+      description: The same delivery (same id and seq) is sent again now, with a fresh read token and a fresh round of five tries; `attempts` keeps counting.
       tags: [hooks]
       responses:
         "202":
@@ -1027,8 +2691,42 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Delivery" }
-  /v1/monorepos/{monorepo}/worktrees:
+  /v1/monorepos/{owner}/{monorepo}/machines:
     parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listMachines
+      summary: The Machines tab, one row per machine (a credential), latest activity first
+      description: |
+        A machine is a credential: the row's key is (login, credential_id),
+        and it is shown by the credential's name, so two people's `laptop`s
+        stay apart. Kept by the monorepo in the same step as each change:
+        - every activity event made through the credential sets
+          `last_activity` (the line's kind, repo, branch and summary, as in
+          FeedEvent; a push's commit count and title arrive a moment later);
+        - a follower's hello on the event socket sets it `connected`, with its
+          worktrees; its last such socket closing sets it disconnected.
+        Machines with no activity yet (only connected) come after the others.
+        Browser sessions (kind `browser`) appear only once they act, never as
+        connected; show them as the web. Live: `machine.updated` on the event
+        stream.
+      tags: [worktrees]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [machines]
+                properties:
+                  machines:
+                    type: array
+                    items: { $ref: "#/components/schemas/Machine" }
+  /v1/monorepos/{owner}/{monorepo}/worktrees:
+    parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
     get:
       operationId: listWorktrees
@@ -1054,13 +2752,14 @@ paths:
                   worktrees:
                     type: array
                     items: { $ref: "#/components/schemas/Worktree" }
-  /v1/monorepos/{monorepo}/worktrees/{worktree_id}:
+  /v1/monorepos/{owner}/{monorepo}/worktrees/{worktree_id}:
     parameters:
+      - $ref: "#/components/parameters/owner"
       - $ref: "#/components/parameters/monorepo"
       - name: worktree_id
         in: path
         required: true
-        description: Made by the client (formats.md, `wt_` and 16 hex characters).
+        description: Made by the client, `wt_` and 16 hex characters.
         schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
     put:
       operationId: putWorktree
@@ -1077,7 +2776,7 @@ paths:
               properties:
                 repo: { type: string, description: "The repo path (`projects/web`, or `.`)." }
                 branch: { type: string }
-                path: { type: string, description: "The worktree path from the root (formats.md, section 1)." }
+                path: { type: string, description: "The worktree path from the root." }
                 machine: { type: string }
                 agent: { type: [string, "null"], description: "The agent working in it, if any (PANDO_AGENT)." }
                 kind: { type: string, enum: [fuse, sparse, fskit] }
@@ -1106,6 +2805,501 @@ paths:
       responses:
         "204": { description: Removed }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: getCi
+      summary: The CI tab's top - services, connections, pipelines, required checks
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [services, connections, pipelines, required_checks]
+                properties:
+                  services:
+                    type: array
+                    description: The services Pando can connect.
+                    items:
+                      type: object
+                      properties:
+                        service: { type: string }
+                        name: { type: string }
+                  connections:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiConnection" }
+                  pipelines:
+                    type: array
+                    description: Each connection's pipelines - those its builds named, and those a buildkite hook names.
+                    items: { $ref: "#/components/schemas/CiPipeline" }
+                  required_checks:
+                    type: array
+                    description: Every repo's required checks, read from `.pando/pando.toml` (a repo with no pipeline is here too).
+                    items:
+                      type: object
+                      properties:
+                        repo: { type: string }
+                        path: { type: string }
+                        checks:
+                          type: [array, "null"]
+                          description: Null while unknown (pando.toml unreadable or broken).
+                          items: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/connections:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: createCiConnection
+      summary: Connect a CI service (owners)
+      description: |
+        Answers the webhook URL to paste into the service, and its token
+        (`webhook_token`), shown this once. For Buildkite: Organization
+        Settings, Notification Services, Add, Webhook; the URL; the token,
+        sent as `X-Buildkite-Token` or (better) signed as
+        `X-Buildkite-Signature`; events `build.*` and `job.*`; the pipelines
+        to send. One connection per organization per monorepo. REST calls
+        use the Worker secret `BUILDKITE_API_TOKEN` at launch (the connection
+        says `token: worker_secret`); per-connection tokens are not built yet.
+      tags: [ci]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service, organization]
+              properties:
+                service: { type: string, enum: [buildkite] }
+                organization: { type: string, description: "The organization's slug, as in buildkite.com/<slug>." }
+                webhook_token:
+                  type: string
+                  minLength: 16
+                  maxLength: 200
+                  description: The service's own webhook token, if it made one; else Pando makes one.
+      responses:
+        "201":
+          description: Connected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection, webhook_token]
+                properties:
+                  connection: { $ref: "#/components/schemas/CiConnection" }
+                  webhook_token: { type: string, description: Shown once. }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409":
+          description: "`ci_connection_exists`: this organization is connected already."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/connections/{connection}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciConnection"
+    delete:
+      operationId: deleteCiConnection
+      summary: Disconnect a CI service (owners)
+      description: Its pipelines, builds, jobs and cached details go; its checks stay (they are commit statuses). Its webhook URL then answers 404.
+      tags: [ci]
+      responses:
+        "204": { description: Disconnected }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listCiBuilds
+      summary: Stored builds, newest first
+      tags: [ci]
+      parameters:
+        - { name: repo, in: query, schema: { type: string } }
+        - { name: branch, in: query, schema: { type: string } }
+        - { name: sha, in: query, schema: { type: string }, description: A full sha. }
+        - { name: pipeline, in: query, schema: { type: string } }
+        - name: number
+          in: query
+          description: "A build number, with `pipeline` (400 without it): a build's page address, `/{owner}/{monorepo}/ci/{pipeline}/{number}`. A number is unique within one pipeline on one connection; when two connections have a pipeline with the same slug, both builds come back, and `connection` narrows to one."
+          schema: { type: integer, minimum: 1 }
+        - { name: connection, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { $ref: "#/components/schemas/CiState" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "`next_cursor` from the previous page." }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [builds, next_cursor]
+                properties:
+                  builds:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiBuild" }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    get:
+      operationId: getCiBuild
+      summary: A build and its jobs
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CiBuild"
+                  - type: object
+                    required: [jobs]
+                    properties:
+                      jobs:
+                        type: array
+                        description: First scheduled first. Wait steps are left out.
+                        items: { $ref: "#/components/schemas/CiJob" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/jobs/{job}/log:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+      - $ref: "#/components/parameters/ciJob"
+    get:
+      operationId: getCiJobLog
+      summary: A job's log, from the service (its last 1 MiB)
+      description: Raw, with the service's escape codes (ANSI colours, Buildkite's timestamps). `Cache-Control` is immutable once `complete`.
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job, content, bytes, total_bytes, truncated, complete, fetched_at, cached, retry_after_ms]
+                properties:
+                  job: { type: string }
+                  content: { type: string }
+                  bytes: { type: integer, description: The bytes in `content`. }
+                  total_bytes: { type: integer, description: The whole log's size. }
+                  truncated: { type: boolean, description: True when `content` is the log's last 1 MiB only. }
+                  complete: { type: boolean, description: The job finished over 30 s ago; this never changes again. }
+                  fetched_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+                  retry_after_ms: { type: [integer, "null"], description: "Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise." }
+        "404": { $ref: "#/components/responses/Error" }
+        "413":
+          description: "`log_too_large`: the log is over 64 MiB; open it in the service (`web_url`)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/annotations:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    get:
+      operationId: listCiAnnotations
+      summary: A build's annotations, from the service (first 100)
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [annotations, truncated, complete, fetched_at, cached, retry_after_ms]
+                properties:
+                  annotations:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiAnnotation" }
+                  truncated: { type: boolean, description: The build has more than 100. }
+                  complete: { type: boolean }
+                  fetched_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+                  retry_after_ms: { type: [integer, "null"], description: "Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise." }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/artifacts:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    get:
+      operationId: listCiArtifacts
+      summary: A build's artifacts, from the service (first 100)
+      tags: [ci]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artifacts, truncated, complete, fetched_at, cached, retry_after_ms]
+                properties:
+                  artifacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiArtifact" }
+                  truncated: { type: boolean }
+                  complete: { type: boolean }
+                  fetched_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+                  retry_after_ms: { type: [integer, "null"], description: "Set when this is the last copy because Buildkite's rate limit is held: ask again after this long. Null otherwise." }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/artifacts/{artifact}/download:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+      - name: artifact
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: downloadCiArtifact
+      summary: Download an artifact of this build
+      description: A 302 to the service's own download URL, which Buildkite keeps good for about 60 seconds. Only an artifact of this build.
+      tags: [ci]
+      responses:
+        "302": { description: "`Location` is the download." }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/rebuild:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    post:
+      operationId: rebuildCiBuild
+      summary: Build the same commit again, with fresh tokens
+      description: |
+        A new build in the same pipeline, for the same commit and branch,
+        with the env a hook delivery gives (a fresh `PANDO_READ_TOKEN` and
+        `PANDO_STATUS_TOKEN`) and `meta_data.pando_rebuild_of`. Recorded at
+        once. Needs `write_builds` on the token.
+      tags: [ci]
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build: { $ref: "#/components/schemas/CiBuild" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+    post:
+      operationId: cancelCiBuild
+      summary: Cancel a running build (passed through)
+      description: "409 `ci_finished` when it has finished. Needs `write_builds`."
+      tags: [ci]
+      responses:
+        "202":
+          description: Canceling
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build: { $ref: "#/components/schemas/CiBuild" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/builds/{build}/jobs/{job}/retry:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/ciBuild"
+      - $ref: "#/components/parameters/ciJob"
+    post:
+      operationId: retryCiJob
+      summary: Retry a job (passed through)
+      description: |
+        The service reruns the job with the build's original env, so it can
+        clone for as long as the build's read token lives: at least 24 hours
+        after Pando started the build. The new job is recorded at once and
+        its check goes back to pending. Needs `write_builds`.
+      tags: [ci]
+      responses:
+        "202":
+          description: Retrying
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    oneOf:
+                      - $ref: "#/components/schemas/CiJob"
+                      - type: "null"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/pipelines/{pipeline}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - name: pipeline
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getCiPipeline
+      summary: A pipeline - its configuration (pipeline.yml) and its builds
+      description: |
+        The configuration is the service's (Buildkite's pipeline YAML, as set
+        in Buildkite), read at most every 5 minutes. A pipeline that uploads
+        its steps from the repo shows the upload step here; the repo's own
+        file is on the Code tab. When the read fails, the last copy is
+        shown with `configuration_error`.
+      tags: [ci]
+      parameters:
+        - { name: connection, in: query, schema: { type: string }, description: Needed only when two connections have a pipeline of this name. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pipeline, builds, next_cursor]
+                properties:
+                  pipeline:
+                    allOf:
+                      - $ref: "#/components/schemas/CiPipeline"
+                      - type: object
+                        properties:
+                          configuration: { type: [string, "null"] }
+                          configuration_fetched_at: { type: [string, "null"], format: date-time }
+                          configuration_error:
+                            type: [object, "null"]
+                            properties:
+                              code: { type: string }
+                              message: { type: string }
+                  builds:
+                    type: array
+                    items: { $ref: "#/components/schemas/CiBuild" }
+                  next_cursor: { type: [string, "null"] }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/ci/pipelines/{pipeline}/builds:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - name: pipeline
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: startCiBuild
+      summary: New build - the pipeline builds a branch's head as Pando has it
+      description: |
+        Any member. The branch's head comes from Pando's stored heads (no
+        ref read); its commit's title (one Artifacts read) is the build's
+        message. Started as a push delivery starts one: a read token for the
+        repo and a status token for the commit, both fresh. The build is
+        recorded at once; its webhooks update it. `?connection=` picks the
+        pipeline when two connections share its slug.
+      tags: [ci]
+      parameters:
+        - { name: connection, in: query, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch: { type: string, description: "Default: the repo's default branch." }
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [build]
+                properties:
+                  build:
+                    description: The build as Pando now has it, with its jobs; null if the service's answer named none.
+                    oneOf:
+                      - allOf:
+                          - $ref: "#/components/schemas/CiBuild"
+                          - type: object
+                            required: [jobs]
+                            properties:
+                              jobs: { type: array, items: { $ref: "#/components/schemas/CiJob" } }
+                      - type: "null"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { description: "No such pipeline, or no such branch (or it has no recorded head yet).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`no_repo`: the pipeline builds no repo of this monorepo (register it with a buildkite hook).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/integrations/buildkite/{connection}:
+    parameters:
+      - $ref: "#/components/parameters/ciConnection"
+    post:
+      operationId: buildkiteWebhook
+      summary: Buildkite's webhooks (the URL a connection shows)
+      description: |
+        Buildkite's own request: `X-Buildkite-Event`, and either
+        `X-Buildkite-Signature: timestamp=<unix s>,signature=<hex>` (HMAC-SHA256
+        of `<timestamp>.<raw body>` keyed by the connection's webhook token;
+        refused when over 5 minutes off) or `X-Buildkite-Token`. Events used:
+        `build.*` and `job.*` (and `ping`). Bodies up to 5 MiB. The build,
+        its job and its check are written with their events before the
+        answer. Events are applied in the order Buildkite signed them (in
+        whole seconds; with a plain token, the order they arrive); a job's
+        state never moves back, and a job event's copy of a build never moves
+        a finished build back.
+      tags: [ci]
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: "`recorded`, or `ignored` with a reason (another monorepo's, another organization's, or a pipeline that builds no repo here)."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: { type: string, enum: [recorded, ignored] }
+                  reason: { type: string }
+                  build: { type: string, description: The Pando build id. }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
 webhooks:
   hookDelivery:
     post:
@@ -1115,8 +3309,15 @@ webhooks:
         Headers: `X-Pando-Event` (the event), `X-Pando-Delivery` (the
         delivery id), `X-Pando-Signature-256: sha256=<hex>` (HMAC-SHA256 of
         the raw body with the hook's secret; GitHub's scheme under another
-        name). A delivery that does not get a 2xx within 10 seconds is retried
-        after 10 s, 1 min, 5 min and 30 min, then marked failed.
+        name).
+
+        Deliveries leave as soon as the change is recorded (no queue):
+        at least once and not in order, like GitHub's. The body's `seq` is the event stream's sequence number:
+        drop a seq you have seen, and sort by it. A try that does not get a
+        2xx within 10 seconds is retried after 10 s, 1 min, 5 min and 30 min
+        (5 tries over about 36 minutes); then the delivery is dead until an
+        owner redelivers it or replays the hook. Delivery records are kept for
+        the latest 1,000 per hook, with each one's last 10 tries.
       requestBody:
         content:
           application/json:
@@ -1129,16 +3330,38 @@ components:
       type: http
       scheme: bearer
       description: "A user's credential (`pando_` and 40 hex characters). Git sends it as the Basic password."
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-pando_session
+      description: A browser session (kind browser), set by /v1/login/callback. /v1 only; writes need Pando's own Origin.
     bootstrap:
       type: http
       scheme: bearer
       description: The Worker secret PANDO_BOOTSTRAP.
+    statusToken:
+      type: http
+      scheme: bearer
+      description: "A status token, `pst1.<payload>.<signature>`: one per hook delivery, signed with the Worker secret PANDO_STATUS_SECRET, good for createStatus on one commit in one repo for 24 hours."
   parameters:
+    owner:
+      name: owner
+      in: path
+      required: true
+      description: The monorepo's owner, a namespace (a person's login or an organization). Matched without case.
+      schema: { $ref: "#/components/schemas/Login" }
     monorepo:
       name: monorepo
       in: path
       required: true
+      description: The monorepo's name within its owner (or an old name). Matched without case.
       schema: { $ref: "#/components/schemas/Name" }
+    org:
+      name: org
+      in: path
+      required: true
+      description: An organization's login. Matched without case.
+      schema: { $ref: "#/components/schemas/Login" }
     repo:
       name: repo
       in: path
@@ -1151,6 +3374,24 @@ components:
       required: true
       description: The branch name, `/` encoded as `%2F`.
       schema: { type: string }
+    ciConnection:
+      name: connection
+      in: path
+      required: true
+      description: "A CI connection's id: `<monorepo id>--cic_<12 hex>`."
+      schema: { type: string }
+    ciBuild:
+      name: build
+      in: path
+      required: true
+      description: "Pando's build id (`cib_<16 hex>`)."
+      schema: { type: string }
+    ciJob:
+      name: job
+      in: path
+      required: true
+      description: The service's job id.
+      schema: { type: string }
   responses:
     Error:
       description: An error
@@ -1161,11 +3402,11 @@ components:
     Name:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. `v1` and `healthz` are reserved."
+      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered."
     Login:
       type: string
-      pattern: "^[a-z0-9](?:[a-z0-9]|-(?!-)){0,38}$"
-      description: A user's login, GitHub's rules in lower case.
+      pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"
+      description: "A user's login, which is their namespace, or an organization's (one space for both): 1 to 39 lower-case letters, digits and single hyphens, no hyphen at either end (input in any case is lowered). Reserved, because a namespace is the first URL segment: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, orgs, users, docs. A login made at sign-in comes from the email's local part, skipping reserved and taken names (`base`, `base-2`, ... `base-999`, then a random tail)."
     MemberRole:
       type: string
       enum: [owner, member]
@@ -1185,19 +3426,193 @@ components:
             checks: { $ref: "#/components/schemas/Checks" }
     Monorepo:
       type: object
-      required: [name, kind, created_at]
+      required: [id, owner, name, full_name, kind, created_at]
+      properties:
+        id: { type: string, description: "Permanent: `m_` and 16 hex characters, or, for a monorepo made before namespaces, its old name." }
+        owner: { $ref: "#/components/schemas/Login" }
+        name: { $ref: "#/components/schemas/Name" }
+        full_name: { type: string, description: "`owner/name`." }
+        kind: { type: string, enum: [monorepo, repo] }
+        created_at: { type: string, format: date-time }
+    MonorepoEntry:
+      allOf:
+        - $ref: "#/components/schemas/Monorepo"
+        - type: object
+          required: [role, owner_type]
+          properties:
+            role: { $ref: "#/components/schemas/MemberRole", description: "The caller's: the higher of their own row and, in an org's monorepo, their org role." }
+            owner_type: { type: string, enum: [user, org], description: "Whose namespace `owner` is: a person's or an organization's." }
+    Profile:
+      type: object
+      description: A person's profile header, as getOwner and updateProfile answer. Never their email.
+      required: [type, login, name, bio, location, links, picture_url, created_at, orgs]
+      properties:
+        type: { type: string, enum: [user] }
+        login: { $ref: "#/components/schemas/Login" }
+        name: { type: [string, "null"] }
+        bio: { type: [string, "null"], maxLength: 160 }
+        location: { type: [string, "null"], maxLength: 100 }
+        links: { type: array, maxItems: 4, items: { type: string }, description: https URLs, in the person's order. }
+        picture_url: { type: [string, "null"], description: As on User. }
+        created_at: { type: string, format: date-time }
+        orgs:
+          type: array
+          description: The organizations the person is in that the viewer is in too (all of them on your own profile), by login.
+          items:
+            type: object
+            required: [login, name]
+            properties:
+              login: { $ref: "#/components/schemas/Login" }
+              name: { type: [string, "null"] }
+    ContributionPeriod:
+      type: object
+      description: A month of the timeline (`2026-10`), or one day (`2026-10-03`). Each list is most first.
+      required: [period, commit, branch, review, created, joined]
+      properties:
+        period: { type: string }
+        commit: { type: array, items: { $ref: "#/components/schemas/MonorepoCount" } }
+        branch: { type: array, items: { $ref: "#/components/schemas/MonorepoCount" } }
+        review: { type: array, items: { $ref: "#/components/schemas/MonorepoCount" } }
+        created:
+          type: array
+          description: Repositories the person made, oldest first.
+          items: { type: object, required: [full_name, at], properties: { full_name: { type: string }, at: { type: string, format: date-time } } }
+        joined:
+          type: array
+          description: Organizations the person made (`created`) or joined, shared with the viewer. Not counted on the graph.
+          items:
+            type: object
+            required: [org, name, at, created]
+            properties:
+              org: { $ref: "#/components/schemas/Login" }
+              name: { type: [string, "null"] }
+              at: { type: string, format: date-time }
+              created: { type: boolean }
+    MonorepoCount:
+      type: object
+      required: [full_name, n]
+      properties:
+        full_name: { type: string }
+        n: { type: integer, minimum: 0 }
+    Contributions:
+      type: object
+      required: [login, tz, from, to, total, levels, days, monorepos, kinds, months]
+      properties:
+        login: { $ref: "#/components/schemas/Login" }
+        tz: { type: integer, description: The tz asked for. }
+        from: { type: string, format: date, description: "The first square: the Sunday 52 weeks before this week's." }
+        to: { type: string, format: date, description: Today, in the viewer's time zone. }
+        total: { type: integer, minimum: 0 }
+        levels:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: integer, minimum: 0 }
+          description: The lowest count of shades 1 to 4, the quartiles of the person's non-empty days.
+        days:
+          type: array
+          description: Non-empty days only, oldest first.
+          items:
+            type: object
+            required: [date, n, commit, branch, review, created]
+            properties:
+              date: { type: string, format: date }
+              n: { type: integer }
+              commit: { type: integer }
+              branch: { type: integer }
+              review: { type: integer }
+              created: { type: integer }
+        monorepos:
+          type: array
+          description: Repositories shared with the viewer or with the person's work in them, most first.
+          items:
+            type: object
+            required: [full_name, owner_type, kind, n, months]
+            properties:
+              full_name: { type: string }
+              owner_type: { type: string, enum: [user, org] }
+              kind: { type: string, enum: [monorepo, repo] }
+              n: { type: integer }
+              months: { type: array, items: { type: integer }, description: "By calendar month, oldest first, one per month the window touches." }
+        kinds:
+          type: object
+          required: [commit, branch, review, created]
+          properties:
+            commit: { type: integer }
+            branch: { type: integer }
+            review: { type: integer }
+            created: { type: integer }
+        months:
+          type: array
+          description: Months with any activity, newest first.
+          items: { $ref: "#/components/schemas/ContributionPeriod" }
+    Org:
+      type: object
+      required: [type, login, name, description, website, created_at, role, members]
+      properties:
+        type: { type: string, enum: [org] }
+        login: { $ref: "#/components/schemas/Login" }
+        name: { type: [string, "null"], description: "The display name (\"Plannotator\")." }
+        description: { type: [string, "null"] }
+        website: { type: [string, "null"], description: An https URL. }
+        created_at: { type: string, format: date-time }
+        role: { oneOf: [{ $ref: "#/components/schemas/MemberRole" }, { type: "null" }], description: "The caller's role in it; null when not in it." }
+        members: { type: [integer, "null"], description: "How many people are in it; null for someone who is not in it." }
+    OrgMember:
+      type: object
+      required: [login, name, picture_url, role, added_at, added_by, last_active_at]
+      properties:
+        login: { $ref: "#/components/schemas/Login" }
+        name: { type: [string, "null"] }
+        picture_url: { type: [string, "null"] }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        added_at: { type: string, format: date-time }
+        added_by: { type: [string, "null"], description: Null for the org's creator. }
+        last_active_at: { type: [string, "null"], format: date-time }
+    TreeEntry:
+      type: object
+      required: [name, type, mode, oid]
       properties:
         name: { type: string }
-        kind: { type: string, enum: [monorepo, repo] }
-        role: { $ref: "#/components/schemas/MemberRole" }
-        created_at: { type: string, format: date-time }
+        type: { type: string, enum: [dir, file, symlink, submodule] }
+        mode: { type: string, description: "git's mode: `100644`, `100755` (executable), `120000`, `40000`, `160000`." }
+        oid: { type: string, description: The object's hash (a blob for files; read it with raw). }
+    CommitLine:
+      type: object
+      required: [sha, title, author, at, merged_branch]
+      properties:
+        sha: { type: string }
+        title: { type: string, description: The message's first line. }
+        author: { type: object, properties: { name: { type: string }, email: { type: string } } }
+        at: { type: string, format: date-time, description: The author date. }
+        merged_branch:
+          type: [object, "null"]
+          description: On a merge into main, the branch it merged.
+          properties:
+            branch: { type: string }
+            title: { type: [string, "null"] }
+    ReplacedAlias:
+      type: [object, "null"]
+      description: An old `owner/name` (from a rename or transfer) that led to another monorepo and now leads to this one. Null when nothing was taken over. Never silent.
+      required: [full_name, pointed_to]
+      properties:
+        full_name: { type: string, description: "The old name, now this monorepo's." }
+        pointed_to: { type: [string, "null"], description: "The `owner/name` it led to before." }
     User:
       type: object
-      required: [login, created_at]
+      required: [login, name, email, picture_url, created_at]
       properties:
         login: { type: string }
         name: { type: [string, "null"] }
         email: { type: [string, "null"] }
+        picture_url:
+          type: [string, "null"]
+          description: >-
+            Their WorkOS profile picture (an https URL of at most 2,048
+            characters), stored at each sign-in, browser or `pando login`, and
+            refreshed every time (a removed picture becomes null). Null when
+            there is none or it is not https: the web draws one. Pando never
+            fetches, proxies or caches it.
         created_at: { type: string, format: date-time }
     Credential:
       type: object
@@ -1205,9 +3620,10 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [machine, sandbox, bootstrap] }
+        kind: { type: string, enum: [machine, sandbox, bootstrap, browser] }
         created_at: { type: string, format: date-time }
         last_used_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time, description: "Browser sessions only: the end unless used before then (each use pushes it to 30 days)." }
     NewCredential:
       allOf:
         - $ref: "#/components/schemas/Credential"
@@ -1225,30 +3641,208 @@ components:
         role: { $ref: "#/components/schemas/MemberRole" }
         invited_by: { type: string }
         created_at: { type: string, format: date-time }
+    Event:
+      type: object
+      required: [seq, at, kind, collection, key, op, row]
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        kind: { type: string }
+        collection: { type: [string, "null"] }
+        key: { type: [string, "null"] }
+        op: { type: [string, "null"], enum: [upsert, delete, null] }
+        repo: { type: [string, "null"] }
+        actor: { type: [string, "null"], description: The user's login. }
+        machine: { type: [string, "null"], description: The credential's name. }
+        agent: { type: [string, "null"] }
+        row: { description: "The changed row in its REST shape; on a delete, the last row (or its key fields)." }
+        partial: { type: boolean, description: "True on branch events: the row has the branch's stored fields only." }
+    FeedEvent:
+      type: object
+      description: One line of the activity log (listActivity, the person's socket, the `feed` topic).
+      required: [monorepo, monorepo_id, seq, at, kind, repo, repo_path, branch, actor, machine, summary]
+      properties:
+        monorepo: { type: string, description: "`owner/name`, as it is when the line is read." }
+        monorepo_id: { type: string, description: "The monorepo's id. Pages sort by (at, monorepo_id, seq)." }
+        seq: { type: integer, description: "The monorepo's event seq. `(monorepo_id, seq)` is the line's identity." }
+        at: { type: string, format: date-time }
+        kind: { type: string, enum: [push, branch.opened, branch.deleted, merged, review, status, worktree.reported, worktree.removed, meta.saved, issue.opened, issue.commented, issue.closed, issue.reopened] }
+        repo: { type: [string, "null"], description: The repo's name in URLs (`meta` for the meta layer). }
+        repo_path: { type: [string, "null"], description: "`projects/web`; `.` for the meta layer and a plain repo." }
+        branch: { type: [string, "null"] }
+        actor: { type: [string, "null"], description: "The person (a login). A meta.saved line from before versions kept the login has the author's name." }
+        machine: { type: [string, "null"], description: The credential's name (the machine or sandbox). }
+        summary:
+          type: [object, "null"]
+          description: |
+            Per kind:
+            - push, branch.opened: `commits` (new commits in this push; for a
+              new branch, those not on main), `head_title`, `head`, `before`.
+              `commits` and `head_title` arrive a moment after the push (the
+              branch-facts job adds them); null when they could not be read.
+              `commits_more`: true when a first push of main had more than 250.
+            - branch.deleted: `before`.
+            - merged: `merge_commit`, `forced`, `title` (the branch's), `head`,
+              `closes` (the issues it closes, as MergeResult has them).
+            - review: `verdict`, `comments` (a count), `head`.
+            - status: `context`, `state`, `description`, `target_url`, `sha`,
+              `duration_s` (from the run's first `pending` to this state; null
+              without one), `app` (the CI service that reported it, null when
+              a member posted it; `actor` is then that member, else null).
+            - worktree.reported, worktree.removed: `path`, `worktree` (its id).
+            - meta.saved: `path`, `version`, `deleted`.
+            - issue.opened, issue.commented, issue.closed (by a person; a
+              merge's close is on its merged line), issue.reopened:
+              `number`, `title`, `reason` (closed: completed or
+              not_planned), `excerpt` (commented: the first 140
+              characters). The line's repo is the issue's project.
+    FeedSummary:
+      type: object
+      description: A monorepo's one line on the home.
+      required: [last_activity_at, worktrees_active, machines_active, needs, members, large, repos, open_branches, assigned, at]
+      properties:
+        last_activity_at: { type: [string, "null"], format: date-time, description: Its newest activity line. }
+        worktrees_active: { type: integer, description: Worktrees named in the hellos of open follower sockets. }
+        machines_active: { type: integer, description: Machines with an open follower socket that said hello. }
+        needs:
+          type: object
+          required: [ready, conflicts, failing]
+          properties:
+            ready: { type: integer }
+            conflicts: { type: integer }
+            failing: { type: integer }
+        members: { type: integer }
+        large: { type: boolean, description: "More than 100 members: its lines are read on demand, not copied to feeds." }
+        repos: { type: integer, description: "Its projects (code repos; the meta layer's own repo is not counted). A plain repo has 1." }
+        open_branches: { type: integer, description: "Open branches across those projects (not merged, not deleted, main not counted)." }
+        assigned:
+          type: object
+          description: "Open issues assigned to each member, by login (none: left out): the home's Needs you shows the person's own."
+          additionalProperties: { $ref: "#/components/schemas/AssignedIssues" }
+        at: { type: string, format: date-time, description: When the monorepo computed it. }
+    MonorepoSummary:
+      allOf:
+        - $ref: "#/components/schemas/MonorepoEntry"
+        - type: object
+          description: "listMonorepos with ?summary=1. Nulls until the person's feed has the monorepo's line."
+          properties:
+            last_activity_at: { type: [string, "null"], format: date-time }
+            worktrees_active: { type: [integer, "null"] }
+            machines_active: { type: [integer, "null"] }
+            needs:
+              type: [object, "null"]
+              properties:
+                ready: { type: integer }
+                conflicts: { type: integer }
+                failing: { type: integer }
+            members: { type: [integer, "null"] }
+            large: { type: [boolean, "null"] }
+            repos: { type: [integer, "null"] }
+            open_branches: { type: [integer, "null"] }
+            assigned:
+              type: [object, "null"]
+              additionalProperties: { $ref: "#/components/schemas/AssignedIssues" }
+    NeedRow:
+      type: object
+      required: [monorepo, monorepo_id, repo, repo_path, branch, head, author, pushed_machine, state, checks, updated_at]
+      properties:
+        monorepo: { type: string, description: "`owner/name`." }
+        monorepo_id: { type: string }
+        repo: { type: string }
+        repo_path: { type: string }
+        branch: { type: string }
+        title: { type: [string, "null"] }
+        head: { type: string }
+        author: { type: [string, "null"], description: The user whose first push made the branch. }
+        pushed_machine: { type: [string, "null"], description: The credential that last pushed it. }
+        state: { type: string, enum: [ready, conflicts, failing] }
+        checks:
+          type: object
+          properties:
+            state: { type: string }
+            failing: { type: array, items: { type: string }, description: Contexts that failed or errored. }
+            failing_apps:
+              type: object
+              description: "For each failing context, the CI service that reported it (`app`, for its mark), or null when a member posted it."
+              additionalProperties: { type: [string, "null"] }
+        updated_at: { type: [string, "null"], format: date-time, description: The last push. }
+    Commit:
+      type: object
+      required: [sha, parents, title, message, author, committer, trailers]
+      properties:
+        sha: { type: string }
+        parents:
+          type: array
+          items: { type: string }
+        title: { type: string, description: The message's first line. }
+        message: { type: string, description: "The full message, at most 4,096 characters." }
+        author:
+          type: object
+          properties:
+            name: { type: [string, "null"] }
+            email: { type: [string, "null"] }
+            date: { type: [string, "null"], format: date-time }
+        committer:
+          type: object
+          properties:
+            name: { type: [string, "null"] }
+            email: { type: [string, "null"] }
+            date: { type: [string, "null"], format: date-time }
+        trailers:
+          type: object
+          required: [agent, worktree, machine]
+          properties:
+            agent: { type: [string, "null"] }
+            worktree: { type: [string, "null"] }
+            machine: { type: [string, "null"] }
+        co_authors:
+          type: array
+          description: "`Co-authored-by: Name <email>` lines from the message's trailers (its last paragraph), each once, as git and GitHub read them."
+          items:
+            type: object
+            required: [name, email]
+            properties:
+              name: { type: string }
+              email: { type: [string, "null"] }
     Member:
       type: object
-      required: [login, role, added_at]
+      required: [login, name, picture_url, role, added_at, last_active_at, via]
       properties:
         login: { type: string }
+        name: { type: [string, "null"], description: "The user's display name, if known." }
+        picture_url: { type: [string, "null"], description: "As on User: their profile picture, or null (the web draws one)." }
         role: { $ref: "#/components/schemas/MemberRole" }
         added_at: { type: string, format: date-time }
         added_by: { type: [string, "null"] }
+        last_active_at:
+          type: [string, "null"]
+          format: date-time
+          description: >-
+            The newest last use of any of their credentials (written at most
+            once a minute per credential); null if none was ever used.
+        via:
+          type: string
+          enum: [direct, org, both]
+          description: "Where their access comes from: their own row (`direct`), the org that owns the monorepo (`org`), or both. `added_at` and `added_by` come from their own row when they have one."
     Repo:
       type: object
       required: [monorepo, name, path, default_branch, clone_url, created_at]
       properties:
-        monorepo: { type: string }
+        monorepo: { type: string, description: "The monorepo's `owner/name`." }
         name: { type: string, description: The repo's id in URLs (its path with `/` turned into `-`). }
         path: { type: string, description: "`projects/web`, or `.` for a plain repo." }
         description: { type: [string, "null"] }
         default_branch: { type: string, description: Always `main` for now. }
         clone_url:
           type: string
-          description: The git door URL, `https://<host>/<monorepo>/<name>.git`.
+          description: "The git door URL: `https://<host>/<owner>/<monorepo>/<name>.git`, or `https://<host>/<owner>/<name>.git` for a plain repo."
         required_checks:
-          type: array
-          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists.
+          type: [array, "null"]
+          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists. Null while unknown.
           items: { type: string }
+        checks_unknown:
+          type: [string, "null"]
+          description: With required_checks, why they are unknown (pando.toml unreadable or broken); else null.
         created_at: { type: string, format: date-time }
         created_by: { type: string }
     Branch:
@@ -1273,16 +3867,143 @@ components:
           description: Commits on the default branch that are not on the branch.
         mergeable:
           type: string
-          enum: [clean, conflicts, up_to_date, unknown]
-          description: From the merge engine's dry run. `up_to_date` means the branch adds nothing.
+          enum: [clean, conflicts, up_to_date, unknown, pending]
+          description: "From the merge engine's dry run. `up_to_date`: the branch adds nothing. `pending`: not yet computed for the current main and head (see `last_mergeable`)."
+        stale: { type: boolean, description: "True while ahead, behind, base and mergeable are not yet for the current main and head." }
+        last_mergeable: { type: [string, "null"], description: "When stale: the last known mergeable answer." }
+        conflict_paths:
+          type: [array, "null"]
+          items: { type: string }
+          description: "The paths changed differently on both sides, from the same dry run as `mergeable` (or `last_mergeable` while stale), so a branch page shows them before Merge is pressed. Null unless that answer is `conflicts`. No cap: the same list a refused merge's 409 carries in `paths`."
+        facts_at: { type: [string, "null"], format: date-time, description: When the facts were computed. }
         checks: { $ref: "#/components/schemas/Checks" }
         state:
           type: string
           enum: [open, merged]
           description: "`merged` when the branch's current head was landed by a Pando merge."
         merge_commit: { type: [string, "null"] }
+        merged_by: { type: [string, "null"], description: "The user who merged (state merged only)." }
+        merged_at: { type: [string, "null"], format: date-time }
+        merged_machine: { type: [string, "null"], description: "The name of the credential used to merge: the machine or sandbox." }
+        merged_agent: { type: [string, "null"], description: "The agent that merged, from X-Pando-Agent, if one said so." }
+        pushed_machine: { type: [string, "null"], description: "The name of the credential that last pushed the branch: the machine or sandbox." }
+        forced: { type: [boolean, "null"], description: "True when the merge went past red or missing checks with force=1." }
         created_at: { type: [string, "null"], format: date-time }
         updated_at: { type: [string, "null"], format: date-time }
+    CiState:
+      type: string
+      enum: [queued, running, blocked, passed, failed, canceled, skipped]
+      description: "One vocabulary for every service. Buildkite's scheduled and waiting are queued, failing and canceling are running, not_run and broken are skipped; `service_state` keeps the service's own word."
+    CiConnection:
+      type: object
+      required: [id, service, organization, web_url, webhook_url, token, created_at, created_by, last_event, last_refused]
+      properties:
+        id: { type: string }
+        service: { type: string, enum: [buildkite] }
+        organization: { type: string }
+        web_url: { type: string, description: The organization on the service. }
+        webhook_url: { type: string, description: The URL to paste into the service's webhook settings. }
+        token: { type: string, enum: [worker_secret, stored], description: "Where its REST token comes from: the Worker secret BUILDKITE_API_TOKEN at launch." }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        last_event:
+          type: [object, "null"]
+          description: The last webhook that passed its check.
+          properties:
+            at: { type: string, format: date-time }
+            event: { type: [string, "null"] }
+            result: { type: [string, "null"], description: "`recorded`, or `ignored: <reason>`." }
+        last_refused:
+          type: [object, "null"]
+          description: The last webhook refused (a wrong token or signature), recorded at most every 10 s.
+          properties:
+            at: { type: string, format: date-time }
+            reason: { type: [string, "null"] }
+    CiPipeline:
+      type: object
+      required: [connection, service, slug, name, repo, web_url, last_build]
+      properties:
+        connection: { type: string }
+        service: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        repo: { type: [string, "null"], description: The repo it builds. }
+        repo_path: { type: [string, "null"] }
+        web_url: { type: string }
+        default_branch: { type: [string, "null"] }
+        hook_id: { type: [string, "null"], description: "The buildkite hook that starts its builds on push, if any." }
+        required_checks:
+          type: [array, "null"]
+          description: Its repo's required checks (from `.pando/pando.toml`); null while unknown.
+          items: { type: string }
+        last_build:
+          oneOf:
+            - $ref: "#/components/schemas/CiBuild"
+            - type: "null"
+    CiBuild:
+      type: object
+      required: [id, service, connection, pipeline, number, repo, sha, state, service_state, created_at]
+      properties:
+        id: { type: string, description: "Pando's id (`cib_...`)." }
+        service: { type: string }
+        connection: { type: string }
+        pipeline: { type: string }
+        number: { type: integer }
+        repo: { type: string }
+        repo_path: { type: [string, "null"] }
+        sha: { type: [string, "null"], description: Null when the service built no fixed commit. }
+        branch: { type: [string, "null"] }
+        message: { type: [string, "null"] }
+        state: { $ref: "#/components/schemas/CiState" }
+        service_state: { type: string }
+        web_url: { type: [string, "null"] }
+        pushed_by: { type: [string, "null"], description: "Who pushed the commit (a login), from Pando's own records; never the service's creator." }
+        created_at: { type: [string, "null"], format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        duration_s: { type: [integer, "null"] }
+        rebuilt_from: { type: [string, "null"], description: The service's id of the build this one rebuilt. }
+    CiJob:
+      type: object
+      required: [id, build, type, state, service_state, check]
+      properties:
+        id: { type: string, description: The service's job id. }
+        build: { type: string }
+        name: { type: [string, "null"] }
+        step_key: { type: [string, "null"] }
+        type: { type: string, description: "`script`, `trigger` or `manual`." }
+        state: { $ref: "#/components/schemas/CiState" }
+        service_state: { type: string }
+        exit_status: { type: [integer, "null"] }
+        soft_failed: { type: boolean }
+        retried: { type: boolean, description: A newer job replaced it (Retry). }
+        web_url: { type: [string, "null"] }
+        created_at: { type: [string, "null"], format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        duration_s: { type: [integer, "null"] }
+        check: { type: [string, "null"], description: "The check (status context) it reports, its step key; null for jobs that report none." }
+    CiAnnotation:
+      type: object
+      properties:
+        id: { type: [string, "null"] }
+        context: { type: [string, "null"] }
+        style: { type: [string, "null"], description: "success, info, warning or error." }
+        body_html: { type: string, description: "HTML a pipeline wrote: sanitise it before showing it." }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    CiArtifact:
+      type: object
+      properties:
+        id: { type: string }
+        job: { type: [string, "null"], description: The job that uploaded it. }
+        path: { type: [string, "null"] }
+        filename: { type: [string, "null"] }
+        dirname: { type: [string, "null"] }
+        mime_type: { type: [string, "null"] }
+        size: { type: [integer, "null"] }
+        sha1sum: { type: [string, "null"] }
+        state: { type: [string, "null"] }
     StatusState:
       type: string
       enum: [pending, success, failure, error]
@@ -1295,21 +4016,30 @@ components:
         state: { $ref: "#/components/schemas/StatusState" }
         target_url: { type: [string, "null"] }
         description: { type: [string, "null"] }
-        creator: { type: string }
+        creator:
+          type: string
+          description: "The member who posted it (a login); `app:<slug>` for a status posted with a status token or by a CI integration; `hook:<hook id>` for a status token from a web hook with no app."
+        app:
+          type: [string, "null"]
+          description: "The CI service that reported it (`buildkite`, `github-actions`, ...), stamped by Pando from a status token or a CI integration, never from the body or `target_url`. Null when a member posted it with their own credential. The web shows the service's mark for a slug it knows."
         created_at: { type: string, format: date-time }
     Checks:
       type: object
-      required: [sha, state, required, statuses]
+      required: [sha, state, required, statuses, checks_unknown]
       description: GitHub's combined status, plus the required contexts and which are missing.
       properties:
         sha: { type: [string, "null"] }
         state:
           type: string
-          enum: [success, pending, failure, error, missing]
-          description: "`success` when the merge gate passes; `missing` when a required context has not reported."
+          enum: [success, pending, failure, error, missing, unknown]
+          description: "`success` when the merge gate passes; `missing` when a required context has not reported; `unknown` while the required checks are (an unforced merge is refused)."
         required:
-          type: array
+          type: [array, "null"]
+          description: Null while unknown.
           items: { type: string }
+        checks_unknown:
+          type: [string, "null"]
+          description: "Why the required checks are unknown, in plain words: \"Pando couldn't read this monorepo's required checks; try again\", or \"pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force\". Null otherwise."
         missing:
           type: array
           items: { type: string }
@@ -1337,6 +4067,33 @@ components:
         files:
           type: array
           items: { $ref: "#/components/schemas/DiffFile" }
+    BranchDiff:
+      type: object
+      required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]
+      properties:
+        base_branch: { type: string }
+        base: { type: string, description: "Main's head the diff was taken against; for a branch Pando merged at this head, main just before that merge (the merge commit's first parent), so a merged branch keeps its changes." }
+        head: { type: string, description: The branch's head. }
+        merge_base: { type: string }
+        truncated: { type: boolean, description: "Some patches were left out past 2 MiB in all (`patch_omitted: budget`)." }
+        too_many_files: { type: boolean, description: More than 1,000 files changed; the first 1,000 by path are listed. }
+        files_total: { type: integer, description: Every changed file, listed or not. }
+        stats:
+          type: object
+          description: The listed files.
+          properties:
+            files: { type: integer }
+            additions: { type: integer }
+            deletions: { type: integer }
+        files:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/DiffFile"
+              - type: object
+                required: [patch]
+                properties:
+                  patch: { type: [string, "null"], description: "This file's unified patch in git's format; null when `patch_omitted` is set." }
     DiffFile:
       type: object
       required: [path, status, binary]
@@ -1408,6 +4165,15 @@ components:
         merge_base: { type: string }
         forced: { type: boolean }
         merged_by: { type: string }
+        closes:
+          type: array
+          items: { type: integer }
+          description: |
+            `merged`: the open issues this merge closes, decided as it lands
+            (the branch's links, the keywords in the merge message and the
+            merged commits). Each closes about a second later in its own step
+            (`issue.closed`, naming the merge); one a person closed meanwhile
+            is left as it is.
     HookEvent:
       type: string
       enum: [push, branch.opened, merged]
@@ -1427,6 +4193,9 @@ components:
           properties:
             organization: { type: string }
             pipeline: { type: string }
+        app:
+          type: [string, "null"]
+          description: "The app its status tokens stamp: `buildkite` for a buildkite hook, a web hook's own `app`, or null."
         active: { type: boolean }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
@@ -1437,13 +4206,60 @@ components:
         id: { type: string }
         hook_id: { type: string }
         event: { $ref: "#/components/schemas/HookEvent" }
-        status: { type: string, enum: [pending, delivered, failed] }
+        seq: { type: [integer, "null"], description: "The event stream's seq for the change. One delivery per (hook, event, seq): a retry, a redeliver or a replay reuses it." }
+        status:
+          type: string
+          enum: [queued, retrying, delivered, failed, dead]
+          description: "`queued`: waiting for its first try. `retrying`: the last try failed; `next_attempt_at` says when the next is. `dead`: the fifth try failed, or its hook or repo was deleted (redeliver to try again). `failed` appears only on deliveries from before 2026-10-03, between the fifth try and `dead`."
         attempts: { type: integer }
         response_code: { type: [integer, "null"] }
         error: { type: [string, "null"] }
         created_at: { type: string, format: date-time }
         last_attempt_at: { type: [string, "null"], format: date-time }
         next_attempt_at: { type: [string, "null"], format: date-time }
+        recent_attempts:
+          type: array
+          description: The last 10 tries, newest first.
+          items:
+            type: object
+            properties:
+              n: { type: integer }
+              at: { type: string, format: date-time }
+              response_code: { type: [integer, "null"] }
+              error: { type: [string, "null"] }
+              ms: { type: integer }
+    Machine:
+      type: object
+      required: [login, credential_id, name, kind, connected, connected_at, last_activity, worktrees, updated_at]
+      properties:
+        login: { type: string, description: The person. }
+        credential_id: { type: string, description: "With login, the machine's key." }
+        name: { type: string, description: "The credential's name: the machine as people see it." }
+        kind: { type: [string, "null"], enum: [machine, sandbox, bootstrap, browser, null] }
+        connected: { type: boolean, description: "An event socket of this credential said hello and is open." }
+        connected_at: { type: [string, "null"], format: date-time }
+        last_activity:
+          type: [object, "null"]
+          description: Its latest activity line in this monorepo.
+          properties:
+            seq: { type: integer }
+            at: { type: string, format: date-time }
+            kind: { type: string }
+            repo: { type: [string, "null"] }
+            repo_path: { type: [string, "null"] }
+            branch: { type: [string, "null"] }
+            summary: { type: [object, "null"], description: As FeedEvent.summary. }
+        worktrees:
+          type: array
+          description: "The worktrees its last hello named; repo, branch and path from the worktree registry (null when not reported there)."
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              repo: { type: [string, "null"] }
+              branch: { type: [string, "null"] }
+              path: { type: [string, "null"] }
+        updated_at: { type: string, format: date-time }
     Worktree:
       type: object
       required: [id, repo, branch, path, machine, kind, reported_by, created_at, last_seen_at]
@@ -1460,12 +4276,13 @@ components:
         last_seen_at: { type: string, format: date-time }
     HookPayload:
       type: object
-      required: [event, delivery_id, occurred_at, monorepo, repo, ref, clone_url]
+      required: [event, delivery_id, occurred_at, monorepo, monorepo_id, repo, ref, clone_url]
       properties:
         event: { $ref: "#/components/schemas/HookEvent" }
         delivery_id: { type: string }
         occurred_at: { type: string, format: date-time }
-        monorepo: { type: string }
+        monorepo: { type: string, description: "`owner/name` when the delivery was made." }
+        monorepo_id: { type: string, description: "The monorepo's permanent id: a stable key across renames." }
         repo: { type: string }
         branch: { type: string }
         ref: { type: string, description: "`refs/heads/<branch>`" }
@@ -1475,7 +4292,8 @@ components:
         title: { type: [string, "null"] }
         description: { type: [string, "null"] }
         author: { type: [string, "null"], description: The branch's author (a user). }
-        pusher: { type: string, description: "The user who pushed; for `merged`, who merged." }
+        pusher: { type: [string, "null"], description: "The user who pushed; for `merged`, who merged. Null only when Pando found a push in Artifacts' refs whose pusher it never learned (its record and its keep both failed)." }
+        seq: { type: [integer, "null"], description: "The event stream's seq for this change: drop repeats, sort by it." }
         merge_commit: { type: string, description: Only for `merged`. }
         diff_url: { type: string }
         clone_url: { type: string, description: The git door URL. Clone it with `read_token`. }
@@ -1485,4 +4303,182 @@ components:
         read_token_expires_at: { type: string, format: date-time }
         status_url:
           type: string
-          description: "`POST` a commit status here for `head` (needs a member's credential)."
+          description: "`POST` a commit status here for `head`, with `status_token` or a member's credential."
+        status_token:
+          type: string
+          description: "Posts statuses for `head` in this repo for 24 hours, stamped with the hook's `app` (see createStatus). Absent when the Worker secret PANDO_STATUS_SECRET is not set or the branch was deleted."
+        status_token_expires_at: { type: string, format: date-time }
+    AssignedIssues:
+      type: object
+      required: [count, newest]
+      description: Open issues assigned to one person in one monorepo.
+      properties:
+        count: { type: integer }
+        newest:
+          type: object
+          required: [number, title, updated_at]
+          properties:
+            number: { type: integer }
+            title: { type: string }
+            updated_at: { type: string, format: date-time }
+    BranchRef:
+      type: object
+      required: [repo, branch]
+      properties:
+        repo: { type: string, description: "A repo's name." }
+        branch: { type: string }
+    LabelColor:
+      type: string
+      enum: [gray, orange, yellow, green, teal, blue, purple, pink]
+      description: Each theme sets the eight from its own tokens (no red, so a label never reads as a failure).
+    Label:
+      type: object
+      required: [name, color, description]
+      properties:
+        name: { type: string, description: "1 to 50 characters, unique ignoring case." }
+        color: { $ref: "#/components/schemas/LabelColor" }
+        description: { type: [string, "null"] }
+    LabelList:
+      type: object
+      required: [labels]
+      properties:
+        labels:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Label"
+              - type: object
+                required: [open_issues]
+                properties:
+                  open_issues: { type: integer }
+    ReactionContent:
+      type: string
+      enum: ["+1", "-1", laugh, hooray, confused, heart, rocket, eyes]
+    Reactions:
+      type: array
+      description: "Those given at least once, in GitHub's order."
+      items:
+        type: object
+        required: [content, count, by]
+        properties:
+          content: { $ref: "#/components/schemas/ReactionContent" }
+          count: { type: integer }
+          by: { type: array, items: { type: string }, description: Logins, each once. }
+    ReactionsAnswer:
+      type: object
+      required: [reactions]
+      properties:
+        reactions: { $ref: "#/components/schemas/Reactions" }
+    IssueMerge:
+      type: object
+      required: [repo, repo_path, branch, merge_commit]
+      properties:
+        repo: { type: string }
+        repo_path: { type: string }
+        branch: { type: string }
+        merge_commit: { type: string }
+    IssueRow:
+      type: object
+      description: A row of the list (no body).
+      required: [number, title, state, state_reason, project, project_path, labels, assignees, author, comments, tasks, linked_branches, created_at, updated_at, closed_at, closed_by, closed_by_merge]
+      properties:
+        number: { type: integer }
+        title: { type: string }
+        state: { type: string, enum: [open, closed] }
+        state_reason: { type: [string, "null"], enum: [completed, not_planned, null] }
+        project: { type: [string, "null"], description: "A repo's name; null for the monorepo as a whole." }
+        project_path: { type: [string, "null"] }
+        labels: { type: array, items: { $ref: "#/components/schemas/Label" } }
+        assignees: { type: array, items: { type: string } }
+        author: { type: string }
+        comments: { type: integer }
+        tasks:
+          type: [object, "null"]
+          description: "`- [ ]` and `- [x]` lines in the body; null without a task list."
+          properties:
+            done: { type: integer }
+            total: { type: integer }
+        linked_branches: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        closed_at: { type: [string, "null"], format: date-time }
+        closed_by: { type: [string, "null"] }
+        closed_by_merge:
+          oneOf:
+            - $ref: "#/components/schemas/IssueMerge"
+            - type: "null"
+    IssueLink:
+      type: object
+      required: [repo, repo_path, branch, sources, sha, linked_by, branch_state, merged_at, closed_issue]
+      properties:
+        repo: { type: string }
+        repo_path: { type: string }
+        branch: { type: string }
+        sources: { type: array, items: { type: string, enum: [link, title, commit] } }
+        sha: { type: [string, "null"], description: "`commit`: the newest commit on the branch naming the issue." }
+        linked_by: { type: [string, "null"], description: "`link`: who linked it." }
+        branch_state: { type: string, enum: [open, ready, conflicts, failing, merged, deleted] }
+        merged_at: { type: [string, "null"], format: date-time }
+        closed_issue: { type: boolean, description: This branch's merge closed the issue. }
+    Issue:
+      allOf:
+        - $ref: "#/components/schemas/IssueRow"
+        - type: object
+          required: [body, body_version, machine, links, participants, reactions]
+          properties:
+            body: { type: string }
+            body_version: { type: integer, description: Goes up by one on every body edit. }
+            machine: { type: [string, "null"], description: The machine that opened it. }
+            links: { type: array, items: { $ref: "#/components/schemas/IssueLink" } }
+            participants: { type: array, items: { type: string } }
+            reactions: { $ref: "#/components/schemas/Reactions" }
+    IssueComment:
+      type: object
+      required: [id, body, body_version, author, machine, created_at, updated_at, reactions]
+      properties:
+        id: { type: string }
+        body: { type: [string, "null"], description: "Null only in a live event, over 16 KB: read it with getIssueComment." }
+        body_version: { type: integer }
+        author: { type: string }
+        machine: { type: [string, "null"], description: The machine that wrote it. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        reactions: { $ref: "#/components/schemas/Reactions" }
+    TimelineItem:
+      type: object
+      required: [id, at, actor, machine, kind]
+      description: |
+        By `kind`, with its own fields: `comment` (`comment`), `labeled` and
+        `unlabeled` (`label`, as it was then), `assigned` and `unassigned`
+        (`assignee`), `renamed` (`from`, `to`), `project_changed` (`from`,
+        `from_path`, `to`, `to_path`), `linked` (`repo`, `repo_path`,
+        `branch`, `source`, `sha`), `unlinked` (`repo`, `repo_path`,
+        `branch`, `source`), `closed` (`reason`, `merge`: the merge that
+        closed it, or null), `reopened`, `merge_referenced` (`merge`: a merge
+        that named it after it was closed).
+      properties:
+        id: { type: integer, description: Orders items (one counter per monorepo). }
+        at: { type: string, format: date-time }
+        actor: { type: [string, "null"] }
+        machine: { type: [string, "null"] }
+        kind: { type: string, enum: [comment, labeled, unlabeled, assigned, unassigned, renamed, project_changed, linked, unlinked, closed, reopened, merge_referenced] }
+    Timeline:
+      type: object
+      required: [items, total, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TimelineItem" } }
+        total: { type: integer }
+        next_cursor: { type: [string, "null"] }
+    IssueList:
+      type: object
+      required: [issues, counts, next_cursor]
+      properties:
+        issues: { type: array, items: { $ref: "#/components/schemas/IssueRow" } }
+        counts:
+          type: object
+          required: [open, closed]
+          description: For the same filters, in either state.
+          properties:
+            open: { type: integer }
+            closed: { type: integer }
+        next_cursor: { type: [string, "null"] }

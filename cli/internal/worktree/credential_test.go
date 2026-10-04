@@ -8,14 +8,16 @@ import (
 	"testing"
 )
 
-// The helper list git inherits (a system osxkeychain, here a fake that
-// leaves a mark) must never run for the Pando host: not to get, not to
-// store. Other hosts keep it.
+// The helper list git inherits (osxkeychain on a Mac; here a fake in the
+// global config that leaves a mark) must never run for the Pando host: not to
+// get, not to store. Other hosts keep it. The system level stays off
+// (GIT_CONFIG_NOSYSTEM=1): Apple git's osxkeychain is there, and only that
+// setting keeps it from running.
 func TestCredentialConfigClearsInheritedHelpers(t *testing.T) {
 	dir := t.TempDir()
-	mark := filepath.Join(dir, "system-helper-ran")
-	system := filepath.Join(dir, "system.gitconfig")
-	os.WriteFile(system, []byte("[credential]\n\thelper = \"!f() { echo $1 >> '"+mark+"'; }; f\"\n"), 0o644)
+	mark := filepath.Join(dir, "inherited-helper-ran")
+	global := filepath.Join(dir, "global.gitconfig")
+	os.WriteFile(global, []byte("[credential]\n\thelper = \"!f() { echo $1 >> '"+mark+"'; }; f\"\n"), 0o644)
 	pando := filepath.Join(dir, "pando")
 	os.WriteFile(pando, []byte("#!/bin/sh\n[ \"$2\" = get ] && printf 'username=pat\\npassword=pando_fake\\n'\nexit 0\n"), 0o755)
 
@@ -25,7 +27,7 @@ func TestCredentialConfigClearsInheritedHelpers(t *testing.T) {
 	}
 	run := func(action, host string) string {
 		cmd := exec.Command("git", append(args, "credential", action)...)
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_SYSTEM="+system, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+global, "GIT_TERMINAL_PROMPT=0")
 		cmd.Stdin = strings.NewReader("protocol=https\nhost=" + host + "\npath=ws/projects-app.git\nusername=pat\npassword=pando_fake\n\n")
 		out, _ := cmd.CombinedOutput()
 		return string(out)

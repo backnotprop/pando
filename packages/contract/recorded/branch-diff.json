@@ -1,0 +1,33 @@
+{
+  "schema": "BranchDiff",
+  "route": "GET .../branches/{branch}/diff?patches=1 (Files changed)",
+  "status": 200,
+  "body": {
+    "base_branch": "main",
+    "base": "89d824c9703c63d48bceb4fc56462f506f50cfc8",
+    "head": "ec2a63d55a41070e53dccdded163c94161f90746",
+    "merge_base": "5e44f241062d0bbede1f1c0aaca478e4cf50aa08",
+    "truncated": false,
+    "too_many_files": false,
+    "files_total": 1,
+    "stats": {
+      "files": 1,
+      "additions": 1,
+      "deletions": 0
+    },
+    "files": [
+      {
+        "path": "ready.txt",
+        "status": "added",
+        "old_sha": null,
+        "new_sha": "395527df662d5fdf4b00c5f1cd9b8d7ac048e127",
+        "old_mode": null,
+        "new_mode": "100644",
+        "binary": false,
+        "additions": 1,
+        "deletions": 0,
+        "patch": "diff --git a/ready.txt b/ready.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..395527df662d5fdf4b00c5f1cd9b8d7ac048e127\n--- /dev/null\n+++ b/ready.txt\n@@ -0,0 +1 @@\n+ready\n"
+      }
+    ]
+  }
+}

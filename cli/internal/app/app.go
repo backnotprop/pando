@@ -3,9 +3,11 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"pando/internal/config"
 	"pando/internal/server"
@@ -31,6 +34,9 @@ type Env struct {
 
 	in    *bufio.Reader
 	noted bool
+
+	mu     sync.Mutex // one line at a time from goroutines (clone mounts in parallel)
+	noteMu sync.Mutex
 
 	// Agent is the agent this command acts for, sent as X-Pando-Agent: a
 	// command's --agent, else PANDO_AGENT, else the agent recorded for the
@@ -63,9 +69,17 @@ type UsageError struct{ Msg string }
 
 func (u UsageError) Error() string { return u.Msg }
 
-func (e *Env) printf(format string, a ...any) { fmt.Fprintf(e.Stdout, format, a...) }
+func (e *Env) printf(format string, a ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fmt.Fprintf(e.Stdout, format, a...)
+}
 
-func (e *Env) warnf(format string, a ...any) { fmt.Fprintf(e.Stderr, "pando: "+format+"\n", a...) }
+func (e *Env) warnf(format string, a ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fmt.Fprintf(e.Stderr, "pando: "+format+"\n", a...)
+}
 
 // flags makes a FlagSet that reports errors as usage errors.
 func flags(name string) *flag.FlagSet {
@@ -180,15 +194,32 @@ func (e *Env) pickNew(kind string) (worktree.Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" && !e.noted {
+	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" {
+		e.noteMu.Lock()
+		first := !e.noted
 		e.noted = true
-		e.warnf("%s", n.Note())
+		e.noteMu.Unlock()
+		if first {
+			e.warnf("%s", n.Note())
+		}
 	}
 	return drv, nil
 }
 
-// root finds the Pando root above the current folder.
-func (e *Env) root() (*config.Root, error) { return config.FindRoot(e.Cwd) }
+// root finds the Pando root above the current folder, upgrading a version 1
+// root to owner/name first (upgrade.go).
+func (e *Env) root() (*config.Root, error) {
+	root, err := config.FindRoot(e.Cwd)
+	if err != nil {
+		return nil, err
+	}
+	if root.Owner == "" {
+		if err := e.upgradeRoot(root); err != nil {
+			return nil, fmt.Errorf("this folder's monorepo %s needs its owner/name from the server: %w", root.Name, err)
+		}
+	}
+	return root, nil
+}
 
 // agent is the agent name in force: --agent, else PANDO_AGENT.
 func agentName(flagValue string) string {
@@ -217,7 +248,7 @@ func (e *Env) repoArg(root *config.Root, arg string) (string, error) {
 	if r, ok := root.RepoFor(rel); ok && (r == "." || strings.HasPrefix(rel, r+"/worktrees")) {
 		return r, nil
 	}
-	return "", fmt.Errorf("%s is not a repo in %s (repos: %s)", rel, root.Name, repoList(root))
+	return "", fmt.Errorf("%s is not a repo in %s (repos: %s)", rel, root.FullName(), repoList(root))
 }
 
 func repoList(root *config.Root) string {
@@ -267,7 +298,7 @@ func repoName(root *config.Root, path string) string {
 	if e, ok := root.Repo(path); ok && e.Name != "" {
 		return e.Name
 	}
-	return server.RepoName(root.Name, path)
+	return server.RepoName(root.FullName(), path)
 }
 
 func short(s string) string {
@@ -283,7 +314,89 @@ var errSilent = errors.New("")
 // for a plain repo (path ".").
 func label(root *config.Root, repo string) string {
 	if repo == "." {
-		return root.Name
+		return root.FullName()
 	}
 	return repo
+}
+
+// target is the signed-in Pando server (not file://) and a monorepo's
+// owner/name: mono (owner/name, or a name of yours), else the one this
+// folder is in.
+func (e *Env) target(srvFlag, mono string) (*server.HTTP, string, error) {
+	if mono == "" {
+		root, err := e.root()
+		if err != nil {
+			return nil, "", UsageError{"which monorepo? add --monorepo <owner/name>, or run this inside its folder"}
+		}
+		mono = root.FullName()
+	}
+	srv, _, err := e.signedIn(srvFlag)
+	if err != nil {
+		return nil, "", err
+	}
+	h, ok := srv.(*server.HTTP)
+	if !ok {
+		return nil, "", errors.New("this needs a Pando server; this one is a local file:// server")
+	}
+	if _, _, full := splitFull(mono); !full {
+		m, err := resolveMonorepo(e, srv, mono)
+		if err != nil {
+			return nil, "", err
+		}
+		mono = m.Full()
+	}
+	return h, mono, nil
+}
+
+// repoIn picks a repo of the monorepo full: repoFlag (a path such as
+// projects/web, or a name such as projects-web), else the repo this folder
+// is in when it is that monorepo's, else its only repo.
+func (e *Env) repoIn(h *server.HTTP, full, repoFlag string) (server.Repo, error) {
+	repos, err := h.ListRepos(e.Ctx, full)
+	if err != nil {
+		return server.Repo{}, err
+	}
+	if repoFlag != "" {
+		return pickRepo(repos, full, repoFlag)
+	}
+	if root, err := e.root(); err == nil && strings.EqualFold(root.FullName(), full) {
+		if rel, err := root.Rel(e.Cwd); err == nil {
+			if path, ok := root.RepoFor(rel); ok {
+				return pickRepo(repos, full, path)
+			}
+		}
+	}
+	if len(repos) == 1 {
+		return repos[0], nil
+	}
+	var paths []string
+	for _, r := range repos {
+		paths = append(paths, r.Path)
+	}
+	return server.Repo{}, fmt.Errorf("which repo? pass --repo <path> (repos: %s)", strings.Join(paths, ", "))
+}
+
+// printJSON prints an answer of the API as it came: indented on a terminal,
+// compact in a pipe. An empty answer (204) prints nothing.
+func (e *Env) printJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil
+	}
+	var b bytes.Buffer
+	var err error
+	if stdoutTerminal(e) {
+		err = json.Indent(&b, data, "", "  ")
+	} else {
+		err = json.Compact(&b, data)
+	}
+	if err != nil {
+		b.Reset()
+		b.Write(data) // not JSON: as it came
+	}
+	b.WriteByte('\n')
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, err = e.Stdout.Write(b.Bytes())
+	return err
 }

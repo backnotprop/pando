@@ -1,0 +1,14 @@
+// Pando's docs (site/docs): an assets-only Worker, no code. Every request is a
+// static file from dist/ (npm run check builds it and checks its links);
+// a path with no file gets the site's 404 page. pando-ops deploys it.
+// docs.<domain> once the domain is bought; until then its workers.dev address.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pando-docs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}

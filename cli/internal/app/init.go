@@ -28,6 +28,7 @@ func validName(n string) bool {
 func Init(e *Env, args []string) error {
 	fs := flags("init")
 	name := fs.String("name", "", "the monorepo's name on the server (default: the folder's name)")
+	owner := fs.String("owner", "", "make it in this organization (default: your own account)")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
 	yes := fs.Bool("yes", false, "take the default answer to every question")
 	dry := fs.Bool("dry-run", false, "show what would happen and change nothing")
@@ -53,7 +54,7 @@ func Init(e *Env, args []string) error {
 		return err
 	}
 	if existing != nil && existing.Kind != plan.Kind {
-		return fmt.Errorf("%s is already a Pando %s named %s", dir, existing.Kind, existing.Name)
+		return fmt.Errorf("%s is already a Pando %s named %s", dir, existing.Kind, existing.FullName())
 	}
 
 	printPlan(e, plan)
@@ -145,12 +146,23 @@ func Init(e *Env, args []string) error {
 		return fmt.Errorf("%q cannot be a monorepo name (lower-case letters, digits, '.', '_', '-'; no '--'; at most 39); pass --name", mono)
 	}
 
-	srvc, repos, made, err := ensureMonorepo(e, serverURL, mono, plan.Kind)
+	org := strings.ToLower(*owner)
+	if org != "" && !loginRe.MatchString(org) {
+		return fmt.Errorf("%q cannot be an organization's name", *owner)
+	}
+	existingFull := ""
+	if existing != nil && existing.Owner != "" && existing.Name == mono {
+		if org != "" && org != existing.Owner {
+			return fmt.Errorf("this folder is %s already; to move it to %s, run: pando monorepo transfer %s %s", existing.FullName(), org, existing.FullName(), org)
+		}
+		existingFull = existing.FullName()
+	}
+	srvc, repos, mrec, made, err := ensureMonorepo(e, serverURL, org, mono, existingFull, plan.Kind)
 	if err != nil {
 		return err
 	}
-
-	root := &config.Root{Dir: plan.Root, Kind: plan.Kind, Name: mono, Server: serverURL}
+	root := &config.Root{Dir: plan.Root, Kind: plan.Kind, Owner: mrec.Owner, Name: mrec.Name, ID: mrec.ID, Server: serverURL}
+	mono = root.FullName() // owner/name from here on
 	if existing != nil {
 		root.Repos = existing.Repos
 	}
@@ -217,16 +229,16 @@ func Init(e *Env, args []string) error {
 	if plan.Kind == config.KindMonorepo {
 		switch {
 		case strings.HasPrefix(serverURL, "file://"):
-			e.printf("meta layer: none on a file:// server\n")
+			e.printf("shared files: not synced on a file:// server\n")
 		case !made:
-			e.printf("meta layer: already started; keep it live with pando meta sync\n")
+			e.printf("shared files: the first upload already started; keep the files outside projects/ live with pando sync\n")
 		default:
 			start := time.Now()
 			if err := meta.Init(e.Ctx, plan.Root); err != nil {
-				e.warnf("meta layer: the first upload did not finish: %v", err)
+				e.warnf("shared files: the first upload did not finish: %v", err)
 				failed++
 			} else {
-				e.printf("meta layer: uploaded in %.1fs; keep it live with pando meta sync\n", time.Since(start).Seconds())
+				e.printf("shared files: uploaded the files outside projects/ in %.1fs; keep them live with pando sync\n", time.Since(start).Seconds())
 			}
 		}
 	}
@@ -260,7 +272,7 @@ func printPlan(e *Env, p *detect.Plan) {
 		e.printf("%s is a git repo: it becomes a plain Pando repo.\n", p.Root)
 		e.printf("  main: local branch %s at %s\n", pr.MainBranch, short(pr.Head))
 	} else {
-		e.printf("%s is not a git repo: it becomes a Pando monorepo, with this folder as the meta layer.\n", p.Root)
+		e.printf("%s is not a git repo: it becomes a Pando monorepo. Its files outside projects/ are shared with every machine.\n", p.Root)
 		e.printf("\nRepos (%d):\n", len(p.Projects))
 		for _, pr := range p.Projects {
 			from := rel(p.Root, pr.Checkout)
@@ -284,41 +296,61 @@ func printPlan(e *Env, p *detect.Plan) {
 // It creates first and looks up only on 409: a lookup before the create
 // would plant a "no such monorepo" answer in the Worker's per-isolate auth
 // cache, which then answers 404 for some seconds after the create.
-func ensureMonorepo(e *Env, serverURL, mono, kind string) (srv server.Server, repos []server.Repo, made bool, err error) {
+func ensureMonorepo(e *Env, serverURL, owner, name, existingFull, kind string) (srv server.Server, repos []server.Repo, m *server.Monorepo, made bool, err error) {
 	tok, terr := e.Home.Token(serverURL)
 	if terr != nil && !strings.HasPrefix(serverURL, "file://") {
-		return nil, nil, false, terr
+		return nil, nil, nil, false, terr
 	}
 	s, err := server.Open(serverURL, tok)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
 	if h, ok := s.(*server.HTTP); ok {
 		h.Agent = worktree.CleanAgent(e.agentFor(nil))
 	}
-	created, err := s.CreateMonorepo(e.Ctx, mono, kind)
-	if err == nil {
-		e.printf("\nMade %s %s on %s; you are its owner.\n", kind, mono, config.Host(serverURL))
-		return s, created.Repos, true, nil
+	full := existingFull
+	if full == "" {
+		created, err := s.CreateMonorepo(e.Ctx, owner, name, kind)
+		if err == nil {
+			m := created.Monorepo
+			e.printf("\nMade %s %s on %s; you are its owner.\n", kind, m.Full(), config.Host(serverURL))
+			if ra := created.ReplacedAlias; ra != nil && ra.FullName != "" {
+				e.warnf("%s no longer leads to %s", ra.FullName, ra.PointedTo)
+			}
+			return s, created.Repos, &m, true, nil
+		}
+		if server.StatusOf(err) != 409 {
+			if owner != "" && server.Code(err) == "not_your_namespace" {
+				return nil, nil, nil, false, fmt.Errorf("you are not in the organization %s (pando org list shows yours): %w", owner, err)
+			}
+			return nil, nil, nil, false, err
+		}
+		// It exists in that namespace (the org's, else this person's own):
+		// continue with it.
+		if owner == "" {
+			me, err := s.Me(e.Ctx)
+			if err != nil {
+				return nil, nil, nil, false, err
+			}
+			owner = strings.ToLower(me.Login)
+		}
+		full = owner + "/" + name
 	}
-	if server.StatusOf(err) != 409 {
-		return nil, nil, false, err
-	}
-	m, err := s.GetMonorepo(e.Ctx, mono)
+	got, err := s.GetMonorepo(e.Ctx, full)
 	switch {
 	case server.StatusOf(err) == 403:
-		return nil, nil, false, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", mono, config.Host(serverURL))
+		return nil, nil, nil, false, fmt.Errorf("monorepo %s exists on %s and you are not a member; ask an owner to add you", full, config.Host(serverURL))
 	case err != nil:
-		return nil, nil, false, err
-	case m.Kind != kind:
-		return nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", mono, m.Kind, kind)
+		return nil, nil, nil, false, err
+	case got.Kind != kind:
+		return nil, nil, nil, false, fmt.Errorf("monorepo %s exists on the server as a %s, not a %s", full, got.Kind, kind)
 	}
-	repos, err = s.ListRepos(e.Ctx, mono)
+	repos, err = s.ListRepos(e.Ctx, got.Full())
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
-	e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", mono, config.Host(serverURL), dash(m.Role))
-	return s, repos, false, nil
+	e.printf("\nMonorepo %s exists on %s (you are %s); continuing.\n", got.Full(), config.Host(serverURL), dash(got.Role))
+	return s, repos, got, false, nil
 }
 
 // pushMain pushes a project's main branch through the git door, and adds a
@@ -353,15 +385,11 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		return fmt.Errorf("the server's main is at %s, not %s; it is left as it is (push a branch and merge it)", short(f[0]), short(p.Head))
 	}
 	// The same size check a worktree's pre-push hook makes. main takes only
-	// its first push, so history over the limit goes up in pieces on a side
-	// branch first.
-	check := gitx.Cmd{Dir: p.Checkout, Stdin: strings.NewReader(fmt.Sprintf("refs/heads/%s %s refs/heads/main %s\n", p.MainBranch, p.Head, strings.Repeat("0", len(p.Head))))}
-	if _, err := check.RunShell(e.Ctx, worktree.PrePushScript(), "pando", cloneURL); err != nil {
-		var ge *gitx.Error
-		if errors.As(err, &ge) {
-			e.Stderr.Write([]byte(ge.Stderr))
-		}
-		return fmt.Errorf("main is not pushed. Push older history first on a side branch, in pieces under 100 MB: git -C %s push pando <older commit>:refs/heads/import, then run pando init again", p.Checkout)
+	// its first push, so a history over one push goes up in steps first
+	// (steps.go), and main's push carries the rest.
+	steps, err := pushSteps(e, g, p.Path, cloneURL, p.Head)
+	if err != nil {
+		return err
 	}
 	// Two failures are retried. A repo made a moment ago can be "not found"
 	// at the git door for a few seconds: retried for up to half a minute.
@@ -372,7 +400,12 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 	push := func() error {
 		// The agent header rides on this one push only; the person's own
 		// checkout keeps no Pando agent in its config.
-		args := append(worktree.AgentHeaderArgs(cloneURL, e.agentFor(nil)), "push", "--quiet", "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
+		args := append(worktree.AgentHeaderArgs(cloneURL, e.agentFor(nil)), "push", "--quiet")
+		if len(steps) > 0 {
+			// Measured above with the steps left out; a pre-push hook here would count them again.
+			args = append(args, "--no-verify")
+		}
+		args = append(args, "pando", "refs/heads/"+p.MainBranch+":refs/heads/main")
 		_, err := g.Run(e.Ctx, args...)
 		return err
 	}
@@ -403,6 +436,15 @@ func pushMain(e *Env, p detect.Project, cloneURL string) error {
 		err = push()
 	}
 	e.printf("%-44s pushed %s %s as main\n", p.Path, p.MainBranch, short(p.Head))
+	if len(steps) > 0 {
+		del := []string{"push", "--quiet", "--no-verify", "pando"}
+		for _, ref := range steps {
+			del = append(del, ":"+ref)
+		}
+		if _, err := g.Run(e.Ctx, del...); err != nil {
+			e.warnf("%s: main is pushed, but %s stays on the server (%s)", p.Path, strings.Join(steps, " and "), firstLine(err))
+		}
+	}
 	return nil
 }
 

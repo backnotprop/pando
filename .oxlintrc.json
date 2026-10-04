@@ -1,0 +1,127 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.wrangler/**",
+    "spikes/**",
+    "**/spikes/**",
+    "worker/worker-configuration.d.ts",
+    "**/*.gen.ts",
+    // site/docs: @cloudflare/create-nimbus-docs 0.7.9 scaffold output and nimbus recipe output, vendored (site/docs/UPSTREAM.md).
+    "site/docs/.astro/**",
+    "site/docs/src/components/ui/**",
+    "site/docs/src/components/AgentDirective.astro",
+    "site/docs/src/components/Header.astro",
+    "site/docs/src/components/Render.astro",
+    "site/docs/src/layouts/**",
+    "site/docs/src/lib/**",
+    "site/docs/src/pages/\\[...slug\\].astro",
+    "site/docs/src/pages/\\[...slug\\]/**",
+    "site/docs/src/pages/\\[section\\]/**",
+    "site/docs/src/pages/404.astro",
+    "site/docs/src/pages/api/\\[...slug\\].astro",
+    "site/docs/src/pages/llms-full.txt.ts",
+    "site/docs/src/pages/llms.txt.ts",
+    "site/docs/src/pages/nimbus-api/**",
+    "site/docs/src/pages/og.png.ts",
+    "site/docs/src/pages/og/\\[...slug\\].ts",
+    "site/docs/src/pages/robots.txt.ts"
+  ],
+  "jsPlugins": [
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    },
+    {
+      "name": "anti-slop-effect",
+      "specifier": "./tools/oxlint/anti-slop/effect/index.ts"
+    }
+  ],
+  "rules": {
+    "oxc/no-accumulating-spread": "error",
+    "anti-slop/no-array-filter-map": "error",
+    "anti-slop/no-reduce-accumulator-copy": "error",
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-known-value-widening": "error",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-runtime-typeof": [
+      "error",
+      {
+        "allowInTypeGuards": true
+      }
+    ],
+    "anti-slop/no-shape-in-symbol-names": "error",
+    "anti-slop/no-unknown-parameters": "error",
+    "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-readable-spacing": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "effect",
+            "message": "Import the module instead (effect/Schema, effect/Effect, ...): the barrel puts about 3 times more Effect in a bundle (research/plans/architecture-2026-10-03/EFFECT.md)."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["worker/src/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "effect",
+                "message": "Import the module instead (effect/Schema, effect/Effect, ...): the barrel puts about 3 times more Effect in a bundle (research/plans/architecture-2026-10-03/EFFECT.md)."
+              },
+              {
+                "name": "@pando/contract",
+                "allowTypeImports": true,
+                "message": "The Worker uses the contract for types only (import type ...), so the deploy carries none of it (decisions/RULINGS.md, M5)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/**",
+        "web/src/api/**",
+        "worker/src/adapters/**"
+      ],
+      "rules": {
+        "anti-slop-effect/no-manual-effect-error-tag": "error",
+        "anti-slop-effect/no-manual-tag-comparison": "error",
+        "anti-slop-effect/no-manual-tagged-construction": "error",
+        "anti-slop-effect/no-service-constructor-imports": "error",
+        "anti-slop-effect/prefer-effect-match": "error"
+      }
+    }
+  ]
+}

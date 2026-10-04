@@ -1,0 +1,87 @@
+{
+  "schema": "Contributions",
+  "route": "GET /v1/users/{login}/contributions?tz=0 (another viewer: only repositories they can open)",
+  "status": 200,
+  "body": {
+    "login": "rec-muu4ew7h",
+    "tz": 0,
+    "from": "2025-10-05",
+    "to": "2026-10-04",
+    "total": 17,
+    "levels": [
+      1,
+      17,
+      18,
+      19
+    ],
+    "days": [
+      {
+        "date": "2026-10-04",
+        "n": 17,
+        "commit": 8,
+        "branch": 7,
+        "review": 1,
+        "created": 1
+      }
+    ],
+    "monorepos": [
+      {
+        "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+        "owner_type": "org",
+        "kind": "monorepo",
+        "n": 17,
+        "months": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          17
+        ]
+      }
+    ],
+    "kinds": {
+      "commit": 8,
+      "branch": 7,
+      "review": 1,
+      "created": 1
+    },
+    "months": [
+      {
+        "period": "2026-10",
+        "commit": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 8
+          }
+        ],
+        "branch": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 7
+          }
+        ],
+        "review": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 1
+          }
+        ],
+        "created": [
+          {
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "at": "2026-10-04T17:54:38.895Z"
+          }
+        ],
+        "joined": []
+      }
+    ]
+  }
+}

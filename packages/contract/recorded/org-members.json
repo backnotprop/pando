@@ -1,0 +1,27 @@
+{
+  "schema": "OrgMemberList",
+  "route": "GET /v1/orgs/{org}/members",
+  "status": 200,
+  "body": {
+    "members": [
+      {
+        "login": "bo-muu2mhw1",
+        "name": "Bo Diaz",
+        "picture_url": null,
+        "role": "member",
+        "added_at": "2026-10-04T17:05:17.259Z",
+        "added_by": "rec-muu2mhw1",
+        "last_active_at": null
+      },
+      {
+        "login": "rec-muu2mhw1",
+        "name": "Ana Lima",
+        "picture_url": null,
+        "role": "owner",
+        "added_at": "2026-10-04T17:05:17.249Z",
+        "added_by": null,
+        "last_active_at": "2026-10-04T17:04:34.355Z"
+      }
+    ]
+  }
+}

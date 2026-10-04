@@ -1,0 +1,138 @@
+---
+title: Blacksmith and Depot through GitHub Actions
+description: Run a Pando repo's tests on Blacksmith or Depot runners, started by a GitHub Actions repository dispatch.
+sidebar:
+  order: 2
+---
+
+Blacksmith and Depot sell runners for GitHub Actions. Neither documents a way to start a job from a git server other than GitHub, so with Pando they run through GitHub Actions: a push to Pando starts a workflow in a GitHub repo you keep for CI, through GitHub's repository dispatch. The workflow runs on a Blacksmith or Depot runner, fetches the commit from Pando, runs your tests, and posts the check back to Pando.
+
+<Aside type="caution" title="Not tested end to end">
+Pando has not run this path end to end. The GitHub, Blacksmith and Depot facts on this page come from their docs, read on 2026-10-02. Where those docs did not answer a question, this page says unknown. [Buildkite](/ci/buildkite/) is the CI service Pando starts by itself.
+</Aside>
+
+## How it flows
+
+1. You push a branch to Pando.
+2. Pando's `web` hook sends the push, signed, to a relay you run.
+3. The relay checks the signature and calls GitHub: `POST https://api.github.com/repos/<org>/<ci-repo>/dispatches`.
+4. GitHub starts the workflow on a Blacksmith or Depot runner. It fetches the commit from Pando with the hook's read token and runs your tests.
+5. Its last step posts the check to Pando with the hook's status token.
+
+The relay is needed because a Pando hook sends Pando's own JSON, while GitHub's dispatch API wants your GitHub token and its own body. Pando does not run the relay for you.
+
+## What you need
+
+- **A private GitHub repo for CI**, in a GitHub organization. Blacksmith does not support personal repos. The workflow file must be on its default branch.
+- **The runner's GitHub app** installed on that organization: Blacksmith's or Depot's.
+- **A GitHub token** that can call the dispatch API. A classic token needs the `repo` scope. The fine-grained permission it needs: unknown.
+- **A relay**: any HTTPS address you run, such as a Cloudflare Worker.
+- **Owner rights** on the Pando repository, to add the hook.
+
+## 1. The workflow
+
+In the CI repo, on its default branch, add `.github/workflows/pando.yml`:
+
+```yaml
+name: pando
+on:
+  repository_dispatch:
+    types: [pando-push]
+jobs:
+  test:
+    runs-on: blacksmith-2vcpu-ubuntu-2404   # Depot: depot-ubuntu-24.04
+    steps:
+      - name: Fetch the commit from Pando
+        env:
+          CLONE_URL: ${{ github.event.client_payload.clone_url }}
+          READ_TOKEN: ${{ github.event.client_payload.read_token }}
+          SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          git init -q repo
+          cd repo
+          git -c "http.extraHeader=Authorization: Bearer $READ_TOKEN" fetch -q --depth 1 "$CLONE_URL" "$SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Test
+        working-directory: repo
+        run: ./test.sh
+      - name: Post the check to Pando
+        if: always()
+        env:
+          STATUS_URL: ${{ github.event.client_payload.status_url }}
+          STATUS_TOKEN: ${{ github.event.client_payload.status_token }}
+          STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "$STATUS_URL" \
+            -H "Authorization: Bearer $STATUS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"state\":\"$STATE\",\"context\":\"ci\",\"target_url\":\"$RUN_URL\"}"
+```
+
+Only the `runs-on` label differs between Blacksmith and Depot. No page read says a repository dispatch behaves differently on their runners than on GitHub's own; that is assumed, not tested.
+
+## 2. The relay
+
+The relay receives Pando's hook, checks its `X-Pando-Signature-256` header (`sha256=` and the HMAC-SHA256 of the raw body, keyed with the hook's secret), and sends GitHub a dispatch. GitHub takes at most 10 top-level properties in `client_payload`, under 64 KB in all, and an `event_type` of at most 100 characters.
+
+A sketch as a Cloudflare Worker, with the secrets `PANDO_HOOK_SECRET` and `GITHUB_TOKEN`:
+
+```js
+// Pando's push hook in, GitHub's repository dispatch out.
+const CI_REPO = "your-org/your-ci-repo";
+
+export default {
+  async fetch(request, env) {
+    const body = await request.text();
+    const sig = (request.headers.get("x-pando-signature-256") ?? "").replace(/^sha256=/, "");
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.PANDO_HOOK_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const bytes = new Uint8Array((sig.match(/../g) ?? []).map((h) => parseInt(h, 16)));
+    if (!(await crypto.subtle.verify("HMAC", key, bytes, new TextEncoder().encode(body)))) return new Response("bad signature", { status: 401 });
+
+    const p = JSON.parse(body);
+    if (p.event !== "push" || /^0+$/.test(p.head)) return new Response("nothing to build");
+
+    const res = await fetch(`https://api.github.com/repos/${CI_REPO}/dispatches`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "pando-relay" },
+      body: JSON.stringify({
+        event_type: "pando-push",
+        client_payload: { repo: p.repo, branch: p.branch, sha: p.head, clone_url: p.clone_url, read_token: p.read_token, status_url: p.status_url, status_token: p.status_token },
+      }),
+    });
+
+    // Anything but 2xx makes Pando try the delivery again.
+    return new Response(res.ok ? "dispatched" : `GitHub answered ${res.status}`, { status: res.ok ? 200 : 502 });
+  },
+};
+```
+
+## 3. The hook in Pando
+
+Make a credential for the API, then add a `web` hook to the repo whose pushes should run the workflow. Run this in a terminal:
+
+```sh
+pando credential create --name ci-setup --out ~/ci-setup.token
+curl -fsS -X POST "https://<server>/v1/monorepos/<owner>/<name>/repos/<repo>/hooks" \
+  -H "Authorization: Bearer $(cat ~/ci-setup.token)" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"web","url":"https://<your-relay>","secret":"<the relay secret>","events":["push"],"app":"github-actions"}'
+```
+
+`<repo>` is the repo's path with each `/` turned into `-` (`projects/web` is `projects-web`). `app` names the CI service on the checks this hook's deliveries post. Revoke the credential afterwards with `pando credential revoke <id>` (`pando credential list` shows the id). See [createHook](/api/hooks/createHook/) in the API reference.
+
+Then require the check, if Merge should wait for it (see [Checks and CI](/ci/)):
+
+<Render file="required-checks" />
+
+## Tokens and what can see them
+
+- **The read token** reads one repo and lasts 30 minutes from the delivery. A job that waits longer in GitHub's queue fails at the fetch; push again.
+- **The status token** posts checks on its one commit, in its one repo, for 24 hours.
+- **Payload values show in the run's logs.** Treat both tokens as visible to anyone who can read the CI repo's Actions logs, and keep that repo private.
+
+## Unknown
+
+- The fine-grained GitHub permission for repository dispatch.
+- GitHub's rate limit for repository dispatch.
+- Whether Blacksmith or Depot add anything of their own to a dispatched run. Their docs read on 2026-10-02 say nothing either way.

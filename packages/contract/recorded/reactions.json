@@ -1,0 +1,16 @@
+{
+  "schema": "ReactionsAnswer",
+  "route": "PUT .../issues/{n}/reactions/{content}",
+  "status": 200,
+  "body": {
+    "reactions": [
+      {
+        "content": "+1",
+        "count": 1,
+        "by": [
+          "rec-muu2mhw1"
+        ]
+      }
+    ]
+  }
+}

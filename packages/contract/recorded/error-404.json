@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "GET .../meta/file?path=absent.md",
+  "status": 404,
+  "body": {
+    "error": {
+      "code": "not_found",
+      "message": "no such file at that version"
+    }
+  }
+}

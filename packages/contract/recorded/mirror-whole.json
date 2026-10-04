@@ -1,0 +1,45 @@
+{
+  "schema": "Mirror",
+  "route": "GET .../mirror (whole repository)",
+  "status": 200,
+  "body": {
+    "app": {
+      "configured": true
+    },
+    "connection": {
+      "installation_id": 101,
+      "login": "backnotprop",
+      "type": "User",
+      "repository_selection": "selected",
+      "manage_url": "http://127.0.0.1:8835/web/settings/installations/101",
+      "connected_at": "2026-10-04T18:07:28.886Z",
+      "connected_by": "mr-muu4v9az"
+    },
+    "mode": "whole",
+    "on": true,
+    "started": true,
+    "paused": null,
+    "targets": [
+      {
+        "repo": "*",
+        "path": "*",
+        "on": true,
+        "github": {
+          "id": 1003,
+          "full_name": "backnotprop/mr-muu4v9az-all",
+          "private": true,
+          "url": "https://github.com/backnotprop/mr-muu4v9az-all"
+        },
+        "state": "up_to_date",
+        "last": {
+          "commit": "cf3f2834d56e3fe8ff5088cfee3abd06b3db65cf",
+          "at": "2026-10-04T18:08:57.662Z"
+        },
+        "behind": null,
+        "waiting_since": null,
+        "next_try_at": null,
+        "problem": null
+      }
+    ]
+  }
+}

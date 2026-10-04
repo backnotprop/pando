@@ -1,0 +1,16 @@
+{
+  "schema": "CiJobLog",
+  "route": "GET .../ci/builds/{build}/jobs/{job}/log",
+  "status": 200,
+  "body": {
+    "job": "job-lint-1",
+    "content": "$ npm run lint\n\n> lint\n> oxlint --deny-warnings\n\nFound 0 warnings and 0 errors.\n",
+    "bytes": 80,
+    "total_bytes": 80,
+    "truncated": false,
+    "complete": false,
+    "fetched_at": "2026-10-04T17:05:02.493Z",
+    "cached": false,
+    "retry_after_ms": null
+  }
+}

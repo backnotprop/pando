@@ -1,0 +1,27 @@
+{
+  "schema": "HistoryPage",
+  "route": "GET .../repos/{repo}/history?ref=main&path=merged.txt",
+  "status": 200,
+  "body": {
+    "ref": "main",
+    "path": "merged.txt",
+    "commits": [
+      {
+        "sha": "89d824c9703c63d48bceb4fc56462f506f50cfc8",
+        "title": "Merge branch 'feat/merge-me'",
+        "author": {
+          "name": "Ana Lima",
+          "email": "rec-muu2mhw1@users.pando.invalid"
+        },
+        "at": "2026-10-04T17:04:51.000Z",
+        "merged_branch": {
+          "branch": "feat/merge-me",
+          "title": null
+        }
+      }
+    ],
+    "next": null,
+    "capped": false,
+    "complete_page": true
+  }
+}

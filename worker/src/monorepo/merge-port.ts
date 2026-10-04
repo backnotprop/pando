@@ -7,12 +7,15 @@ import { GitWriteError, mergeCommit, type MergeOptions, type MergeResult } from 
 export type { MergeOptions, MergeResult as MergeOutcome };
 
 export interface GitWrite {
-  mergeCommit(repo: { artifacts: Artifacts; name: string }, opts: MergeOptions): Promise<MergeResult>;
+  mergeCommit(
+    repo: { artifacts: Artifacts; name: string; write?: { remote?: string; token: (fresh: boolean) => Promise<string> } },
+    opts: MergeOptions,
+  ): Promise<MergeResult>;
 }
 
 /** The `code` of a GitWriteError, or null for any other error. */
-export function gitWriteCode(err: unknown): string | null {
-  return err instanceof GitWriteError ? err.code : null;
+export function gitWriteCode(cause: unknown): string | null {
+  return cause instanceof GitWriteError ? cause.code : null;
 }
 
 export const gitwrite: GitWrite | null = { mergeCommit };

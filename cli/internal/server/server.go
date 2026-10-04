@@ -10,14 +10,44 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
+// Monorepo is named owner/name, like a GitHub repo; ID is permanent
+// (a rename or transfer changes the name, never the id).
 type Monorepo struct {
+	ID        string `json:"id"`
+	Owner     string `json:"owner"`
 	Name      string `json:"name"`
-	Kind      string `json:"kind"` // "monorepo" or "repo"
-	Role      string `json:"role"` // the caller's: "owner" or "member"
+	FullName  string `json:"full_name"`  // owner/name
+	Kind      string `json:"kind"`       // "monorepo" or "repo"
+	OwnerType string `json:"owner_type"` // "user" or "org"
+	Role      string `json:"role"`       // the caller's: "owner" or "member"
 	CreatedAt string `json:"created_at"`
+	// Description is its one line (at most 160 characters); empty when it has none.
+	Description string `json:"description"`
+	// ReplacedAlias is set by a rename that took another monorepo's old name.
+	ReplacedAlias *ReplacedAlias `json:"replaced_alias,omitempty"`
+	JSON          []byte         `json:"-"` // the answer as sent, from an HTTP server: what --json prints
+}
+
+// Full is owner/name (from full_name, or built when the server left it out).
+func (m Monorepo) Full() string {
+	switch {
+	case m.FullName != "":
+		return m.FullName
+	case m.Owner != "":
+		return m.Owner + "/" + m.Name
+	}
+	return m.Name
+}
+
+// ReplacedAlias says a create or rename took a name an old monorepo name
+// had pointed to: that old name no longer leads where it did.
+type ReplacedAlias struct {
+	FullName  string `json:"full_name"`
+	PointedTo string `json:"pointed_to"`
 }
 
 type Repo struct {
@@ -31,8 +61,9 @@ type Repo struct {
 
 // Created is the answer to createMonorepo.
 type Created struct {
-	Monorepo Monorepo `json:"monorepo"`
-	Repos    []Repo   `json:"repos"`
+	Monorepo      Monorepo       `json:"monorepo"`
+	Repos         []Repo         `json:"repos"`
+	ReplacedAlias *ReplacedAlias `json:"replaced_alias"`
 }
 
 type User struct {
@@ -75,6 +106,21 @@ type InviteResult struct {
 	Invite *Invite `json:"invite"`
 }
 
+// Head is one repo's main, from GET /v1/monorepos/{owner}/{name}/heads.
+type Head struct {
+	Repo          string `json:"repo"` // the repo's URL name
+	Path          string `json:"path"`
+	DefaultBranch string `json:"default_branch"`
+	Head          string `json:"head"` // "" for an empty repo
+	UpdatedAt     string `json:"updated_at"`
+}
+
+// Heads is every code repo's main and the event stream's newest seq.
+type Heads struct {
+	Heads []Head `json:"heads"`
+	Seq   *int64 `json:"seq"` // nil when the stream is off
+}
+
 // Me is GET /v1/user: the user and the credential in use.
 type Me struct {
 	User
@@ -93,6 +139,19 @@ type Status struct {
 	State       string `json:"state"`
 	TargetURL   string `json:"target_url"`
 	Description string `json:"description"`
+	// Creator is a user's login, or app:<slug> for a status posted with a
+	// status token. App is the CI service Pando stamped ("" when a member
+	// posted it).
+	Creator string `json:"creator"`
+	App     string `json:"app"`
+}
+
+// StatusIn is the body of a new commit status.
+type StatusIn struct {
+	State       string `json:"state"`
+	Context     string `json:"context,omitempty"`
+	TargetURL   string `json:"target_url,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Checks struct {
@@ -112,17 +171,30 @@ type Branch struct {
 	Description string `json:"description"`
 	Ahead       *int   `json:"ahead"`
 	Behind      *int   `json:"behind"`
-	Mergeable   string `json:"mergeable"`
-	Checks      Checks `json:"checks"`
-	State       string `json:"state"`
-	MergeCommit string `json:"merge_commit"`
-	UpdatedAt   string `json:"updated_at"`
+	Mergeable   string `json:"mergeable"` // clean, conflicts, up_to_date, unknown, pending
+	// Stale: ahead, behind, base and mergeable are not yet for the current
+	// main and head (the server computes them on change); LastMergeable is
+	// the last known answer meanwhile.
+	Stale         bool   `json:"stale"`
+	LastMergeable string `json:"last_mergeable"`
+	Checks        Checks `json:"checks"`
+	State         string `json:"state"`
+	MergeCommit   string `json:"merge_commit"`
+	// ConflictPaths: with mergeable conflicts, the paths both sides changed.
+	ConflictPaths []string `json:"conflict_paths,omitempty"`
+	MergedBy      string   `json:"merged_by,omitempty"`
+	MergedAt      string   `json:"merged_at,omitempty"`
+	PushedMachine string   `json:"pushed_machine,omitempty"`
+	Forced        bool     `json:"forced,omitempty"`
+	UpdatedAt     string   `json:"updated_at"`
+	JSON          []byte   `json:"-"` // the answer as sent, from an HTTP server: what --json prints
 }
 
 type BranchList struct {
 	DefaultBranch string   `json:"default_branch"`
 	DefaultHead   string   `json:"default_head"`
 	Branches      []Branch `json:"branches"`
+	NextCursor    string   `json:"next_cursor"`
 }
 
 type ReviewComment struct {
@@ -141,13 +213,37 @@ type ReviewIn struct {
 }
 
 type Review struct {
-	ID        string `json:"id"`
-	Branch    string `json:"branch"`
-	Head      string `json:"head"`
-	Verdict   string `json:"verdict"`
-	Body      string `json:"body"`
-	Author    string `json:"author"`
-	CreatedAt string `json:"created_at"`
+	ID        string          `json:"id"`
+	Branch    string          `json:"branch"`
+	Head      string          `json:"head"`
+	Verdict   string          `json:"verdict"`
+	Body      string          `json:"body"`
+	Comments  []ReviewComment `json:"comments,omitempty"`
+	Author    string          `json:"author"`
+	CreatedAt string          `json:"created_at"`
+}
+
+// Commit is one commit of a branch (branchCommits).
+type Commit struct {
+	SHA     string   `json:"sha"`
+	Parents []string `json:"parents"`
+	Title   string   `json:"title"`
+	Author  struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+		Date  string `json:"date"`
+	} `json:"author"`
+}
+
+// BranchCommits is the branch's own commits, newest first.
+type BranchCommits struct {
+	Branch    string   `json:"branch"`
+	Head      string   `json:"head"`
+	MergeBase string   `json:"merge_base"`
+	Total     int      `json:"total"`
+	Truncated bool     `json:"truncated"`
+	Commits   []Commit `json:"commits"`
+	JSON      []byte   `json:"-"`
 }
 
 type MergeResult struct {
@@ -159,6 +255,9 @@ type MergeResult struct {
 	MergeBase  string `json:"merge_base"`
 	Forced     bool   `json:"forced"`
 	MergedBy   string `json:"merged_by"`
+	// Closes is the open issues this merge closes, decided as it lands; each
+	// closes about a second later.
+	Closes []int `json:"closes"`
 }
 
 // WorktreeIn is the body of putWorktree.
@@ -177,7 +276,7 @@ type Worktree struct {
 	Branch     string `json:"branch"`
 	Path       string `json:"path"`
 	Machine    string `json:"machine"`
-	Agent      string `json:"agent"`
+	Agent      string `json:"agent,omitempty"`
 	Kind       string `json:"kind"`
 	ReportedBy string `json:"reported_by"`
 	CreatedAt  string `json:"created_at"`
@@ -202,8 +301,12 @@ type Server interface {
 	ListCredentials(ctx context.Context) ([]Credential, error)
 	RevokeCredential(ctx context.Context, id string) error
 
-	CreateMonorepo(ctx context.Context, name, kind string) (*Created, error)
-	ListMonorepos(ctx context.Context) ([]Monorepo, error)
+	// CreateMonorepo makes a monorepo in owner's namespace: an org the
+	// caller is in, or "" for the caller's own.
+	CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error)
+	// ListMonorepos lists the caller's monorepos; with a name, only those
+	// named so (any owner), the caller's own namespace first.
+	ListMonorepos(ctx context.Context, name string) ([]Monorepo, error)
 	GetMonorepo(ctx context.Context, mono string) (*Monorepo, error)
 	// DeleteMonorepo deletes it, its repos and their history (owners).
 	DeleteMonorepo(ctx context.Context, mono string) error
@@ -215,6 +318,8 @@ type Server interface {
 	RevokeInvite(ctx context.Context, mono, email string) error
 
 	ListRepos(ctx context.Context, mono string) ([]Repo, error)
+	// Heads is every repo's main, for followers (no Artifacts read).
+	Heads(ctx context.Context, mono string) (*Heads, error)
 	GetRepo(ctx context.Context, mono, repo string) (*Repo, error)
 	CreateRepo(ctx context.Context, mono, path string) (*Repo, error)
 
@@ -236,18 +341,32 @@ type Server interface {
 // A plain repo (path ".") is named after its monorepo.
 func RepoName(mono, path string) string {
 	if path == "." || path == "" {
-		return mono
+		return mono[strings.LastIndexByte(mono, '/')+1:] // the monorepo's name, without its owner
 	}
 	return strings.ReplaceAll(path, "/", "-")
 }
 
-// APIError is a non-2xx answer: {"error": {"code", "message", ...}}.
+// MonorepoPath is a monorepo's API path, /v1/monorepos/<owner>/<name>, for
+// a full name owner/name. Every monorepo URL the cli builds starts here
+// (the API, the event socket, the meta layer's routes and socket). Git
+// URLs come from the server's clone_url, never built.
+func MonorepoPath(full string) string {
+	parts := strings.Split(full, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return "/v1/monorepos/" + strings.Join(parts, "/")
+}
+
+// APIError is a non-2xx answer: {"error": {"code", "message", ...}}. Body
+// is the answer as it came (--json prints it).
 type APIError struct {
 	Status  int
 	Code    string
 	Message string
 	Paths   []string
 	Checks  *Checks
+	Body    []byte
 }
 
 func (e *APIError) Error() string {

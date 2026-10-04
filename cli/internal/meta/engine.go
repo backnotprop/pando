@@ -8,13 +8,14 @@ import (
 	"io/fs"
 	"math/rand/v2"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
+
+	"pando/internal/server"
 
 	"github.com/coder/websocket"
 )
@@ -58,6 +59,20 @@ type Engine struct {
 
 	fatal error // set when the monorepo is gone: Run and CatchUp return it
 
+	// OS file-change notifications (watch.go). nil: scan every cfg.Poll.
+	watch     watcher
+	dirtyAt   map[string]time.Time // paths the watcher reported, and when to read them
+	dirtyNext time.Time            // the earliest of dirtyAt
+	rescan    string               // why a full scan is due now ("" if none)
+	nextFull  time.Time            // the next safety-net scan
+	nextTick  time.Time
+
+	// Case-only twins (Notes.md, notes.md): on a file system that keeps one
+	// file for both, pando sync names each pair once.
+	caseFold   bool                       // this file system is case-insensitive
+	byLower    map[string]map[string]bool // live paths from the server, by lower case
+	warnedCase map[string]bool            // pairs already named
+
 	untilSynced bool // return from Run once everything here is sent
 	textOnly    bool // CatchUp for a --text-only clone (saved in the state)
 	hooks       Hooks
@@ -93,6 +108,39 @@ func (c *seen) key() string {
 const closeDeleted websocket.StatusCode = 4404
 
 var errDeleted = errors.New("the monorepo was deleted on the server")
+
+// closeNoAccess is the close code the server sends when this user can no
+// longer open the monorepo: an owner removed them, they left the org that
+// owns it, or a transfer moved it away from that org.
+const closeNoAccess websocket.StatusCode = 4403
+
+// errNoAccess is that close, or a reconnect answered 403 not_a_member (the
+// access ended while this machine was offline).
+var errNoAccess = errors.New("you no longer have access to this monorepo")
+
+func lostAccess(err error) bool {
+	return websocket.CloseStatus(err) == closeNoAccess || errors.Is(err, errNoAccess)
+}
+
+// refusedAccess reports whether a refused upgrade is the Worker's 403
+// not_a_member (its body's first 1,024 bytes are kept by websocket.Dial).
+func refusedAccess(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusForbidden || resp.Body == nil {
+		return false
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	return body.Error.Code == "not_a_member"
+}
+
+// noAccess is why the sync stops when access ended, naming the monorepo.
+func (e *Engine) noAccess() error {
+	return fmt.Errorf("%s: %w; this folder keeps its files and stops syncing", e.cfg.Monorepo, errNoAccess)
+}
 
 type event struct {
 	gen      int
@@ -145,6 +193,7 @@ func New(cfg Config) (*Engine, error) {
 		done:        make(chan struct{}),
 		refsChanged: map[string]bool{},
 		hookBusy:    make(chan struct{}, 1),
+		dirtyAt:     map[string]time.Time{},
 		client:      NewClient(cfg),
 		runCtx:      context.Background(),
 		downloads:   map[string]*serverMsg{},
@@ -162,10 +211,30 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	defer e.close()
 	e.runCtx = ctx
-	e.cfg.Log.Printf("syncing %s with %s (monorepo %s, machine %s)", e.cfg.Root, e.cfg.Server, e.cfg.Monorepo, e.cfg.Machine)
+	how := fmt.Sprintf("scanning every %s", e.cfg.Poll)
+	if !e.untilSynced && !e.cfg.NoWatch { // pando sync --once and pando init scan once instead
+		w, err := startWatcher(e.cfg.Root, e.rules)
+		if err == nil {
+			e.watch = w
+			e.rescan = "start"
+			how = "changes from " + w.Name()
+		} else if !errors.Is(err, errNoWatcher) {
+			e.cfg.Log.Printf("no file-change notifications: %v", err)
+		}
+	}
+	defer func() {
+		if e.watch != nil {
+			e.watch.Close()
+		}
+	}()
+	e.cfg.Log.Printf("syncing %s with %s (monorepo %s, machine %s; %s)", e.cfg.Root, e.cfg.Server, e.cfg.Monorepo, e.cfg.Machine, how)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
+		var notify <-chan struct{}
+		if e.watch != nil {
+			notify = e.watch.Notify()
+		}
 		select {
 		case <-ctx.Done():
 			return nil
@@ -177,22 +246,33 @@ func (e *Engine) Run(ctx context.Context) error {
 			if e.untilSynced && !e.live && e.attempt >= 3 {
 				return fmt.Errorf("could not reach %s (%d tries); changes wait in the outbox for the next sync", e.cfg.Server, e.attempt)
 			}
+		case <-notify:
+			e.drainWatch()
 		case <-timer.C:
-			// A scan takes at most a tenth of the time: on a big tree the
-			// passes space out instead of using more of a core.
 			took := e.tick(ctx)
 			if e.untilSynced && e.synced() {
 				return nil
 			}
-			timer.Reset(max(e.cfg.Poll, 10*took))
+			gap := e.cfg.Poll // with a watcher: housekeeping only (frozen paths, held changes, the socket)
+			if e.watch == nil {
+				// A scan takes at most a tenth of the time: on a big tree the
+				// passes space out instead of using more of a core.
+				gap = max(e.cfg.Poll, 10*took)
+			}
+			e.nextTick = time.Now().Add(gap)
 		}
+		next := e.nextTick
+		if !e.dirtyNext.IsZero() && e.dirtyNext.Before(next) {
+			next = e.dirtyNext
+		}
+		timer.Reset(max(time.Until(next), 0))
 	}
 }
 
 // synced reports whether everything here is on the server: online, nothing
 // queued or in flight, nothing still changing or waiting to count as deleted.
 func (e *Engine) synced() bool {
-	if !e.live || len(e.st.Outbox) > 0 || len(e.inflight) > 0 || len(e.missing) > 0 || len(e.downloads) > 0 {
+	if !e.live || len(e.st.Outbox) > 0 || len(e.inflight) > 0 || len(e.missing) > 0 || len(e.downloads) > 0 || len(e.dirtyAt) > 0 {
 		return false
 	}
 	for _, c := range e.cache {
@@ -201,6 +281,33 @@ func (e *Engine) synced() bool {
 		}
 	}
 	return true
+}
+
+// notSent lists what pando sync --once leaves out of Pando: frozen paths,
+// whose edits wait for pando resolve, and changes the server refused, which
+// wait until the file changes again. One plain line each, sorted.
+func (e *Engine) notSent() []string {
+	var out []string
+	frozen, _ := ListFrozen(e.cfg.Root)
+	for _, f := range frozen {
+		line := f.Path + ": frozen after a conflict, so its edits are not sent."
+		if f.ConflictCopy != "" {
+			line += " Your version is in " + f.ConflictCopy + "."
+		}
+		out = append(out, line+" When the file is right: pando resolve "+f.Path)
+	}
+	for p := range e.st.Refused {
+		if _, err := os.Lstat(e.abs(p)); err != nil {
+			continue // gone since: nothing waits
+		}
+		why := e.st.RefusedWhy[p]
+		if why == "" {
+			why = "no reason kept"
+		}
+		out = append(out, p+": refused by the server: "+why+". It goes again when the file changes.")
+	}
+	sort.Strings(out)
+	return out
 }
 
 // CatchUp downloads every change since this machine last synced (all of the
@@ -230,6 +337,9 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 				if websocket.CloseStatus(ev.err) == closeDeleted {
 					return errDeleted
 				}
+				if lostAccess(ev.err) {
+					return e.noAccess()
+				}
 				return fmt.Errorf("download: %w", ev.err)
 			}
 			e.handle(ctx, ev)
@@ -239,7 +349,7 @@ func (e *Engine) CatchUp(ctx context.Context) error {
 			}
 		}
 	}
-	e.cfg.Log.Printf("downloaded the meta layer: %d paths known (%d new), at version %d", len(e.st.Files), len(e.st.Files)-start, e.st.Cursor)
+	e.cfg.Log.Printf("downloaded the files outside projects/: %d paths known (%d new), at version %d", len(e.st.Files), len(e.st.Files)-start, e.st.Cursor)
 	return nil
 }
 
@@ -260,6 +370,7 @@ func (e *Engine) open() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	e.caseFold = caseInsensitive(dir)
 	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
@@ -321,7 +432,7 @@ func (e *Engine) logf(format string, args ...any) {
 // ---- the connection ----
 
 func (e *Engine) socketURL() string {
-	u := e.cfg.Server + "/v1/monorepos/" + url.PathEscape(e.cfg.Monorepo) + "/meta/socket"
+	u := e.cfg.Server + server.MonorepoPath(e.cfg.Monorepo) + "/meta/socket"
 	if strings.HasPrefix(u, "https://") {
 		return "wss://" + strings.TrimPrefix(u, "https://")
 	}
@@ -351,9 +462,12 @@ func (e *Engine) dial(ctx context.Context) {
 	}
 	go func() {
 		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		c, _, err := websocket.Dial(dctx, e.socketURL(), &websocket.DialOptions{HTTPHeader: header})
+		c, resp, err := websocket.Dial(dctx, e.socketURL(), &websocket.DialOptions{HTTPHeader: header})
 		cancel()
 		if err != nil {
+			if refusedAccess(resp) {
+				err = errNoAccess
+			}
 			e.post(event{gen: gen, err: err})
 			return
 		}
@@ -431,6 +545,8 @@ func (e *Engine) handle(ctx context.Context, ev event) {
 	case ev.err != nil && websocket.CloseStatus(ev.err) == closeDeleted:
 		e.fatal = errDeleted
 		e.cfg.Log.Printf("%v; this folder keeps its files and stops syncing", errDeleted)
+	case ev.err != nil && lostAccess(ev.err):
+		e.fatal = e.noAccess() // Run returns it; pando sync prints it
 	case ev.err != nil:
 		wasUp := e.conn != nil
 		e.dialing = false
@@ -510,7 +626,15 @@ func (e *Engine) tick(ctx context.Context) time.Duration {
 	}
 	e.loadFrozen()
 	start := time.Now()
-	e.scan(start)
+	if e.watch == nil {
+		e.scan(start)
+	} else {
+		if e.rescan != "" || !start.Before(e.nextFull) {
+			e.markAll(start)
+			e.rescan, e.nextFull = "", start.Add(e.cfg.FullScan)
+		}
+		e.scanDue(start)
+	}
 	took := time.Since(start)
 	for _, m := range e.held {
 		e.applyOne(m)
@@ -545,6 +669,7 @@ func (e *Engine) loadFrozen() {
 	for p := range e.frozen {
 		if _, still := next[p]; !still {
 			e.logf("resolved %s: it syncs again", p)
+			e.markDirty(p, time.Now()) // its edits made while frozen go out now
 		}
 	}
 	e.frozen = next
@@ -583,7 +708,7 @@ func (e *Engine) scan(now time.Time) {
 			return nil
 		}
 		present[rel] = true
-		if op := e.observe(rel, abs, info, now); op != nil {
+		if op := e.observe(rel, abs, info, now, false); op != nil {
 			created = append(created, newSave{op, e.cache[rel].sha})
 		}
 		return nil
@@ -630,8 +755,9 @@ func (e *Engine) scan(now time.Time) {
 }
 
 // observe looks at one file. It returns the op it queued for a path that had
-// no synced bytes (a rename candidate).
-func (e *Engine) observe(rel, abs string, info fs.FileInfo, now time.Time) *Op {
+// no synced bytes (a rename candidate). settled: the file has been quiet for
+// its settle time already (a watcher's path), so one look is enough.
+func (e *Engine) observe(rel, abs string, info fs.FileInfo, now time.Time, settled bool) *Op {
 	size, mt := info.Size(), info.ModTime().UnixNano()
 	f := e.st.Files[rel]
 	if f != nil && f.SHA != "" && f.Size == size && f.Mtime == mt {
@@ -646,7 +772,7 @@ func (e *Engine) observe(rel, abs string, info fs.FileInfo, now time.Time) *Op {
 		}
 		c = &seen{size: size, mtime: mt, firstMove: first}
 		e.cache[rel] = c
-		if now.Sub(first) < e.cfg.MaxHold {
+		if !settled && now.Sub(first) < e.cfg.MaxHold {
 			return nil // still changing: wait for a quiet pass
 		}
 	}
@@ -731,6 +857,12 @@ func (e *Engine) queue(op *Op) *Op {
 }
 
 func (e *Engine) removeOp(op *Op) {
+	// Answered or dropped: look at the file again, in case it changed while
+	// the op was on its way (a watcher sends no event for that later).
+	e.markDirty(op.Path, time.Now())
+	if op.From != "" {
+		e.markDirty(op.From, time.Now())
+	}
 	if e.st.Outbox[op.Path] == op {
 		delete(e.st.Outbox, op.Path)
 	}
@@ -750,6 +882,237 @@ func (e *Engine) opFor(rel string) *Op {
 		return op
 	}
 	return e.byFrom[rel]
+}
+
+// ---- with a watcher ----
+
+// markDirty asks for rel to be looked at, at time at (a later event for the
+// same path replaces the time). Without a watcher the scan does this.
+func (e *Engine) markDirty(rel string, at time.Time) {
+	if e.watch == nil {
+		return
+	}
+	e.dirtyAt[rel] = at
+	if e.dirtyNext.IsZero() || at.Before(e.dirtyNext) {
+		e.dirtyNext = at
+	}
+}
+
+func (e *Engine) drainWatch() {
+	evs, rescan, err := e.watch.Drain()
+	now := time.Now()
+	if err != nil {
+		e.cfg.Log.Printf("file-change notifications stopped (%v); scanning every %s instead", err, e.cfg.Poll)
+		e.watch.Close()
+		e.watch, e.dirtyAt, e.dirtyNext = nil, map[string]time.Time{}, time.Time{}
+		e.nextTick = now
+		return
+	}
+	if rescan != "" {
+		e.rescan = rescan
+		e.nextTick = now
+		if rescan != "start" {
+			e.logf("scanning everything: %s", rescan)
+		}
+	}
+	for _, ev := range evs {
+		switch refusal(ev.rel) {
+		case "local_only", "not_meta", "bad_path":
+			continue // node_modules/, projects/, editor temp files, Pando's own files...
+		}
+		e.markDirty(ev.rel, now.Add(ev.settle))
+	}
+}
+
+// scanDue looks at every reported path whose quiet time is over.
+func (e *Engine) scanDue(now time.Time) {
+	if e.dirtyNext.IsZero() || e.dirtyNext.After(now) {
+		return
+	}
+	var due []string
+	var next time.Time
+	for rel, at := range e.dirtyAt {
+		if !at.After(now) {
+			due = append(due, rel)
+			delete(e.dirtyAt, rel)
+		} else if next.IsZero() || at.Before(next) {
+			next = at
+		}
+	}
+	e.dirtyNext = next
+	sort.Strings(due)
+	e.scanPaths(due, now)
+}
+
+// scanPaths is scan for some paths: files, folders that appeared (walked),
+// and things that are gone (a file, or a folder of synced files). Deletes and
+// renames are judged on the whole batch, as a scan does.
+func (e *Engine) scanPaths(rels []string, now time.Time) {
+	var created []newSave
+	var gone []string
+	present := map[string]bool{}
+	for _, rel := range rels {
+		if rel == "" || !e.inSyncedFolder(rel) {
+			continue
+		}
+		abs := e.abs(rel)
+		info, err := os.Lstat(abs)
+		switch {
+		case err != nil:
+			if !errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if _, isFile := e.st.Files[rel]; isFile {
+				gone = append(gone, rel)
+			} else {
+				gone = append(gone, e.filesUnder(rel)...) // a folder
+			}
+		case info.IsDir():
+			if e.rules.SkipDir(rel) {
+				continue
+			}
+			e.walkFolder(rel, now, present, &created)
+			gone = append(gone, e.filesUnder(rel)...)
+		case info.Mode().IsRegular() && e.rules.SyncFile(rel):
+			present[rel] = true
+			if op := e.observe(rel, abs, info, now, true); op != nil {
+				created = append(created, newSave{op, e.cache[rel].sha})
+			}
+		default: // a symlink, a socket, or a file that stays here
+			if f := e.st.Files[rel]; f != nil && f.SHA != "" && !info.Mode().IsRegular() {
+				gone = append(gone, rel)
+			}
+		}
+	}
+	sort.Strings(gone)
+	for i, rel := range gone {
+		if (i > 0 && gone[i-1] == rel) || present[rel] {
+			continue
+		}
+		e.goneNow(rel, created)
+	}
+}
+
+// walkFolder observes every file under a folder that appeared or moved in.
+func (e *Engine) walkFolder(dir string, now time.Time, present map[string]bool, created *[]newSave) {
+	filepath.WalkDir(e.abs(dir), func(abs string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		r, rerr := filepath.Rel(e.cfg.Root, abs)
+		if rerr != nil {
+			return nil
+		}
+		rel := filepath.ToSlash(r)
+		if d.IsDir() {
+			if rel != dir && e.rules.SkipDir(rel) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || !e.rules.SyncFile(rel) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		present[rel] = true
+		if op := e.observe(rel, abs, info, now, true); op != nil {
+			*created = append(*created, newSave{op, e.cache[rel].sha})
+		}
+		return nil
+	})
+}
+
+// filesUnder lists the synced files inside a folder.
+func (e *Engine) filesUnder(dir string) []string {
+	var out []string
+	for p, f := range e.st.Files {
+		if f.SHA != "" && strings.HasPrefix(p, dir+"/") {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// goneNow is a scan's delete step, for a path the watcher saw go.
+func (e *Engine) goneNow(rel string, created []newSave) {
+	delete(e.cache, rel)
+	f := e.st.Files[rel]
+	if f == nil || f.SHA == "" {
+		return
+	}
+	if _, err := os.Lstat(e.abs(rel)); err == nil {
+		return // back already
+	}
+	if _, frozen := e.frozen[rel]; frozen || e.st.Outbox[rel] != nil || e.byFrom[rel] != nil {
+		return
+	}
+	if e.renameInto(rel, f, created) {
+		return
+	}
+	e.queue(&Op{Kind: "delete", Path: rel, Base: f.Version})
+}
+
+// inSyncedFolder reports whether every folder above rel syncs.
+func (e *Engine) inSyncedFolder(rel string) bool {
+	for i := 0; i < len(rel); i++ {
+		if rel[i] == '/' && e.rules.SkipDir(rel[:i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// markAll is the safety net: walk everything, and mark what differs from
+// what this machine last saw.
+func (e *Engine) markAll(now time.Time) {
+	present := map[string]bool{}
+	root := e.cfg.Root
+	filepath.WalkDir(root, func(abs string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		r, rerr := filepath.Rel(root, abs)
+		if rerr != nil {
+			return nil
+		}
+		rel := filepath.ToSlash(r)
+		if d.IsDir() {
+			if rel != "." && e.rules.SkipDir(rel) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || !e.rules.SyncFile(rel) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		present[rel] = true
+		size, mt := info.Size(), info.ModTime().UnixNano()
+		if f := e.st.Files[rel]; f != nil && f.SHA != "" && f.Size == size && f.Mtime == mt {
+			return nil
+		}
+		if c := e.cache[rel]; c != nil && c.size == size && c.mtime == mt && c.firstMove.IsZero() && (c.sha != "" || c.oid != "" || c.why != "") {
+			return nil // these bytes were looked at already
+		}
+		e.markDirty(rel, now.Add(walkSettle))
+		return nil
+	})
+	for rel, f := range e.st.Files {
+		if f.SHA != "" && !present[rel] {
+			e.markDirty(rel, now.Add(walkSettle))
+		}
+	}
+	for rel := range e.cache {
+		if !present[rel] {
+			delete(e.cache, rel)
+		}
+	}
 }
 
 // ---- sending ----
@@ -808,7 +1171,9 @@ func (e *Engine) send(ctx context.Context, op *Op, mayConvert bool) {
 		if data == nil {
 			data = []byte{}
 		}
-		op.sentSHA, op.sentSize, op.sentMt = sha, info.Size(), info.ModTime().UnixNano()
+		op.SentSHA, op.SentDelete, op.sentOid = sha, false, ""
+		op.sentSize, op.sentMt = info.Size(), info.ModTime().UnixNano()
+		e.dirty = true
 		op.id = id
 		e.inflight[id] = op
 		e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: sha, Bytes: data})
@@ -818,6 +1183,8 @@ func (e *Engine) send(ctx context.Context, op *Op, mayConvert bool) {
 			e.send(ctx, op, false)
 			return
 		}
+		op.SentSHA, op.SentDelete, op.sentOid = "", true, ""
+		e.dirty = true
 		op.id = id
 		e.inflight[id] = op
 		e.write(ctx, deleteMsg{Type: "delete", ID: id, Path: op.Path, Base: op.Base})
@@ -856,10 +1223,12 @@ func (e *Engine) sendLarge(ctx context.Context, op *Op, id string, info fs.FileI
 		return
 	}
 	text := u.ptr.text()
-	op.sentSHA, op.sentOid, op.sentSize, op.sentMt = gitSHA(text), u.ptr.Oid, info.Size(), info.ModTime().UnixNano()
+	op.SentSHA, op.SentDelete, op.sentOid = gitSHA(text), false, u.ptr.Oid
+	op.sentSize, op.sentMt = info.Size(), info.ModTime().UnixNano()
+	e.dirty = true
 	op.id = id
 	e.inflight[id] = op
-	e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: op.sentSHA, Bytes: text})
+	e.write(ctx, saveMsg{Type: "save", ID: id, Path: op.Path, Base: op.Base, SHA: op.SentSHA, Bytes: text})
 }
 
 func (e *Engine) uploaded(ctx context.Context, r *uploadResult) {
@@ -888,8 +1257,9 @@ func (e *Engine) accepted(m *serverMsg) {
 	}
 	switch op.Kind {
 	case "save":
-		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.sentSHA, Oid: op.sentOid, Size: op.sentSize, Mtime: op.sentMt}
+		e.st.Files[op.Path] = &FileState{Version: m.Version, SHA: op.SentSHA, Oid: op.sentOid, Size: op.sentSize, Mtime: op.sentMt}
 		delete(e.st.Refused, op.Path)
+		delete(e.st.RefusedWhy, op.Path)
 		e.logf("sent %s (version %d)", op.Path, m.Version)
 	case "delete":
 		e.st.Files[op.Path] = &FileState{Version: m.Version}
@@ -915,10 +1285,11 @@ func (e *Engine) refused(m *serverMsg) {
 		return
 	}
 	if op.Kind == "save" {
-		e.st.Refused[op.Path] = op.sentSHA
+		e.st.Refused[op.Path] = op.SentSHA
 		if op.sentOid != "" {
 			e.st.Refused[op.Path] = "sha256:" + op.sentOid
 		}
+		e.st.RefusedWhy[op.Path] = fmt.Sprintf("%s (%s)", m.Message, m.Reason)
 	}
 	e.removeOp(op)
 	e.cfg.Log.Printf("the server refused %s: %s (%s)", m.Path, m.Message, m.Reason)
@@ -942,48 +1313,67 @@ func (e *Engine) stale(m *serverMsg) {
 		e.queue(&Op{Kind: "save", Path: op.Path, Base: op.ToBase})
 		return
 	case "delete":
+		if _, err := os.Lstat(e.abs(op.Path)); err == nil {
+			// Made again here since the delete went out: its new bytes lose
+			// as a save's would, to a conflict copy (CODE-VS-MODEL M4).
+			if !e.lostSave(op, cur) {
+				return
+			}
+			break
+		}
 		e.writeCurrent(op.Path, cur)
 		if !cur.Deleted {
 			e.cfg.Log.Printf("%s changed on %s before your delete arrived, so it is back", op.Path, cur.Machine)
 		}
 	case "save":
-		p := op.Path
-		data, err := os.ReadFile(e.abs(p))
-		if err == nil && !cur.Deleted && gitSHA(data) == cur.SHA {
-			e.adopt(p, cur.Version, cur.SHA, "") // the same bytes won
-			break
+		if !e.lostSave(op, cur) {
+			return
 		}
-		if ptr, ok := parsePointer(cur.Bytes); err == nil && ok && op.sentOid == ptr.Oid {
-			e.adopt(p, cur.Version, cur.SHA, ptr.Oid) // the same large file won
-			break
-		}
-		copyRel := ""
-		if err == nil {
-			copyRel = e.freeConflictName(p)
-			if _, werr := writeAtomic(e.abs(copyRel), data); werr != nil {
-				e.cfg.Log.Printf("could not keep your copy of %s: %v; leaving it as it is", p, werr)
-				return
-			}
-		}
-		e.writeCurrent(p, cur)
-		who := cur.Author
-		if cur.Machine != "" {
-			who += " on " + cur.Machine
-		}
-		if copyRel == "" {
-			e.cfg.Log.Printf("%s: %s saved first; your file was already gone", p, who)
-			break
-		}
-		fz := Frozen{Path: p, ConflictCopy: copyRel, Version: cur.Version, At: time.Now().UTC()}
-		if err := freeze(e.cfg.Root, fz); err != nil {
-			e.cfg.Log.Printf("could not freeze %s: %v", p, err)
-		}
-		e.frozen[p] = fz
-		e.cfg.Log.Printf("conflict on %s: %s saved first. Your version is in %s. %s is frozen until: pando resolve %s", p, who, copyRel, p, p)
 	}
 	if h := e.held[op.Path]; h != nil && h.Version <= cur.Version {
 		delete(e.held, op.Path)
 	}
+}
+
+// lostSave handles the local file of a change that lost the race: the same
+// bytes won (adopted), or the local bytes go to a conflict copy, the
+// object's are written, and the path freezes. False: the copy could not be
+// written, and the file is left as it is.
+func (e *Engine) lostSave(op *Op, cur *Current) bool {
+	p := op.Path
+	data, err := os.ReadFile(e.abs(p))
+	if err == nil && !cur.Deleted && gitSHA(data) == cur.SHA {
+		e.adopt(p, cur.Version, cur.SHA, "", nil) // the same bytes won
+		return true
+	}
+	if ptr, ok := parsePointer(cur.Bytes); err == nil && ok && op.sentOid == ptr.Oid {
+		e.adopt(p, cur.Version, cur.SHA, ptr.Oid, nil) // the same large file won
+		return true
+	}
+	copyRel := ""
+	if err == nil {
+		copyRel = e.freeConflictName(p)
+		if _, werr := writeAtomic(e.abs(copyRel), data); werr != nil {
+			e.cfg.Log.Printf("could not keep your copy of %s: %v; leaving it as it is", p, werr)
+			return false
+		}
+	}
+	e.writeCurrent(p, cur)
+	who := cur.Author
+	if cur.Machine != "" {
+		who += " on " + cur.Machine
+	}
+	if copyRel == "" {
+		e.cfg.Log.Printf("%s: %s saved first; your file was already gone", p, who)
+		return true
+	}
+	fz := Frozen{Path: p, ConflictCopy: copyRel, Version: cur.Version, At: time.Now().UTC()}
+	if err := freeze(e.cfg.Root, fz); err != nil {
+		e.cfg.Log.Printf("could not freeze %s: %v", p, err)
+	}
+	e.frozen[p] = fz
+	e.cfg.Log.Printf("conflict on %s: %s saved first. Your version is in %s. %s is frozen until: pando resolve %s", p, who, copyRel, p, p)
+	return true
 }
 
 func (e *Engine) freeConflictName(rel string) string {
@@ -1034,8 +1424,12 @@ func (e *Engine) writeCurrent(rel string, cur *Current) {
 	e.dirty = true
 }
 
-// adopt records the local file as synced at version (its bytes already match).
-func (e *Engine) adopt(rel string, version int64, sha, oid string) {
+// adopt records the local file as synced at version (its bytes already
+// match). A queued change of it is dropped, except one that went out and
+// whose answer was lost: m, the change that matched, drops it only when m is
+// that change's own version (CODE-VS-MODEL M3). Otherwise it waits for its
+// own version, or goes out again and finds nothing left to send.
+func (e *Engine) adopt(rel string, version int64, sha, oid string, m *serverMsg) {
 	f := &FileState{Version: version, SHA: sha, Oid: oid}
 	if sha != "" {
 		if info, err := os.Lstat(e.abs(rel)); err == nil {
@@ -1043,11 +1437,47 @@ func (e *Engine) adopt(rel string, version int64, sha, oid string) {
 		}
 	}
 	e.st.Files[rel] = f
-	if op := e.opFor(rel); op != nil && op.id == "" {
+	if op := e.opFor(rel); op != nil && op.id == "" && (m == nil || !op.wasSent() || e.lostAnswer(op, m)) {
 		e.removeOp(op)
 	}
 	delete(e.held, rel)
 	e.dirty = true
+}
+
+func (op *Op) wasSent() bool { return op.SentSHA != "" || op.SentDelete }
+
+// lostAnswer reports whether m is this machine's own version of what op last
+// sent, with op not in flight now: the server accepted it, and the answer was
+// lost with a dropped socket.
+func (e *Engine) lostAnswer(op *Op, m *serverMsg) bool {
+	if op == nil || op.id != "" || op.Path != m.Path || m.Machine != e.cfg.Machine {
+		return false
+	}
+	if m.Deleted {
+		return op.SentDelete
+	}
+	return op.SentSHA != "" && op.SentSHA == m.SHA
+}
+
+// rebase takes m as the answer a dropped socket lost, when the file changed
+// again since: m is synced, and the queued change goes out on top of it
+// instead of meeting its own version as a conflict (CODE-VS-MODEL M3).
+func (e *Engine) rebase(m *serverMsg, oid string) bool {
+	op := e.st.Outbox[m.Path]
+	if !e.lostAnswer(op, m) {
+		return false
+	}
+	f := &FileState{Version: m.Version}
+	if !m.Deleted {
+		// Not the bytes on disk: the file changed since, so it is not clean.
+		f.SHA, f.Oid, f.Size, f.Mtime = m.SHA, oid, -1, -1
+	}
+	e.st.Files[m.Path] = f
+	op.Base = m.Version
+	delete(e.held, m.Path)
+	e.dirty = true
+	e.logf("%s: version %d is this machine's own (its answer was lost); the newer edit goes out on top of it", m.Path, m.Version)
+	return true
 }
 
 func (e *Engine) noteWrite(rel string) {
@@ -1119,7 +1549,7 @@ func (e *Engine) move(m *serverMsg) bool {
 	e.noteWrite(from)
 	e.noteWrite(to)
 	e.st.Files[from] = &FileState{Version: m.FromVersion}
-	e.adopt(to, m.Version, m.SHA, ff.Oid)
+	e.adopt(to, m.Version, m.SHA, ff.Oid, nil)
 	delete(e.cache, from)
 	e.logf("%s moved %s to %s", who(m), from, to)
 	return true
@@ -1170,6 +1600,7 @@ func (e *Engine) applyOne(m *serverMsg) {
 	if !e.rules.Receivable(p) {
 		return
 	}
+	e.noteCase(m)
 	f := e.st.Files[p]
 	if f != nil && m.Version <= f.Version {
 		delete(e.held, p)
@@ -1182,20 +1613,29 @@ func (e *Engine) applyOne(m *serverMsg) {
 		e.held[p] = m
 		return
 	}
-	if ptr, ok := parsePointer(m.Bytes); ok && !m.Deleted && e.wantBytes(p, exists, info) {
-		e.applyLarge(m, ptr, exists, info)
-		return
+	// A pointer kept as text (a --text-only clone) still records its file's
+	// SHA-256, so the bytes pando fetch puts there later count as synced.
+	ptrOid := ""
+	if ptr, ok := parsePointer(m.Bytes); ok && !m.Deleted {
+		if e.wantBytes(p, exists, info) {
+			e.applyLarge(m, ptr, exists, info)
+			return
+		}
+		ptrOid = ptr.Oid
 	}
 	// The file already holds these bytes: a lost answer, or the same edit.
 	if !exists && m.Deleted {
-		e.adopt(p, m.Version, "", "")
+		e.adopt(p, m.Version, "", "", m)
 		return
 	}
 	if exists && !m.Deleted && info.Size() == m.Size {
 		if data, err := os.ReadFile(abs); err == nil && gitSHA(data) == m.SHA {
-			e.adopt(p, m.Version, m.SHA, "")
+			e.adopt(p, m.Version, m.SHA, ptrOid, m)
 			return
 		}
+	}
+	if e.rebase(m, ptrOid) {
+		return
 	}
 	if !e.clean(p) {
 		if e.held[p] == nil {
@@ -1220,11 +1660,50 @@ func (e *Engine) applyOne(m *serverMsg) {
 			e.cfg.Log.Printf("could not write %s: %v", p, err)
 			return
 		}
-		e.st.Files[p] = &FileState{Version: m.Version, SHA: m.SHA, Size: info.Size(), Mtime: info.ModTime().UnixNano()}
+		e.st.Files[p] = &FileState{Version: m.Version, SHA: m.SHA, Oid: ptrOid, Size: info.Size(), Mtime: info.ModTime().UnixNano()}
 		e.cache[p] = &seen{size: info.Size(), mtime: info.ModTime().UnixNano(), sha: m.SHA}
 		e.logf("%s saved %s (version %d)", who(m), p, m.Version)
 	}
 	e.dirty = true
+}
+
+// noteCase warns once per pair when the server holds two live paths that
+// differ only in case and this file system keeps one file for both: on a
+// Mac, Notes.md and notes.md overwrite each other.
+func (e *Engine) noteCase(m *serverMsg) {
+	if !e.caseFold {
+		return
+	}
+	if e.byLower == nil {
+		e.byLower, e.warnedCase = map[string]map[string]bool{}, map[string]bool{}
+		for q, f := range e.st.Files {
+			if f.SHA != "" {
+				e.addLower(q)
+			}
+		}
+	}
+	key := strings.ToLower(m.Path)
+	if m.Deleted {
+		delete(e.byLower[key], m.Path)
+		return
+	}
+	for q := range e.byLower[key] {
+		a, b := min(q, m.Path), max(q, m.Path)
+		if q == m.Path || e.warnedCase[a+"\x00"+b] {
+			continue
+		}
+		e.warnedCase[a+"\x00"+b] = true
+		e.cfg.Log.Printf("warning: %s and %s differ only in case; this file system keeps one file for both, so they overwrite each other here (git and Linux keep two). Rename one.", a, b)
+	}
+	e.addLower(m.Path)
+}
+
+func (e *Engine) addLower(p string) {
+	key := strings.ToLower(p)
+	if e.byLower[key] == nil {
+		e.byLower[key] = map[string]bool{}
+	}
+	e.byLower[key][p] = true
 }
 
 // ---- large files from other machines ----
@@ -1255,9 +1734,12 @@ func (e *Engine) applyLarge(m *serverMsg, ptr Pointer, exists bool, info fs.File
 	abs := e.abs(p)
 	if exists && info.Size() == ptr.Size {
 		if oid, _, err := sha256File(abs); err == nil && oid == ptr.Oid {
-			e.adopt(p, m.Version, m.SHA, ptr.Oid) // already here
+			e.adopt(p, m.Version, m.SHA, ptr.Oid, m) // already here
 			return
 		}
+	}
+	if e.rebase(m, ptr.Oid) {
+		return
 	}
 	if !e.clean(p) {
 		if e.held[p] == nil {

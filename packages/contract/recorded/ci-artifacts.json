@@ -1,0 +1,25 @@
+{
+  "schema": "CiArtifactList",
+  "route": "GET .../ci/builds/{build}/artifacts",
+  "status": 200,
+  "body": {
+    "artifacts": [
+      {
+        "id": "art-1",
+        "job": "job-lint-1",
+        "path": "reports/lint.txt",
+        "filename": "lint.txt",
+        "dirname": "reports",
+        "mime_type": "text/plain",
+        "size": 412,
+        "sha1sum": "0000000000000000000000000000000000000000",
+        "state": "finished"
+      }
+    ],
+    "truncated": false,
+    "complete": false,
+    "fetched_at": "2026-10-04T17:05:02.504Z",
+    "cached": false,
+    "retry_after_ms": null
+  }
+}

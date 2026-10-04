@@ -47,6 +47,21 @@ func (f *Fuse) Kind() string {
 	return "fuse"
 }
 
+// refreshPolicy is how often the ArtifactFS daemon fetches from the server
+// on its own (add-repo --refresh). A branch worktree never does: its own
+// writes are local, and the person or agent fetches when they want
+// (git fetch, git pull). A read-only main or a reference does every 10
+// minutes, as a safety net: the follower moves main on each merge as the
+// event stream reports it, with one fetch. The daemon's default was every
+// 30 s per mount, 95% of the git door's traffic in the load test
+// (research/operational/load-2026-10/README.md, C5b).
+func refreshPolicy(s Spec) string {
+	if s.ReadOnly || s.Reference {
+		return "10m"
+	}
+	return "never"
+}
+
 // stateDir is ~/.pando/afs/<repo folder>-<hash>: ARTIFACT_FS_ROOT for one repo.
 func (f *Fuse) stateDir(s Spec) string {
 	repoAbs := filepath.Join(s.Root, filepath.FromSlash(s.Repo))
@@ -65,7 +80,9 @@ func (f *Fuse) gitDir(s Spec) string {
 }
 
 func (f *Fuse) env(s Spec) []string {
-	env := []string{"ARTIFACT_FS_ROOT=" + f.stateDir(s)}
+	// The daemon runs git itself (clone, fetch, lazy content fetches): no
+	// system git config for it either (gitx.NoSystemConfig).
+	env := []string{"ARTIFACT_FS_ROOT=" + f.stateDir(s), gitx.NoSystemConfig}
 	if !s.Reference {
 		env = append(env, CredentialEnv(s.CloneURL)...)
 	}
@@ -122,6 +139,7 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 	if s.ReadOnly || s.Reference {
 		args = append(args, "--read-only")
 	}
+	args = append(args, "--refresh", refreshPolicy(s))
 	if _, err := f.run(ctx, s, args...); err != nil {
 		if strings.Contains(err.Error(), "flag provided but not defined: -read-only") {
 			return errors.New("this artifact-fs has no --read-only; build it from the fork's main (projects/artifact-fs)")
@@ -173,6 +191,9 @@ func (f *Fuse) Add(ctx context.Context, s Spec) error {
 // it, so one call brings back the repo's other worktrees too.
 func (f *Fuse) Up(ctx context.Context, s Spec) (bool, error) {
 	mp := f.mountPath(s)
+	// Mounts made before the refresh policy keep the daemon's 30 s fetch;
+	// set it here. A registry write only: no remount.
+	_, _ = f.run(ctx, s, "set-refresh", "--name", f.name(s), "--interval", refreshPolicy(s))
 	// A FUSE mount outlives its daemon (stale, "transport endpoint is not
 	// connected"), and so does an FSKit volume (EIO), so a mount alone is
 	// not proof.

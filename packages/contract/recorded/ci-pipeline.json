@@ -1,0 +1,69 @@
+{
+  "schema": "CiPipelinePage",
+  "route": "GET .../ci/pipelines/{pipeline}",
+  "status": 200,
+  "body": {
+    "pipeline": {
+      "connection": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
+      "service": "buildkite",
+      "slug": "web",
+      "name": "web",
+      "repo": "projects-web",
+      "repo_path": "projects/web",
+      "web_url": "https://buildkite.com/o/web",
+      "default_branch": "main",
+      "hook_id": null,
+      "last_build": {
+        "id": "cib_5fa125a40750929f",
+        "service": "buildkite",
+        "connection": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
+        "pipeline": "web",
+        "number": 1,
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
+        "branch": "feat/ready",
+        "message": "Add the ready file",
+        "state": "passed",
+        "service_state": "passed",
+        "web_url": "https://buildkite.com/o/web/builds/1",
+        "pushed_by": "rec-muu2mhw1",
+        "created_at": "2026-10-04T17:04:50.346Z",
+        "started_at": "2026-10-04T17:04:51.346Z",
+        "finished_at": "2026-10-04T17:05:00.346Z",
+        "duration_s": 9,
+        "rebuilt_from": null
+      },
+      "required_checks": [
+        "ci/test"
+      ],
+      "configuration": "steps:\n  - label: lint\n    key: lint\n    command: npm run lint\n",
+      "configuration_fetched_at": "2026-10-04T17:05:02.489Z",
+      "configuration_error": null
+    },
+    "builds": [
+      {
+        "id": "cib_5fa125a40750929f",
+        "service": "buildkite",
+        "connection": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
+        "pipeline": "web",
+        "number": 1,
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
+        "branch": "feat/ready",
+        "message": "Add the ready file",
+        "state": "passed",
+        "service_state": "passed",
+        "web_url": "https://buildkite.com/o/web/builds/1",
+        "pushed_by": "rec-muu2mhw1",
+        "created_at": "2026-10-04T17:04:50.346Z",
+        "started_at": "2026-10-04T17:04:51.346Z",
+        "finished_at": "2026-10-04T17:05:00.346Z",
+        "duration_s": 9,
+        "rebuilt_from": null
+      }
+    ],
+    "next_cursor": null
+  }
+}

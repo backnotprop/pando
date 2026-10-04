@@ -1,0 +1,16 @@
+{
+  "schema": "MergeResult",
+  "route": "POST .../branches/{branch}/merge?force=1",
+  "status": 200,
+  "body": {
+    "status": "merged",
+    "branch": "feat/merge-me",
+    "head": "c679a942ac97dbd47e10fd22e67ef3f7332112aa",
+    "sha": "89d824c9703c63d48bceb4fc56462f506f50cfc8",
+    "base_before": "5e44f241062d0bbede1f1c0aaca478e4cf50aa08",
+    "merge_base": "5e44f241062d0bbede1f1c0aaca478e4cf50aa08",
+    "forced": true,
+    "merged_by": "rec-muu2mhw1",
+    "closes": []
+  }
+}

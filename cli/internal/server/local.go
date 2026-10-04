@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,17 +33,41 @@ type localRepo struct {
 }
 
 type localMono struct {
+	ID        string      `json:"id"`
+	Owner     string      `json:"owner"`
 	Name      string      `json:"name"`
 	Kind      string      `json:"kind"`
 	CreatedAt string      `json:"created_at"`
 	Repos     []localRepo `json:"repos"`
 }
 
-func (l *Local) monoDir(m string) string { return filepath.Join(l.Base, m) }
+// A monorepo lives at <base>/<owner>/<name>; m is always owner/name
+// (owners are lower case, matched without regard to case).
+func (l *Local) monoDir(m string) string {
+	owner, name, ok := strings.Cut(m, "/")
+	if !ok {
+		return filepath.Join(l.Base, "_no_owner_", m) // never made: not found
+	}
+	return filepath.Join(l.Base, strings.ToLower(owner), name)
+}
+
+func (lm *localMono) full() string { return lm.Owner + "/" + lm.Name }
+
+func (lm *localMono) view(role string) Monorepo {
+	return Monorepo{ID: lm.ID, Owner: lm.Owner, Name: lm.Name, FullName: lm.full(), Kind: lm.Kind, Role: role, CreatedAt: lm.CreatedAt}
+}
 func (l *Local) repoDir(m, name string) string {
 	return filepath.Join(l.monoDir(m), "repos", name+".git")
 }
-func (l *Local) cloneURL(m, name string) string { return "file://" + l.repoDir(m, name) }
+
+// cloneURL is file://, or, for tests of git over HTTP, under
+// PANDO_TEST_CLONE_BASE (a git http-backend serving this folder).
+func (l *Local) cloneURL(m, name string) string {
+	if base := os.Getenv("PANDO_TEST_CLONE_BASE"); base != "" {
+		return strings.TrimRight(base, "/") + "/" + m + "/repos/" + name + ".git"
+	}
+	return "file://" + l.repoDir(m, name)
+}
 func apiErr(status int, code, msg string) error {
 	return &APIError{Status: status, Code: code, Message: msg}
 }
@@ -67,11 +93,11 @@ func (l *Local) load(m string) (*localMono, error) {
 
 func (l *Local) save(lm *localMono) error {
 	sort.Slice(lm.Repos, func(i, j int) bool { return lm.Repos[i].Path < lm.Repos[j].Path })
-	return writeJSONFile(filepath.Join(l.monoDir(lm.Name), "monorepo.json"), lm)
+	return writeJSONFile(filepath.Join(l.monoDir(lm.full()), "monorepo.json"), lm)
 }
 
 func (l *Local) repo(lm *localMono, r localRepo) Repo {
-	return Repo{Monorepo: lm.Name, Name: r.Name, Path: r.Path, DefaultBranch: "main", CloneURL: l.cloneURL(lm.Name, r.Name)}
+	return Repo{Monorepo: lm.full(), Name: r.Name, Path: r.Path, DefaultBranch: "main", CloneURL: l.cloneURL(lm.full(), r.Name)}
 }
 
 func (l *Local) CreateUser(_ context.Context, _ string, login, name, email, credName string) (*NewUser, error) {
@@ -95,14 +121,20 @@ func (l *Local) ListCredentials(_ context.Context) ([]Credential, error) {
 
 func (l *Local) RevokeCredential(_ context.Context, _ string) error { return nil }
 
-func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created, error) {
-	l.mu.Lock()
-	if _, err := l.load(name); err == nil {
-		l.mu.Unlock()
-		return nil, apiErr(409, "monorepo_exists", "monorepo "+name+" exists")
+func (l *Local) CreateMonorepo(ctx context.Context, owner, name, kind string) (*Created, error) {
+	if owner != "" && owner != l.login() {
+		return nil, apiErr(403, "not_your_namespace", "a file:// server has no organizations")
 	}
-	lm := &localMono{Name: name, Kind: kind, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
-	if err := os.MkdirAll(l.monoDir(name), 0o755); err != nil {
+	full := l.login() + "/" + name
+	l.mu.Lock()
+	if _, err := l.load(full); err == nil {
+		l.mu.Unlock()
+		return nil, apiErr(409, "monorepo_exists", "monorepo "+full+" exists")
+	}
+	id := make([]byte, 8)
+	rand.Read(id)
+	lm := &localMono{ID: "m_" + hex.EncodeToString(id), Owner: l.login(), Name: name, Kind: kind, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := os.MkdirAll(l.monoDir(full), 0o755); err != nil {
 		l.mu.Unlock()
 		return nil, err
 	}
@@ -111,9 +143,9 @@ func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created
 	if err != nil {
 		return nil, err
 	}
-	out := &Created{Monorepo: Monorepo{Name: name, Kind: kind, Role: "owner", CreatedAt: lm.CreatedAt}}
+	out := &Created{Monorepo: lm.view("owner")}
 	if kind == "repo" {
-		r, err := l.CreateRepo(ctx, name, ".")
+		r, err := l.CreateRepo(ctx, full, ".")
 		if err != nil {
 			return nil, err
 		}
@@ -122,18 +154,27 @@ func (l *Local) CreateMonorepo(ctx context.Context, name, kind string) (*Created
 	return out, nil
 }
 
-func (l *Local) ListMonorepos(_ context.Context) ([]Monorepo, error) {
-	entries, err := os.ReadDir(l.Base)
-	if err != nil {
-		return nil, nil
-	}
-	var out []Monorepo
-	for _, e := range entries {
-		if lm, err := l.load(e.Name()); err == nil {
-			out = append(out, Monorepo{Name: lm.Name, Kind: lm.Kind, Role: "owner", CreatedAt: lm.CreatedAt})
+// ListMonorepos lists every monorepo under every owner (the one local user
+// sees all), only those named name when given, the user's own first.
+func (l *Local) ListMonorepos(_ context.Context, name string) ([]Monorepo, error) {
+	files, _ := filepath.Glob(filepath.Join(l.Base, "*", "*", "monorepo.json"))
+	var mine, others []Monorepo
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		lm := &localMono{}
+		if json.Unmarshal(b, lm) != nil || lm.Owner == "" || (name != "" && !strings.EqualFold(lm.Name, name)) {
+			continue
+		}
+		if lm.Owner == l.login() {
+			mine = append(mine, lm.view("owner"))
+		} else {
+			others = append(others, lm.view("member"))
 		}
 	}
-	return out, nil
+	return append(mine, others...), nil
 }
 
 func (l *Local) GetMonorepo(_ context.Context, m string) (*Monorepo, error) {
@@ -141,7 +182,12 @@ func (l *Local) GetMonorepo(_ context.Context, m string) (*Monorepo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Monorepo{Name: lm.Name, Kind: lm.Kind, Role: "owner", CreatedAt: lm.CreatedAt}, nil
+	role := "member"
+	if lm.Owner == l.login() {
+		role = "owner"
+	}
+	v := lm.view(role)
+	return &v, nil
 }
 
 func (l *Local) ListRepos(_ context.Context, m string) ([]Repo, error) {
@@ -206,6 +252,7 @@ func (l *Local) CreateRepo(ctx context.Context, m, path string) (*Repo, error) {
 	for _, kv := range [][2]string{
 		{"uploadpack.allowFilter", "true"},
 		{"uploadpack.allowAnySHA1InWant", "true"},
+		{"http.receivepack", "true"}, // pushes over http-backend in tests
 	} {
 		if _, err := bare.Run(ctx, "config", kv[0], kv[1]); err != nil {
 			return nil, err
@@ -623,4 +670,22 @@ func (l *Local) DeleteMonorepo(_ context.Context, m string) error {
 		return err
 	}
 	return os.RemoveAll(l.monoDir(m))
+}
+
+// Heads on a file:// server: each bare repo's main; no stream, so no seq.
+func (l *Local) Heads(ctx context.Context, m string) (*Heads, error) {
+	lm, err := l.load(m)
+	if err != nil {
+		return nil, err
+	}
+	out := &Heads{}
+	for _, r := range lm.Repos {
+		g, err := l.bare(m, r.Name)
+		if err != nil {
+			continue
+		}
+		head, _ := g.Run(ctx, "rev-parse", "--verify", "--quiet", "refs/heads/main")
+		out.Heads = append(out.Heads, Head{Repo: r.Name, Path: r.Path, DefaultBranch: "main", Head: head})
+	}
+	return out, nil
 }

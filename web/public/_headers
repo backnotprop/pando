@@ -1,0 +1,8 @@
+# Workers static assets read this file (it is not served).
+# Built chunks carry a hash in their names, so a name never holds new bytes: cache them a year.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Fonts keep their names across builds: a week, then revalidated.
+/fonts/*
+  Cache-Control: public, max-age=604800

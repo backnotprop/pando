@@ -1,0 +1,15 @@
+{
+  "schema": "Org",
+  "route": "POST /v1/orgs",
+  "status": 201,
+  "body": {
+    "type": "org",
+    "login": "org-muu2mhw1",
+    "name": "Rec Org",
+    "description": null,
+    "website": null,
+    "created_at": "2026-10-04T17:05:17.249Z",
+    "role": "owner",
+    "members": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema": "MonorepoList",
+  "route": "GET /v1/monorepos",
+  "status": 200,
+  "body": {
+    "monorepos": [
+      {
+        "id": "m_45d69c4a03ba6d4e",
+        "owner": "rec-muu2mhw1",
+        "name": "rec-muu2mhw1",
+        "full_name": "rec-muu2mhw1/rec-muu2mhw1",
+        "kind": "monorepo",
+        "created_at": "2026-10-04T17:04:34.363Z",
+        "owner_type": "user",
+        "description": null,
+        "role": "owner"
+      }
+    ]
+  }
+}

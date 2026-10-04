@@ -76,7 +76,7 @@ func Reference(e *Env, args []string) error {
 	if err := refs.Write(root.Dir, p); err != nil {
 		return err
 	}
-	e.printf("%s: %s -> %s (%s). The pointer travels with the meta layer; every machine follows.\n",
+	e.printf("%s: %s -> %s (%s). The pointer syncs with the files outside projects/; every machine follows.\n",
 		path, short(old), short(newest), strings.TrimPrefix(p.Ref, "refs/heads/"))
 	return moveLocalReference(e, root, p, old, *kind)
 }

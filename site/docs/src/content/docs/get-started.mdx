@@ -1,0 +1,112 @@
+---
+title: Get started
+description: Install pando, sign in, clone a repository, and work on a branch in its own worktree.
+sidebar:
+  order: 1
+---
+
+This page takes you from nothing to a merged branch. You need git, and Go 1.26 to build the `pando` command.
+
+## Install pando
+
+`pando` is one program, built from Pando's source with Go. There is no prebuilt download yet.
+
+From a checkout of Pando's code:
+
+```sh
+cd cli
+go build -o ~/.local/bin/pando ./cmd/pando
+pando help        # every command
+```
+
+Put `~/.local/bin` on your `PATH` if it is not there already.
+
+## Sign in
+
+```sh
+pando login --server https://pando-dev.plannotator.workers.dev
+```
+
+`pando` shows a code and a link, and opens your browser. Confirm the code there. The terminal then says `Signed in to ... as <your login>`. The credential is kept in `~/.pando/`, readable only by you. From then on, git and `pando` on this machine act as you, with no further sign-in.
+
+`pando auth status` shows who this machine is signed in as.
+
+## Clone a repository
+
+A repository has an owner and a name, like `ramos/acme`. Clone it the way you would with git:
+
+```sh
+pando clone ramos/acme
+cd acme
+```
+
+The folder looks like this:
+
+```
+acme/
+  AGENTS.md  decisions/  ...      shared files, the same on every machine
+  projects/
+    web/
+      worktrees/
+        main/                     main, read-only, follows every merge
+    api/
+      worktrees/
+        main/
+```
+
+Every project under `projects/` gets a read-only `worktrees/main/`. It moves to the new main after each merge. You never edit it.
+
+The shared files around the projects (notes, decisions, plans) are the same on every machine. `pando sync` keeps them live while it runs; see [Shared files](/cli/#shared-files).
+
+To start a repository of your own, run `pando init` in a folder that holds your git repos under `projects/`. To use Pando with one ordinary git repo, see [A plain git repository](/plain-git/).
+
+## Work on a branch
+
+Each branch gets its own folder, a worktree:
+
+```sh
+pando worktree add projects/web fix-login
+cd projects/web/worktrees/fix-login
+```
+
+`fix-login` is a new branch off main, or the existing branch of that name. Inside the worktree, git works as usual:
+
+```sh
+git status
+git commit -am "Fix the login redirect"
+git push
+```
+
+Main is protected. A push to main is refused with `main is protected; push a branch and merge it`. Push your branch instead.
+
+Give every agent its own worktree. Two agents never share one, so neither can break the other's work.
+
+See [Worktrees](/worktrees/) for how a Pando worktree differs from `git worktree`.
+
+## Review and merge
+
+From inside the worktree:
+
+```sh
+pando diff                        # the branch diff against main
+pando review -m "Looks right"     # leave a comment
+pando merge                       # land it on main with a merge commit
+```
+
+The same branch has a page in the web app: its commits, the diff, reviews, checks and a Merge button.
+
+Merge waits for the checks the project requires (see [Checks and CI](/ci/)). Pando merges whole files: if the branch and main both changed a file in different ways, the merge stops and lists the files. Merge main into your branch, fix them, push, and merge again.
+
+## Clean up
+
+```sh
+pando worktree remove projects/web/worktrees/fix-login
+```
+
+`pando worktree remove` refuses while there is work that is not committed or not pushed. The branch stays on the server until it merges.
+
+## Next
+
+- [CLI reference](/cli/): every command and flag.
+- [Projects and references](/references/): keep someone else's repo nearby to read.
+- [Limits](/limits/): file and push sizes, and other numbers to know.

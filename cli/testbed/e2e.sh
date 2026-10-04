@@ -68,6 +68,34 @@ wt=/work/acme/worktrees/feat-x
 mountpoint -q "$wt" && ok "worktrees/feat-x is a FUSE mount ($(findmnt -no FSTYPE "$wt"))" || fail "feat-x is not mounted"
 echo "  pando worktree add took $(( (end - start) / 1000000 )) ms"
 
+step "the daemon fetches on its own only for main (every 10 min), never for a branch"
+gitdir_of() { ls -d "$PANDO_HOME"/afs/*/repos/"$1"/git | head -1; }
+state_of() { dirname "$(dirname "$(dirname "$(gitdir_of "$1")")")"; }
+afs_status() { ARTIFACT_FS_ROOT="$(state_of "$1")" artifact-fs status --name "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+[ "$(afs_status feat-x remote_refresh)" = disabled ] && ok "feat-x: the daemon's remote refresh is off (--refresh never)" || fail "feat-x remote_refresh=$(afs_status feat-x remote_refresh)"
+[ "$(afs_status main remote_refresh)" = enabled ] && ok "main: the daemon's remote refresh is on, as a safety net (--refresh 10m)" || fail "main remote_refresh=$(afs_status main remote_refresh)"
+# A control mount with a 20 s refresh, to show the count sees fetches.
+PANDO_AGENT=ctl pando worktree add . ctl >/dev/null
+ARTIFACT_FS_ROOT="$(state_of ctl)" artifact-fs set-refresh --name ctl --interval 20s >/dev/null
+fetch_count() { # distinct FETCH_HEAD times per mount, sampled every 2 s for $1 s
+  local secs="$1"; shift; declare -A last cnt
+  for n in "$@"; do last[$n]=$(stat -c %Y "$(gitdir_of "$n")/FETCH_HEAD" 2>/dev/null || echo none); cnt[$n]=0; done
+  for _ in $(seq 1 $((secs / 2))); do
+    sleep 2
+    for n in "$@"; do
+      t=$(stat -c %Y "$(gitdir_of "$n")/FETCH_HEAD" 2>/dev/null || echo none)
+      [ "$t" != "${last[$n]}" ] && cnt[$n]=$((cnt[$n] + 1)) && last[$n]=$t
+    done
+  done
+  for n in "$@"; do echo "$n=${cnt[$n]}"; done
+}
+counts=$(fetch_count 70 feat-x main ctl | tr '\n' ' ')
+echo "  fetches in 70 s with no pushes: $counts"
+echo "$counts" | grep -q "feat-x=0 " && ok "feat-x (a branch): 0 fetches in 70 s" || fail "branch fetches: $counts"
+echo "$counts" | grep -q "main=0 " && ok "main: 0 fetches in 70 s (next one within 10 min)" || fail "main fetches: $counts"
+echo "$counts" | grep -Eq "ctl=[2-9]" && ok "control at a 20 s refresh: the count does see fetches" || fail "control: $counts"
+pando worktree remove worktrees/ctl --force >/dev/null
+
 step "every file listed at once, nothing downloaded"
 listed=$(cd "$wt" && find . -path ./.git -prune -o -type f -print | wc -l)
 [ "$listed" -eq "$total" ] && ok "find lists $listed of $total files" || fail "find lists $listed, git has $total"
@@ -127,7 +155,7 @@ if out=$(git push -q 2>&1); then fail "a 33 MB file was pushed"; else
 git reset -q --hard HEAD~1
 head -c 6000000 /dev/urandom > r.bin && git add r.bin && git commit -q -m "6 MB"
 if out=$(PANDO_PUSH_LIMIT=5000000 git push -q 2>&1); then fail "a push over the (lowered) limit went"; else
-  echo "$out" | grep -q "split it into several pushes" && ok "a push over the push limit is refused, with how to split (limit lowered to 5 MB)" || fail "push limit: $out"; fi
+  echo "$out" | grep -q "split it into several pushes" && ok "a push over the push limit is refused, with how to split (limit lowered to 5,000,000 bytes)" || fail "push limit: $out"; fi
 git reset -q --hard HEAD~1
 cd /work/acme
 
@@ -135,7 +163,9 @@ step "worktrees/main is read-only and follows a merge"
 cd /work/acme
 if (echo x > worktrees/main/README.md) 2>/dev/null; then fail "wrote into worktrees/main"; else ok "writing into worktrees/main fails ($(touch worktrees/main/x 2>&1 | sed 's/.*: //'))"; fi
 pando diff feat-x | sed 's/^/  /'
-pando merge feat-x | sed 's/^/  /'
+merged=$(pando merge feat-x) && echo "$merged" | sed 's/^/  /'
+echo "$merged" | grep -q "follows within a moment" && ok "pando merge returns once the server merged; main follows on its own" || fail "merge: $merged"
+for _ in $(seq 1 150); do grep -q "changed in the mount" worktrees/main/pkg3/f1.go 2>/dev/null && break; sleep 0.1; done
 grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main shows the merged change" || fail "main did not follow the merge"
 [ -f worktrees/main/notes.txt ] && ok "worktrees/main has the merged notes.txt" || fail "notes.txt missing in main"
 [ -z "$(git -C worktrees/main status --porcelain)" ] && ok "git status in worktrees/main is clean after the merge" || fail "main status: $(git -C worktrees/main status --porcelain | head -3)"
@@ -149,6 +179,24 @@ pando worktree mount | sed 's/^/  /'
 grep -q "changed in the mount" worktrees/main/pkg3/f1.go && ok "worktrees/main reads again after pando worktree mount" || fail "worktrees/main did not come back"
 [ -z "$(git -C "$wt" status --porcelain)" ] && ok "git status in feat-x works again" || fail "feat-x after mount: $(git -C "$wt" status --porcelain 2>&1 | head -3)"
 out=$(pando worktree mount) && echo "$out" | grep -qx "Every worktree here is mounted." && ok "a second pando worktree mount has nothing to do" || fail "second mount: $out"
+
+step "a version 1 folder (before owner/name) upgrades, and its mounts' remotes follow"
+cd /work/acme
+owner=$(sed -n 's/.*"owner": "\([^"]*\)".*/\1/p' .pando/local/root.json)
+newurl=$(git -C worktrees/main remote get-url origin)
+oldurl=$(echo "$newurl" | sed "s#/$owner/#/#")   # the old /<name>/... address, gone with no bridge
+sed -i -e '/"owner":/d' -e '/"id":/d' -e 's/"version": 2/"version": 1/' -e "s#$newurl#$oldurl#g" .pando/local/root.json
+for w in main feat-x; do git -C "worktrees/$w" config remote.origin.url "$oldurl"; done
+[ -n "$owner" ] && [ "$newurl" != "$oldurl" ] && grep -q '"version": 1' .pando/local/root.json && ok "made it version 1, remotes at $oldurl" || fail "setup: owner=$owner new=$newurl old=$oldurl"
+up=$(pando status 2>&1)
+echo "$up" | grep -q "now named $owner/" && ok "pando status upgraded it: $(echo "$up" | grep -o "now named [^ ]*")" || fail "upgrade: $up"
+grep -q '"version": 2' .pando/local/root.json && grep -q "\"owner\": \"$owner\"" .pando/local/root.json && ok "root.json is version 2 with the owner and an id ($(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' .pando/local/root.json))" || fail "root.json: $(cat .pando/local/root.json)"
+for w in main feat-x; do
+  [ "$(git -C "worktrees/$w" remote get-url origin)" = "$newurl" ] && ok "worktrees/$w ($(findmnt -no FSTYPE "worktrees/$w")) points at $newurl again" || fail "$w origin: $(git -C "worktrees/$w" remote get-url origin)"
+done
+git -C worktrees/feat-x fetch -q origin && ok "git fetch through the mount works" || fail "fetch through feat-x failed"
+again=$(pando status 2>&1)
+echo "$again" | grep -q "now named" && fail "a second run upgraded again: $again" || ok "a second run changes nothing"
 
 step "worktree list and remove"
 pando worktree list | sed 's/^/  /'
@@ -187,6 +235,28 @@ pando reference update "$ref" | sed 's/^/  /'
 grep -q "commit = \"$newest\"" ".pando/references/$ref.toml" && ok "and rewrote the pointer" || fail "pointer not rewritten"
 [ -z "$(git -C "$ref" status --porcelain)" ] && ok "git status in the reference is clean after the move" || fail "reference status: $(git -C "$ref" status --porcelain | head -3)"
 
+case "$SERVER" in http*)
+  step "a second machine's main follows merges through the event stream"
+  out=$(PANDO_BIN=pando /testbed/follow-latency.sh "$SERVER" 3 2>&1)
+  echo "$out" | grep -E '^merge ' | sed 's/^/  /'
+  slow=$(echo "$out" | sed -n 's/.*moved \([0-9]*\) ms after.*/\1/p' | awk '$1 > 5000' | wc -l)
+  [ "$(echo "$out" | grep -c 'moved [0-9]* ms after')" = 3 ] && [ "$slow" = 0 ] \
+    && ok "3 merges: the follower's main moved within 5 s of each (was up to 15 s by polling)" || fail "follow: $out"
+
+  step "a burst of 20 merges costs each machine at most 2 fetches of main"
+  out=$(PANDO_BIN=pando /testbed/burst.sh "$SERVER" 2>&1)
+  echo "$out" | grep -E '^(20 merges|machine)' | sed 's/^/  /'
+  secs=$(echo "$out" | sed -n 's/^20 merges in \([0-9]*\) s.*/\1/p')
+  bound=$((2 + ${secs:-0} / 10))   # 2 per burst, plus at most 1 per 10 s it lasts
+  for m in a b; do
+    n=$(echo "$out" | sed -n "s/^machine $m: \([0-9]*\) fetches.*/\1/p")
+    [ -n "$n" ] && [ "$n" -ge 1 ] && [ "$n" -le "$bound" ] && ok "machine $m (works in the repo): $n fetches for 20 merges in ${secs} s (at most $bound)" || fail "machine $m fetches: $out"
+  done
+  echo "$out" | grep -q "a_at_last=yes b_at_last=yes" && ok "machines a and b end with main at the last merge" || fail "burst: $out"
+  echo "$out" | grep -q "^machine c: 0 fetches" && echo "$out" | grep -q c_main_unchanged=yes && ok "machine c (no worktree in the repo): 0 fetches; its main waits for the safety net" || fail "machine c: $out"
+  ;;
+esac
+
 step "as a person without root: read-only main by ArtifactFS --read-only"
 useradd -m dev >/dev/null 2>&1 || true
 chmod 666 /dev/fuse
@@ -206,7 +276,7 @@ cd worktrees/feat
 # its packs: a daemon that is not root must still write its backing file.
 (umask 0222 && printf "ro-data\n" > ro.txt) && echo "ro0444=$(stat -c %a ro.txt):$(cat ro.txt)" && rm -f ro.txt
 git clone -q --no-local "file://$HOME/src" clone-in && git -C clone-in fsck --no-progress && echo "clone-in=ok" && rm -rf clone-in
-echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge feat >/dev/null
+echo two >> a.txt && git commit -qam two && git push -q && cd ~/acme && pando merge --wait feat >/dev/null
 echo "main-content=$(tr "\n" " " < worktrees/main/a.txt)"
 pando worktree remove worktrees/feat >/dev/null && echo "removed=yes"
 ' 2>&1) || true

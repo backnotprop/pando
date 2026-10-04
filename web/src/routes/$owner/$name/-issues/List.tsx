@@ -188,7 +188,7 @@ function Row({ row, full }: { row: IssueRow; full: string }) {
     <li className={`border-t border-rule-faint first:border-t-0 ${fresh ? "arrived" : ""}`}>
       {/* The whole row opens the issue (as every list's row does), its title in Link (links R); its labels are links of their own, above the row's. */}
       <div className="group relative grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-3.5 px-4 py-3 hover:bg-air phone:grid-cols-[16px_minmax(0,1fr)] phone:px-3">
-        <Link {...issueLink(full, row.number)} aria-label={`#${row.number} ${row.title}`} tabIndex={-1} className="absolute inset-0" />
+        <Link {...issueLink(full, row.number)} aria-hidden="true" tabIndex={-1} className="absolute inset-0" />
         <span className="mt-0.5">
           <StateGlyph state={row.state} reason={row.state_reason} />
         </span>

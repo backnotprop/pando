@@ -101,7 +101,7 @@ export function MonorepoList({ lines, ownerPage = false }: { lines: readonly Mon
       {lines.map((m) => (
         <li key={m.id} className="border-t border-rule-faint first:border-t-0">
           <div className="group relative -mx-2.5 grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-3.5 rounded-[7px] px-2.5 py-2 hover:bg-air">
-            <Link {...monoLink(m.full_name)} aria-label={m.full_name} tabIndex={-1} className="absolute inset-0 rounded-[7px]" />
+            <Link {...monoLink(m.full_name)} aria-hidden="true" tabIndex={-1} className="absolute inset-0 rounded-[7px]" />
             <span className="flex min-w-0 flex-col gap-1">
               <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[14px] leading-[18px] text-ellipsis whitespace-nowrap">
                 {ownerPage ? null : <Avatar name={m.owner} org={m.owner_type === "org"} size={16} />}
@@ -133,7 +133,7 @@ export function RepoRows({ lines }: { lines: readonly MonorepoSummary[] }) {
       {lines.map((m) => (
         <li key={m.id} className="border-t border-rule-faint first:border-t-0">
           <div className="group relative -mx-2.5 flex flex-col gap-2 rounded-[7px] px-2.5 py-4 hover:bg-air">
-            <Link {...monoLink(m.full_name)} aria-label={m.full_name} tabIndex={-1} className="absolute inset-0 rounded-[7px]" />
+            <Link {...monoLink(m.full_name)} aria-hidden="true" tabIndex={-1} className="absolute inset-0 rounded-[7px]" />
             <Ref kind="name" link={monoLink(m.full_name)} above className="self-start text-[17px] leading-[22px]">
               {m.name}
             </Ref>

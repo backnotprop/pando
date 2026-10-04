@@ -233,6 +233,7 @@ export function Sentence({ s, mini = false }: { s: Sentence; mini?: boolean }) {
       {s.tail ? <span className="fox-cool text-bark-dim">{s.tail}</span> : null}
       {s.closes.map((n, i) => (
         <span key={n} className="fox-cool text-bark-dim">
+          {" "}
           <IssueRef full={s.monorepo} number={n} state="closed" reason="completed" text above />
           {i < s.closes.length - 1 ? "," : null}
         </span>

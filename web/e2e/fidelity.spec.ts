@@ -22,6 +22,9 @@ const SHOTS = fileURLToPath(new URL("shots/", import.meta.url));
 /** The issues mocks: one screen per address hash (#list, #issue, ...). */
 const ISSUE_MOCKS = pathToFileURL(fileURLToPath(new URL("../../../../../../research/design/pando-ui-2026-10-03/issues/mocks.html", import.meta.url))).href;
 
+/** The links study's recommended direction, R (owner ruling, links R): a page per screen, ?screen=&theme=&bare=1. */
+const LINKS_R = pathToFileURL(fileURLToPath(new URL("../../../../../../research/design/pando-ui-2026-10-03/links/direction-r.html", import.meta.url))).href;
+
 const ramos = { id: "user_ramos_local", email: "ramos@pando.invalid", email_verified: true, first_name: "Michael", last_name: "Ramos" };
 
 // The prototype's second person: a member of ramos/pando, on her own machine.
@@ -591,9 +594,14 @@ async function pair(
  * with its linked issue, the activity log, labels in Settings, the home's
  * Needs you; the list and the issue at 390; and the issue in every theme.
  */
+/** The issues, made once for the groups that show them (issues, links). */
+let issuesMade: ReturnType<typeof seedIssues> | null = null;
+
+const issuesOnce = (shown: Showcase) => (issuesMade ??= seedIssues({ ramos: shown.machine, sandbox: shown.sandbox, ana: shown.ana, pandoUrl: shown.pandoUrl }));
+
 async function issueShots(page: Page, browser: Browser, shown: Showcase) {
   if (!wanted("issues-")) return;
-  const n = await seedIssues({ ramos: shown.machine, sandbox: shown.sandbox, ana: shown.ana, pandoUrl: shown.pandoUrl });
+  const n = await issuesOnce(shown);
   const mock = (proto: string) => ({ protoUrl: ISSUE_MOCKS, proto });
 
   for (const width of [1440, 390]) {
@@ -757,6 +765,100 @@ const PICKER: Trigger = { name: "branch picker", real: (p) => p.getByRole("butto
 
 const ROLE: Trigger = { name: "Invite's role select", real: (p) => p.getByRole("combobox", { name: "Role" }), proto: 'select[aria-label="Role"]' };
 
+/** A person signs in once in their own browser and makes their machine's credential (`{login}-mbp`). */
+async function otherMachine(browser: Browser, who: typeof ramos): Promise<Machine> {
+  const context = await browser.newContext();
+  const p = await context.newPage();
+
+  await nextSignIn(who);
+  await p.goto(`${BASE}/login`);
+  await p.getByRole("link", { name: "Sign in" }).click();
+  await expect(p).toHaveURL(`${BASE}/`);
+  const login = who.email.split("@")[0] ?? "";
+  const m = await Machine.make(p, `${login}-mbp`, login);
+
+  await context.close();
+
+  return m;
+}
+
+/** The orgs shots' organization (orgs-shots.spec.ts): plannotator, with ana and ben, and two repositories with open branches. */
+async function seedOrg(page: Page, browser: Browser, shown: Showcase) {
+  const ben = { id: "user_ben_local", email: "ben@pando.invalid", email_verified: true, first_name: "Ben", last_name: "Okafor" };
+  const benMbp = await otherMachine(browser, ben);
+
+  const send = async (method: "POST" | "PUT" | "PATCH", path: string, data: Record<string, string>) => {
+    const res = await page.request.fetch(path, { method, data, headers: { origin: BASE } });
+
+    if (!res.ok() && res.status() !== 409) throw new Error(`${method} ${path}: ${res.status()} ${await res.text()}`);
+  };
+
+  await send("POST", "/v1/orgs", { login: "plannotator", name: "Plannotator" });
+  await send("PATCH", "/v1/orgs/plannotator", { name: "Plannotator", description: "Plan review for coding agents.", website: "https://plannotator.ai" });
+  await send("PUT", "/v1/orgs/plannotator/members/ana", { role: "member" });
+  await send("PUT", "/v1/orgs/plannotator/members/ben", { role: "member" });
+
+  for (const name of ["workspaces", "plannotator"]) {
+    await page.request.delete(`/v1/monorepos/plannotator/${name}?confirm=plannotator/${name}`, { headers: { origin: BASE } });
+    await browserPost(page, "/v1/monorepos", { name, owner: "plannotator" });
+  }
+
+  const ws = (await browserPost(page, "/v1/monorepos/plannotator/workspaces/repos", { path: "projects/workspaces" })).clone_url;
+  const ui = (await browserPost(page, "/v1/monorepos/plannotator/plannotator/repos", { path: "projects/ui" })).clone_url;
+  const sb = shown.sandbox;
+
+  pushBranch(sb, "p-workspaces", ws, "main", { "README.md": "# Workspaces\n" }, "Start workspaces");
+  pushBranch(sb, "p-ui", ui, "main", { "README.md": "# Plannotator UI\n" }, "Start the UI");
+  pushBranch(benMbp, "p-ui", ui, "viewer-print", { "print.css": "@media print {}\n" }, "Print the viewer");
+  pushBranch(sb, "p-workspaces", ws, "sync-retry", { "sync.ts": "export const retries = 3;\n" }, "Retry sync");
+  pushBranch(shown.ana, "p-workspaces", ws, "search-index", { "search.ts": "export const index = [];\n" }, "Index search");
+  // An open issue, so the org's rows count one.
+  await browserPost(page, "/v1/monorepos/plannotator/workspaces/issues", { title: "Search misses exact names" });
+}
+
+/**
+ * The links study's R (owner ruling, links R) in the real app beside its
+ * prototype (links/direction-r.html): the home, an organization, a
+ * repository's activity and an issue closed by a merge, at 1440 and 390, in
+ * Pando dark and light, Cloudflare light and Black Rainbow, whole pages.
+ */
+async function linkShots(page: Page, browser: Browser, shown: Showcase) {
+  if (!wanted("links-")) return;
+  const n = await issuesOnce(shown);
+
+  await seedOrg(page, browser, shown);
+  // The summary lines (open issues, projects, open branches) tick every 10 s.
+  await page.waitForTimeout(11_000);
+
+  for (const width of [1440, 390]) {
+    const size = { width, height: width === 1440 ? 900 : 844 };
+
+    await page.setViewportSize(size);
+    const proto = await browser.newPage({ viewport: size, deviceScaleFactor: 2, colorScheme: "dark", reducedMotion: "reduce" });
+
+    for (const theme of ["pando-dark", "pando-light", "cloudflare-light", "black-rainbow"]) {
+      for (const [screen, route] of [
+        ["home", "/"],
+        ["org", "/plannotator"],
+        ["activity", "/ramos/pando/activity"],
+        ["issue", `/ramos/pando/issues/${n.closedByMerge}`],
+      ] as const) {
+        await page.goto(`${route}?theme=${theme}`);
+        await settle(page);
+        await page.screenshot({ path: `${SHOTS}links-${screen}-${width}-${theme}-real.png`, fullPage: true });
+        await proto.goto(`${LINKS_R}?screen=${screen}&theme=${theme}&bare=1`);
+        await settle(proto);
+        await proto.screenshot({ path: `${SHOTS}links-${screen}-${width}-${theme}-proto.png`, fullPage: true });
+      }
+    }
+
+    await proto.close();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?theme=pando");
+}
+
 test.use({ deviceScaleFactor: 2, colorScheme: "dark", reducedMotion: "reduce" });
 
 test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, browser }) => {
@@ -858,6 +960,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await issueShots(page, browser, shown);
+  await linkShots(page, browser, shown);
   await themes(page);
   await blackRainbow(page);
   await avatars(page);

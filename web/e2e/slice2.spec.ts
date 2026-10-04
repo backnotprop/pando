@@ -137,6 +137,8 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
     await test.step("the clashing branch now conflicts with main, and Merge is off", async () => {
       await page.goto(`${project}/branches/clash`);
       await expect(page.getByText("Conflicts with main")).toBeVisible({ timeout: 60_000 });
+      // The conflicting file shows before anyone presses Merge.
+      await expect(page.getByText("src/a.ts", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Merge", exact: true })).toBeDisabled();
     });
 

@@ -201,12 +201,15 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
       </>
     );
   } else if (conflicts) {
+    // The files the dry run found changed on both sides, up front; a refused Merge's own answer if it has newer ones.
+    const paths = said?.paths.length ? said.paths : (b.conflict_paths ?? []);
+
     body = (
       <>
         <p className={`${big} text-rust`}>Conflicts with main</p>
-        {said?.paths.length ? (
+        {paths.length ? (
           <p className={`${q} mt-1.5`}>
-            {said.paths.map((p) => (
+            {paths.map((p) => (
               <code key={p} className="block text-[12.5px] text-bark">
                 {p}
               </code>

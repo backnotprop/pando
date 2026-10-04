@@ -1,10 +1,10 @@
 // The colour theme people pick in the name menu (owner ruling): Pando,
-// Plannotator, Iris or Cloudflare, each dark and light, and the mode (System
-// follows the computer). public/theme.js applies and keeps it before the page
+// Plannotator, Iris or Cloudflare, each dark and light, or Black Rainbow (the
+// owner's concept, dark only), and the mode (System follows the computer). public/theme.js applies and keeps it before the page
 // paints; this is the app's typed handle on it.
 import { useSyncExternalStore } from "react";
 
-export type Theme = "pando" | "plannotator" | "iris" | "cloudflare";
+export type Theme = "pando" | "plannotator" | "iris" | "cloudflare" | "black-rainbow";
 
 export type Mode = "system" | "dark" | "light";
 
@@ -28,11 +28,13 @@ declare global {
   }
 }
 
-export const THEMES: readonly { id: Theme; label: string }[] = [
+/** `darkOnly`: the theme has no light; Mode does not apply to it (public/theme.js, DARK_ONLY). */
+export const THEMES: readonly { id: Theme; label: string; darkOnly?: true }[] = [
   { id: "pando", label: "Pando" },
   { id: "plannotator", label: "Plannotator" },
   { id: "iris", label: "Iris" },
   { id: "cloudflare", label: "Cloudflare" },
+  { id: "black-rainbow", label: "Black Rainbow", darkOnly: true },
 ];
 
 export const MODES: readonly { id: Mode; label: string }[] = [

@@ -381,6 +381,13 @@ func Merge(e *Env, args []string) error {
 		forced = ", forced past checks"
 	}
 	e.printf("Merged %s into main of %s: %s (merge commit%s, by %s)\n", branch, label(root, repo), short(res.SHA), forced, dash(res.MergedBy))
+	if len(res.Closes) > 0 {
+		nums := make([]string, len(res.Closes))
+		for k, n := range res.Closes {
+			nums[k] = fmt.Sprintf("#%d", n)
+		}
+		e.printf("This merge closes %s (each within about a second).\n", strings.Join(nums, ", "))
+	}
 	if !hasReadOnlyMain(root, repo) {
 		return nil
 	}

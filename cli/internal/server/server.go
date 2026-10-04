@@ -252,6 +252,9 @@ type MergeResult struct {
 	MergeBase  string `json:"merge_base"`
 	Forced     bool   `json:"forced"`
 	MergedBy   string `json:"merged_by"`
+	// Closes is the open issues this merge closes, decided as it lands; each
+	// closes about a second later.
+	Closes []int `json:"closes"`
 }
 
 // WorktreeIn is the body of putWorktree.
@@ -350,13 +353,15 @@ func MonorepoPath(full string) string {
 	return "/v1/monorepos/" + strings.Join(parts, "/")
 }
 
-// APIError is a non-2xx answer: {"error": {"code", "message", ...}}.
+// APIError is a non-2xx answer: {"error": {"code", "message", ...}}. Body
+// is the answer as it came (--json prints it).
 type APIError struct {
 	Status  int
 	Code    string
 	Message string
 	Paths   []string
 	Checks  *Checks
+	Body    []byte
 }
 
 func (e *APIError) Error() string {

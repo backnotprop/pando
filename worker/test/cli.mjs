@@ -9,6 +9,10 @@
 //   pando monorepo  rename (the folder follows), view by the new name
 //   pando members   invites and revoke
 //   pando activity  --json; pando branch view; pando hook; pando machine list
+//   pando issue     create and comment with --key (once each), list, view,
+//                   edit with --base-version (a stale one refused), close
+//                   and reopen, react, link and unlink; worktree add --issue,
+//                   then push and pando merge: "closes #N", and it closes
 //
 //   PANDO_URL=http://localhost:8854 node test/cli.mjs
 //
@@ -18,7 +22,7 @@
 // nothing reaches the owner's git config, ~/.pando or the keychain.
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -374,6 +378,106 @@ try {
   r = await pando(["members", "revoke", LOGIN], { cwd: mono });
   check("revoke takes an email only (remove takes a login)", r.status === 2, said(r));
 
+  // ── pando issue ──
+  const ijson = async (args, o = {}) => {
+    const run = await pando([...args, "--json"], { cwd: o.cwd ?? mono, input: o.input });
+
+    return { run, j: parsed(run) };
+  };
+
+  let { run: ir, j: ij } = await ijson(["issue", "create", "--title", "Login fails after token refresh", "--body", "Steps:\n- [ ] sign in\n- [x] wait", "--label", "bug", "--key", `task-${id}`]);
+  const n1 = ij?.number;
+  check("pando issue create --key: opened, with its label and tasks", ir.status === 0 && n1 >= 1 && ij.labels?.[0]?.name === "bug" && ij.tasks?.total === 2 && ij.author === LOGIN, said(ir));
+  r = await pando(["issue", "create", "--title", "Login fails after token refresh", "--key", `task-${id}`], { cwd: mono });
+  const listed = parsed(await pando(["issue", "list", "--state", "all", "--json", "--limit", "100"], { cwd: mono }));
+  check("the same create with the same --key (a retry): the first issue, nothing new", r.status === 0 && r.stdout.includes(`#${n1} Login fails after token refresh was opened already`) && listed?.issues?.filter((i) => i.title === "Login fails after token refresh").length === 1, said(r));
+  r = await pando(["issue", "create", "--body", "no title"], { cwd: mono });
+  check("create with no --title: a usage error, exit 2", r.status === 2, said(r));
+  r = await pando(["issue", "list"], { cwd: mono });
+  check("pando issue list: the counts, then a row per issue", r.status === 0 && new RegExp(`${full}: \\d+ open, \\d+ closed`).test(r.stdout) && new RegExp(`#${n1}\\s+Login fails after token refresh\\s+open\\s+bug`).test(r.stdout), said(r));
+  check("issue list --json: the API's IssueList, with counts", listed?.counts?.open >= 1 && "next_cursor" in listed, JSON.stringify(listed?.counts));
+
+  ({ run: ir, j: ij } = await ijson(["issue", "view", `#${n1}`]));
+  const v1 = ij?.body_version;
+  check("pando issue view --json: the issue, with body_version", ir.status === 0 && ij?.number === n1 && Number.isInteger(v1) && ij.body.includes("sign in"), said(ir));
+  r = await pando(["issue", "view", String(n1)], { cwd: mono });
+  check("pando issue view: state, author, labels, tasks, then the body", r.status === 0 && r.stdout.startsWith(`#${n1} Login fails after token refresh  open`) && /labels\s+bug/.test(r.stdout) && /tasks\s+1 of 2 done/.test(r.stdout) && r.stdout.includes("- [ ] sign in"), said(r));
+
+  ({ run: ir, j: ij } = await ijson(["issue", "comment", String(n1), "--body", "Seen it on staging too.", "--key", `c-${id}`]));
+  const c1 = ij?.id;
+  r = await pando(["issue", "comment", String(n1), "--body", "Seen it on staging too.", "--key", `c-${id}`], { cwd: mono });
+  ({ j: ij } = await ijson(["issue", "view", String(n1), "--comments"]));
+  const comments = (ij?.timeline?.items ?? []).filter((x) => x.kind === "comment");
+  check("pando issue comment --key twice: one comment; view --comments --json has it under timeline", (c1 ?? "").startsWith("ic_") && /on #\d+ already/.test(r.stdout) && comments.length === 1 && comments[0].comment.id === c1, said(r));
+
+  r = await pando(["issue", "edit", String(n1), "--body-file", "-", "--base-version", String(v1)], { cwd: mono, input: "Steps, rewritten.\n" });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue edit --body-file - --base-version: the body moves one version", r.status === 0 && ij?.body === "Steps, rewritten.\n" && ij.body_version === v1 + 1, said(r));
+  r = await pando(["issue", "edit", String(n1), "--body", "an overwrite", "--base-version", String(v1), "--json"], { cwd: mono });
+  let refusal = null;
+
+  try {
+    refusal = JSON.parse(r.stderr);
+  } catch {}
+
+  check("a stale --base-version with --json: exit 1, the API's error object (edited, with current)", r.status === 1 && refusal?.error?.code === "edited" && refusal.error.current?.body === "Steps, rewritten.\n", said(r));
+  r = await pando(["issue", "edit", String(n1), "--body", "an overwrite", "--base-version", String(v1)], { cwd: mono });
+  check("... and without --json: one line, the code, and the version now", r.status === 1 && /\(edited, HTTP 409\)/.test(r.stderr) && r.stderr.includes(`version ${v1 + 1} now`) && r.stderr.trim().split("\n").length === 1, said(r));
+  r = await pando(["issue", "edit", String(n1), "--add-assignee", "@me", "--add-label", "enhancement", "--remove-label", "bug"], { cwd: mono });
+  ({ j: ij } = await ijson(["issue", "list", "--assignee", "@me", "--label", "enhancement"]));
+  check("edit --add-assignee @me --add-label --remove-label; list --assignee @me --label finds it", r.status === 0 && ij?.issues?.length === 1 && ij.issues[0].number === n1 && ij.issues[0].labels.map((l) => l.name).join() === "enhancement", said(r));
+
+  ({ run: ir, j: ij } = await ijson(["issue", "close", String(n1), "--reason", "not-planned", "--comment", "Duplicate of an older report."]));
+  check("pando issue close --reason not-planned --comment: closed as not planned, the comment first", ir.status === 0 && ij?.state === "closed" && ij.state_reason === "not_planned" && ij.comments === 2, said(ir));
+  r = await pando(["issue", "close", String(n1), "--reason", "not-planned"], { cwd: mono });
+  check("closing it again (a retry) changes nothing", r.status === 0 && /is closed as not planned/.test(r.stdout), said(r));
+  r = await pando(["issue", "reopen", String(n1)], { cwd: mono });
+  check("pando issue reopen", r.status === 0 && r.stdout.includes(`#${n1} Login fails after token refresh is open.`), said(r));
+
+  r = await pando(["issue", "react", String(n1), "heart"], { cwd: mono });
+  await pando(["issue", "react", String(n1), "heart"], { cwd: mono });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue react heart, twice: one heart, by this person", r.status === 0 && ij?.reactions?.length === 1 && ij.reactions[0].content === "heart" && ij.reactions[0].count === 1 && ij.reactions[0].by[0] === LOGIN, said(r));
+  ({ run: ir, j: ij } = await ijson(["issue", "react", String(n1), "👍", "--comment", c1]));
+  check("react with the emoji, on a comment (--comment id)", ir.status === 0 && ij?.reactions?.[0]?.content === "+1", said(ir));
+  ({ run: ir, j: ij } = await ijson(["issue", "react", String(n1), "heart", "--remove"]));
+  check("react --remove takes it back", ir.status === 0 && Array.isArray(ij?.reactions) && ij.reactions.length === 0, said(ir));
+  r = await pando(["issue", "react", String(n1), "thumbs"], { cwd: mono });
+  check("a reaction that is not one of the eight: exit 2", r.status === 2, said(r));
+
+  // A task, start to end: an issue, a worktree linked to it, a push, the merge that closes it.
+  ({ run: ir, j: ij } = await ijson(["issue", "create", "--title", "Name the line in the pando.toml error", "--project", "projects/app", "--key", `task2-${id}`]));
+  const n2 = ij?.number;
+  check("create --project projects/app", ij?.project_path === "projects/app" && n2 > n1, said(ir));
+  r = await pando(["worktree", "add", "projects/app", "fix-line", "--issue", String(n2)], { cwd: mono });
+  check("pando worktree add --issue: the worktree, and the branch linked", r.status === 0 && r.stdout.includes(`Linked fix-line to #${n2} Name the line in the pando.toml error: merging it closes #${n2}.`), said(r));
+  r = await pando(["worktree", "add", "projects/app", "fix-nope", "--issue", "999"], { cwd: mono });
+  check("--issue with no such issue: stops before anything is made", r.status === 1 && /issue #999/.test(r.stderr) && !existsSync(join(app, "worktrees", "fix-nope")), said(r));
+  const wt = join(app, "worktrees", "fix-line");
+  r = await pando(["issue", "link", String(n1)], { cwd: wt });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue link <n> in a worktree: its branch, linked", r.status === 0 && ij?.links?.some((l) => l.branch === "fix-line" && l.sources.includes("link")), said(r));
+  r = await pando(["issue", "unlink", String(n1)], { cwd: wt });
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("pando issue unlink: gone again (so this merge leaves it open)", r.status === 0 && !ij?.links?.some((l) => l.branch === "fix-line"), said(r));
+  writeFileSync(join(wt, "line.go"), "package main\n");
+  git(["add", "-A"], wt);
+  git(["commit", "-qm", "Name the line"], wt);
+  const pushed = git(["push", "-q"], wt);
+  check("a commit pushed from the worktree", pushed.status === 0, scrub(pushed.stderr));
+  r = await pando(["merge", "--force"], { cwd: wt });
+  check(`pando merge says it closes #${n2}, from the merge's answer`, r.status === 0 && r.stdout.includes(`This merge closes #${n2} (`), said(r));
+
+  const closed = await waitFor(async () => {
+    const v = parsed(await pando(["issue", "view", String(n2), "--json"], { cwd: mono }));
+
+    return v?.state === "closed" ? v : null;
+  }, 15_000);
+
+  check("about a second later it is closed, as completed, by that merge", closed?.state_reason === "completed" && closed.closed_by_merge?.branch === "fix-line", JSON.stringify(closed?.closed_by_merge));
+  ({ j: ij } = await ijson(["issue", "view", String(n1)]));
+  check("the unlinked issue stays open", ij?.state === "open");
+
   // ── pando monorepo rename, then by the new name ──
   r = await pando(["monorepo", "rename", RENAMED], { cwd: mono });
   const renamed = `${LOGIN}/${RENAMED}`;
@@ -412,7 +516,7 @@ try {
   // The help: the new commands, no agent name, never "meta layer".
   r = await pando(["help"]);
   const help = r.stderr;
-  check("pando help lists the new commands", ["pando api <path>", "pando ci build list", "pando ci job retry", "pando ci run <pipeline>", "pando branch view", "pando monorepo rename", "pando members invites", "pando hook list", "pando machine list", "pando activity"].every((x) => help.includes(x)));
+  check("pando help lists the new commands", ["pando api <path>", "pando ci build list", "pando ci job retry", "pando ci run <pipeline>", "pando branch view", "pando monorepo rename", "pando members invites", "pando hook list", "pando machine list", "pando activity", "pando issue list", "pando issue react", "--issue n"].every((x) => help.includes(x)));
   check("... and never says meta layer or agent", !/meta layer|agent/i.test(help));
 } catch (cause) {
   check("no exception", false, describeError(cause));

@@ -104,12 +104,13 @@ func worktreeAdd(e *Env, args []string) error {
 	// Pando-Agent trailer.
 	agent := fs.String("agent", "", "")
 	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse (default: fuse on Linux with artifact-fs, fskit on a Mac with Pando.app on, else sparse)")
+	issue := fs.Int("issue", 0, "link the branch to this issue: merging it closes the issue")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(pos) < 2 {
-		return UsageError{"pando worktree add <repo path> <branch> [folders...]"}
+	if len(pos) < 2 || *issue < 0 {
+		return UsageError{"pando worktree add <repo path> <branch> [folders...] [--issue n]"}
 	}
 	root, err := e.root()
 	if err != nil {
@@ -120,9 +121,32 @@ func worktreeAdd(e *Env, args []string) error {
 		return err
 	}
 	e.Agent = agentName(*agent)
+	// The issue first: a wrong number stops before anything is made.
+	var h *server.HTTP
+	if *issue > 0 {
+		srv, err := e.open(root)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		if h, ok = srv.(*server.HTTP); !ok {
+			return errors.New("--issue needs a Pando server; this one is a local file:// server")
+		}
+		if _, err := h.GetIssue(e.Ctx, root.FullName(), *issue); err != nil {
+			return fmt.Errorf("issue #%d: %w", *issue, err)
+		}
+	}
 	w, err := addWorktree(e, root, repo, pos[1], e.Agent, *kind, pos[2:])
 	if err != nil {
 		return err
+	}
+	if h != nil {
+		ref := []server.BranchRef{{Repo: repoName(root, repo), Branch: pos[1]}}
+		i, err := h.UpdateIssue(e.Ctx, root.FullName(), *issue, map[string]any{"link": ref})
+		if err != nil {
+			return fmt.Errorf("the worktree is made, but %s is not linked to #%d (%w); link it with: pando issue link %d %s", pos[1], *issue, err, *issue, pos[1])
+		}
+		e.printf("Linked %s to #%d %s: merging it closes #%d.\n", pos[1], i.Number, i.Title, i.Number)
 	}
 	e.printf("Next: cd %s\n", rel(e.Cwd, root.Abs(w.Path)))
 	return nil

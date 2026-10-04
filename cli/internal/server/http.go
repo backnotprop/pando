@@ -36,6 +36,7 @@ type request struct {
 	body   any
 	bearer string // overrides the token (bootstrap)
 	accept string
+	header http.Header
 }
 
 func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []byte, error) {
@@ -72,6 +73,9 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 	if h.Agent != "" {
 		req.Header.Set("X-Pando-Agent", h.Agent)
 	}
+	for k, vs := range r.header {
+		req.Header[k] = vs
+	}
 	resp, err := h.Client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s %s: %w", r.method, h.Base+r.path, unwrapURLError(err))
@@ -100,7 +104,7 @@ func unwrapURLError(err error) error {
 }
 
 func decodeError(status int, data []byte) error {
-	ae := &APIError{Status: status}
+	ae := &APIError{Status: status, Body: data}
 	var e struct {
 		Error struct {
 			Code    string   `json:"code"`

@@ -11,6 +11,8 @@
 //   (f) A push that did not land, its answer lost, is never recorded.
 //   (g) A push whose record failed, then a second push on top of it: both
 //       are recorded, in order, by their pushers.
+//   (h) A kept push is repaired by the next push to its repo, with no
+//       branch read and no compare due.
 //   (d) A push whose record and keep both fail is found by the periodic
 //       compare of Artifacts' refs with the records.
 //
@@ -283,6 +285,40 @@ try {
   await waitFor(() => (gGot(yg) && gGot(zg) ? true : null), 10_000);
   await sleep(1_000);
   check("(g) the hook got each push once", gGot(yg) === 1 && gGot(zg) === 1, `${gGot(yg)} and ${gGot(zg)}`);
+
+  // (h) A fresh repo whose compare is 10 minutes off for every push: a kept push waits for no list; the next push repairs it.
+  {
+    const M2 = `lost2-${id}`;
+    const made2 = await call("POST", "/v1/monorepos", { name: M2, kind: "repo" });
+
+    if (made2.status === 201) tw.add(`${O}/${M2}`);
+    const url2 = made2.json?.repos?.[0]?.clone_url;
+    const MID2 = made2.json?.monorepo?.id;
+    const later = header("X-Pando-Test-Refs-Check-Ms", "600000");
+    const h = join(work, "h");
+    mkdirSync(h);
+    git(["init", "-q"], h);
+    commit(h, "h.txt", "x\n");
+    git(["push", "-q", url2, "main"], h, later);
+    git(["checkout", "-qb", "h-kept"], h);
+    const yh = commit(h, "h.txt", "y\n");
+    const gh = git(["push", url2, "h-kept"], h, [...later, ...header("X-Pando-Test-Record-Fail", "1")]);
+    // Read the log only: a branch read would reconcile by itself.
+    const recordedH = async () => ((await call("GET", `/v1/monorepos/${O}/${M2}/events?since=0&limit=100`)).json?.events ?? []).some((e) => e.key === `${M2}/h-kept` && e.head === yh);
+    await sleep(2_000);
+    const before = await recordedH();
+    git(["checkout", "-qb", "h-next", "main"], h);
+    commit(h, "n.txt", "n\n");
+    const t0 = Date.now();
+    const gn = git(["push", url2, "h-next"], h, later);
+    const repaired = await waitFor(() => recordedH(), 3_000);
+    const left = (await call("GET", `/v1/_door/test?monorepo=${MID2}&repo=${M2}`, undefined, { authorization: `Bearer ${BOOT}` })).json?.kept;
+    check(
+      "(h) a kept push is recorded by the next push to its repo, with no branch read and no compare due",
+      made2.status === 201 && gh.ok && gn.ok && !before && !!repaired && left?.length === 0,
+      `kept then: ${before ? "recorded already" : "not recorded"}; after the next push: ${repaired ? `recorded within ${Date.now() - t0} ms` : "not recorded"}, ${left?.length} kept`,
+    );
+  }
 
   // (d) The record fails and keeping the push fails too: the periodic compare of Artifacts' refs finds it.
   git(["checkout", "-q", "main"], a);

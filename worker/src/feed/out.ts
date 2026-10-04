@@ -26,7 +26,7 @@ import { assignedByLogin } from "../issues/schema";
 import type { ObjectInfo, StatusRecord } from "../monorepo/types";
 import { isRecord, isTextList, parseJson, type Json, type JsonObject } from "../parse";
 import {
-  FANOUT_MAX, feedEventOf, flagOf, HELLO_WORKTREES_MAX, isNeedState, MEMBERS_INLINE_MAX, nameOf, needChangesOf, pushSummaryOf, seqBound,
+  ACTIVITY_KINDS, closesOf, FANOUT_MAX, feedEventOf, flagOf, HELLO_WORKTREES_MAX, isNeedState, MEMBERS_INLINE_MAX, nameOf, needChangesOf, pushSummaryOf, seqBound,
   statusStateOf, storedPointerOf, summaryOf, textOf, TICK_LARGE_MS, TICK_SMALL_MS, verdictOf, wholeOf,
   type FeedEvent, type FeedMessage, type Key, type Line, type NeedChange, type NeedRow, type NeedState, type PushNumbers,
   type StoredPointer, type Summary,
@@ -217,7 +217,7 @@ export class FeedOut {
   /** Once: give events logged before the feed existed their feed lines (no push summaries, every status counted). */
   private markOld(): void {
     const old = this.rows<{ seq: number; at: string; kind: string; body: string }>(
-      `SELECT seq, at, kind, body FROM events WHERE feed IS NULL AND kind IN ('push','branch.opened','branch.deleted','merged','review','status','worktree.reported','worktree.removed','meta.saved')`,
+      `SELECT seq, at, kind, body FROM events WHERE feed IS NULL AND kind IN (${ACTIVITY_KINDS.map((k) => `'${k}'`).join(",")})`,
     );
 
     for (const r of old) {
@@ -599,7 +599,7 @@ export class FeedOut {
       case "merged": {
         const m: JsonObject = isRecord(ev.merge) ? ev.merge : {};
         branch = textOf(row.name);
-        line = { kind, summary: { merge_commit: textOf(m.sha) ?? textOf(row.merge_commit), forced: flagOf(m.forced) ?? flagOf(row.forced), title: textOf(row.title), head: textOf(row.head) } };
+        line = { kind, summary: { merge_commit: textOf(m.sha) ?? textOf(row.merge_commit), forced: flagOf(m.forced) ?? flagOf(row.forced), title: textOf(row.title), head: textOf(row.head), ...closesOf(m.closes) } };
         break;
       }
 
@@ -661,6 +661,29 @@ export class FeedOut {
         actor = actor ?? textOf(row.login) ?? nameOf(textOf(row.author));
         line = { kind, summary: { path: textOf(ev.key) ?? textOf(row.path), version: wholeOf(row.version), deleted: row.deleted === true } };
         break;
+      case "issue.opened":
+      case "issue.commented":
+      case "issue.closed":
+      case "issue.reopened": {
+        const items = Array.isArray(ev.items) ? ev.items.filter(isRecord) : [];
+        const closed = items.find((x) => x.kind === "closed");
+
+        // A merge's close is on the merge's own line ("closing #34").
+        if (kind === "issue.closed" && closed && isRecord(closed.merge)) return null;
+        const c = items.find((x) => x.kind === "comment");
+        const body = c && isRecord(c.comment) ? textOf(c.comment.body) : null;
+
+        line = {
+          kind,
+          summary: {
+            number: wholeOf(row.number) ?? wholeOf(ev.number) ?? 0, title: textOf(row.title) ?? "",
+            reason: kind === "issue.closed" && (closed?.reason === "completed" || closed?.reason === "not_planned") ? closed.reason : null,
+            excerpt: body === null ? null : body.slice(0, 140),
+          },
+        };
+        break;
+      }
+
       default:
         return null;
     }

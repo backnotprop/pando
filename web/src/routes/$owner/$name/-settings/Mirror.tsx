@@ -15,6 +15,7 @@ import { disconnectMirror, githubReposQuery, mirrorKey, mirrorQuery, moving, MOV
 import { fallback, useRows } from "../../../../live/rows";
 import { button, lnk, Refusal } from "../../../../ui/controls";
 import { Chevron } from "../../../../ui/Icons";
+import { Ref } from "../../../../ui/Ref";
 import { since, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { ChangeMenu, GithubMark, type Pick, pickByName, sourceName, suggestedName, textButton, Toggle } from "./mirror-parts";
@@ -98,19 +99,18 @@ function Problem({ t }: { t: MirrorTarget }) {
 }
 
 /** A paused or switched-off row's link: Ash. */
-const dimLink = "cursor-pointer border-b border-ash-half pb-px text-ash hover:text-bark-dim";
 
 /** The GitHub repository, a link (a new tab), with an arrow before it on a phone. */
 function GithubLink({ t, dim }: { t: MirrorTarget; dim: boolean }) {
   if (!t.github) return null;
 
-  // Ref after merge: every row's GitHub repository link is this one.
+  // What the row is about, as links R draws an object (ui/Ref.tsx); faded while paused or off.
   return (
     <>
       <span className="hidden text-ash phone:inline">→</span>
-      <a href={t.github.url} target="_blank" rel="noopener noreferrer" className={`${dim ? dimLink : lnk} min-w-0 overflow-hidden text-ellipsis whitespace-nowrap`}>
+      <Ref kind="object" href={t.github.url} className={`${dim ? "opacity-60" : ""} min-w-0 overflow-hidden text-ellipsis whitespace-nowrap`}>
         {t.github.full_name}
-      </a>
+      </Ref>
     </>
   );
 }

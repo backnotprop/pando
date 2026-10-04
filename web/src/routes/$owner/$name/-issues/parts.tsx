@@ -25,7 +25,7 @@ export function LabelChip({ label, full }: { label: Label; full?: string }) {
   );
 
   return full ? (
-    <Link {...issuesLink(full, { label: label.name })} title={label.description ?? undefined} style={style} className={`${chip} hover:text-bark`}>
+    <Link {...issuesLink(full, { label: label.name })} title={label.description ?? undefined} style={style} className={`${chip} relative z-10 hover:text-bark`}>
       {inner}
     </Link>
   ) : (

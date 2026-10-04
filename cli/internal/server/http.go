@@ -246,6 +246,18 @@ func (h *HTTP) RenameMonorepo(ctx context.Context, m, name string) (*Monorepo, e
 	return out, err
 }
 
+// DescribeMonorepo sets a monorepo's one-line description (owners); "" clears it.
+func (h *HTTP) DescribeMonorepo(ctx context.Context, m, description string) (*Monorepo, error) {
+	out := &Monorepo{}
+	var value any
+	if description != "" {
+		value = description
+	}
+	_, data, err := h.do(ctx, request{method: "PATCH", path: monoPath(m), body: map[string]any{"description": value}}, out)
+	out.JSON = data
+	return out, err
+}
+
 func (h *HTTP) Heads(ctx context.Context, m string) (*Heads, error) {
 	out := &Heads{}
 	_, _, err := h.do(ctx, request{method: "GET", path: monoPath(m) + "/heads"}, out)

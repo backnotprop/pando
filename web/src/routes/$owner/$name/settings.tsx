@@ -1,14 +1,14 @@
 // Settings, for owners: the name (Rename; the old name keeps leading here),
-// the issue labels, Transfer to an org you are in or to yourself (mock
+// its one-line description (shown under its name), the issue labels, Transfer to an org you are in or to yourself (mock
 // `transfer`; the old address keeps leading here too), and Delete, which you
 // type the full owner/name to enable (ruling).
 import type { Login } from "@pando/contract";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { deleteMonorepo, rename } from "../../../api/actions";
+import { deleteMonorepo, describe, rename } from "../../../api/actions";
 import { myOrgsQuery, transfer } from "../../../api/orgs";
-import { meQuery } from "../../../api/queries";
+import { meQuery, monorepoQuery } from "../../../api/queries";
 import { Avatar } from "../../../ui/Avatar";
 import { button, Empty, field, Lnk, Refusal, SectionHead } from "../../../ui/controls";
 import { Select } from "../../../ui/dropdown";
@@ -53,6 +53,39 @@ function Rename() {
         </button>
       </form>
       <Refusal error={move.error} />
+    </section>
+  );
+}
+
+/** The one line under its name, in its rows and its header (at most 160 characters; empty clears it). */
+function Description() {
+  const { monorepo } = useMonorepo();
+  const qc = useQueryClient();
+  const saved = useSuspenseQuery(monorepoQuery(monorepo)).data.description ?? "";
+  const [text, setText] = useState<string>(saved);
+
+  const save = useMutation({
+    mutationFn: () => describe(monorepo, text),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: monorepoQuery(monorepo).queryKey, exact: true }), qc.invalidateQueries({ queryKey: ["monorepos"] })]),
+  });
+
+  return (
+    <section className="mt-11">
+      <SectionHead title="Description" className="mb-3" />
+      <form
+        className="flex items-center gap-2.5 phone:flex-wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <input className={`${field} w-[520px] phone:w-full`} aria-label="Description" maxLength={160} value={text} onChange={(e) => setText(e.target.value)} placeholder="One line about this repository" />
+        <button type="submit" className={button("quiet")} disabled={save.isPending || text.trim() === saved}>
+          Save
+        </button>
+        {save.isSuccess && text.trim() === saved ? <span className="text-[13px] text-bark-dim">Saved.</span> : null}
+      </form>
+      <Refusal error={save.error} />
     </section>
   );
 }
@@ -166,6 +199,7 @@ function Settings() {
         {info.role === "owner" ? (
           <>
             <Rename />
+            <Description />
             <Mirror />
             <LabelsSettings />
             <Transfer />

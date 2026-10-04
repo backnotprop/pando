@@ -16,6 +16,8 @@ export const Monorepo = Schema.Struct({
   full_name: FullName,
   kind: MonorepoKind,
   created_at: Timestamp,
+  /** Its one line under the name (at most 160 characters); null when it has none. Set with PATCH {description}, owners only. */
+  description: Schema.NullOr(Schema.String),
 });
 
 export interface Monorepo extends Schema.Schema.Type<typeof Monorepo> {}
@@ -79,6 +81,8 @@ export const FeedSummary = Schema.Struct({
   open_branches: Count,
   /** Open issues assigned to each member, by login (none: left out): the home's "Needs you" shows the person's own; this frame moves it. */
   assigned: Schema.Record(Schema.String, AssignedIssues),
+  /** Its open issues, for the repository's row. */
+  open_issues: Count,
   at: Timestamp,
 });
 
@@ -96,6 +100,7 @@ export const MonorepoSummary = MonorepoEntry.pipe(
     repos: Schema.NullOr(Count),
     open_branches: Schema.NullOr(Count),
     assigned: Schema.NullOr(Schema.Record(Schema.String, AssignedIssues)),
+    open_issues: Schema.NullOr(Count),
   }),
 );
 

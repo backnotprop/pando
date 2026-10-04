@@ -11,6 +11,7 @@ import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { Cmd, Empty } from "../../../../ui/controls";
 import { branchesLink, branchLink } from "../../../../ui/paths";
+import { refClass } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { since, useNow } from "../../../../ui/time";
 import { Older } from "../../../../ui/Older";
@@ -82,9 +83,9 @@ function Open({ repo }: { repo: Repo }) {
       <ul aria-label="Open branches">
         {branches.map((b) => (
           <li key={b.name} className={`border-t border-rule-faint ${arrived(b.name) ? "arrived" : ""}`}>
-            <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`${rowLine} ${cols} hover:bg-air focus-visible:bg-air`}>
+            <Link {...branchLink(monorepo.full, repo.path, b.name)} className={`group ${rowLine} ${cols} hover:bg-air focus-visible:bg-air`}>
               <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap phone:col-span-2">
-                <span className="fox-cool font-mono text-[13.5px] leading-[16px] text-bark">{b.name}</span>
+                <span className={`fox-cool ${refClass("name", { mono: true })} leading-[16px]`}>{b.name}</span>
                 {b.title ? <span className="text-[13px] text-ash">{b.title}</span> : null}
               </span>
               <span className="min-w-0 narrow:hidden phone:block">

@@ -5,7 +5,7 @@
 // artifacts are read from the service, as the server caches them.
 import { type CiBuildDetail, type CiJob, Routes } from "@pando/contract";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { cancelBuild, rebuild, retryJob } from "../../../../../api/actions";
 import { ciAnnotationsQuery, ciArtifactsQuery, ciBuildIdQuery, ciBuildQuery, ciKey, ciLogQuery, going } from "../../../../../api/ci";
@@ -15,6 +15,7 @@ import { Avatar } from "../../../../../ui/Avatar";
 import { button, lnk, Refusal, SectionHead } from "../../../../../ui/controls";
 import { Chevron } from "../../../../../ui/Icons";
 import { branchLink } from "../../../../../ui/paths";
+import { Ref } from "../../../../../ui/Ref";
 import { SafeHtml } from "../../../../../ui/SafeHtml";
 import { jobSearch } from "../../../../../api/search";
 import { useArrivals } from "../../../../../ui/arrival";
@@ -225,9 +226,9 @@ function BuildPage() {
                 b={b}
                 branch={
                   branch && b.repo_path ? (
-                    <Link {...branchLink(monorepo.full, b.repo_path, branch)} className="font-mono text-bark-dim hover:underline hover:decoration-ash hover:underline-offset-3">
+                    <Ref kind="object" link={branchLink(monorepo.full, b.repo_path, branch)} mono>
                       {branch}
-                    </Link>
+                    </Ref>
                   ) : undefined
                 }
               />

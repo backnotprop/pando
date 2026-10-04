@@ -67,8 +67,8 @@ export interface JsonBody {
   readonly [key: string]: string | number | boolean | null | JsonBody;
 }
 
-/** A write a route names (POST or PATCH), with an optional JSON body, and its decoded answer. */
-export async function write<A, I>(route: { method: "POST" | "PATCH"; path: string; response: Schema.Codec<A, I> }, body?: JsonBody): Promise<A> {
+/** A write a route names (POST, PATCH or PUT), with an optional JSON body, and its decoded answer. */
+export async function write<A, I>(route: { method: "POST" | "PATCH" | "PUT"; path: string; response: Schema.Codec<A, I> }, body?: JsonBody): Promise<A> {
   const headers = new Headers({ accept: "application/json" });
 
   if (body) headers.set("content-type", "application/json");

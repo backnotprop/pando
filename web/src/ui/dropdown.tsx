@@ -21,15 +21,19 @@ export function Caret({ kind = "box" }: { kind?: "box" | "button" | "switch" }) 
 
 /** The fields a native select is drawn with: the form field's (32 px) and the Clone panel's smaller one (28 px). */
 const SELECT = {
-  field: "h-8 rounded-[7px] border border-rootline bg-air pr-7 pl-3 text-[13.5px] text-bark",
-  small: "h-7 rounded-[7px] border border-rootline bg-air pr-[26px] pl-2 text-[12.5px] leading-[15px] text-bark",
+  field: "h-8 rounded-[7px] border border-rootline bg-air pr-7 text-[13.5px] text-bark",
+  small: "h-7 rounded-[7px] border border-rootline bg-air pr-[26px] text-[12.5px] leading-[15px] text-bark",
 };
+
+/** The left inset: the field's own, or room for a `lead` (an owner's avatar, 18 px, 10 px in). */
+const INSET = { field: "pl-3", small: "pl-2", lead: "pl-[36px]" };
 
 /**
  * A native select (the keyboard, the phone's own picker), its arrow the
  * prototype's chevron: 14 px, centred, 9 px from the outer edge (1 px border
  * and 8 px, as the home filter's). Its options are paths and names, so SF Pro
- * Text (owner ruling on mono use, variant C). `wide` fills its row.
+ * Text (owner ruling on mono use, variant C). `wide` fills its row; `lead`
+ * sits inside it at the left, as the chosen owner's avatar in Transfer.
  */
 export function Select({
   label,
@@ -38,6 +42,7 @@ export function Select({
   children,
   size = "field",
   wide = false,
+  lead,
 }: {
   label: string;
   value: string;
@@ -45,6 +50,7 @@ export function Select({
   children: ReactNode;
   size?: keyof typeof SELECT;
   wide?: boolean;
+  lead?: ReactNode;
 }) {
   return (
     <span className={`relative min-w-0 ${wide ? "flex w-full" : "inline-flex"}`}>
@@ -52,10 +58,11 @@ export function Select({
         aria-label={label}
         value={value}
         onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
-        className={`min-w-0 cursor-pointer appearance-none focus:border-ash focus:outline-none ${SELECT[size]} ${wide ? "w-full" : ""}`}
+        className={`min-w-0 cursor-pointer appearance-none focus:border-ash focus:outline-none ${SELECT[size]} ${INSET[lead ? "lead" : size]} ${wide ? "w-full" : ""}`}
       >
         {children}
       </select>
+      {lead ? <span className="pointer-events-none absolute top-1/2 left-2.5 flex -translate-y-1/2">{lead}</span> : null}
       <Chevron aria-hidden="true" data-caret="" className="pointer-events-none absolute top-1/2 right-[9px] block size-3.5 -translate-y-1/2 text-bark-dim" />
     </span>
   );

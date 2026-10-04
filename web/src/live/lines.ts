@@ -38,11 +38,12 @@ const rowFed = (key: readonly unknown[]) => (key[5] === "branch" && (key.length 
 export function applyLine(qc: QueryClient, e: FeedEvent): void {
   markArrived(lineKey(e));
 
-  for (const scope of [null, e.monorepo]) {
+  const [owner, name] = e.monorepo.split("/");
+
+  // The logs it belongs in: all, its monorepo's, and its owner's (an org's page).
+  for (const scope of [null, e.monorepo, { owner }]) {
     qc.setQueryData<InfiniteData<EventsPage, string>>(["activity", scope], (data) => data && withLine(data, e));
   }
-
-  const [owner, name] = e.monorepo.split("/");
 
   patchMachineActivity(qc, e);
 

@@ -1,16 +1,19 @@
 // The quiet top bar: the mark (home), the breadcrumb (owner / monorepo with
-// its switcher / path), and your name, which opens a small menu (Your
-// machines, the theme and its mode, Sign out).
+// its switcher / path), and your name, which opens a small menu (your
+// organizations and New organization, Your machines, the theme and its mode,
+// Sign out).
 import { Menu } from "@base-ui/react/menu";
+import type { MonorepoSummary } from "@pando/contract";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { signOut } from "../api/actions";
 import { monorepoRef } from "../api/names";
+import { myOrgsQuery } from "../api/orgs";
 import { meQuery, monoreposQuery, openBranchesQuery, reposQuery } from "../api/queries";
 import { Avatar } from "./Avatar";
 import { Caret } from "./dropdown";
 import { CheckIcon, Mark } from "./Icons";
-import { type AppLink, monoLink, repoLink } from "./paths";
+import { type AppLink, monoLink, ownerLink, repoLink } from "./paths";
 import { MenuHeading, menuHeading, MenuLink, MenuPopup, MenuRule, menuItem } from "./menu";
 import { EXACT } from "./TabBar";
 import { MODES, type Mode, setTheme, type Theme, THEMES, useThemeChoice } from "./theme";
@@ -33,9 +36,27 @@ export interface Crumb {
 // A crumb that has no room ends in an ellipsis rather than running into the next one.
 const crumbLink = "min-w-0 overflow-hidden rounded-md px-1.5 py-1 text-ellipsis whitespace-nowrap text-bark-dim hover:bg-loam hover:text-bark";
 
+/** Your monorepos by owner: yours first, then the others by name, each keeping the most recently active first. */
+function byOwner(lines: readonly MonorepoSummary[], me: string | undefined): [string, MonorepoSummary[]][] {
+  const groups = new Map<string, MonorepoSummary[]>();
+
+  for (const m of lines) {
+    const group = groups.get(m.owner);
+
+    if (group) group.push(m);
+    else groups.set(m.owner, [m]);
+  }
+
+  return [...groups].sort(([a], [b]) => Number(b === me) - Number(a === me) || a.localeCompare(b));
+}
+
 function Switcher({ current }: { current: string }) {
   const lines = useQuery(monoreposQuery);
+  const me = useQuery(meQuery).data?.login;
   const clock = useNow();
+  const groups = byOwner(lines.data ?? [], me);
+  // One owner needs no headings; with more, each group is headed by its owner (an org's avatar square, a person's round).
+  const grouped = groups.length > 1;
 
   return (
     <Menu.Root>
@@ -47,15 +68,25 @@ function Switcher({ current }: { current: string }) {
       </Menu.Trigger>
       <MenuPopup offset={10}>
         <MenuHeading>Switch repository</MenuHeading>
-        {(lines.data ?? []).map((m) => (
-          <MenuLink key={m.id} link={monoLink(m.full_name)} current={m.full_name === current}>
-            <Avatar name={m.name} org size={18} />
-            <span className="text-[13px]">
-              <span className="text-ash">{m.owner}/</span>
-              {m.name}
-            </span>
-            <span className="ml-auto text-[12px] text-ash">{m.last_activity_at ? lastSeen(m.last_activity_at, clock) : ""}</span>
-          </MenuLink>
+        {groups.map(([owner, rows]) => (
+          <Menu.Group key={owner}>
+            {grouped ? (
+              <Menu.GroupLabel className={`${menuHeading} flex items-center gap-2`}>
+                <Avatar name={owner} org={rows[0]?.owner_type === "org"} size={16} />
+                {owner}
+              </Menu.GroupLabel>
+            ) : null}
+            {rows.map((m) => (
+              <MenuLink key={m.id} link={monoLink(m.full_name)} current={m.full_name === current}>
+                <Avatar name={m.name} org size={18} />
+                <span className="text-[13px]">
+                  {grouped ? null : <span className="text-ash">{m.owner}/</span>}
+                  {m.name}
+                </span>
+                <span className="ml-auto text-[12px] text-ash">{m.last_activity_at ? lastSeen(m.last_activity_at, clock) : ""}</span>
+              </MenuLink>
+            ))}
+          </Menu.Group>
         ))}
         <MenuRule />
         <MenuLink link={{ to: "/" }}>All repositories</MenuLink>
@@ -146,6 +177,7 @@ function ThemeSetting() {
 
 function NameMenu() {
   const me = useQuery(meQuery).data;
+  const orgs = useQuery(myOrgsQuery).data ?? [];
 
   if (!me) return null;
 
@@ -156,6 +188,15 @@ function NameMenu() {
         <span>{me.login}</span>
       </Menu.Trigger>
       <MenuPopup align="end" offset={10}>
+        <MenuHeading>Your organizations</MenuHeading>
+        {orgs.map((o) => (
+          <MenuLink key={o.login} link={ownerLink(o.login)}>
+            <Avatar name={o.login} org size={18} />
+            <span>{o.name ?? o.login}</span>
+          </MenuLink>
+        ))}
+        <MenuLink link={{ to: "/orgs/new" }}>New organization</MenuLink>
+        <MenuRule />
         <MenuLink link={{ to: "/settings/machines" }}>Your machines</MenuLink>
         <MenuRule />
         <ThemeSetting />

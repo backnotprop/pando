@@ -17,6 +17,12 @@ License, Version 2.0.
 Source: https://github.com/pierrecomputer/pierre (packages/diffs and
 packages/trees)
 
+This product bundles Shiki 4.5.0, through @pierre/diffs, to colour code,
+copyright (c) 2021 Pine Wu and (c) 2023 Anthony Fu, licensed under the MIT
+License. Source: https://github.com/shikijs/shiki
+The TextMate grammars it bundles carry their own licences, as Shiki ships
+them (https://github.com/shikijs/textmate-grammars-themes).
+
 Pando's Mac app and file system extension (mac/) are derived from Oak's macOS FSKit mount app and extension (https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak), Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache License, Version 2.0. mac/NOTICE gives the source commit and every change made.
 
 Pando mounts worktrees with ArtifactFS (https://github.com/cloudflare/artifact-fs), Copyright Cloudflare, Inc., licensed under the Apache License, Version 2.0, through the fork https://github.com/backnotprop/artifact-fs. Parts of the fork's macOS front end are translated from Oak's FSKit backend; the fork's NOTICE has the details.

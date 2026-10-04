@@ -231,6 +231,17 @@ html[data-theme$="-light"] {
     font-size: 13px;
     font-weight: 400;
   }
+  /* Mono text without ligatures, as the prototype's SF Mono and GitHub show
+     code: Ioskeley Mono would draw => as one arrow. diffs-container is the
+     coloured code view (Colour.tsx); its shadow DOM inherits this. */
+  code,
+  pre,
+  kbd,
+  samp,
+  .font-mono,
+  diffs-container {
+    font-variant-ligatures: none;
+  }
   button {
     cursor: pointer;
   }

@@ -53,6 +53,8 @@ interface Made {
   buildkite: Buildkite | null;
   socket: WebSocket | null;
   name: string;
+  /** Other monorepos the run made, deleted at the end. */
+  others: string[];
 }
 
 test("slice 3: machines, your machines, members, CI with Buildkite, rename and delete", async ({ page, browser }) => {
@@ -64,7 +66,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
     if (m.type() === "error" && !/status of (401|404|409)/.test(m.text())) errors.push(m.text());
   });
 
-  const made: Made = { machine: null, buildkite: null, socket: null, name };
+  const made: Made = { machine: null, buildkite: null, socket: null, name, others: [] };
 
   const machine = () => {
     if (!made.machine) throw new Error("no machine credential yet");
@@ -166,6 +168,38 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(page.getByRole("navigation", { name: full }).getByRole("link", { name: /Members/ })).toHaveText(/2$/);
       await members.getByRole("button", { name: `Remove bea-${id}` }).click();
       await expect(members.getByText(`bea-${id}`, { exact: true })).toHaveCount(0);
+    });
+
+    await test.step("a large monorepo (the e2e's FEED_FANOUT_MAX is 1: two people make one): a push reaches the open home live, by its own socket", async () => {
+      const big = `big-${id}`;
+      const branch = `large-${id}`;
+      const m = machine();
+
+      await browserPost(page, "/v1/monorepos", { name: big });
+      made.others.push(big);
+      const appUrl = (await browserPost(page, `/v1/monorepos/${login}/${big}/repos`, { path: "projects/app" })).clone_url;
+
+      m.push(m.commit("app", appUrl, "main", { "README.md": "# app\n" }, "Start the app"), appUrl, "main");
+      await browserPost(page, `/v1/monorepos/${login}/${big}/invites`, { email: bea.email, role: "member" });
+      // The home's list says so once the person's feed has its line.
+      await expect
+        .poll(async () => (await (await page.request.get("/v1/monorepos?summary=1")).json()).monorepos.find((x: { name: string }) => x.name === big)?.large, { timeout: 60_000 })
+        .toBe(true);
+      const sockets: string[] = [];
+
+      page.on("websocket", (ws) => sockets.push(ws.url()));
+      await page.goto(`${BASE}/`);
+      await expect.poll(() => sockets.some((u) => u.includes(`/v1/monorepos/${login}/${big}/events?topics=feed`))).toBe(true);
+      await page.waitForTimeout(2000);
+      // Its lines never reach the person's socket; nor does the log poll (one large monorepo, under 5).
+      const logReads = reads(page, /^\/v1\/events$/);
+
+      logReads.from();
+      m.push(m.commit("app", appUrl, branch, { "a.txt": "a\n" }, "A large monorepo's push"), appUrl, branch);
+      await expect(page.getByTestId("activity").getByRole("link", { name: branch }).first()).toBeVisible({ timeout: 30_000 });
+      expect(logReads.seen()).toEqual([]);
+      // Back to the first monorepo's members, where the next step invites.
+      await page.goto(`${BASE}/${full}/members`);
     });
 
     await test.step("invite an email with no account: it waits under Invited; then revoke it", async () => {
@@ -402,5 +436,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
     await made.buildkite?.close();
 
     if (made.name) await made.machine?.api("DELETE", `/v1/monorepos/${login}/${made.name}?confirm=${login}/${made.name}`);
+
+    for (const other of made.others) await made.machine?.api("DELETE", `/v1/monorepos/${login}/${other}?confirm=${login}/${other}`);
   }
 });

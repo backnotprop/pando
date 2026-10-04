@@ -14,11 +14,15 @@
 //   `wrangler login`. (Git in the tests gets a temporary HOME of its own.)
 // The Worker below builds the app first, with this process's environment:
 // `npm run shots` sets PANDO_SF_FONTS=1, so the shots use the same fonts as
-// the prototype.
+// the prototype. A monorepo of more than FEED_FANOUT_MAX members is large
+// (its lines reach the home by its own socket): 1 for the e2e, so two people
+// make one large; the shots keep the server's own 100 (PANDO_E2E_FEED_FANOUT_MAX).
 import { defineConfig } from "@playwright/test";
 import { INSPECTOR_PORT, STANDIN_PORT, WORKER_PORT } from "./e2e/ports.ts";
 
 const state = "../web/e2e/.state/wrangler";
+
+const fanout = Number(process.env.PANDO_E2E_FEED_FANOUT_MAX ?? 1);
 
 export default defineConfig({
   testDir: "e2e",
@@ -35,7 +39,7 @@ export default defineConfig({
   webServer: [
     { command: "node e2e/workos.ts", url: `http://127.0.0.1:${STANDIN_PORT}/healthz`, reuseExistingServer: false },
     {
-      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site`,
+      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site --var FEED_FANOUT_MAX:${fanout}`,
       url: `http://localhost:${WORKER_PORT}/healthz`,
       reuseExistingServer: false,
       timeout: 180_000,

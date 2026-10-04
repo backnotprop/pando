@@ -67,7 +67,10 @@
    mocks/SCREENS.md, "Visual rules"). Cloudflare: cloudflare-docs' colours
    (MIT, NOTICE), mapped in research/design/pando-ui-2026-10-03/themes/
    CLOUDFLARE-TOKENS.md: Foxfire is its cyan, Rust its danger red, clay its
-   orange. The rules, hovers and dim text mix from each theme's roles. */
+   orange. Black Rainbow: the owner's drawing-sheet concept
+   (research/design/themes/black-rainbow.html), dark only, mapped in the
+   web-look README. The rules, hovers and dim text mix from each theme's roles. */
+html[data-theme="black-rainbow"],
 html[data-theme="pando-light"],
 html[data-theme="cloudflare-dark"],
 html[data-theme="cloudflare-light"],
@@ -132,6 +135,30 @@ html[data-theme="cloudflare-light"] {
   --bark-hi: color-mix(in srgb, var(--bark) 82%, var(--soil));
   --shadow: rgba(0, 0, 0, 0.14);
   color-scheme: light;
+}
+/* Pure black, the grounds a touch above it (low enough that the concept's red
+   holds 4.5:1 on each), rules from its line white #dedede at 18%, ink and dim
+   as drawn. Ash is the concept's faint #6a6a6a (3.88:1 on black) lifted to
+   #7b7b7b (4.96:1 on black, 4.56:1 on the menus' ground). Rust is its red,
+   Foxfire its pink (red + blue in its key), clay the red + green of its
+   spectrum. */
+html[data-theme="black-rainbow"] {
+  --soil: #000000;
+  --air: #080808;
+  --loam: #0c0c0c;
+  --pop: #0e0e0e;
+  --rootline: #282828;
+  --bark: #e6e6e6;
+  --bark-dim: #a3a3a3;
+  --ash: #7b7b7b;
+  --clay: #e8c959;
+  --fox: #e48fe0;
+  --rust: #e23c2e;
+  --bark-hi: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.6);
+  /* The drawing sheet's grid (below): the concept's minor 0.035 every 22.4 px; its major every 112 px at 0.055, not 0.06, so Rust keeps 4.5:1 over a major line. */
+  --grid-minor: rgba(255, 255, 255, 0.035);
+  --grid-major: rgba(255, 255, 255, 0.055);
 }
 html[data-theme="plannotator-dark"] {
   --soil: oklch(0.15 0.02 260);
@@ -248,6 +275,28 @@ html[data-theme="cloudflare-dark"] {
   --diffs-token-function: #4693ff;
   --diffs-token-constant: #ffce4b;
 }
+/* Black Rainbow's own: its spectrum, never its red (Rust) or its pink
+   (Foxfire). Green as drawn; cyan and yellow are its additive mixes, green +
+   blue and red + green, as its pink is red + blue. Its blue is lifted 0.03 in
+   OKLab lightness (#3b6ff0 to #4379fb) and comments are a step above ash
+   (#818181), so both hold 4.5:1 on a diff's changed words. A diff's tints are
+   its green and blue at 0.45% of white's luminance on a changed line (Pierre
+   takes 15% of the mix targets below, in lab: #134a18 and #1e3c83) and 0.9% on
+   a changed word: dimmer than Pierre's, with the bar in the gutter still
+   marking each line. */
+html[data-theme="black-rainbow"] {
+  --diffs-token-comment: #818181;
+  --diffs-token-keyword: #4379fb;
+  --diffs-token-string: #3fc24c;
+  --diffs-token-function: #56daf9;
+  --diffs-token-constant: #e8c959;
+  --diffs-bg-addition-override: #134a18;
+  --diffs-bg-addition-number-override: #134a18;
+  --diffs-bg-deletion-override: #1e3c83;
+  --diffs-bg-deletion-number-override: #1e3c83;
+  --diffs-bg-addition-emphasis-override: #041d05;
+  --diffs-bg-deletion-emphasis-override: #07153a;
+}
 html[data-theme="cloudflare-light"] {
   --diffs-token-keyword: #4b3bdc;
   --diffs-token-string: #196535;
@@ -320,11 +369,30 @@ html[data-theme="cloudflare-light"] {
   button {
     cursor: pointer;
   }
+  /* Under Black Rainbow's grid, a box on the page (the file list, a code file,
+     a diff, a README) is black, so the grid shows on the page's ground only.
+     In this layer, a box with its own background (bg-loam) keeps it. */
+  html[data-theme="black-rainbow"] main .border-rootline {
+    background-color: var(--soil);
+  }
   :focus-visible {
     outline: 1.5px solid var(--bark);
     outline-offset: 2px;
     border-radius: 5px;
   }
+}
+
+/* Black Rainbow's drawing sheet: a still grid on the page's ground, scrolling
+   with the page (no fixed background, which repaints on every scroll). */
+html[data-theme="black-rainbow"] body {
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid-minor) 1px, transparent 1px), linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+  background-size:
+    112px 112px,
+    112px 112px,
+    22.4px 22.4px,
+    22.4px 22.4px;
 }
 
 /* An activity line that just arrived: it slides in, takes Foxfire for two

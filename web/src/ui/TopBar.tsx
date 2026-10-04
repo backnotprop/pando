@@ -96,13 +96,19 @@ function ProjectSwitcher({ full, current }: { full: string; current: string }) {
   );
 }
 
-/** The mode's three choices sit in one row, as a segmented control. */
+/** The mode's three choices sit in one row, as a segmented control; under a dark-only theme they show Dark, and none can be picked. */
 const modeItem =
-  "flex h-7 flex-1 cursor-pointer items-center justify-center rounded-[5px] text-[13px] text-bark-dim outline-none data-checked:bg-pop-hi data-checked:text-bark data-highlighted:text-bark data-highlighted:shadow-[inset_0_0_0_1px_var(--rule-hi)]";
+  "flex h-7 flex-1 cursor-pointer items-center justify-center rounded-[5px] text-[13px] text-bark-dim outline-none data-checked:bg-pop-hi data-checked:text-bark data-highlighted:text-bark data-highlighted:shadow-[inset_0_0_0_1px_var(--rule-hi)] data-disabled:cursor-default data-disabled:text-ash data-disabled:data-checked:text-bark-dim";
 
-/** The theme and its mode, kept in this browser (public/theme.js). A choice keeps the menu open, so the page changes under it. */
+/**
+ * The theme and its mode, kept in this browser (public/theme.js). A choice
+ * keeps the menu open, so the page changes under it. A dark-only theme (Black
+ * Rainbow) shows Mode as Dark, not to be picked, and says so; the mode kept
+ * for the other themes is left as it was.
+ */
 function ThemeSetting() {
   const { theme, mode } = useThemeChoice();
+  const darkOnly = THEMES.some((t) => t.id === theme && t.darkOnly);
 
   return (
     <>
@@ -120,8 +126,16 @@ function ThemeSetting() {
         </Menu.RadioGroup>
       </Menu.Group>
       <Menu.Group>
-        <Menu.GroupLabel className={menuHeading}>Mode</Menu.GroupLabel>
-        <Menu.RadioGroup value={mode} onValueChange={(id: Mode) => setTheme({ mode: id })} className="mx-1 mb-1 flex gap-0.5 rounded-[7px] border border-rootline p-0.5">
+        <Menu.GroupLabel className={`${menuHeading} flex`}>
+          Mode
+          {darkOnly ? <span className="ml-auto">dark only</span> : null}
+        </Menu.GroupLabel>
+        <Menu.RadioGroup
+          value={darkOnly ? "dark" : mode}
+          onValueChange={(id: Mode) => setTheme({ mode: id })}
+          disabled={darkOnly}
+          className="mx-1 mb-1 flex gap-0.5 rounded-[7px] border border-rootline p-0.5"
+        >
           {MODES.map((m) => (
             <Menu.RadioItem key={m.id} value={m.id} className={modeItem}>
               {m.label}

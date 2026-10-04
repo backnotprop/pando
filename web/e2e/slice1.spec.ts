@@ -261,6 +261,19 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await page.emulateMedia({ colorScheme: "light" });
       await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-light");
 
+      // Black Rainbow is dark only: Mode shows Dark and cannot be picked; the kept mode (System) stays for the others.
+      await pick(page, "Black Rainbow");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "black-rainbow");
+      await expect(page.getByRole("menuitemradio", { name: "Light", exact: true })).toHaveAttribute("aria-disabled", "true");
+      await expect(page.getByRole("menuitemradio", { name: "Dark", exact: true })).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByRole("menu").getByText("dark only")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await page.reload();
+      expect(await themeAtApp(page)).toBe("black-rainbow");
+      await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
+      expect(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--diffs-token-keyword").trim())).toBe("#4379fb");
+      expect(await page.evaluate(() => localStorage.getItem("pando-mode"))).toBe("system");
+
       await pick(page, "Pando");
       await pick(page, "Dark");
       await expect(page.locator("html")).toHaveAttribute("data-theme", "pando-dark");

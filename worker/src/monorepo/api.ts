@@ -7,6 +7,7 @@ import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
 import { isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
 import { ciRoutes } from "../ci/routes";
+import { issueRoutes } from "../issues/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -718,7 +719,7 @@ async function branchViews(
       const read = commitReader(repo);
       await views.pool(due, SWEEP_PARALLEL, async (name) => {
         try {
-          const f = await computeFacts(c.env, r, m, heads.get(name)!, read);
+          const f = await computeFacts(c.env, r, m, heads.get(name)!, read, [c.get("full")]);
           await stub.writeFacts(r.name, name, f, required);
         } catch (err) {
           if (!(err instanceof views.MainMoved)) throw err; // main moved: the row stays pending
@@ -1113,6 +1114,7 @@ async function merge(c: C, r: RepoRecord, branch: string): Promise<Response> {
     message: str(b.message, "message", { optional: true, max: 50_000 }),
     expected_head: str(b.expected_head, "expected_head", { optional: true }),
     origin: new URL(c.req.url).origin,
+    test_refs_late: c.env.DOOR_TEST === "1" && c.req.header("x-pando-test-merge-refs-late") === "1",
   });
 
   return c.json(unwrap(out) satisfies typeof Contract.MergeResult.Encoded);
@@ -1351,6 +1353,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
 // ── CI (ci/routes.ts): the CI tab's reads and actions, and connections ──
 
 ciRoutes(api);
+
+// ── Issues and labels (issues/routes.ts) ──
+
+issueRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

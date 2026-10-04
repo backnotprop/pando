@@ -5,14 +5,14 @@
   "body": {
     "repos": [
       {
-        "monorepo": "rec-mutvywkn/rec-mutvywkn",
+        "monorepo": "rec-mutxvkul/rec-mutxvkul",
         "name": "projects-web",
         "path": "projects/web",
         "description": null,
         "default_branch": "main",
-        "clone_url": "http://localhost:8821/rec-mutvywkn/rec-mutvywkn/projects-web.git",
-        "created_at": "2026-10-04T13:58:19.891Z",
-        "created_by": "rec-mutvywkn"
+        "clone_url": "http://localhost:8797/rec-mutxvkul/rec-mutxvkul/projects-web.git",
+        "created_at": "2026-10-04T14:51:44.092Z",
+        "created_by": "rec-mutxvkul"
       }
     ]
   }

@@ -36,7 +36,7 @@ func TestShortNames(t *testing.T) {
 	ctx := context.Background()
 	make := func(owner, name string) {
 		t.Setenv("USER", owner)
-		if _, err := srv.CreateMonorepo(ctx, name, "repo"); err != nil {
+		if _, err := srv.CreateMonorepo(ctx, "", name, "repo"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,7 +68,7 @@ func TestCloneFolderIsTheName(t *testing.T) {
 	h := newHarness(t)
 	srv := &server.Local{Base: strings.TrimPrefix(h.server, "file://")}
 	t.Setenv("USER", "ana")
-	if _, err := srv.CreateMonorepo(context.Background(), "tools", "monorepo"); err != nil {
+	if _, err := srv.CreateMonorepo(context.Background(), "", "tools", "monorepo"); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("USER", "pat")

@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 
 import { StatusState } from "./checks.ts";
 import { Count, FullName, MonorepoId, RepoName, Sha, Timestamp } from "./ids.ts";
+import { IssueStateReason } from "./issue.ts";
 import { FeedSummary } from "./monorepo.ts";
 import { NeedChange } from "./needs.ts";
 
@@ -31,6 +32,8 @@ export const MergedSummary = Schema.Struct({
   /** The branch's title. */
   title: Schema.NullOr(Schema.String),
   head: Schema.NullOr(Sha),
+  /** The issues the merge closes ("closing #34"), as the merge decided them (MergeResult.closes). */
+  closes: Schema.optionalKey(Schema.Array(Count)),
 });
 
 export interface MergedSummary extends Schema.Schema.Type<typeof MergedSummary> {}
@@ -79,6 +82,18 @@ export const MetaSavedSummary = Schema.Struct({
 
 export interface MetaSavedSummary extends Schema.Schema.Type<typeof MetaSavedSummary> {}
 
+/** issue.opened, issue.commented, issue.closed (by a person; a merge's close is on its merged line), issue.reopened. The line's repo is the issue's project. */
+export const IssueSummary = Schema.Struct({
+  number: Count,
+  title: Schema.String,
+  /** issue.closed: as completed or not planned. */
+  reason: Schema.NullOr(IssueStateReason),
+  /** issue.commented: the comment's first 140 characters. */
+  excerpt: Schema.NullOr(Schema.String),
+});
+
+export interface IssueSummary extends Schema.Schema.Type<typeof IssueSummary> {}
+
 /** What every line carries. `(monorepo_id, seq)` is a line's identity; pages sort by `(at, monorepo_id, seq)`, newest first. */
 const lineFields = {
   monorepo: FullName,
@@ -111,6 +126,10 @@ export const byActivityKind = <const Fields extends Schema.Struct.Fields>(fields
     Schema.Struct({ ...fields, kind: Schema.tag("worktree.reported"), summary: Schema.NullOr(WorktreeSummary) }),
     Schema.Struct({ ...fields, kind: Schema.tag("worktree.removed"), summary: Schema.NullOr(WorktreeSummary) }),
     Schema.Struct({ ...fields, kind: Schema.tag("meta.saved"), summary: Schema.NullOr(MetaSavedSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("issue.opened"), summary: Schema.NullOr(IssueSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("issue.commented"), summary: Schema.NullOr(IssueSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("issue.closed"), summary: Schema.NullOr(IssueSummary) }),
+    Schema.Struct({ ...fields, kind: Schema.tag("issue.reopened"), summary: Schema.NullOr(IssueSummary) }),
   ]);
 
 /** One line of the activity log. No agent field (owner ruling: people, machines and worktrees only). */

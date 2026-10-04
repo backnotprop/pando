@@ -1,0 +1,62 @@
+{
+  "schema": "ErrorBody",
+  "route": "PATCH .../issues/{n} (a stale base_version: 409 edited with current)",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "edited",
+      "message": "#1 was edited since version 1; it is at 2",
+      "current": {
+        "number": 1,
+        "title": "Login fails after token refresh",
+        "state": "open",
+        "state_reason": null,
+        "project": "projects-web",
+        "project_path": "projects/web",
+        "labels": [
+          {
+            "name": "area/web",
+            "color": "teal",
+            "description": "The web app"
+          },
+          {
+            "name": "bug",
+            "color": "orange",
+            "description": "Something isn't working"
+          }
+        ],
+        "assignees": [
+          "rec-mutxvkul"
+        ],
+        "author": "rec-mutxvkul",
+        "comments": 1,
+        "tasks": {
+          "done": 2,
+          "total": 2
+        },
+        "linked_branches": 0,
+        "created_at": "2026-10-04T14:52:08.812Z",
+        "updated_at": "2026-10-04T14:52:08.829Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_by_merge": null,
+        "body": "Steps:\n\n- [x] sign in\n- [x] wait an hour",
+        "body_version": 2,
+        "machine": "ana-mbp",
+        "links": [],
+        "participants": [
+          "rec-mutxvkul"
+        ],
+        "reactions": [
+          {
+            "content": "+1",
+            "count": 1,
+            "by": [
+              "rec-mutxvkul"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

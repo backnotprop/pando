@@ -4,14 +4,19 @@
 import * as Schema from "effect/Schema";
 
 import { Checks } from "./checks.ts";
+import { Issue, IssueComment } from "./issue.ts";
 
-/** The wire body of every error response. A refused merge carries `checks` (412 checks_not_green) or `paths` (409 conflicts). */
+/**
+ * The wire body of every error response. A refused merge carries `checks` (412 checks_not_green) or `paths`
+ * (409 conflicts); a stale body edit (409 edited) carries `current`, the issue or comment as it is now.
+ */
 export const ErrorBody = Schema.Struct({
   error: Schema.Struct({
     code: Schema.String,
     message: Schema.String,
     paths: Schema.optionalKey(Schema.Array(Schema.String)),
     checks: Schema.optionalKey(Checks),
+    current: Schema.optionalKey(Schema.Union([Issue, IssueComment])),
   }),
 });
 

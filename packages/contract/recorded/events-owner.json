@@ -5,98 +5,100 @@
   "body": {
     "events": [
       {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
-        "seq": 54,
-        "at": "2026-10-04T13:58:39.154Z",
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "org-mutxvkul/rec-mutxvkul-renamed",
+        "seq": 69,
+        "at": "2026-10-04T14:52:10.579Z",
         "kind": "merged",
         "summary": {
-          "merge_commit": "0d84f7e374537ace3b7ac8ff78104797b01ad16f",
-          "forced": false,
+          "merge_commit": "c5ede19abae47e71ddd11bc135d947badbcc233e",
+          "forced": true,
           "title": null,
-          "head": "43fc5a17f2824863863d655d69861b09c34d06f9"
-        },
-        "repo": "meta",
-        "repo_path": ".",
-        "branch": "break-config",
-        "actor": "rec-mutvywkn",
-        "machine": "ana-mbp"
-      },
-      {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
-        "seq": 53,
-        "at": "2026-10-04T13:58:37.846Z",
-        "kind": "branch.opened",
-        "summary": {
-          "head": "43fc5a17f2824863863d655d69861b09c34d06f9",
-          "before": null,
-          "commits": 2,
-          "head_title": "Break pando.toml"
-        },
-        "repo": "meta",
-        "repo_path": ".",
-        "branch": "break-config",
-        "actor": "rec-mutvywkn",
-        "machine": "ana-mbp"
-      },
-      {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
-        "seq": 52,
-        "at": "2026-10-04T13:58:35.959Z",
-        "kind": "meta.saved",
-        "summary": {
-          "path": "README.md",
-          "version": 6,
-          "deleted": false
-        },
-        "repo": "meta",
-        "repo_path": ".",
-        "branch": null,
-        "actor": "rec-mutvywkn",
-        "machine": "unknown"
-      },
-      {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
-        "seq": 50,
-        "at": "2026-10-04T13:58:35.657Z",
-        "kind": "meta.saved",
-        "summary": {
-          "path": "README.md",
-          "version": 5,
-          "deleted": false
-        },
-        "repo": "meta",
-        "repo_path": ".",
-        "branch": null,
-        "actor": "rec-mutvywkn",
-        "machine": "ana-mbp"
-      },
-      {
-        "monorepo_id": "m_b03271178f23aa74",
-        "monorepo": "org-mutvywkn/rec-mutvywkn-renamed",
-        "seq": 45,
-        "at": "2026-10-04T13:58:34.945Z",
-        "kind": "status",
-        "summary": {
-          "context": "lint",
-          "state": "pending",
-          "description": "#1 queued",
-          "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1-retry",
-          "sha": "8a0b12034040273ed0f600550d5791233e66f883",
-          "duration_s": null,
-          "app": "buildkite"
+          "head": "d3105238befdd2529b0945198d4203c8047b9f96",
+          "closes": [
+            2
+          ]
         },
         "repo": "projects-web",
         "repo_path": "projects/web",
-        "branch": "feat/ready",
-        "actor": null,
-        "machine": null
+        "branch": "fix/login",
+        "actor": "rec-mutxvkul",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "org-mutxvkul/rec-mutxvkul-renamed",
+        "seq": 67,
+        "at": "2026-10-04T14:52:09.734Z",
+        "kind": "branch.opened",
+        "summary": {
+          "head": "d3105238befdd2529b0945198d4203c8047b9f96",
+          "before": null,
+          "commits": 1,
+          "head_title": "Keep the session (fixes #2)"
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": "fix/login",
+        "actor": "rec-mutxvkul",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "org-mutxvkul/rec-mutxvkul-renamed",
+        "seq": 66,
+        "at": "2026-10-04T14:52:08.840Z",
+        "kind": "issue.reopened",
+        "summary": {
+          "number": 1,
+          "title": "Login fails an hour after sign-in",
+          "reason": null,
+          "excerpt": null
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": null,
+        "actor": "rec-mutxvkul",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "org-mutxvkul/rec-mutxvkul-renamed",
+        "seq": 65,
+        "at": "2026-10-04T14:52:08.837Z",
+        "kind": "issue.closed",
+        "summary": {
+          "number": 1,
+          "title": "Login fails an hour after sign-in",
+          "reason": "not_planned",
+          "excerpt": null
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": null,
+        "actor": "rec-mutxvkul",
+        "machine": "ana-mbp"
+      },
+      {
+        "monorepo_id": "m_6bb0e9eea359f448",
+        "monorepo": "org-mutxvkul/rec-mutxvkul-renamed",
+        "seq": 60,
+        "at": "2026-10-04T14:52:08.821Z",
+        "kind": "issue.commented",
+        "summary": {
+          "number": 1,
+          "title": "Login fails after token refresh",
+          "reason": null,
+          "excerpt": "Seen on staging too."
+        },
+        "repo": "projects-web",
+        "repo_path": "projects/web",
+        "branch": null,
+        "actor": "rec-mutxvkul",
+        "machine": "ana-mbp"
       }
     ],
-    "next": "MjAyNi0xMC0wNFQxMzo1ODozNC45NDVafG1fYjAzMjcxMTc4ZjIzYWE3NHw0NQ",
+    "next": "MjAyNi0xMC0wNFQxNDo1MjowOC44MjFafG1fNmJiMGU5ZWVhMzU5ZjQ0OHw2MA",
     "from_logs": false,
     "skipped": []
   }

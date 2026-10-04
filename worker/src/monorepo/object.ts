@@ -31,6 +31,12 @@ import { isOneOf, isRecord, isText, isTextList, isWholeNumber, parseJson } from 
 import { attachmentOf, Machines, type MachineRow } from "./machines";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
+import { ISSUES_SCHEMA, statements } from "../issues/schema";
+import { commitClosings } from "../issues/commits";
+import { commitReader } from "./graph";
+import {
+  IssueStore, type BranchWord, type IssueFilters, type IssueInput, type IssuePatch, type IssueWho, type ReactionContent,
+} from "../issues/store";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
 import type { Json } from "../parse";
 import type {
@@ -274,6 +280,14 @@ function worktreeOf(r: WorktreeRow): Worktree | null {
   return isOneOf(WORKTREE_KINDS, r.kind) ? { ...r, kind: r.kind } : null;
 }
 
+/** Who acts on issues: the person and the machine (no agent is stored on issues; it rides on events only). */
+function issueWho(by: Identity): IssueWho {
+  return { login: by.login, machine: by.credential_name, agent: by.agent ?? null };
+}
+
+/** The merge's read of its commits' keywords waits at most this long (pando-ops: a slow read never holds a merge). */
+const MERGE_REFS_MS = 2_000;
+
 function who(by: Identity | null): EventWho {
   const out: EventWho = { actor: by?.login ?? null, machine: by?.credential_name ?? null, agent: by?.agent ?? null };
 
@@ -311,6 +325,8 @@ export interface MergeArgs {
   message?: string;
   expected_head?: string;
   origin: string;
+  /** Tests only (DOOR_TEST): take the read of the merged commits' keywords as past its time limit. */
+  test_refs_late?: boolean;
 }
 
 export type { MergeResult } from "./types";
@@ -335,6 +351,7 @@ export class MonorepoObject extends DurableObject<Env> {
   private metaApply: MetaApplyOut;
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
+  private issues: IssueStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -356,6 +373,13 @@ export class MonorepoObject extends DurableObject<Env> {
       publish: (e) => this.publish(e),
       addStatus: (repo, sha, st, identity, stamp) => this.addStatus(repo, sha, st, identity, stamp),
     });
+    this.issues = new IssueStore(this.sql, {
+      info: () => this.info(),
+      publish: (e) => this.publish(e),
+      repoPath: (name) => this.repoRow(name)?.path ?? null,
+      branchWord: (repo, branch) => this.branchWord(repo, branch),
+      summaryChanged: () => this.feed.scheduleSummary(),
+    });
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
     const m = this.info();
@@ -371,6 +395,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private ensureSchema(): void {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+
+    for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
+    this.issues.seedLabels();
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
 
@@ -999,7 +1026,37 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** A branch made by the API (createBranch): the caller is its creator. */
   createBranchRecord(repo: string, name: string, head: string, identity: Identity, title: string | null, description: string | null, origin: string | null = null): RepoEvent[] {
-    return this.recordPush(repo, identity, [{ old: ZERO, new: head, ref: `refs/heads/${name}` }], { title, description }, origin);
+    const events = this.recordPush(repo, identity, [{ old: ZERO, new: head, ref: `refs/heads/${name}` }], { title, description }, origin);
+    this.titleLinks(repo, name, identity);
+
+    return events;
+  }
+
+  /** A branch's closing keywords in its title and description, as `title` links (re-read on every change). */
+  private titleLinks(repo: string, name: string, identity: Identity | null): void {
+    const b = this.branchRecord(repo, name);
+    const refs = this.issues.closingIn(b ? [b.title, b.description].filter(Boolean).join("\n\n") : null);
+    this.issues.setLinks({ repo, branch: name }, "title", refs.map((number) => ({ number, sha: null })), identity ? issueWho(identity) : null);
+  }
+
+  /** A branch's state in one word, as an issue's Development box shows it; null when the repo never had it. */
+  private branchWord(repo: string, branch: string): { state: BranchWord; merged_at: string | null } | null {
+    const v = this.repoRow(repo) ? this.branchRows(repo, { names: [branch], state: "all" }).branches[0] : undefined;
+
+    if (!v) {
+      const gone = this.row<{ merged_at: string | null }>("SELECT merged_at FROM branches WHERE repo = ? AND name = ?", repo, branch);
+
+      return gone ? { state: "deleted", merged_at: gone.merged_at } : null;
+    }
+
+    if (v.state === "merged") return { state: "merged", merged_at: v.merged_at };
+    const mergeable = v.mergeable === "pending" ? v.last_mergeable : v.mergeable;
+
+    if (mergeable === "conflicts") return { state: "conflicts", merged_at: null };
+
+    if (v.checks.state === "failure" || v.checks.state === "error") return { state: "failing", merged_at: null };
+
+    return { state: mergeable === "clean" && v.checks.state === "success" ? "ready" : "open", merged_at: null };
   }
 
   updateBranch(repo: string, name: string, patch: { title?: string; description?: string }, head: string, identity: Identity | null = null): Promise<Outcome<BranchRecord>> {
@@ -1021,9 +1078,73 @@ export class MonorepoObject extends DurableObject<Env> {
 
       if (patch.description !== undefined) this.sql.exec("UPDATE branches SET description = ? WHERE repo = ? AND name = ?", patch.description, repo, name);
       this.publishBranch("branch.updated", repo, name, identity);
+      this.titleLinks(repo, name, identity);
 
       return this.branchRecord(repo, name)!;
     });
+  }
+
+  // ── Issues (issues/store.ts; routes in issues/routes.ts) ─────────────────
+
+  issueCreate(input: IssueInput, identity: Identity, key: string | null) {
+    return this.guard(() => this.issues.create(input, issueWho(identity), key));
+  }
+
+  issueList(f: IssueFilters) {
+    return this.guard(() => this.issues.list(f));
+  }
+
+  issueGet(n: number) {
+    return this.guard(() => this.issues.get(n));
+  }
+
+  issueUpdate(n: number, patch: IssuePatch, identity: Identity) {
+    return this.guard(() => this.issues.update(n, patch, issueWho(identity)));
+  }
+
+  issueTimeline(n: number, page: { cursor: number | null; limit: number; last: number | null }) {
+    return this.guard(() => this.issues.timeline(n, page));
+  }
+
+  issueComment(n: number, body: string, identity: Identity, key: string | null) {
+    return this.guard(() => this.issues.comment(n, body, issueWho(identity), key));
+  }
+
+  issueGetComment(n: number, id: string) {
+    return this.guard(() => this.issues.getComment(n, id));
+  }
+
+  issueEditComment(n: number, id: string, body: string, baseVersion: number | null, identity: Identity) {
+    return this.guard(() => this.issues.editComment(n, id, body, baseVersion, issueWho(identity)));
+  }
+
+  issueDeleteComment(n: number, id: string, identity: Identity) {
+    return this.guard(() => this.issues.deleteComment(n, id, issueWho(identity), identity.role === "owner"));
+  }
+
+  issueReact(n: number, comment: string | null, content: ReactionContent, identity: Identity, on: boolean) {
+    return this.guard(() => this.issues.react(n, comment, content, issueWho(identity), on));
+  }
+
+  labelList() {
+    return this.guard(() => this.issues.labels());
+  }
+
+  labelCreate(l: { name: string; color: string; description: string | null }, identity: Identity) {
+    return this.guard(() => this.issues.createLabel(l, issueWho(identity)));
+  }
+
+  labelUpdate(name: string, patch: { name?: string; color?: string; description?: string | null }, identity: Identity) {
+    return this.guard(() => this.issues.updateLabel(name, patch, issueWho(identity)));
+  }
+
+  labelDelete(name: string, identity: Identity) {
+    return this.guard(() => this.issues.deleteLabel(name, issueWho(identity)));
+  }
+
+  /** A merge's commits read late (facts job merge_refs): the issues they name get a merge_referenced item. */
+  issueMergeReferenced(merge: number, numbers: number[]): void {
+    this.issues.mergeReferenced(merge, numbers);
   }
 
   // ── Reviews ──────────────────────────────────────────────────────────────
@@ -1242,6 +1363,8 @@ export class MonorepoObject extends DurableObject<Env> {
     };
 
     const attempt = isMeta ? attemptMeta : attemptMerge;
+    // Closing keywords in the merged commits, when the stored facts are not for exactly this main and head.
+    const refsRead = a.test_refs_late ? { head, refs: null, late: true } : await this.commitRefsFor(r, a.branch, base, head);
 
     try {
       out = await attempt(head, base);
@@ -1289,10 +1412,11 @@ export class MonorepoObject extends DurableObject<Env> {
     if (out.status !== "merged") fail(502, "merge_failed", `unexpected merge result ${out.status}`);
     const at = now();
     const forced = checks?.state !== "success";
-    this.sql.exec(
-      "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at, machine, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+
+    const mergeId = this.sql.exec<{ id: number }>(
+      "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at, machine, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
       a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.login, forced ? 1 : 0, at, a.identity.credential_name, a.identity.agent ?? null,
-    );
+    ).one().id;
 
     // The live files get the merge through the outbox, written with the record (CODE-VS-MODEL M2).
     if (isMeta) this.metaApply.landed(metaMerge ?? randomId("mg_"), out.old, out.sha, a.identity);
@@ -1308,7 +1432,20 @@ export class MonorepoObject extends DurableObject<Env> {
     this.rememberHead(a.repo, out.sha, message.split("\n")[0] || null);
     this.forgetRequiredIfConfig(a.repo);
     this.queueFacts({ type: "sweep", repo: a.repo, main: out.sha });
-    const merge: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
+    // The issues it closes, decided now: the branch's links, and keywords in the message and the merged commits.
+    // Each closes about a second later, in its own step (issues/store.ts applyCloses).
+    const merged = { repo: a.repo, branch: a.branch };
+    const refs = refsRead.head === head ? refsRead.refs : null;
+
+    if (refs) this.issues.setLinks(merged, "commit", refs, null);
+    const named = [...this.issues.linkedTo(merged), ...this.issues.closingIn(message), ...(refs ?? []).map((x) => x.number)];
+    const { closes, due } = this.issues.mergeLanded(mergeId, named);
+
+    if (named.length) this.feed.armAt(due);
+
+    // The read ran out of time: the facts job reads the commits, and an issue they name gets a merge_referenced item.
+    if (refsRead.late || (refsRead.head !== head && !refs)) this.queueFacts({ type: "merge_refs", repo: a.repo, merge: mergeId, base: out.old, head });
+    const merge: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login, closes };
     const mergedSeq = this.publishBranch("merged", a.repo, a.branch, a.identity, { merge });
     // main moved: every open branch's ahead, behind and mergeable change; clients refetch the branch list.
     this.publish({
@@ -1328,9 +1465,34 @@ export class MonorepoObject extends DurableObject<Env> {
     // The first try before answering, as before: the merge is on machines when the caller hears of it. A failed try is retried.
     if (isMeta) await this.metaApply.flush();
 
-    const result: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
+    return merge;
+  }
 
-    return result;
+  /**
+   * The issues a branch's commits close, for a merge of (base, head): null refs when the stored facts are for
+   * exactly that pair (the branch's commit links are current then). Else read, at most MERGE_REFS_MS; past that,
+   * or when the read fails, `late` (the merge goes on with the stored links).
+   */
+  private async commitRefsFor(r: RepoRecord, branch: string, base: string, head: string): Promise<{ head: string; refs: { number: number; sha: string }[] | null; late: boolean }> {
+    const b = this.branchRecord(r.name, branch);
+
+    if (b && b.facts_main === base && b.facts_head === head) return { head, refs: null, late: false };
+    const names = this.info() ? [this.info()!.label] : [];
+    const read = withRepo(this.env, r.artifacts_name, (repo) => commitClosings(commitReader(repo), base, head, names));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((res) => (timer = setTimeout(() => res("late"), MERGE_REFS_MS)));
+
+    try {
+      const out = await Promise.race([read, late]);
+
+      return out === "late" ? { head, refs: null, late: true } : { head, refs: out, late: false };
+    } catch (err) {
+      console.warn(`merge of ${branch}: its commits' keywords not read: ${err instanceof Error ? err.message : String(err)}`);
+
+      return { head, refs: null, late: true };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   /** The paths a branch changes since its merge base: merging it into main changes no others. */
@@ -1505,6 +1667,10 @@ export class MonorepoObject extends DurableObject<Env> {
   async alarm(): Promise<void> {
     await this.feed.alarm();
     this.refsChecks();
+    // Issues named by merges close about a second after them, each merge's once (issues/store.ts).
+    const closesNext = this.issues.applyCloses();
+
+    if (closesNext !== null) this.feed.armAt(closesNext);
     await this.factsOut.alarm();
     await this.hooksOut.alarm();
     await this.metaApply.alarm();
@@ -1556,7 +1722,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
     if (had) return had.seq;
     const at = now();
-    const { seq: _s, at: _a, via: _v, ...rest } = e;
+    const { seq: _s, at: _a, via: _v, topics: _t, ...rest } = e;
     const body = JSON.stringify(rest);
     const tags = eventTags(e);
 
@@ -1880,6 +2046,9 @@ export class MonorepoObject extends DurableObject<Env> {
       "UPDATE branches SET ahead = ?, behind = ?, merge_base = ?, mergeable = ?, conflict_paths = ?, facts_main = ?, facts_head = ?, facts_at = ? WHERE repo = ? AND name = ?",
       f.ahead, f.behind, f.merge_base, f.mergeable, f.conflict_paths ? JSON.stringify(f.conflict_paths) : null, f.main, f.head, now(), repo, name,
     );
+
+    // The branch's commit links, for this head and main only (as ahead and behind are).
+    if (f.issue_refs) this.issues.setLinks({ repo, branch: name }, "commit", f.issue_refs, null);
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     this.publishBranchRow(repo, name, required);
 

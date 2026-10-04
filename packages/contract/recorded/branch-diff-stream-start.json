@@ -1,0 +1,14 @@
+{
+  "schema": "BranchDiffLine",
+  "route": "GET .../branches/{branch}/diff?patches=1&stream=1 (a start line)",
+  "status": 200,
+  "body": {
+    "type": "start",
+    "base_branch": "main",
+    "base": "7eb4942e1fce992b039b41a2844053b7edcd58f1",
+    "head": "911e88b357ad3ca06a6169957f590a0257fffa0a",
+    "merge_base": "ba3de7aa7632d929cb031838e28f0cb2ab03533f",
+    "files_total": 1,
+    "too_many_files": false
+  }
+}

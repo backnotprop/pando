@@ -11,6 +11,7 @@ import { openBranchesQuery } from "../../../../api/queries";
 import { isDoc } from "../../../../ui/doc/Doc";
 import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref } from "../../../../ui/paths";
+import { loadColourViews } from "../-code/coloured";
 import { BarSpace, ChangeBar } from "../-code/FileList";
 import { FileShown, FileTools } from "../-code/FileView";
 import { PathTrail } from "../-code/PathTrail";
@@ -23,6 +24,9 @@ export async function loadFile(qc: QueryClient, m: MonorepoRef, repo: Repo, path
   const { dir, name } = split(path);
   // The Branches tab's count, read alongside the tree (quicker than it), so the tab never draws without it.
   const open = qc.prefetchQuery(openBranchesQuery(m, repo.name));
+
+  // The coloured view and its worker load alongside the reads, so a file opened first, or by its address, is not left plain.
+  void loadColourViews();
   const tree = await qc.ensureQueryData(codeTreeQuery(m, repo.name, ref, dir));
 
   if (!tree?.entries.some((e) => e.name === name && e.type !== "dir")) throw notFound();

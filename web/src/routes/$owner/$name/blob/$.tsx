@@ -12,6 +12,7 @@ import { fileSearch, versionOf } from "../../../../api/search";
 import { lnk } from "../../../../ui/controls";
 import { isDoc } from "../../../../ui/doc/Doc";
 import { blobLink, historyLink, treeLink } from "../../../../ui/paths";
+import { loadColourViews } from "../-code/coloured";
 import { ChangeBar, saverOf } from "../-code/FileList";
 import { FileShown, FileTools } from "../-code/FileView";
 import { PathTrail } from "../-code/PathTrail";
@@ -27,6 +28,9 @@ export const Route = createFileRoute("/$owner/$name/blob/$")({
     const repo = await plainRepo(queryClient, monorepo);
 
     if (repo) return loadFile(queryClient, monorepo, repo, path, deps.ref);
+
+    // The coloured view and its worker load alongside the reads (-code/coloured.ts).
+    void loadColourViews();
 
     const [entry, file] = await Promise.allSettled([
       queryClient.ensureQueryData(entryQuery(monorepo, path, deps.v)),

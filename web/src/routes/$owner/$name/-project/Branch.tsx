@@ -21,12 +21,16 @@ import { branchLink, ciBuildLink } from "../../../../ui/paths";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { loadColourViews } from "../-code/coloured";
 import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
 
 /** `files`: the Files changed tab waits for the diff; Overview fetches it alongside, for the tab's count. */
 export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean) {
   const diff = qc.prefetchQuery(branchDiffQuery(m, repo.name, branch));
+
+  // Files changed: the diff view and its worker load alongside the reads (-code/coloured.ts).
+  if (files) void loadColourViews();
 
   await Promise.all([
     qc.ensureQueryData(branchQuery(m, repo.name, branch)),

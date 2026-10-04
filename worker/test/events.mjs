@@ -207,6 +207,10 @@ try {
   await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/statuses/${headA}`, A, { state: "success", context: "ci" }, { "x-pando-agent": "ci-bot" });
   e = await find(ev, (x) => x.kind === "status" && x.row?.sha === headA);
   checkS("event: status (Status row, agent from X-Pando-Agent)", e?.collection === "statuses" && e?.key === `${repo}/${headA}/ci` && e?.row?.state === "success" && e?.agent === "ci-bot", scrub(JSON.stringify(e)).slice(0, 160));
+  // The status changes feat/a's gate: its full row follows, with the checks the server computed (the web never recomputes them).
+  e = await find(ev, (x) => x.kind === "branch.updated" && x.partial === false && x.row?.name === "feat/a" && x.row?.checks?.statuses?.some((s) => s.context === "ci" && s.state === "success"));
+  const gate = (await call("GET", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/feat%2Fa`, A)).json?.checks;
+  checkS("a status publishes its branch's full row (branch.updated, partial false) with the new checks, as GET branch computes them", !!e && e.row.checks.sha === headA && e.row.checks.state === gate?.state && e.row.repo === repo, `${e?.row?.checks?.state} vs ${gate?.state}`);
   await call("POST", `/v1/monorepos/${O}/${M}/repos/${repo}/branches/feat%2Fa/reviews`, A, { verdict: "comment", body: "ok" });
   e = await find(ev, (x) => x.kind === "review");
   checkS("event: review (Review row)", e?.collection === "reviews" && e?.row?.verdict === "comment" && e?.row?.branch === "feat/a");

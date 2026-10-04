@@ -50,7 +50,7 @@ export interface CiBuildList extends Schema.Schema.Type<typeof CiBuildList> {}
 export const CiJob = Schema.Struct({
   /** The service's job id. */
   id: Schema.String,
-  /** The service's build id. */
+  /** The build's Pando id (`cib_...`), as in .../ci/builds/{build}. */
   build: Schema.String,
   name: Schema.NullOr(Schema.String),
   step_key: Schema.NullOr(Schema.String),
@@ -84,15 +84,13 @@ export const CiService = Schema.Struct({ service: Schema.String, name: Schema.St
 
 export interface CiService extends Schema.Schema.Type<typeof CiService> {}
 
-/** One account of a CI service (a Buildkite organization) connected to the monorepo. */
-export const CiConnection = Schema.Struct({
+/** One account of a CI service (a Buildkite organization) connected to the monorepo, as the event stream carries it. */
+export const CiConnectionRow = Schema.Struct({
   id: Schema.String,
   service: Schema.Literals(["buildkite"]),
   organization: Schema.String,
   /** The organization on the service. */
   web_url: Schema.String,
-  /** The URL to paste into the service's webhook settings. */
-  webhook_url: Schema.String,
   /** Where its REST token comes from: the Worker secret at launch. */
   token: Schema.Literals(["worker_secret", "stored"]),
   created_at: Timestamp,
@@ -102,6 +100,11 @@ export const CiConnection = Schema.Struct({
   /** The last webhook refused (a wrong token or signature), recorded at most every 10 s. */
   last_refused: Schema.NullOr(Schema.Struct({ at: Timestamp, reason: Schema.NullOr(Schema.String) })),
 });
+
+export interface CiConnectionRow extends Schema.Schema.Type<typeof CiConnectionRow> {}
+
+/** A connection as the CI routes answer it: the row, and the URL to paste into the service's webhook settings. */
+export const CiConnection = CiConnectionRow.pipe(Schema.fieldsAssign({ webhook_url: Schema.String }));
 
 export interface CiConnection extends Schema.Schema.Type<typeof CiConnection> {}
 

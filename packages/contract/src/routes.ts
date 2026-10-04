@@ -97,6 +97,18 @@ export const monorepoFeedSocketPath = (owner: Login, name: MonorepoName, feedSin
   return `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/events${query(params)}`;
 };
 
+/**
+ * A monorepo's event socket for row updates (open it with `Upgrade: websocket`): `topics` such as
+ * `kind:branch.updated` or `repo:<repo>` (at most 10; ROW_KINDS lists the row kinds), `since` the highest `seq` seen.
+ */
+export const monorepoEventsSocketPath = (owner: Login, name: MonorepoName, topics: readonly string[], since: number | null): string => {
+  const params = new URLSearchParams({ topics: topics.join(",") });
+
+  if (since !== null) params.set("since", String(since));
+
+  return `/v1/monorepos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/events${query(params)}`;
+};
+
 /** GET /{owner}/{name}/raw/{path}?v=<version>: a root file's bytes (no schema; members only). `version` null: now. Path segments keep their slashes. */
 export const metaRawPath = (owner: Login, name: MonorepoName, path: string, version: number | null): string => {
   const params = new URLSearchParams();

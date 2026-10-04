@@ -5,9 +5,9 @@
   "body": {
     "error": {
       "code": "checks_not_green",
-      "message": "checks are failure on d6196dd18fee; wait, or merge with force",
+      "message": "checks are failure on 30b22c97f599; wait, or merge with force",
       "checks": {
-        "sha": "d6196dd18feeb71d5b65d832cf27ce3f5274c39e",
+        "sha": "30b22c97f599967a7e1c83600bc25f908c6a01bb",
         "state": "failure",
         "required": [
           "ci/test"
@@ -15,14 +15,14 @@
         "missing": [],
         "statuses": [
           {
-            "sha": "d6196dd18feeb71d5b65d832cf27ce3f5274c39e",
+            "sha": "30b22c97f599967a7e1c83600bc25f908c6a01bb",
             "context": "ci/test",
             "state": "failure",
             "target_url": null,
             "description": "2 tests failed",
-            "creator": "rec-mut77wcr",
+            "creator": "rec-mut7vro0",
             "app": null,
-            "created_at": "2026-10-04T02:25:38.724Z"
+            "created_at": "2026-10-04T02:44:13.318Z"
           }
         ]
       }

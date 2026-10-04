@@ -825,6 +825,10 @@ async function filesChanged(c: C, r: RepoRecord, branch: string): Promise<Respon
 
   if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
 
+  // A merged branch keeps its changes, as GitHub keeps a merged pull request's: against main just before the merge (the
+  // merge commit's first parent), not today's main, which holds the head.
+  main = (await stub.mergedFrom(r.name, branch, head)) ?? main;
+
   if (!main) throw new HttpError(409, "no_main", `${r.default_branch} does not exist yet`);
   const tag = `${main}.${head}`;
   const headers = { etag: `"${tag}"`, "cache-control": "private, no-cache" };

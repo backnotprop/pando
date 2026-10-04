@@ -139,7 +139,7 @@ export interface ChangedFile extends Schema.Schema.Type<typeof ChangedFile> {}
  */
 export const BranchDiff = Schema.Struct({
   base_branch: Schema.String,
-  /** The default branch's head the diff was taken against. */
+  /** The default branch's head the diff was taken against; for a branch Pando merged at this head, main just before that merge. */
   base: Sha,
   head: Sha,
   merge_base: Sha,

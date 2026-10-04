@@ -3123,7 +3123,7 @@ components:
       required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]
       properties:
         base_branch: { type: string }
-        base: { type: string, description: "Main's head the diff was taken against." }
+        base: { type: string, description: "Main's head the diff was taken against; for a branch Pando merged at this head, main just before that merge (the merge commit's first parent), so a merged branch keeps its changes." }
         head: { type: string, description: The branch's head. }
         merge_base: { type: string }
         truncated: { type: boolean, description: "Some patches were left out past 2 MiB in all (`patch_omitted: budget`)." }

@@ -3,16 +3,16 @@
   "route": "GET .../repos/{repo} (with required_checks)",
   "status": 200,
   "body": {
-    "monorepo": "rec-mut77wcr/rec-mut77wcr",
+    "monorepo": "rec-mut7vro0/rec-mut7vro0",
     "name": "projects-web",
     "path": "projects/web",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8797/rec-mut77wcr/rec-mut77wcr/projects-web.git",
+    "clone_url": "http://localhost:8797/rec-mut7vro0/rec-mut7vro0/projects-web.git",
     "required_checks": [
       "ci/test"
     ],
-    "created_at": "2026-10-04T02:25:30.160Z",
-    "created_by": "rec-mut77wcr"
+    "created_at": "2026-10-04T02:44:03.690Z",
+    "created_by": "rec-mut7vro0"
   }
 }

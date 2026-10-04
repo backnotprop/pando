@@ -268,6 +268,12 @@ try {
 
   sockets.push(monorepoFeed);
 
+  // The row updates the web patches from: one kind:<kind> topic per row kind (ROW_KINDS in src/stream.ts).
+  const rowTopics = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection"].map((k) => `kind:${k}`).join(",");
+  const rowSocket = openSocket(`/v1/monorepos/${full}/events?topics=${rowTopics}`, secret);
+
+  sockets.push(rowSocket);
+
   // The meta layer's first upload (pando init): .pando/pando.toml requires ci/test for projects/web.
   const metaPath = `/v1/monorepos/${full}/meta`;
   const meta = openSocket(`${metaPath}/socket`, secret);
@@ -638,6 +644,26 @@ try {
 
   r = await call("DELETE", `${base}/ci/connections/${encodeURIComponent(connectionId)}`, secret);
   record("ci-disconnected.json", "NoContent", "DELETE .../ci/connections/{connection}", r.status, r.json);
+
+  // The row frames, one of each shape (kind, collection, op, full or partial), and a resync for a seq past the head.
+  const rowsBeyond = openSocket(`/v1/monorepos/${full}/events?topics=${rowTopics}&since=999999`, secret);
+
+  sockets.push(rowsBeyond);
+  await waitFor(() => rowsBeyond.frames.some((f) => f.type === "resync") && rowSocket.frames.some((f) => f.kind === "ci.connection" && f.op === "delete"), 10_000);
+
+  const rowFrames = [];
+  const rowKept = new Set();
+
+  for (const frame of [...rowSocket.frames, ...rowsBeyond.frames]) {
+    const key = frame.type === "event" ? `${frame.kind}|${frame.collection}|${frame.op}|${frame.partial}` : frame.type;
+
+    if (frame.type === "pong" || rowKept.has(key)) continue;
+
+    rowKept.add(key);
+    rowFrames.push(frame);
+  }
+
+  record("monorepo-event-frames.json", "MonorepoEventFrame[]", "GET /v1/monorepos/{owner}/{monorepo}/events?topics=kind:<row kinds>[&since=] (WebSocket)", 101, rowFrames);
 
   // Settings: rename, last (the old name keeps working; the cleanup deletes by the new one).
   r = await call("PATCH", base, secret, { name: `${name}-renamed` });

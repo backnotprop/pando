@@ -3,12 +3,12 @@
   "route": "PATCH /v1/monorepos/{owner}/{monorepo} {name}",
   "status": 200,
   "body": {
-    "id": "m_f22a4f35b02e449b",
-    "owner": "rec-mut77wcr",
-    "name": "rec-mut77wcr-renamed",
-    "full_name": "rec-mut77wcr/rec-mut77wcr-renamed",
+    "id": "m_ee92532e4bf06a36",
+    "owner": "rec-mut7vro0",
+    "name": "rec-mut7vro0-renamed",
+    "full_name": "rec-mut7vro0/rec-mut7vro0-renamed",
     "kind": "monorepo",
-    "created_at": "2026-10-04T02:25:25.161Z",
+    "created_at": "2026-10-04T02:43:58.832Z",
     "role": "owner",
     "replaced_alias": null
   }

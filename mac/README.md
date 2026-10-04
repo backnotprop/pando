@@ -294,6 +294,15 @@ downloads files to learn their sizes only when the server cannot answer.
 Numbers: `research/operational/mac-mount-downloads-2026-10-04.md` in the
 meta layer.
 
+**Downloads.** A request to Artifacts costs about 0.65 s whatever it
+carries (1 blob 0.65 s, 100 blobs 0.67 s, 1,000 blobs 1.7 s). So the daemon
+fetches every read that misses at the same moment in one request (up to 500
+blobs), and the worktrees of one repository share one blob cache, so a file
+downloads once. Git's own automatic repack is off in the daemon's clones: it
+swapped packs under running fetches and failed reads. The daemon merges
+packs itself with no fetch running. Listing a folder costs about 1 ms through
+the mount. Numbers: the same file in the meta layer.
+
 **Not a drive.** A worktree must be a folder, not a drive icon on the
 Desktop and in Finder's sidebar. That takes the `nobrowse` mount flag, and
 `/sbin/mount -F` drops every `-o` option on macOS 26.3: its last step

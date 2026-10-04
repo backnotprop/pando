@@ -17,6 +17,7 @@
 
 import { isOneOf, isRecord, isText, isWholeNumber, type Json } from "../parse";
 import type { ReviewVerdict, StatusRecord } from "../monorepo/types";
+import type { AssignedByLogin } from "../issues/schema";
 
 /** Monorepos with this many members or fewer copy their events into members' feeds (an owner limit). */
 export const FANOUT_MAX = 100;
@@ -250,8 +251,28 @@ export function summaryOf(v: Json | undefined): Summary | null {
     large: v.large === true,
     repos: wholeOf(v.repos) ?? 0,
     open_branches: wholeOf(v.open_branches) ?? 0,
+    assigned: assignedOf(v.assigned),
     at,
   };
+}
+
+/** A summary's open issues per login, as stored or sent; an entry that is not one is left out. */
+function assignedOf(v: Json | undefined): AssignedByLogin {
+  const out: AssignedByLogin = {};
+
+  if (!isRecord(v)) return out;
+
+  for (const [login, a] of Object.entries(v)) {
+    const newest = isRecord(a) && isRecord(a.newest) ? a.newest : null;
+    const count = isRecord(a) ? wholeOf(a.count) : null;
+    const number = wholeOf(newest?.number);
+    const title = textOf(newest?.title);
+    const updated = textOf(newest?.updated_at);
+
+    if (count !== null && number !== null && title !== null && updated !== null) out[login] = { count, newest: { number, title, updated_at: updated } };
+  }
+
+  return out;
 }
 
 export function isNeedState(v: string): v is NeedState {
@@ -365,6 +386,8 @@ export interface Summary {
   /** Its projects (code repos; the meta layer's repo not counted), and their open branches (main not counted). */
   repos: number;
   open_branches: number;
+  /** Open issues assigned to each member, by login (none: left out). */
+  assigned: AssignedByLogin;
   /** When the monorepo object computed it. */
   at: string;
 }

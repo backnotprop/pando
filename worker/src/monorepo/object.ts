@@ -31,6 +31,7 @@ import { isOneOf, isRecord, isText, isTextList, isWholeNumber, parseJson } from 
 import { attachmentOf, Machines, type MachineRow } from "./machines";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
+import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
 import type { Json } from "../parse";
 import type {
@@ -371,6 +372,8 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private ensureSchema(): void {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+
+    for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
 

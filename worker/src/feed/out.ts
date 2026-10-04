@@ -22,6 +22,7 @@ import { now } from "../http";
 import { released } from "../timing";
 import { combine } from "../monorepo/checks";
 import { ZERO } from "../monorepo/names";
+import { assignedByLogin } from "../issues/schema";
 import type { ObjectInfo, StatusRecord } from "../monorepo/types";
 import { isRecord, isTextList, parseJson, type Json, type JsonObject } from "../parse";
 import {
@@ -866,7 +867,7 @@ export class FeedOut {
 
     return {
       last_activity_at: last, worktrees_active: p.worktrees, machines_active: p.machines, needs: counts,
-      members: this.memberCount(), large: this.isLarge(), repos, open_branches: open, at: now(),
+      members: this.memberCount(), large: this.isLarge(), repos, open_branches: open, assigned: assignedByLogin(this.sql), at: now(),
     };
   }
 

@@ -9,7 +9,7 @@ import { monorepoRef } from "../../../api/names";
 import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Page } from "../../../ui/pages";
-import { blobLink, ciPipelineLink, codeBlobLink, codeLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -50,6 +50,9 @@ function pathCrumbs(parts: string[], folder: (dir: string) => Crumb["link"], las
 function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   const [kind = "", ...parts] = rest;
   const repoPath = plain ? "." : `projects/${parts[0] ?? ""}`;
+
+  // issues / #34, issues / new
+  if (kind === "issues" && parts[0]) return [{ label: "issues", link: issuesLink(full), wide: true }, { label: parts[0] === "new" ? "new" : `#${parts[0]}` }];
 
   if (kind === "projects" && !plain) {
     const [, sub = "", ...path] = parts;

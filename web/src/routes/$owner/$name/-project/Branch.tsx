@@ -2,7 +2,8 @@
 // its commits (with co-authors), its reviews, and on the right the Merge box,
 // its checks (each with its CI service's mark and a link to the run) and its
 // worktree. Merge lands exactly the head on screen (expected_head); a refusal
-// is shown in the box, in words. Files changed: each file's diff, read only
+// is shown in the box, in words. The issues it is linked to sit under the box
+// (-issues/BranchIssues.tsx). Files changed: each file's diff, read only
 // (FilesChanged.tsx).
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -22,6 +23,7 @@ import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { loadColourViews } from "../-code/coloured";
+import { BranchIssues } from "../-issues/BranchIssues";
 import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
 
@@ -422,6 +424,7 @@ function Overview({ repo, b, commits, total, reviews, live }: { repo: Repo; b: B
       </section>
       <aside>
         <MergeBox repo={repo} b={b} />
+        <BranchIssues repo={repo} b={b} />
         <div className="mt-10">
           <SectionHead title="Checks" />
           <CheckRows repo={repo} branch={b} checks={b.checks} live={live} />

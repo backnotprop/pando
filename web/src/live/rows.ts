@@ -13,6 +13,7 @@ import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "..
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
+import { applyIssueFrame, touchLinkedIssues } from "./issues";
 import { keepOpen } from "./socket";
 
 /** While the socket is down, the page's data is read this often instead. */
@@ -137,11 +138,21 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
         void qc.invalidateQueries({ queryKey: commitsQuery(m, f.row.repo, f.row.name).queryKey, exact: true });
       }
 
+      touchLinkedIssues(qc, m, f.row.repo, f.row.name);
+
       break;
     }
 
     case "status":
       // The branches at that commit follow as branch.updated, with their checks and gate.
+      break;
+    case "issue.opened":
+    case "issue.commented":
+    case "issue.closed":
+    case "issue.reopened":
+    case "issue.updated":
+    case "label.updated":
+      applyIssueFrame(qc, m, f);
       break;
   }
 }

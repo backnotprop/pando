@@ -12,11 +12,15 @@ import { type Browser, expect, type Locator, test, type Page } from "@playwright
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Buildkite } from "./buildkite";
+import { seedIssues } from "./issues-seed";
 import { BASE, browserPost, ciStatus, Machine, nextSignIn, saveRootFiles } from "./seed";
 
 const PROTOTYPE = pathToFileURL(fileURLToPath(new URL("../../../../../../research/design/pando-ui-2026-10-03/v3/prototype.html", import.meta.url))).href;
 
 const SHOTS = fileURLToPath(new URL("shots/", import.meta.url));
+
+/** The issues mocks: one screen per address hash (#list, #issue, ...). */
+const ISSUE_MOCKS = pathToFileURL(fileURLToPath(new URL("../../../../../../research/design/pando-ui-2026-10-03/issues/mocks.html", import.meta.url))).href;
 
 const ramos = { id: "user_ramos_local", email: "ramos@pando.invalid", email_verified: true, first_name: "Michael", last_name: "Ramos" };
 
@@ -130,6 +134,9 @@ Current truth only, revised in place when a ruling changes. History is in \`rese
 interface Showcase {
   machine: Machine;
   sandbox: Machine;
+  /** Ana's machine, and projects/pando's clone URL: the issues' cast. */
+  ana: Machine;
+  pandoUrl: string;
   /** The machines' open sockets (connected on the Machines tab), and the stand-in Buildkites, closed after the shots. */
   sockets: WebSocket[];
   buildkites: Buildkite[];
@@ -300,7 +307,7 @@ async function seed(page: Page, browser: Browser): Promise<Showcase> {
 
   const ci = await seedCi(machine, { pandoMain, live, webApiMerge, webApi, cli, macMount, wsMain, failing, chips });
 
-  return { machine, sandbox, sockets, buildkites: ci.buildkites, runningJob: ci.runningJob };
+  return { machine, sandbox, ana: anaMbp, pandoUrl: pando, sockets, buildkites: ci.buildkites, runningJob: ci.runningJob };
 }
 
 /** The commits the prototype's builds are of. */
@@ -547,7 +554,7 @@ async function pair(
   proto: Page,
   name: string,
   route: string,
-  opts: { query?: string; click?: string; protoClick?: string; proto?: string; marks?: readonly string[]; carets?: readonly Trigger[] } = {},
+  opts: { query?: string; click?: string; protoClick?: string; proto?: string; protoUrl?: string; marks?: readonly string[]; carets?: readonly Trigger[] } = {},
 ) {
   if (!wanted(name)) return;
 
@@ -562,7 +569,7 @@ async function pair(
   const width = page.viewportSize()?.width ?? 1440;
   await page.screenshot({ path: `${SHOTS}${name}-${width}-real.png` });
   await rows(page, `${SHOTS}${name}-${width}-rows.json`);
-  await proto.goto(`${PROTOTYPE}${opts.query ? `?${opts.query}` : ""}#${opts.proto ?? route}`);
+  await proto.goto(`${opts.protoUrl ?? PROTOTYPE}${opts.query ? `?${opts.query}` : ""}#${opts.proto ?? route}`);
   await settle(proto);
 
   if (opts.protoClick) {
@@ -575,6 +582,67 @@ async function pair(
   if (opts.marks) await measure(page, proto, `${SHOTS}${name}-${width}-marks.json`, opts.marks);
 
   if (opts.carets) await measureCarets(page, proto, `${SHOTS}${name}-${width}-carets.json`, opts.carets);
+}
+
+/**
+ * Issues beside their mocks (issues/mocks.html), after the other pairs so
+ * those keep the prototype's data: the list (and a filter open), an issue
+ * closed by a merge, an open one with its close menu, new issue, a branch
+ * with its linked issue, the activity log, labels in Settings, the home's
+ * Needs you; the list and the issue at 390; and the issue in every theme.
+ */
+async function issueShots(page: Page, browser: Browser, shown: Showcase) {
+  if (!wanted("issues-")) return;
+  const n = await seedIssues({ ramos: shown.machine, sandbox: shown.sandbox, ana: shown.ana, pandoUrl: shown.pandoUrl });
+  const mock = (proto: string) => ({ protoUrl: ISSUE_MOCKS, proto });
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    const proto = await browser.newPage({ viewport: { width, height: width === 1440 ? 900 : 844 }, deviceScaleFactor: 2, colorScheme: "dark", reducedMotion: "reduce" });
+
+    await pair(page, proto, "issues-list", "/ramos/pando/issues", mock("list"));
+    await pair(page, proto, "issues-issue", `/ramos/pando/issues/${n.closedByMerge}`, mock("issue"));
+
+    if (width === 1440) {
+      await pair(page, proto, "issues-list-filter", "/ramos/pando/issues?state=closed&label=bug&sort=updated", { ...mock("list-filter"), click: "Label" });
+      await pair(page, proto, "issues-issue-open", `/ramos/pando/issues/${n.open}`, { ...mock("issue-open"), click: "Close as" });
+      await pair(page, proto, "issues-branch", "/ramos/pando/projects/pando/branches/toml-error-line", mock("branch"));
+      await pair(page, proto, "issues-activity", "/ramos/pando/activity", mock("activity"));
+      await pair(page, proto, "issues-labels", "/ramos/pando/settings", { ...mock("labels"), click: "New label" });
+      await pair(page, proto, "issues-home", "/", mock("home-assigned"));
+      // New issue, filled in as the mock is: its title, the description in the plain box, a label and the project.
+      await page.goto("/ramos/pando/issues/new");
+      await page.getByRole("textbox", { name: "Title" }).fill("Activity tab: filter by person");
+      await page.getByRole("textbox", { name: "Description" }).fill("The Activity tab shows every line. With ten agents working as me, I want to see only ana's lines, or only mine.\n\n### Idea\n- A Person menu next to the monorepo picker\n- Kept in the address (`?by=ana`), so a link shares the view");
+      await page.getByRole("button", { name: "Labels" }).click();
+      await page.getByRole("group", { name: "Labels" }).getByRole("button", { name: /^enhancement/ }).click();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Project" }).click();
+      await page.getByRole("group", { name: "Project" }).getByRole("button", { name: "projects/pando" }).click();
+      await settle(page);
+      await page.screenshot({ path: `${SHOTS}issues-new-1440-real.png` });
+      await proto.goto(`${ISSUE_MOCKS}#new-plain`);
+      await settle(proto);
+      await proto.screenshot({ path: `${SHOTS}issues-new-1440-proto.png` });
+    }
+
+    await proto.close();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  for (const theme of ["pando-dark", "pando-light", "plannotator-dark", "plannotator-light", "iris-dark", "iris-light", "cloudflare-dark", "cloudflare-light", "black-rainbow"]) {
+    for (const [name, route] of [
+      ["issue", `/ramos/pando/issues/${n.open}`],
+      ["list", "/ramos/pando/issues"],
+    ] as const) {
+      await page.goto(`${route}?theme=${theme}`);
+      await settle(page);
+      await page.screenshot({ path: `${SHOTS}issues-theme-${theme}-${name}-1440-real.png` });
+    }
+  }
+
+  await page.goto("/?theme=pando");
 }
 
 /** Each theme of the name menu's setting, dark and light: the home and a code file (the app alone: the prototype has no Cloudflare or Pando light), and the menu open. */
@@ -789,6 +857,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
   }
 
   await page.setViewportSize({ width: 1440, height: 900 });
+  await issueShots(page, browser, shown);
   await themes(page);
   await blackRainbow(page);
   await avatars(page);

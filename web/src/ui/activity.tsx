@@ -10,7 +10,7 @@ import type { FeedEvent } from "@pando/contract";
 import { lineKey, takeArrived } from "../live/arrivals";
 import { Avatar } from "./Avatar";
 import buildkiteMark from "./buildkite-mark.svg";
-import { type AppLink, blobLink, branchesLink, branchLink, historyLink, monoLink, ownerLink, repoLink } from "./paths";
+import { type AppLink, blobLink, branchesLink, branchLink, historyLink, issueLink, monoLink, ownerLink, repoLink } from "./paths";
 import { duration, since, useNow } from "./time";
 import { Older } from "./Older";
 
@@ -133,19 +133,20 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
       };
     }
 
-    // Issues (the issues lane styles these): the number as the object, the title after it.
+    // Issues: the number as the object (SF Pro Text, opening the issue), then its title; a close says how instead.
     case "issue.opened":
     case "issue.commented":
     case "issue.closed":
     case "issue.reopened": {
       const d = e.summary;
       const verb = { "issue.opened": "opened", "issue.commented": "commented on", "issue.closed": "closed", "issue.reopened": "reopened" }[e.kind];
+      const how = d?.reason === "not_planned" ? "as not planned" : "as completed";
 
       return {
         ...base,
         verb,
-        object: d ? { text: `#${d.number}`, link: null, path: true } : null,
-        tail: d ? `${d.title}${e.kind === "issue.closed" && d.reason === "not_planned" ? " as not planned" : ""}` : null,
+        object: d ? { text: `#${d.number}`, link: issueLink(e.monorepo, d.number), path: true } : null,
+        tail: d ? (e.kind === "issue.closed" ? how : d.title) : null,
         detail: d?.excerpt ?? null,
       };
     }

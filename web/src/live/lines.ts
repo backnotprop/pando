@@ -6,6 +6,9 @@ import type { InfiniteData, InvalidateQueryFilters, QueryClient } from "@tanstac
 import { lineKey, markArrived } from "./arrivals";
 import { patchMachineActivity } from "./rows";
 
+/** How long after a merge's line the issues it closes are closed (the server's outbox step, about a second). */
+const CLOSES_LAND_MS = 2500;
+
 /** Newest first by the display key (at, monorepo_id, seq), as the server orders pages. */
 function newer(a: FeedEvent, b: FeedEvent): boolean {
   if (a.at !== b.at) return a.at > b.at;
@@ -92,6 +95,18 @@ export function applyLine(qc: QueryClient, e: FeedEvent): void {
 
     return;
   }
+
+  // An issue opened, closed or reopened moves the Issues tab's count (an open list or issue page has its own rows).
+  if (e.kind === "issue.opened" || e.kind === "issue.closed" || e.kind === "issue.reopened") {
+    refresh(qc, { queryKey: ["m", owner, name, "issues", "count"] });
+
+    return;
+  }
+
+  if (e.kind === "issue.commented") return;
+
+  // A merge's closes land about a second after its line (each in its own step): the count is read once they have.
+  if (e.kind === "merged" && e.summary?.closes?.length) setTimeout(() => refresh(qc, { queryKey: ["m", owner, name, "issues", "count"] }), CLOSES_LAND_MS);
 
   // A push, a merge, a check or a review: that repo's branches, pages and files. A branch's own record
   // and its checks' runs come as rows on the branch page's socket (live/rows.ts), so they are not read again here.

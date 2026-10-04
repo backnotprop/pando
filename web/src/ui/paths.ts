@@ -38,6 +38,26 @@ export const historyLink = (full: string, path: string) => linkOptions({ to: "/$
 export const tabLink = (full: string, tab: "activity" | "machines" | "ci" | "members" | "settings") =>
   linkOptions({ to: `/$owner/$name/${tab}`, params: split(full) });
 
+/** The address's filters on the issues list (`?state=closed&label=bug`): plain strings, as the list reads them. */
+export interface IssuesSearch {
+  state?: string;
+  label?: string;
+  assignee?: string;
+  author?: string;
+  project?: string;
+  q?: string;
+  sort?: string;
+}
+
+/** The issues list, with filters (only those set: a key present but undefined fails the route's schema). */
+export const issuesLink = (full: string, search: IssuesSearch = {}) => linkOptions({ to: "/$owner/$name/issues", params: split(full), search });
+
+export const issueLink = (full: string, n: number) => linkOptions({ to: "/$owner/$name/issues/$number", params: { ...split(full), number: String(n) } });
+
+/** New issue; `project` (a repo's name, projects-pando) fills its Project. */
+export const newIssueLink = (full: string, project: string | null = null) =>
+  linkOptions({ to: "/$owner/$name/issues/new", params: split(full), search: project ? { project } : {} });
+
 /** A CI pipeline's page, and one of its builds by number (/{owner}/{name}/ci/{pipeline}/{number}). */
 export const ciPipelineLink = (full: string, pipeline: string) => linkOptions({ to: "/$owner/$name/ci/$pipeline", params: { ...split(full), pipeline } });
 
@@ -108,6 +128,9 @@ export type AppLink =
   | ReturnType<typeof blobLink>
   | ReturnType<typeof historyLink>
   | ReturnType<typeof tabLink>
+  | ReturnType<typeof issuesLink>
+  | ReturnType<typeof issueLink>
+  | ReturnType<typeof newIssueLink>
   | ReturnType<typeof ciPipelineLink>
   | ReturnType<typeof ciBuildLink>
   | ReturnType<typeof codeLink>

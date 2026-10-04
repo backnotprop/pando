@@ -1,7 +1,7 @@
 // Settings, for owners: the name (Rename; the old name keeps leading here),
-// Transfer to an org you are in or to yourself (mock `transfer`; the old
-// address keeps leading here too), and Delete, which you type the full
-// owner/name to enable (ruling).
+// the issue labels, Transfer to an org you are in or to yourself (mock
+// `transfer`; the old address keeps leading here too), and Delete, which you
+// type the full owner/name to enable (ruling).
 import type { Login } from "@pando/contract";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -13,6 +13,7 @@ import { Avatar } from "../../../ui/Avatar";
 import { button, Empty, field, Lnk, Refusal, SectionHead } from "../../../ui/controls";
 import { Select } from "../../../ui/dropdown";
 import { OwnHead, useMonorepo } from "./-frame/heads";
+import { LabelsSettings } from "./-issues/LabelsSettings";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
   loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(myOrgsQuery),
@@ -164,6 +165,7 @@ function Settings() {
         {info.role === "owner" ? (
           <>
             <Rename />
+            <LabelsSettings />
             <Transfer />
             <Delete />
           </>

@@ -62,16 +62,29 @@ export async function post<A, I>(schema: Schema.Codec<A, I>, path: string, body:
   return decoded(schema, res, path);
 }
 
+/** A value in a JSON request body. */
+export type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonBody;
+
 /** A JSON request body. */
 export interface JsonBody {
-  readonly [key: string]: string | number | boolean | null | JsonBody;
+  readonly [key: string]: JsonValue;
 }
 
-/** A write a route names (POST, PATCH or PUT), with an optional JSON body, and its decoded answer. */
-export async function write<A, I>(route: { method: "POST" | "PATCH" | "PUT"; path: string; response: Schema.Codec<A, I> }, body?: JsonBody): Promise<A> {
+/**
+ * A write a route names (POST, PATCH, PUT or DELETE), with an optional JSON
+ * body, and its decoded answer. `idempotencyKey` makes a retried create
+ * answer the first one (the server keeps the key with what it made).
+ */
+export async function write<A, I>(
+  route: { method: "POST" | "PATCH" | "PUT" | "DELETE"; path: string; response: Schema.Codec<A, I> },
+  body?: JsonBody,
+  idempotencyKey?: string,
+): Promise<A> {
   const headers = new Headers({ accept: "application/json" });
 
   if (body) headers.set("content-type", "application/json");
+
+  if (idempotencyKey) headers.set("idempotency-key", idempotencyKey);
   const res = await send(route.path, { method: route.method, headers, body: body ? JSON.stringify(body) : undefined });
 
   return decoded(route.response, res, route.path);

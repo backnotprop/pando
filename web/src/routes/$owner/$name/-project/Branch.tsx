@@ -5,13 +5,13 @@
 // is shown in the box, in words. The issues it is linked to sit under the box
 // (-issues/BranchIssues.tsx). Files changed: each file's diff, read only
 // (FilesChanged.tsx).
-import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
-import type { Branch, Checks, Commit, Repo, Review, Status } from "@pando/contract";
-import { branchDiffQuery, branchQuery, type CheckRun, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
+import type { Branch, ChangedFile, Checks, Commit, Repo, Review, Status } from "@pando/contract";
+import { branchDiffQuery, branchQuery, type CheckRun, checkRunsQuery, commitsQuery, type FilesSoFar, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
@@ -28,9 +28,47 @@ import { BranchIssues } from "../-issues/BranchIssues";
 import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
 
-/** `files`: the Files changed tab waits for the diff; Overview fetches it alongside, for the tab's count. */
+/** Files enough to fill the first screen of Files changed, at the list's metrics (-code/DiffList.tsx: a 44 px header and 16 px apart, 20 px a line), counting only changed lines. */
+function fillsScreen(files: readonly ChangedFile[]): boolean {
+  let px = 0;
+
+  for (const f of files) {
+    px += 60 + ((f.additions ?? 0) + (f.deletions ?? 0)) * 20;
+
+    if (px >= window.innerHeight) return true;
+  }
+
+  return false;
+}
+
+/** Resolves once the streamed diff has its first screen of files, or has ended (`done`), whichever is first. */
+function firstFiles(qc: QueryClient, key: QueryKey, done: Promise<void>): Promise<void> {
+  const ready = () => {
+    const d = qc.getQueryData<FilesSoFar>(key);
+
+    return !!d && (d.end !== null || d.error !== null || fillsScreen(d.files));
+  };
+
+  return new Promise((resolve) => {
+    if (ready()) return resolve();
+
+    const stop = qc.getQueryCache().subscribe(() => {
+      if (!ready()) return;
+      stop();
+      resolve();
+    });
+
+    void done.then(() => {
+      stop();
+      resolve();
+    });
+  });
+}
+
+/** `files`: the Files changed tab waits for its first screen of files (the rest stream in); Overview fetches it alongside, for the tab's count. */
 export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean) {
-  const diff = qc.prefetchQuery(branchDiffQuery(m, repo.name, branch));
+  const query = branchDiffQuery(m, repo.name, branch);
+  const diff = files ? firstFiles(qc, query.queryKey, qc.prefetchQuery(query)) : qc.prefetchQuery(query);
 
   // Files changed: the diff view and its worker load alongside the reads (-code/coloured.ts).
   if (files) void loadColourViews();
@@ -373,7 +411,7 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   const { monorepo } = useMonorepo();
   const diff = useQuery(branchDiffQuery(monorepo, repo.name, branch));
 
-  if (diff.data) return <FilesChanged repo={repo} diff={diff.data} />;
+  if (diff.data?.start) return <FilesChanged repo={repo} diff={diff.data} start={diff.data.start} reading={diff.isFetching} readAgain={() => void diff.refetch()} />;
 
   return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
 }
@@ -386,14 +424,15 @@ export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string
   // the record, its runs and its diff are read once more when the socket opens.
   const live = useRows(monorepo, [`repo:${repo.name}`], () => {
     void qc.invalidateQueries({ queryKey: branchQuery(monorepo, repo.name, branch).queryKey, exact: true });
-    void qc.invalidateQueries({ queryKey: branchDiffQuery(monorepo, repo.name, branch).queryKey, exact: true });
+    // A diff still streaming in is the head's own: it goes on rather than starting over (a large one takes a while the first time).
+    void qc.invalidateQueries({ queryKey: branchDiffQuery(monorepo, repo.name, branch).queryKey, exact: true }, { cancelRefetch: false });
     void qc.invalidateQueries({ queryKey: [...repoKey(monorepo, repo.name), "runs"] });
   });
 
   const b = useSuspenseQuery({ ...branchQuery(monorepo, repo.name, branch), refetchInterval: fallback(live) }).data;
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
-  const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.files_total;
+  const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.start?.files_total;
   // One count for the line under the title and the Commits heading, from the commits read (a new head reads it again, live/rows.ts).
   const n = commits.total;
 

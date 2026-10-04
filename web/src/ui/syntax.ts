@@ -1,11 +1,11 @@
 // Pando's one setup for @pierre/diffs (Shiki), shared by the code view
-// (-code/Colour.tsx), the diff (-code/Diff.tsx) and code fences in documents
-// (doc/PlannotatorDoc.tsx), each loading it on first use:
+// (-code/Colour.tsx), Files changed (-code/DiffList.tsx) and code fences in
+// documents (doc/PlannotatorDoc.tsx), each loading it on first use:
 // - the syntax theme, registered once (Pierre logs an error when a name is
 //   registered twice): its tokens take the --diffs-token-* variables in
 //   theme.css, so one highlighted result fits every theme;
-// - the one worker that colours the code view and the diff off the main
-//   thread, made on first use (making it starts the worker; fences are
+// - the one worker pool that colours the code view and Files changed off the
+//   main thread, made on first use (making it starts the workers; fences are
 //   coloured by Pierre's shared highlighter and need none);
 // - the code view's metrics, which the diff shares, and the same without
 //   line numbers.
@@ -17,9 +17,24 @@ export const SYNTAX_THEME = "pando";
 
 registerCustomCSSVariableTheme(SYNTAX_THEME, {});
 
+/**
+ * Code with more lines than this on a side (a file, or a side of a diff) is
+ * shown without colour (owner limit, boarded): the worker's coloured answer
+ * reaches the page in one message, which blocks it about 4 ms per 1,000 lines
+ * as the code comes into view, so beyond this a scroll would stall past 100 ms.
+ */
+export const COLOUR_MAX_LINES = 12_000;
+
+/**
+ * Workers in the pool: up to three, one fewer than the cores, as DiffsHub and
+ * Plannotator's review size theirs; one on a phone. A large Files changed
+ * colours its files in parallel.
+ */
+const POOL_SIZE = matchMedia("(pointer: coarse)").matches ? 1 : Math.min(3, Math.max(1, (navigator.hardwareConcurrency || 2) - 1));
+
 export const codePool = () =>
   getOrCreateWorkerPoolSingleton({
-    poolOptions: { workerFactory: () => new Worker(workerUrl, { type: "module" }), poolSize: 1 },
+    poolOptions: { workerFactory: () => new Worker(workerUrl, { type: "module" }), poolSize: POOL_SIZE },
     // Owner board: a line over 1,000 characters is shown without colour.
     highlighterOptions: { theme: SYNTAX_THEME, tokenizeMaxLineLength: 1000 },
   });

@@ -228,34 +228,40 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await page.goto(`${project}/branches/files`);
       await page.getByRole("navigation", { name: "Branch" }).getByRole("link", { name: /Files changed/ }).click();
       await expect(page).toHaveURL(`${project}/branches/files?tab=files`);
-      const files = page.getByRole("list", { name: "Files changed" });
-      const file = (path: string) => files.getByRole("listitem").filter({ hasText: path });
+      // One virtualized list (Pierre's CodeView): each file a diffs-container, with its header (data-file-path) in it.
+      const files = page.getByRole("region", { name: "Files changed" });
+      const header = (path: string) => files.locator(`[data-file-path="${path}"]`);
+      const file = (path: string) => files.locator("diffs-container").filter({ has: page.locator(`[data-file-path="${path}"]`) });
 
-      await expect(file("src/colour.ts")).toContainText("modified");
-      await expect(file("src/colour.ts").locator("[data-line]").filter({ hasText: "moss" })).toBeVisible();
-      await expect(file("src/files.ts")).toContainText("added");
-      await expect(file("README.md")).toContainText("deleted");
-      await expect(file("logo.png")).toContainText("modified");
-      await expect(file("logo.png")).toContainText("Binary file");
-      await expect(page.getByRole("link", { name: "Files changed 4" })).toBeVisible();
       // Plannotator's tree beside the files: scrolling the files moves it, choosing in it scrolls to the file.
       const tree = page.getByRole("tree", { name: "Changed files" });
       const node = (name: RegExp) => tree.getByRole("treeitem", { name });
 
+      await expect(file("src/colour.ts")).toContainText("modified");
+      await expect(file("src/colour.ts").locator("[data-line]").filter({ hasText: "moss" })).toBeVisible();
+      await expect(file("src/files.ts")).toContainText("added");
+      await expect(page.getByRole("link", { name: "Files changed 4" })).toBeVisible();
       await expect(node(/colour\.ts/)).toHaveAttribute("aria-selected", "true");
       const reach = await file("src/files.ts").evaluate((el) => el.getBoundingClientRect().top - 20);
 
       await page.mouse.move(900, 500);
       await page.mouse.wheel(0, reach);
       await expect(node(/files\.ts/)).toHaveAttribute("aria-selected", "true");
+      // The list draws only the files near the window: the ones further down come in as they are chosen.
+      await node(/README\.md/).click();
+      await expect(file("README.md")).toContainText("deleted");
       await node(/logo\.png/).click();
-      await expect(file("logo.png")).toHaveAttribute("aria-current", "true");
-      await expect(file("logo.png")).toBeInViewport();
+      await expect(file("logo.png")).toContainText("modified");
+      await expect(file("logo.png")).toContainText("Binary file");
+      await expect(header("logo.png")).toHaveAttribute("aria-current", "true");
+      await expect(header("logo.png")).toBeInViewport();
       await expect(node(/logo\.png/)).toHaveAttribute("aria-selected", "true");
+      await node(/colour\.ts/).click();
+      await expect(header("src/colour.ts")).toBeInViewport();
       // On a phone the diff scrolls inside its box, never the page, and its numbers and code sit where the code view's do.
       await page.setViewportSize({ width: 390, height: 844 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
-      const diffColumns = await columns(file("src/colour.ts").locator("diffs-container"));
+      const diffColumns = await columns(file("src/colour.ts"));
 
       await page.goto(`${project}/blob/src/colour.ts?ref=files`);
       await expect(page.locator("[data-line] span[style]").first()).toBeVisible(HARD_LOAD);
@@ -266,9 +272,12 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       const live = m.commit("web", url, "files", { "src/live.ts": "export const live = true;\n" }, "Live");
 
       m.push(live, url, "files");
-      await expect(file("src/live.ts")).toContainText("added", { timeout: 30_000 });
+      await expect(node(/live\.ts/)).toBeVisible({ timeout: 30_000 });
+      await node(/live\.ts/).click();
+      await expect(file("src/live.ts")).toContainText("added");
       await expect(page.getByRole("link", { name: "Files changed 5" })).toBeVisible();
       // A file with no diff links to its page, at the branch's head.
+      await node(/logo\.png/).click();
       await file("logo.png").getByRole("link", { name: "View file" }).click();
       await expect(page).toHaveURL(`${project}/blob/logo.png?ref=${m.git(live, "rev-parse", "HEAD").trim()}`);
       await expect.poll(() => page.getByRole("img", { name: "logo.png" }).evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);

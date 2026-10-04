@@ -158,6 +158,38 @@ export async function getText(path: string): Promise<FileText> {
   return { text: bytes.subarray(0, 8000).includes(0) ? null : new TextDecoder().decode(bytes), size };
 }
 
+/**
+ * An NDJSON answer, read as it arrives: each network chunk's complete lines,
+ * decoded (a line this build cannot read is skipped), yielded together, so a
+ * reader can draw a large answer while the rest is still coming.
+ */
+export async function* getLines<A>(path: string, decode: (line: string) => Option.Option<A>, signal?: AbortSignal): AsyncGenerator<A[]> {
+  const reader = (await send(path, { signal })).body?.pipeThrough(new TextDecoderStream()).getReader();
+  // The start of a line not yet ended, in pieces (a long line, a large file's patch, spans many chunks).
+  let rest: string[] = [];
+
+  for (let part = await reader?.read(); part && !part.done; part = await reader?.read()) {
+    const end = part.value.lastIndexOf("\n");
+
+    if (end === -1) {
+      rest.push(part.value);
+      continue;
+    }
+
+    const text = rest.join("") + part.value.slice(0, end);
+    const lines = text.split("\n").flatMap((line) => (line ? Option.toArray(decode(line)) : []));
+
+    rest = [part.value.slice(end + 1)];
+
+    if (lines.length) yield lines;
+  }
+
+  const tail = rest.join("");
+  const last = tail.trim() ? Option.toArray(decode(tail)) : [];
+
+  if (last.length) yield last;
+}
+
 /** A frame from the person's socket, or null for the text `pong`, a frame this build does not know, or anything malformed. */
 export const decodeFrame = (data: string): ActivityFrame | null => Option.getOrNull(decodeActivityFrame(data));
 

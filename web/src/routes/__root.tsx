@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { isSignedOut } from "../api/client";
 import { meQuery } from "../api/queries";
 import { startFeed } from "../live/feed";
+import { prewarmColourViews } from "./$owner/$name/-code/coloured";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   beforeLoad: async ({ context, location }) => {
@@ -30,6 +31,12 @@ function Live() {
 
 function Root() {
   const me = useQuery({ ...meQuery, retry: false }).data;
+  const signedIn = Boolean(me);
+
+  // Signed in: the code views and their worker are readied once the first page has painted, before any code is opened.
+  useEffect(() => {
+    if (signedIn) prewarmColourViews();
+  }, [signedIn]);
 
   return (
     <>

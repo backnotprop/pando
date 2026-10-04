@@ -2,21 +2,20 @@
 // Plannotator's file tree beside the files, as its review lays them out, and
 // each changed file in its own box, as the code view draws a file. A header
 // row (the path, what happened to it, its added and removed lines) opens and
-// closes its unified diff, coloured by Diff.tsx (loaded on first use). A large
+// closes its unified diff, coloured by Diff.tsx (-code/coloured.ts). A large
 // diff starts closed; a file with no patch says why, with a link to the file.
 // Choosing a file in the tree scrolls to its box; scrolling the files moves
 // the tree to the file at the top. Narrow screens fold the tree behind Files.
 import type { BranchDiff, ChangedFile, Repo } from "@pando/contract";
 import { Link } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, lnk } from "../../../../ui/controls";
 import { FileTree, type TreeFile } from "../../../../ui/doc/Tree";
 import { Chevron } from "../../../../ui/Icons";
 import { codeBlobLink } from "../../../../ui/paths";
+import { useColourViews } from "../-code/coloured";
 import { tool } from "../-code/FileView";
 import { useMonorepo } from "../-frame/heads";
-
-const Diff = lazy(() => import("../-code/Diff"));
 
 /** Owner board: a file with more changed lines than this starts closed. */
 const START_CLOSED = 400;
@@ -111,6 +110,7 @@ interface BoxProps {
 }
 
 function FileBox({ repo, diff, f, open, toggle, current, place }: BoxProps) {
+  const views = useColourViews();
   const row = "flex min-h-11 w-full items-center gap-2.5 py-1.5 pr-4 pl-4 text-left";
   const status = <span className="flex-none text-[12.5px] leading-[15px] text-ash">{f.status}</span>;
   const box = `scroll-mt-4 overflow-hidden rounded-[10px] border ${current ? "border-ash" : "border-rootline"}`;
@@ -142,9 +142,11 @@ function FileBox({ repo, diff, f, open, toggle, current, place }: BoxProps) {
       </button>
       {!open ? null : hunks ? (
         <div className="border-t border-rule-faint">
-          <Suspense fallback={<div style={{ height: bodyLines(f.patch) * 20 + 24 }} />}>
-            <Diff patch={f.patch} id={`${f.old_sha ?? "none"}..${f.new_sha ?? "none"}:${f.path}`} />
-          </Suspense>
+          {views ? (
+            <views.Diff patch={f.patch} id={`${f.old_sha ?? "none"}..${f.new_sha ?? "none"}:${f.path}`} />
+          ) : (
+            <div style={{ height: bodyLines(f.patch) * 20 + 24 }} />
+          )}
         </div>
       ) : (
         <p className={note}>{f.status === "renamed" ? "Renamed, no line changes" : "No line changes"}</p>

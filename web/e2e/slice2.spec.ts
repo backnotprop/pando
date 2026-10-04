@@ -3,9 +3,12 @@
 // size limits, a branch's Files changed taking a push live, its branches, a
 // branch's page with its commits and co-authors, checks that Buildkite reports arriving live, a merge
 // through the page, a branch left conflicting by that merge, and the
-// monorepo's Activity tab taking a push live. Real Worker, real git.
+// monorepo's Activity tab taking a push live. Pages hold still while things
+// move under them: every frame keeps the top bar and the code when main or
+// the branch on screen moves, and a push replays no check's arrival. Real
+// Worker, real git.
 import { expect, type Locator, test } from "@playwright/test";
-import { BASE, browserPost, ciStatus, Machine, nextSignIn } from "./seed";
+import { BASE, browserPost, ciStatus, type Frame, Machine, nextSignIn, watchFrames } from "./seed";
 
 const id = Date.now().toString(36);
 
@@ -59,6 +62,28 @@ const face = (el: Locator) => el.evaluate((e) => getComputedStyle(e).fontFamily.
 
 const pitch = (rows: Locator) => rows.evaluateAll((els) => els.slice(0, 3).map((e) => e.getBoundingClientRect().top)).then(([a = 0, b = 0, c = 0]) => [b - a, c - b]);
 
+/** The same for the first three lines of one text node (the plain lines' code). */
+const textPitch = (code: Locator) =>
+  code.evaluate((el) => {
+    const node = el.firstChild;
+    const text = node?.textContent ?? "";
+    const range = document.createRange();
+    const tops: number[] = [];
+
+    for (let start = 0, i = 0; node && i < 3; i++) {
+      const end = text.indexOf("\n", start);
+
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      tops.push(range.getBoundingClientRect().top);
+      start = end + 1;
+    }
+
+    const [a = 0, b = 0, c = 0] = tops;
+
+    return [b - a, c - b];
+  });
+
 interface Made {
   machine: Machine | null;
 }
@@ -93,6 +118,10 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       url = (await browserPost(page, `/v1/monorepos/${full}/repos`, { path: "projects/web" })).clone_url;
       made.machine = await Machine.make(page, `laptop-${id}`);
       const m = machine();
+      // The project requires e2e (the root's .pando/pando.toml, the meta layer's first push): a branch page lists it before any CI reports.
+      const meta = `${BASE}/${full}/meta.git`;
+
+      m.push(m.commit("meta", meta, "main", { ".pando/pando.toml": '[repos."projects/web"]\nrequired_checks = ["e2e"]\n' }, "Require e2e"), meta, "main");
 
       const start = {
         "README.md": "# web\n\nThe web project.\n",
@@ -178,10 +207,11 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(page.locator('[data-line] span[style*="--diffs-token-string"]').first()).toHaveText(/sage/);
       expect(await pitch(page.locator("[data-line]"))).toEqual([20, 20]);
       await page.goto(`${project}/blob/src/big.ts`);
-      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible();
-      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached();
+      // A cold read of 2.2 MiB through the tree, then the raw file, one after the other.
+      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached({ timeout: 30_000 });
       await expect(page.locator("diffs-container")).toHaveCount(0);
-      expect(await pitch(page.locator("pre > span"))).toEqual([20, 20]);
+      expect(await textPitch(page.locator("main pre > span:last-child"))).toEqual([20, 20]);
       await page.goto(`${project}/blob/logo.png`);
       const image = page.getByRole("img", { name: "logo.png" });
 
@@ -243,6 +273,65 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await file("logo.png").getByRole("link", { name: "View file" }).click();
       await expect(page).toHaveURL(`${project}/blob/logo.png?ref=${m.git(live, "rev-parse", "HEAD").trim()}`);
       await expect.poll(() => page.getByRole("img", { name: "logo.png" }).evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
+    });
+
+    await test.step("a file stays on screen while main moves under it, and while its branch takes a push: no frame without the top bar or the code, and the code never moves", async () => {
+      const m = machine();
+      const shown = (text: string) => expect(page.locator("[data-line]").filter({ hasText: text }).first()).toBeVisible({ timeout: 30_000 });
+
+      // Every frame: the top bar and the code shown, the code where it was (its last-commit bar kept while the new one is read).
+      const still = async (frames: () => Promise<Frame[]>) => {
+        const seen = await frames();
+
+        expect(seen.filter((f) => f.bar === 0 || f.code === 0)).toEqual([]);
+        expect([...new Set(seen.map((f) => f.top))]).toHaveLength(1);
+      };
+
+      // A merge to main (through the API, as pando merge does) that changes the file on screen.
+      await page.goto(`${project}/blob/src/colour.ts`);
+      await shown("sage");
+      let frames = await watchFrames(page);
+      const steady = m.commit("web", url, "steady", { "src/colour.ts": `${COLOUR}export const steady = true;\n` }, "Steady");
+
+      m.push(steady, url, "steady");
+      const merged = await m.api("POST", `/v1/monorepos/${full}/repos/projects-web/branches/steady/merge?force=1`, { expected_head: m.git(steady, "rev-parse", "HEAD").trim() });
+
+      expect(merged.status).toBe(200);
+      await shown("steady");
+      await page.waitForTimeout(2000);
+      await still(frames);
+
+      // A push to the branch on screen.
+      await page.goto(`${project}/blob/src/colour.ts?ref=files`);
+      await shown("moss");
+      frames = await watchFrames(page);
+      m.push(m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "fern") }, "Fern"), url, "files");
+      await shown("fern");
+      await page.waitForTimeout(2000);
+      await still(frames);
+    });
+
+    await test.step("a push to a branch replays no arrival on its unchanged check rows", async () => {
+      const m = machine();
+      const e2e = page.getByRole("list", { name: "Checks" }).getByRole("listitem").filter({ hasText: "e2e" });
+
+      await page.goto(`${project}/branches/files`);
+      await expect(e2e).toContainText("not reported");
+      await page.waitForTimeout(1000);
+      // The new head's check runs take half a second to read, as on a slower connection, so a replay would show.
+      await page.route(/\/ci\/builds\?/, async (route) => {
+        await new Promise((done) => setTimeout(done, 500));
+        await route.continue();
+      });
+      const frames = await watchFrames(page);
+
+      m.push(m.commit("web", url, "files", { "src/later.ts": "export const later = 1;\n" }, "Later on files"), url, "files");
+      await expect(page.getByRole("list", { name: "Commits" }).getByText("Later on files")).toBeVisible({ timeout: 30_000 });
+      // The new head's check runs are read; the row is the same: "e2e not reported".
+      await page.waitForTimeout(2000);
+      await expect(e2e).toContainText("not reported");
+      expect((await frames()).flatMap((f) => f.arrived).filter((text) => text.includes("e2e"))).toEqual([]);
+      await page.unrouteAll();
     });
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {

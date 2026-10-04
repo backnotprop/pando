@@ -9,9 +9,10 @@ import type { CommitLine, Repo } from "@pando/contract";
 import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Empty, lnk } from "../../../../ui/controls";
+import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
 import { Clone } from "../-code/Clone";
-import { ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
+import { BarSpace, ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 import { BranchPicker } from "./Picker";
 
@@ -23,9 +24,11 @@ export const isBranch = (ref: string | null): ref is string => !!ref && !/^[0-9a
 const readmeIn = (names: readonly string[]) => names.find((n) => /^readme\.md$/i.test(n)) ?? null;
 
 export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir: string, ref: string | null) {
+  // The Branches tab's count and "N open branches", read alongside the tree (quicker than it), so neither draws late.
+  const open = qc.prefetchQuery(openBranchesQuery(m, repo.name));
   const tree = await qc.ensureQueryData(codeTreeQuery(m, repo.name, ref, dir));
 
-  if (!tree) return;
+  if (!tree) return open;
 
   const readme = readmeIn(tree.entries.map((e) => e.name));
 
@@ -35,7 +38,7 @@ export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir:
 
   if (isBranch(ref)) void qc.prefetchQuery(branchQuery(m, repo.name, ref));
 
-  if (readme) await qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme)));
+  await Promise.all([readme ? qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme))) : null, open]);
 }
 
 /** "web-api is 2 commits ahead of main." with its page a click away. */
@@ -96,8 +99,11 @@ function CodeReadme({ repo, commit, path, gitRef }: { repo: Repo; commit: string
 export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gitRef: string | null }) {
   const { monorepo } = useMonorepo();
   const full = monorepo.full;
-  const tree = useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data;
-  const last = useQuery({ ...lastCommitsQuery(monorepo, repo.name, tree?.commit ?? "", dir), enabled: !!tree }).data;
+  // Held while a moved ref's new commit is read (its README), so the folder stays on screen (ui/held.ts).
+  const at = `${repo.name}:${gitRef ?? ""}:${dir}`;
+  const tree = useHeld(at, useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data);
+  // The last answer for this ref and folder stays while a moved ref's is read (ui/held.ts).
+  const last = useLastAnswer(at, useQuery({ ...lastCommitsQuery(monorepo, repo.name, tree?.commit ?? "", dir), enabled: !!tree }).data);
   const here = dir ? `${repo.path === "." ? monorepo.name : repo.path} / ${dir.split("/").join(" / ")}` : undefined;
   const toolbar = <Toolbar repo={repo} gitRef={gitRef} at={(ref) => codeLink(full, repo.path, dir, ref)} here={here} />;
 
@@ -141,7 +147,13 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
         {toolbar}
         {isBranch(gitRef) ? <AheadLine repo={repo} gitRef={gitRef} /> : null}
         <FileList
-          bar={newest ? <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha at={Date.parse(newest.at)} history={history} /> : null}
+          bar={
+            newest ? (
+              <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha at={Date.parse(newest.at)} history={history} />
+            ) : last?.complete ? null : (
+              <BarSpace />
+            )
+          }
           rows={rows}
         />
         {readme ? <CodeReadme repo={repo} commit={tree.commit} path={join(dir, readme)} gitRef={gitRef} /> : null}

@@ -106,13 +106,24 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       const sf = process.env.PANDO_SF_FONTS === "1";
 
       expect(sheet).toContain("font-family:Ioskeley Mono");
-      expect((await page.request.get(mono)).headers()["content-type"]).toBe("font/woff2");
+      const woff = await page.request.get(mono);
+
+      expect(woff.headers()["content-type"]).toBe("font/woff2");
+      // A built file's name carries its hash, so it is cached a year (web/public/_headers); the page itself is always asked again.
+      expect(woff.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect((await page.request.get("/")).headers()["cache-control"]).toContain("max-age=0");
 
       for (const file of ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SFNSMono.ttf"]) {
-        const type = (await page.request.get(`/fonts/${file}`)).headers()["content-type"];
+        const res = await page.request.get(`/fonts/${file}`);
+        const type = res.headers()["content-type"];
 
-        if (sf) expect(type).toMatch(/^font\//);
-        else expect(type).not.toMatch(/^font\//);
+        if (sf) {
+          expect(type).toMatch(/^font\//);
+          // Fonts keep their names across builds: a week.
+          expect(res.headers()["cache-control"]).toBe("public, max-age=604800");
+        } else {
+          expect(type).not.toMatch(/^font\//);
+        }
       }
     });
 

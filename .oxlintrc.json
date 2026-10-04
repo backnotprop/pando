@@ -19,7 +19,26 @@
     "spikes/**",
     "**/spikes/**",
     "worker/worker-configuration.d.ts",
-    "**/*.gen.ts"
+    "**/*.gen.ts",
+    // site/docs: @cloudflare/create-nimbus-docs 0.7.9 scaffold output and nimbus recipe output, vendored (site/docs/UPSTREAM.md).
+    "site/docs/.astro/**",
+    "site/docs/src/components/ui/**",
+    "site/docs/src/components/AgentDirective.astro",
+    "site/docs/src/components/Header.astro",
+    "site/docs/src/components/Render.astro",
+    "site/docs/src/layouts/**",
+    "site/docs/src/lib/**",
+    "site/docs/src/pages/\\[...slug\\].astro",
+    "site/docs/src/pages/\\[...slug\\]/**",
+    "site/docs/src/pages/\\[section\\]/**",
+    "site/docs/src/pages/404.astro",
+    "site/docs/src/pages/api/\\[...slug\\].astro",
+    "site/docs/src/pages/llms-full.txt.ts",
+    "site/docs/src/pages/llms.txt.ts",
+    "site/docs/src/pages/nimbus-api/**",
+    "site/docs/src/pages/og.png.ts",
+    "site/docs/src/pages/og/\\[...slug\\].ts",
+    "site/docs/src/pages/robots.txt.ts"
   ],
   "jsPlugins": [
     {

@@ -114,5 +114,5 @@ export const isHomeProject = (repoPath: string | null, monorepoName: string) => 
 /** The full address, for Copy link and Copy raw link. */
 export const absolute = (href: string) => new URL(href, location.origin).toString();
 
-/** Docs, the changelog and the quiet links, until the domain is bought (APPROACH, Docs). */
-export const DOCS = "https://pando-docs.plannotator.workers.dev";
+/** Docs, the changelog and the quiet links: the Worker sends /docs/<path> to the docs site (worker/wrangler.jsonc DOCS_URL, its one setting). */
+export const DOCS = "/docs";

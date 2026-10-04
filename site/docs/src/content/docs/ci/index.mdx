@@ -1,0 +1,36 @@
+---
+title: Checks and CI
+description: Checks on a branch's commits, the ones Merge waits for, and the CI services that post them.
+sidebar:
+  order: 30
+---
+
+A check is a result on one commit: its name (the context, such as `ci`), its state, a link and a short line. A branch shows the checks on its newest commit, on its page in the web app and in `pando branch list`. Pando shows the CI service's mark beside a check that service posted.
+
+| State | Meaning |
+| --- | --- |
+| `pending` | running or waiting |
+| `success` | passed |
+| `failure` | failed |
+| `error` | could not run |
+
+Pando runs no CI of its own. A CI service runs your tests and posts the checks.
+
+## Checks that Merge waits for
+
+Name them per repo in the monorepo's `.pando/pando.toml`:
+
+<Render file="required-checks" />
+
+Merge then waits until each named check is `success` on the branch's newest commit.
+
+The server reads this file from main, so it changes through review. In a monorepo, `pando init` uploads it with the rest of the folder; after that, `.pando/` changes only through a reviewed branch of the monorepo's `meta` repo (`https://<server>/<owner>/<name>/meta.git`), merged into its main. In a plain repo, the file lives on the repo's own main and the table is `[repos."."]`.
+
+Anyone who may merge can merge past red or missing checks with `pando merge --force`, or Merge anyway in the web app; the merge is recorded as forced.
+
+## Who posts checks
+
+- **Buildkite**, connected to the monorepo: Pando starts a build on each push, and each step with a `key` becomes a check of that name. See [CI with Buildkite](/ci/buildkite/).
+- **A build step itself**, with `pando status success` (or `pending`, `failure`, `error`) in a build Pando started.
+- **Any other CI**, through a `web` hook: each delivery carries a token that can post checks on its one commit. [Blacksmith and Depot through GitHub Actions](/ci/github-actions/) use this.
+- **A member**, through the API, with their own credential: `POST /v1/monorepos/{owner}/{monorepo}/repos/{repo}/statuses/{sha}`. See the [API reference](/api/).

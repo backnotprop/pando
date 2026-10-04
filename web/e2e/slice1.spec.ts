@@ -1,6 +1,7 @@
 // Slice 1, end to end: sign in, the home lists a monorepo just made, a git
 // push arrives in the activity log live, the monorepo's root folder, a folder,
 // a file with Raw and History, and sign-out. Real Worker, real data.
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { BASE, browserPost, Machine, nextSignIn, saveRootFiles } from "./seed";
 
@@ -100,6 +101,27 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await page.waitForLoadState("networkidle");
       page.off("request", record);
       expect(loaded.filter((url) => /PlannotatorDoc|bridge-script|katex|mermaid/.test(url))).toEqual([]);
+    });
+
+    await test.step("What's new is the docs build's JSON; the docs links go through /docs to the docs site", async () => {
+      // The stand-in serves this file as the docs site's whats-new.json (e2e/workos.ts).
+      const news = JSON.parse(readFileSync(new URL("whats-new.json", import.meta.url), "utf8"));
+      const docs = await page.request.get("/docs", { maxRedirects: 0 });
+      expect(docs.status()).toBe(302);
+      expect(docs.headers().location).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/docs-site\/$/);
+      await expect(page.getByRole("link", { name: news.headline })).toHaveAttribute("href", news.link);
+      await expect(page.getByText("Oct 4", { exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", "/docs");
+      await expect(page.getByRole("link", { name: "Changelog" })).toHaveAttribute("href", "/docs/changelog/");
+      await expect(page.getByRole("link", { name: "Contact" })).toHaveAttribute("href", "/docs/contact/");
+
+      // While the docs site can't be reached, the line is hidden (another tab, so its failed fetch is not this test's console error).
+      const away = await page.context().newPage();
+      await away.route("**/whats-new.json", (route) => route.abort());
+      await away.goto("/");
+      await expect(away.getByRole("link", { name: "Documentation" })).toBeVisible();
+      await expect(away.getByText("What's new")).toHaveCount(0);
+      await away.close();
     });
 
     await test.step("a git push shows up in the activity log live, without a reload", async () => {

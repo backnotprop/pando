@@ -1,0 +1,82 @@
+---
+title: Limits
+description: The sizes, counts and times Pando holds to today, and why.
+sidebar:
+  order: 40
+---
+
+These are the limits as Pando runs today. Many come from the Cloudflare products Pando runs on; each says why.
+
+## Pushes and files
+
+- **One push: at most 100 MB.** That is Cloudflare's limit on one request. Split a bigger push into several.
+- **One file in a repo: at most 32 MB.** That is Artifacts' limit for one file.
+- `pando` checks both before git sends anything, and says which limit a push is over. `git push --no-verify` skips the check, and the server then refuses the push.
+- **About 2 pushes at once per repo.** Artifacts takes about 2 writes at once; Pando queues the rest, so a repo takes about 5 to 10 small pushes a second. A queued push gives up after 120 seconds and git says the repo is busy: push again. Pando retries a refused push of up to 1 MiB once by itself.
+
+## Branches, diffs and merges
+
+- **The branch diff skips text files over 1 MiB** on either side.
+- **A branch's commit list shows its newest 250 commits.**
+- **Finding where a branch left main stops after 5,000 commits.** Past that, the answer is `too_large`.
+- **After main moves,** Pando re-checks the open branches pushed in the last 7 days, at most 100, most recently pushed first. Any other branch shows "pending", with its last known answer, for at least 30 seconds; a branch list then works out at most 25 such branches at a time.
+
+## Worktrees and shared files
+
+- **A machine's read-only main can trail the server by up to 10 seconds** while merges keep landing in that repo. It moves at the first merge, then again once merges pause for 3 seconds, or every 10 seconds if they never pause.
+- **A read-only main in a repo where the machine has no branch worktree** is not followed live. It catches up within 5 minutes, or at once when a branch worktree is added there.
+- **One shared file: at most 100 MB.** A larger file stays on its own machine.
+- **Every event is kept.** A monorepo's event log has no cap. Each event takes 0.3 to 1.3 KB, under Cloudflare's 10 GB per Durable Object: about 8 to 30 million events per monorepo.
+
+## Sign-in and access
+
+- **A browser session ends after 30 days without use.** Each use pushes the end back.
+- **A revoked credential, or a removed member, keeps working for up to 15 seconds.** Each Cloudflare server remembers a sign-in check that long.
+- **For up to about 15 seconds after a monorepo is deleted,** a git request can still be answered from a Cloudflare server that cached the monorepo's record. After that, git gets "this monorepo was deleted".
+
+## Your home
+
+- **Your activity feed keeps 7 days,** up to 1,000,000 lines. Older pages are read from each monorepo's own log.
+- **A page of activity is 1 to 200 lines** (50 by default), and reads at most 20 monorepos' logs. The rest are listed as skipped.
+- **A monorepo with more than 100 members** is read from its own log on each page, rather than copied into each member's feed.
+- **A new member sees the latest 500 lines** at once; older ones come from the log.
+- **After a lost connection, the home replays up to 500 lines.** Past that, the page reloads.
+- **Counts can be behind:** a monorepo's line and the Needs you counts by up to 10 seconds (60 seconds over 100 members); a membership change reaches the live feed within 60 seconds.
+- **Needs you covers 50 monorepos** and 500 rows at a time.
+- **At most 32,768 people can have one monorepo open live at once.** That is Cloudflare's limit on connections to one Durable Object.
+- **One machine reports at most 1,000 worktrees.**
+- **A repo's first push to main counts up to 250 commits** in the activity.
+
+## Hooks
+
+- **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.
+- **Each try waits at most 10 seconds** for an answer.
+- **The latest 1,000 deliveries per hook are kept,** with the last 10 tries of each. One replay re-sends at most 1,000 deliveries.
+- **A payload is under about 30 KB.** Its read token lasts 30 minutes.
+- **Deliveries arrive at least once and not in order.** Drop a repeat by its `seq`, and sort by it.
+- **A hook never reaches a Worker on the Pando server's own Cloudflare account** through that Worker's workers.dev address: Cloudflare refuses it. The delivery shows as 404. Hooks to any other address are not affected.
+
+## CI with Buildkite
+
+Pando's side:
+
+- **One Buildkite API token per Pando server.** Pando starts builds and reads their details with the server's own token, so builds start only for Buildkite organizations that token can reach. A token per monorepo is not built yet.
+- **One Buildkite organization per monorepo.**
+- **At most 40 calls to Buildkite a minute per monorepo.** Buildkite allows 50 per token; monorepos sharing one token can together reach Buildkite's limit, and Pando then waits for it to reset.
+- **A job's log shows its last 1 MiB.** A log over 64 MiB opens only in Buildkite.
+- **The first 100 annotations and artifacts** of a build. Download links last about 60 seconds (Buildkite's).
+- **30 builds a page,** 100 at most.
+- **A pipeline's settings are read again at most every 5 minutes,** and a running build's details every 10 seconds.
+- **Webhook bodies up to 5 MiB;** a signature is good for 5 minutes.
+- **A build's clone token reads one repo for 24 to 25 hours,** which lets Buildkite's Retry work for a day after the push. Anyone who can see the pipeline in Buildkite can see it on a job's Environment tab.
+- **A status token posts checks on its one commit for 24 hours.** Other hook deliveries' read tokens last 30 minutes.
+- **Only branch pushes start builds.** A merge into main does not, so main's merge commits carry no check of their own.
+
+Buildkite's free plan, after its 30-day trial (Buildkite's numbers, read 2026-10-03):
+
+- 2,000 Linux vCPU minutes a month, on Small (2 vCPU) machines only: about 1,000 minutes of jobs.
+- 20 vCPU at once: 10 jobs; the rest wait.
+- A job stops after 4 hours.
+- Builds and logs are kept 30 days.
+- 5 users and 1 cluster.
+- 15 webhooks per organization, so one Buildkite organization serves at most 15 Pando monorepos.

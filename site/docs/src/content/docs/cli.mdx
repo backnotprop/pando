@@ -1,0 +1,377 @@
+---
+title: CLI reference
+description: Every pando command, its arguments and flags.
+sidebar:
+  order: 20
+---
+
+`pando help` prints the same list. Flags can go before or after a command's other arguments.
+
+## Sign in
+
+### pando login
+
+```sh
+pando login [--server <url>] [--bootstrap | --with-credential]
+```
+
+Signs this machine in. It shows a code and a link, opens your browser when it can, and waits for you to confirm. git and `pando` on this machine then act as you.
+
+| Flag | What it does |
+| --- | --- |
+| `--server <url>` | The Pando server. Default: the one in `~/.pando/config.toml`, or `PANDO_SERVER`. |
+| `--with-credential` | Sign in with a credential made by `pando credential create`, typed with no echo or piped in. No browser. |
+| `--bootstrap` | Self-hosted servers only: make your user with the server's bootstrap secret, typed with no echo. |
+| `--login <login>` | With `--bootstrap`: the login to make. Default: your user name on this machine. |
+| `--kind <kind>` | With the browser sign-in: `machine` (the default) or `sandbox`. |
+| `--name <name>` | Your name on commits. Default: the account's, else `git config user.name`. |
+| `--email <email>` | Your email on commits. Default: the account's, else `git config user.email`. |
+
+The credential is kept in `~/.pando/credentials/`, readable only by you.
+
+### pando logout
+
+```sh
+pando logout [--server <url>]
+```
+
+Deletes this machine's credential. The credential keeps working on the server until you revoke it with `pando credential revoke`.
+
+### pando auth status
+
+```sh
+pando auth status
+```
+
+Shows the server, where the credential comes from, this machine's name, and who the server says you are. It takes `--server <url>` too.
+
+## Set up a monorepo
+
+### pando init
+
+```sh
+pando init [folder] [--name <name>] [--yes] [--dry-run]
+```
+
+Makes a Pando monorepo or plain repo from a folder (default: the current folder), and you become its owner. A git repo becomes a plain repo. Any other folder becomes a monorepo: each git repo under `projects/` becomes one of its repos, other git repos inside it become [references](/references/), and the rest of the folder becomes its shared files. Run it again after a failure: it skips what is done.
+
+| Flag | What it does |
+| --- | --- |
+| `--name <name>` | The name on the server. Default: the folder's name, in lower case. |
+| `--yes` | Take the default answer to every question. |
+| `--dry-run` | Show what would happen and change nothing. |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+A name is lower-case letters, digits, `.`, `_` and `-`, at most 39 characters, with no `--`.
+
+### pando clone
+
+```sh
+pando clone <owner/name | name> [folder] [--text-only]
+```
+
+Sets up a monorepo or plain repo on this machine: the shared files outside `projects/`, a read-only main for every repo, and the references. The folder defaults to the name. A bare `name` means the one in your own account, else the only one so named that you belong to.
+
+| Flag | What it does |
+| --- | --- |
+| `--text-only` | Keep large shared files and binaries as pointers until `pando fetch`. For sandboxes. |
+| `--kind <kind>` | How to check out each read-only main and reference: `fuse`, `fskit` or `sparse`. Default: a mount when this machine has one. |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+### pando status
+
+```sh
+pando status
+```
+
+Run inside a monorepo: shows the server and your role, then each repo with this machine's worktrees (branch, kind, commit, changed files, unpushed commits) and each reference. With a state it posts a check instead; see [pando status in a CI build](#pando-status-in-a-ci-build).
+
+## Worktrees and branches
+
+One branch, one folder. See [Worktrees](/worktrees/).
+
+### pando worktree
+
+```sh
+pando worktree add <repo> <branch> | list | remove <path> | follow | mount
+```
+
+| Subcommand | What it does |
+| --- | --- |
+| `add <repo> <branch> [folders...]` | Makes the branch off main if it is new, and checks it out at `<repo>/worktrees/<branch>` (a `/` in the branch name becomes `-`). Branch `main` gives a read-only main. Folders, with the sparse kind, check out only those folders. |
+| `list` | Every worktree of the monorepo on every machine: path, branch, machine, kind, ahead, behind, and when it was last seen. |
+| `remove <path>` | Takes a worktree off this machine. It refuses when there is uncommitted or unpushed work. The branch stays on the server until it merges. |
+| `follow` | Keeps this machine's read-only mains at the server's main until stopped. `pando sync` runs the same follower. |
+| `mount` | Mounts again the worktrees whose mount stopped, after a restart for example. Sparse worktrees need nothing. |
+
+| Flag | What it does |
+| --- | --- |
+| `--kind <kind>` | With `add`: `fuse` (Linux with ArtifactFS), `fskit` (a Mac with Pando.app on) or `sparse` (a plain sparse checkout, everywhere). Default: the first of these this machine can use. |
+| `--json` | With `list`: print JSON. |
+| `--force` | With `remove`: remove even with uncommitted or unpushed work, which is lost. |
+| `--once` | With `follow`: move the mains once and stop. |
+| `--poll <duration>` | With `follow`: how often to read the branch lists besides the live updates. Default `5m`. |
+
+### pando branch list
+
+```sh
+pando branch list [--repo <path>] [--all]
+```
+
+Lists open branches with ahead, behind, author, checks, whether they merge cleanly, state and head.
+
+| Flag | What it does |
+| --- | --- |
+| `--repo <path>` | One repo. Default: the repo you are in, or every repo. |
+| `--all` | Include merged branches. |
+| `--json` | Print JSON. |
+
+## Review and merge
+
+`diff`, `review` and `merge` take the branch of the worktree you are in when you name none.
+
+### pando diff
+
+```sh
+pando diff [<branch>] [--json | --patch] [paths...]
+```
+
+Shows the branch diff against main: the changes since the branch left main, as GitHub shows a pull request. Name paths to see only those.
+
+| Flag | What it does |
+| --- | --- |
+| `--patch` | Print a unified diff, for `git apply` or a review tool. |
+| `--json` | Print the API's JSON. |
+| `--repo <path>` | The repo. Default: the one you are in. |
+
+### pando review
+
+```sh
+pando review [<branch>] [-m <comment>]
+```
+
+With no `-m`, opens the branch diff in Plannotator (it must be installed). Approving there posts an approval; annotations post a request for changes. With `-m`, posts the comment with no Plannotator. Reviews are comments and approvals, not a gate on merging.
+
+| Flag | What it does |
+| --- | --- |
+| `-m <comment>` | Post this comment. |
+| `--approve` | With `-m`: post it as an approval (people only). |
+| `--request-changes` | With `-m`: post it as a request for changes. |
+| `--repo <path>` | The repo. Default: the one you are in. |
+
+### pando merge
+
+```sh
+pando merge [<branch>] [--force]
+```
+
+Lands the branch on main with a merge commit. It stops when checks are not green, when the branch and main both changed a file in different ways (Pando merges whole files, with no line-by-line merge), or, run in the branch's worktree, when the branch on the server is not what you pushed. This machine's read-only main then follows within a moment.
+
+| Flag | What it does |
+| --- | --- |
+| `--force` | Merge past red or missing checks. The merge is recorded as forced. |
+| `--wait` | Return only once this machine's read-only main has the merge. For scripts. |
+| `--repo <path>` | The repo. Default: the one you are in. |
+
+## References
+
+### pando reference
+
+```sh
+pando reference update <path> | sync
+```
+
+A reference is someone else's repo inside the monorepo, kept as a pointer to one commit. See [References](/references/).
+
+| Subcommand | What it does |
+| --- | --- |
+| `update <path>` | Moves the reference to the newest commit of its branch. The pointer is a shared file, so every machine running `pando sync` follows. |
+| `sync` | Mounts each reference on this machine, or moves it to its pointer's commit. |
+
+`--kind <kind>` (`fuse`, `fskit` or `sparse`) sets how a new reference folder is checked out.
+
+## Members, credentials and monorepos
+
+### pando members
+
+```sh
+pando members list | invite <email> [--owner] | remove <who>
+```
+
+Each subcommand takes the monorepo as `owner/name` before its other arguments, or uses the monorepo you are in.
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | Members and their roles, then invites still waiting. |
+| `invite <email>` | Adds the person now if they have an account, else they join when they first run `pando login`. |
+| `remove <who>` | A login removes that member. An email withdraws that invite. |
+
+| Flag | What it does |
+| --- | --- |
+| `--owner` | With `invite`: invite as an owner. Default: member. |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+### pando credential
+
+```sh
+pando credential create --name <sandbox> | list | revoke <id>
+```
+
+Credentials that act as you, for another machine or a cloud sandbox.
+
+| Subcommand | What it does |
+| --- | --- |
+| `create --name <name> --out <file>` | Makes a credential and writes its secret to the file, readable only by you. `--out -` writes it to a pipe instead (never to a terminal). In the sandbox, set `PANDO_TOKEN` from it. |
+| `list` | Your credentials: ID, name, kind, created, last used. |
+| `revoke <id>` | Stops a credential working. |
+
+| Flag | What it does |
+| --- | --- |
+| `--kind <kind>` | With `create`: `sandbox` (the default) or `machine`. |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+git also runs `pando credential` as its credential helper for Pando URLs. You never run that part yourself.
+
+### pando monorepo
+
+```sh
+pando monorepo list | delete <owner/name> [--yes]
+```
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | Your monorepos and plain repos, with your role in each. |
+| `delete <owner/name>` | Owners only. Deletes every repo in it, their history, and its shared files. There is no undo. You type the full name to confirm. Folders on this machine stay. |
+
+| Flag | What it does |
+| --- | --- |
+| `--yes` | Delete without typing the name. For scripts. |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+## CI
+
+Pando starts builds on Buildkite and shows their checks. See [CI with Buildkite](/ci/buildkite/).
+
+### pando ci
+
+```sh
+pando ci connect --org <slug> | status | disconnect --org <slug>
+pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>
+```
+
+| Subcommand | What it does |
+| --- | --- |
+| `connect --org <slug>` | Connects a Buildkite organization to the monorepo. It prints the webhook URL and token to put in Buildkite, and the steps. The token is shown once, only on a terminal. |
+| `status` | The connections, the last event Pando received, and each pipeline with its last build. |
+| `disconnect --org <slug>` | Removes the connection. Its builds leave Pando; its checks stay. |
+| `pipeline add <repo> <pipeline>` | Owners only. Each push to a branch of the repo then starts a build of that Buildkite pipeline. |
+| `pipeline list` | Which pipeline each repo starts. |
+| `pipeline remove <repo> <pipeline>` | Owners only. Pushes stop starting that pipeline. |
+
+| Flag | What it does |
+| --- | --- |
+| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
+| `--org <slug>` | The Buildkite organization, as in `buildkite.com/<slug>`. With `pipeline`, the default is the monorepo's one connected organization. |
+| `--out <file>` | With `connect`: write the webhook token to this file, readable only by you, instead of the terminal. |
+| `--paste-token` | With `connect`: use the token Buildkite made, typed with no echo, instead of a new one. |
+| `--server <url>` | The Pando server. Default: the configured one. |
+
+### pando status in a CI build
+
+```sh
+pando status <pending|success|failure|error> [--context ci] [--target-url u] [--description d]
+```
+
+Only in a build Pando started. Posts a check on the build's commit, using `PANDO_STATUS_URL` and `PANDO_STATUS_TOKEN` from the build's environment. Pando shows the CI service's mark on the check.
+
+| Flag | What it does |
+| --- | --- |
+| `--context <name>` | The check's name. Default `ci`. |
+| `--target-url <url>` | A link for the check. Default: `BUILDKITE_BUILD_URL`. |
+| `--description <text>` | A short line for the check. |
+
+## Shared files
+
+A monorepo's shared files are every file outside `projects/` and outside references: notes, decisions, plans. They are plain files on every machine. While `pando sync` runs, a save on one machine goes to the others as soon as it is made, and becomes a git commit after 10 seconds without changes.
+
+Each of these commands takes `--root <folder>` for a monorepo in another folder than the one you are in.
+
+### pando sync
+
+```sh
+pando sync [--once]
+```
+
+Keeps the shared files live until stopped: it sends this machine's saves and writes everyone else's. It also keeps this machine's read-only mains at the server's main. `--once` sends and receives what is waiting, then exits.
+
+### pando history
+
+```sh
+pando history <path> [--limit n] [--json]
+```
+
+Every saved version of a shared file, newest first: version, when, who, machine, what, and the commit.
+
+| Flag | What it does |
+| --- | --- |
+| `--limit <n>` | How many versions. Default 50. |
+| `--json` | Print JSON. |
+
+### pando restore
+
+```sh
+pando restore <path> --to <version | HH:MM>
+```
+
+Writes an old version back as a new save, which every machine gets. `--to` takes a version number, a time today (`10:42`), or a date and time (`2026-10-03 10:42`). A time means the latest version at or before it.
+
+### pando resolve
+
+```sh
+pando resolve [<path>...]
+```
+
+When two machines change a file at once, one keeps a conflict copy beside it and the file stops syncing there. `pando resolve <path>` makes it sync again: if you edited the file, your version goes out. With no path, it lists the files that are stopped.
+
+### pando fetch
+
+```sh
+pando fetch <path>...
+```
+
+Downloads the bytes of large shared files that a `--text-only` clone keeps as pointers. See [Limits](/limits/) for file sizes.
+
+## The Mac
+
+### pando mac broker
+
+```sh
+pando mac broker [--dry-run]
+```
+
+macOS only. Loads Pando.app's background helper, which mounting worktrees through Pando.app needs. The first mount runs this step on its own.
+
+| Flag | What it does |
+| --- | --- |
+| `--dry-run` | Print what it would load and the commands, and load nothing. |
+| `--app <path>` | The installed Pando.app. Default: found on its own. |
+
+## Environment
+
+| Variable | What it does |
+| --- | --- |
+| `PANDO_SERVER` | The Pando server URL, over the one in `~/.pando/config.toml`. |
+| `PANDO_HOME` | Where pando keeps this machine's config and credentials. Default `~/.pando`. |
+| `PANDO_TOKEN` | A credential to use instead of the stored one, for sandboxes. Make one with `pando credential create`. |
+| `PANDO_MACHINE` | This machine's name in Pando. Default: the host name up to its first dot. |
+| `PANDO_NO_BROWSER` | Any value: `pando login` prints the link and opens no browser. |
+| `PANDO_WORKTREE_KIND` | The default for `--kind`: `fuse`, `fskit` or `sparse`. |
+
+Pando sets these in a build it starts:
+
+| Variable | What it does |
+| --- | --- |
+| `PANDO_CLONE_URL` | The repo's clone URL. |
+| `PANDO_READ_TOKEN` | A read-only token for that one repo. Clone with it as a bearer token. It lasts at least 24 hours, so a retried job can still clone. |
+| `PANDO_STATUS_URL` | Where `pando status <state>` posts. It names the build's commit. |
+| `PANDO_STATUS_TOKEN` | Lets `pando status <state>` post checks on that one commit, for 24 hours. |

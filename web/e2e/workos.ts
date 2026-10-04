@@ -1,10 +1,14 @@
 // A stand-in WorkOS for the e2e run, on this machine only (the Worker honours
 // WORKOS_API_BASE only for a localhost address). It plays AuthKit's hosted
 // page (signing in whoever the test named with POST /_next), the code
-// exchange (checking the PKCE verifier), and the session logout.
+// exchange (checking the PKCE verifier), and the session logout. It also
+// stands in for the docs site: the e2e Worker's DOCS_URL is /docs-site here
+// (playwright.config.ts), which serves a local copy of the docs build's
+// whats-new.json (e2e/whats-new.json), as the docs site does.
 //
 //   node e2e/workos.ts        (Playwright starts it on STANDIN_PORT; worker/.dev.vars points here)
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { STANDIN_PORT } from "./ports.ts";
 
@@ -38,6 +42,13 @@ const server = createServer((req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/healthz") return res.writeHead(200).end("ok");
+
+    if (req.method === "GET" && url.pathname === "/docs-site/whats-new.json") {
+      // The headers site/docs/public/_headers gives the real one.
+      return res
+        .writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*", "cache-control": "public, max-age=300" })
+        .end(readFileSync(new URL("whats-new.json", import.meta.url)));
+    }
 
     if (req.method === "GET" && url.pathname === "/user_management/authorize") {
       const q = url.searchParams;

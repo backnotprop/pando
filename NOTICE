@@ -30,6 +30,18 @@ https://buildkite.com/brand-assets ("Mark", SVG, sha256
 d3e31ab1ee183c5f2975291d219182d4ae6a37ac33c614fafcfa5d7e146628af). Its use
 does not mean that Buildkite endorses Pando.
 
+The docs site (site/docs) is built with nimbus: its scaffold,
+@cloudflare/create-nimbus-docs 0.7.9, wrote the site's layouts, components
+and styles, and @cloudflare/nimbus-docs 0.15.2 builds it. Copyright (c) 2025
+Cloudflare, Inc., licensed under the MIT License (site/docs/LICENSE-nimbus.txt).
+Source: https://github.com/cloudflare/nimbus
+
+The docs site bundles Inter Bold v4.001, the font of its preview cards
+(site/docs/public/fonts/Inter-Bold.ttf), copyright 2016 The Inter Project
+Authors, licensed under the SIL Open Font License, Version 1.1
+(site/docs/public/fonts/Inter-OFL.txt).
+Source: https://github.com/rsms/inter
+
 Pando's Mac app and file system extension (mac/) are derived from Oak's macOS FSKit mount app and extension (https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak), Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache License, Version 2.0. mac/NOTICE gives the source commit and every change made.
 
 Pando mounts worktrees with ArtifactFS (https://github.com/cloudflare/artifact-fs), Copyright Cloudflare, Inc., licensed under the Apache License, Version 2.0, through the fork https://github.com/backnotprop/artifact-fs. Parts of the fork's macOS front end are translated from Oak's FSKit backend; the fork's NOTICE has the details.

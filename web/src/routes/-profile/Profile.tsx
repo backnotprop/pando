@@ -16,6 +16,7 @@ import { button, Empty, lnk, SectionHead } from "../../ui/controls";
 import { CalendarIcon, LinkIcon, PinIcon } from "../../ui/Icons";
 import { Page } from "../../ui/pages";
 import { ownerLink } from "../../ui/paths";
+import { Ref } from "../../ui/Ref";
 import { Months, PeriodItems, RepoName } from "./Activity";
 import { Graph, longDay } from "./Graph";
 import { count } from "./words";
@@ -70,9 +71,9 @@ function Side({ person, own }: { person: Person; own: boolean }) {
         {person.location ? <Fact icon={<PinIcon />}>{person.location}</Fact> : null}
         {person.links.map((l) => (
           <Fact key={l} icon={<LinkIcon />}>
-            <a href={l} rel="noreferrer nofollow" className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
+            <Ref kind="object" href={l} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
               {host(l)}
-            </a>
+            </Ref>
           </Fact>
         ))}
         <Fact icon={<CalendarIcon />}>Joined {joined}</Fact>
@@ -83,11 +84,13 @@ function Side({ person, own }: { person: Person; own: boolean }) {
           <ul className="phone:flex phone:flex-wrap phone:gap-x-3.5 phone:gap-y-1">
             {person.orgs.map((o) => (
               <li key={o.login} className="flex min-h-8 items-center">
-                <Link {...ownerLink(o.login)} className="flex min-w-0 items-center gap-2.5 text-[14px] hover:text-bark-hi">
+                <span className="flex min-w-0 items-center gap-2.5 text-[14px]">
                   <Avatar name={o.login} org size={28} />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">{o.name ?? o.login}</span>
+                  <Ref kind="name" link={ownerLink(o.login)} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                    {o.name ?? o.login}
+                  </Ref>
                   {o.name ? <span className="text-[12.5px] text-ash">{o.login}</span> : null}
-                </Link>
+                </span>
               </li>
             ))}
           </ul>
@@ -107,7 +110,7 @@ function Card({ m }: { m: ContributionMonorepo }) {
       <p className="flex min-w-0 items-center gap-2.5 text-[14.5px]">
         <Avatar name={owner} org={m.owner_type === "org"} size={20} />
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-          <RepoName full={m.full_name} />
+          <RepoName full={m.full_name} kind="name" />
         </span>
         {m.kind === "repo" ? (
           <span className="ml-auto h-5 flex-none rounded-[5px] px-[7px] text-[11.5px] leading-5 text-bark-dim shadow-[inset_0_0_0_1px_var(--rule-hi)]">repo</span>

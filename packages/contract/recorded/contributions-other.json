@@ -3,33 +3,33 @@
   "route": "GET /v1/users/{login}/contributions?tz=0 (another viewer: only repositories they can open)",
   "status": 200,
   "body": {
-    "login": "rec-muu2fpbm",
+    "login": "rec-muu4ew7h",
     "tz": 0,
     "from": "2025-10-05",
     "to": "2026-10-04",
-    "total": 13,
+    "total": 17,
     "levels": [
       1,
-      13,
-      14,
-      15
+      17,
+      18,
+      19
     ],
     "days": [
       {
         "date": "2026-10-04",
-        "n": 13,
-        "commit": 5,
-        "branch": 6,
+        "n": 17,
+        "commit": 8,
+        "branch": 7,
         "review": 1,
         "created": 1
       }
     ],
     "monorepos": [
       {
-        "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+        "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
         "owner_type": "org",
         "kind": "monorepo",
-        "n": 13,
+        "n": 17,
         "months": [
           0,
           0,
@@ -43,13 +43,13 @@
           0,
           0,
           0,
-          13
+          17
         ]
       }
     ],
     "kinds": {
-      "commit": 5,
-      "branch": 6,
+      "commit": 8,
+      "branch": 7,
       "review": 1,
       "created": 1
     },
@@ -58,26 +58,26 @@
         "period": "2026-10",
         "commit": [
           {
-            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
-            "n": 5
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 8
           }
         ],
         "branch": [
           {
-            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
-            "n": 6
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "n": 7
           }
         ],
         "review": [
           {
-            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
             "n": 1
           }
         ],
         "created": [
           {
-            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
-            "at": "2026-10-04T16:59:17.390Z"
+            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "at": "2026-10-04T17:54:38.895Z"
           }
         ],
         "joined": []

@@ -7,6 +7,3 @@ export const count = (n: number, one: string, many: string) => `${n.toLocaleStri
 /** "Oct 2". */
 export const shortDay = (iso: string, tz: number) =>
   new Date(Date.parse(iso) + tz * 60_000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-
-/** A repository's name where a line is about it: the owner dim, the name in the text colour. */
-export const repoLink = "text-bark hover:underline hover:decoration-ash hover:underline-offset-3";

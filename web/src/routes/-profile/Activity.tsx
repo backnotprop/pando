@@ -5,12 +5,12 @@
 // bar per repository, the repositories made, and the organizations made or
 // joined.
 import type { ContributionPeriod, MonorepoCount } from "@pando/contract";
-import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { BranchIcon, CommitIcon, OrgIcon, RepoBookIcon, ReviewIcon } from "../../ui/Icons";
 import { button } from "../../ui/controls";
 import { monoLink, ownerLink } from "../../ui/paths";
-import { count, repoLink, shortDay } from "./words";
+import { Ref } from "../../ui/Ref";
+import { count, shortDay } from "./words";
 
 /** The months shown before "Show more activity". */
 const FIRST_MONTHS = 2;
@@ -18,15 +18,15 @@ const FIRST_MONTHS = 2;
 /** "October 2026". */
 const monthName = (period: string) => new Date(`${period}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
-/** `owner/name` with the owner dim, linked to the repository. */
-export function RepoName({ full }: { full: string }) {
+/** `owner/name`, the line's object (links R): in Link, the owner in its regular weight. */
+export function RepoName({ full, kind = "object" }: { full: string; kind?: "object" | "name" }) {
   const [owner, name] = full.split("/");
 
   return (
-    <Link {...monoLink(full)} className={repoLink}>
-      <span className="text-bark-dim">{owner}/</span>
+    <Ref kind={kind} link={monoLink(full)}>
+      <span className="font-normal">{owner}/</span>
       {name}
-    </Link>
+    </Ref>
   );
 }
 
@@ -111,9 +111,9 @@ export function PeriodItems({ p, tz }: { p: ContributionPeriod; tz: number }) {
           head={
             <>
               {o.created ? "Created the organization " : "Joined "}
-              <Link {...ownerLink(o.org)} className={repoLink}>
+              <Ref kind="object" link={ownerLink(o.org)}>
                 {o.org}
-              </Link>
+              </Ref>
             </>
           }
         />

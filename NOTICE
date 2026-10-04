@@ -9,6 +9,14 @@ licensed under the SIL Open Font License, Version 1.1
 (web/src/fonts/IoskeleyMono-OFL.txt).
 Source: https://github.com/ahatem/IoskeleyMono (release v2.1.0)
 
+This product bundles @pierre/diffs 1.3.6, which draws and colours code files
+in the web app (web/src/routes/$owner/$name/-code/Colour.tsx), and uses the
+file and chevron icons of @pierre/trees, unchanged (web/src/ui/Icons.tsx).
+Both copyright 2025 Pierre Computer Company, licensed under the Apache
+License, Version 2.0.
+Source: https://github.com/pierrecomputer/pierre (packages/diffs and
+packages/trees)
+
 Pando's Mac app and file system extension (mac/) are derived from Oak's macOS FSKit mount app and extension (https://oak.space/oak/oak, mirror https://github.com/oakdotspace/oak), Copyright Oakspace Inc. and the Oak contributors, licensed under the Apache License, Version 2.0. mac/NOTICE gives the source commit and every change made.
 
 Pando mounts worktrees with ArtifactFS (https://github.com/cloudflare/artifact-fs), Copyright Cloudflare, Inc., licensed under the Apache License, Version 2.0, through the fork https://github.com/backnotprop/artifact-fs. Parts of the fork's macOS front end are translated from Oak's FSKit backend; the fork's NOTICE has the details.

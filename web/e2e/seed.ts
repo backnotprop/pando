@@ -160,7 +160,7 @@ export class Machine {
    * Files committed on `branch`, which starts from main: a new repo starts
    * main itself; a machine that has not seen the repo clones it first.
    */
-  commit(repo: string, url: string, branch: string, files: Record<string, string>, message: string): string {
+  commit(repo: string, url: string, branch: string, files: Record<string, string | Uint8Array>, message: string): string {
     const dir = join(this.work, repo);
 
     if (!existsSync(join(dir, ".git"))) {

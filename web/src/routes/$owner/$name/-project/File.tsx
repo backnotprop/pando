@@ -1,6 +1,6 @@
 // A file in a repo at a ref: the branch picker and where it sits, its last
-// commit with History, the tools, then the file (plain text with line numbers;
-// colour comes with @pierre/diffs in slice 3).
+// commit with History, the tools, then the file (FileView: plain text at once,
+// colour when the highlighter answers).
 import { type QueryClient, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { notFound } from "@tanstack/react-router";
 import type { MonorepoRef } from "../../../../api/names";
@@ -24,7 +24,7 @@ export async function loadFile(qc: QueryClient, m: MonorepoRef, repo: Repo, path
   // The page waits for the bytes only; the last commit and the picker fill in as they arrive.
   void qc.prefetchQuery(lastCommitsQuery(m, repo.name, tree.commit, dir));
   void qc.prefetchInfiniteQuery(branchesQuery(m, repo.name, "open"));
-  await qc.ensureQueryData(codeFileQuery(m, repo.name, tree.commit, path));
+  await qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, path));
 }
 
 export function ProjectFile({ repo, path, gitRef }: { repo: Repo; path: string; gitRef: string | null }) {
@@ -34,7 +34,8 @@ export function ProjectFile({ repo, path, gitRef }: { repo: Repo; path: string; 
   const tree = useSuspenseQuery(codeTreeQuery(monorepo, repo.name, gitRef, dir)).data;
   const commit = tree?.commit ?? "";
   // The bytes and the last commit are read at the commit the ref resolved to, so they agree.
-  const { text } = useSuspenseQuery(codeFileQuery(monorepo, repo.name, commit, path)).data;
+  const { text, size } = useSuspenseQuery(codeFileQuery(monorepo, repo, commit, path)).data;
+  const oid = tree?.entries.find((e) => e.name === name)?.oid ?? null;
   const last = useQuery(lastCommitsQuery(monorepo, repo.name, commit, dir)).data?.entries[name] ?? null;
 
   return (
@@ -50,7 +51,7 @@ export function ProjectFile({ repo, path, gitRef }: { repo: Repo; path: string; 
             <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
           ) : null}
           <FileTools name={name} text={text} raw={codeRawHref(full, repo.path, path, gitRef)} />
-          <FileBody name={name} text={text} />
+          <FileBody name={name} text={text} size={size} id={oid} raw={codeRawHref(full, repo.path, path, commit)} />
         </div>
       </div>
     </>

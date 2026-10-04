@@ -152,6 +152,34 @@ html[data-theme$="-light"] {
   --av-ring: color-mix(in srgb, var(--bark) 9%, transparent);
 }
 
+/* Syntax colour: the variables Pierre's CSS-variables theme reads, so one
+   highlighted result fits every theme. Four quiet earth tones (wood, sage,
+   slate, sand), one set for the dark themes and one for the light; text,
+   comments and punctuation take each theme's own roles. None reads as Rust
+   (conflicts, failures) or Foxfire (arrival). */
+:root {
+  --diffs-foreground: var(--bark);
+  --diffs-background: transparent;
+  --diffs-token-comment: var(--ash);
+  --diffs-token-punctuation: var(--bark-dim);
+  --diffs-token-parameter: var(--bark);
+  --diffs-token-keyword: oklch(0.76 0.06 68);
+  --diffs-token-string: oklch(0.79 0.05 168);
+  --diffs-token-string-expression: var(--diffs-token-string);
+  --diffs-token-function: oklch(0.79 0.045 240);
+  --diffs-token-constant: oklch(0.82 0.06 88);
+  --diffs-token-link: var(--diffs-token-function);
+  --diffs-token-inserted: var(--diffs-token-string);
+  --diffs-token-deleted: var(--diffs-token-keyword);
+  --diffs-token-changed: var(--diffs-token-function);
+}
+html[data-theme$="-light"] {
+  --diffs-token-keyword: oklch(0.48 0.08 58);
+  --diffs-token-string: oklch(0.5 0.07 170);
+  --diffs-token-function: oklch(0.48 0.075 245);
+  --diffs-token-constant: oklch(0.5 0.08 108);
+}
+
 @theme inline {
   --color-*: initial;
   --color-soil: var(--soil);

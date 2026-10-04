@@ -194,16 +194,23 @@ above:
 - **Offline.** Changes wait in the outbox (kept on disk) with their original
   base versions and go out when the socket returns. Reconnects back off: 5,
   10, 30, then every 60 seconds.
-- **A lost answer.** If a change arrives whose sha equals the local file's
-  bytes, the client adopts it as synced and drops its own queued change. This
-  covers an `accepted` lost to a dropped socket, and two machines making the
-  same edit.
+- **A lost answer.** The outbox keeps what each change last sent: its sha,
+  or that it was a delete. An `accepted` lost with a dropped socket comes
+  back in the catch-up as a `change` by this machine (`machine`) carrying
+  exactly that. The client then records the path as synced at that version,
+  and a newer local edit goes out on top of it: never a conflict against its
+  own save. A change whose sha equals the local file's bytes is adopted as
+  synced (two machines making the same edit); it drops a queued change that
+  was never sent, or whose own version it is, and keeps one still waiting
+  for its own answer.
 - **A lost race (409).** The client keeps its local bytes in
   `<name>.conflict-local-<UTC timestamp>.<ext>` beside the file (for example
   `HISTORY.conflict-local-20261003T104200Z.md`), writes the object's current
   bytes to the file (or removes it if the current state is a delete), and
-  **freezes** the path. A losing delete just brings the file back, with no
-  copy and no freeze. Conflict copies are local only.
+  **freezes** the path. A losing delete brings the file back, with no copy
+  and no freeze; but if the file was made again here after the delete went
+  out, its new bytes are kept as a losing save's are (a conflict copy, and
+  the path frozen). Conflict copies are local only.
 - **Frozen.** A frozen path sends nothing. Changes from the object are written
   only while the file is untouched since the conflict, otherwise held.
   `pando resolve <path>` unfreezes it: if the file was edited, its bytes go
@@ -211,6 +218,11 @@ above:
   change makes a fresh conflict, never a silent overwrite).
 - **Refused.** A refused change is dropped and not retried until the file
   changes again.
+- **`pando sync --once`** sends and receives what is waiting, then exits.
+  It exits 0 only when every change here is in Pando. It exits 3 when some
+  are not, and names each path with why: frozen after a conflict (its edits
+  wait for `pando resolve`), or refused by the server (it goes again when
+  the file changes). An agent can trust exit 0.
 
 ## The first upload (`pando init`)
 
@@ -254,7 +266,8 @@ A rename is two versions: on its delete side `to` is the new path, on its
 save side `from` is the old path; both are `null` on any other change.
 
 `commit` is the meta layer commit that carries the version, or `null` until
-it is committed. `login` is the saver's Pando login beside `author`, the
+it is committed (and for good on a live save a merge from `main` replaced
+before its commit: see "Updates from `main`"). `login` is the saver's Pando login beside `author`, the
 display name (2026-10-03): set from the checked credential on live saves,
 restores, and changes merged on `main` (the merger); `null` on versions
 from before then. Socket `change` messages and `meta.saved` events carry it
@@ -351,7 +364,12 @@ setting, `META_COMMIT_GROUPING`:
   `Rename <from> to <path>`, `Restore <path> to version <n>`; several paths:
   `Save 3 files`, the first 50 listed in the body), then the who-made-it trailers from
   `formats.md` section 6 (`Pando-Agent` when set, `Pando-Machine`; a save
-  has no worktree), `Co-authored-by` with `window`, and `Pando-Version: <n>`.
+  has no worktree), `Co-authored-by`, and `Pando-Version: <n>`.
+- The trailers name everyone whose save the commit carries. That includes a
+  save folded into a later save of the same file in the same quiet window,
+  in either grouping: Ana saves `plan.md`, Ben saves it again 2 s later, and
+  the one commit has Ben as author and `Co-authored-by: Ana`. History marks
+  both versions with the commit.
 - Author: whoever made the latest change, at the time they made it. The
   committer is the same person (gitwrite's default).
 - The object keeps the last commit it wrote as the parent. On `ref_moved` it
@@ -364,19 +382,57 @@ setting, `META_COMMIT_GROUPING`:
 ## Updates from `main`
 
 When a reviewed branch merges into the meta layer's `main`, the monorepo
-object calls the meta layer object (a Durable Object RPC, not public):
+object calls the meta layer object (Durable Object RPCs, not public):
 
 ```ts
-await env.META.get(id).applyFromMain({
+const meta = env.META.get(id);
+await meta.reserve("mg_1f2e...", ["notes/plan.md"]);  // before the merge lands: the paths the branch changes
+// ...the merge lands on main, then:
+await meta.applyFromMain({
   monorepo: "acme",
   commit: "e1f0...",
   author: "Ana <ana@example.com>",
   changes: [{ path: ".pando/pando.toml", bytes: Uint8Array | null }],  // null: deleted
+  merge: "mg_1f2e...",  // ends the reservation
 });
+await meta.release("mg_1f2e...");  // instead, when the merge did not land
 ```
 
 Each change becomes a version with `source: "main"`, with no base check (main
 wins), and is broadcast. This is the only way `.pando/**` changes.
+
+- **Git main and the live files agree after a merge.** Before a merge
+  lands, the monorepo object reserves the paths the branch changes since its
+  merge base (a dry run of the merge finds the base). While a path is
+  reserved, no commit carries it, and a commit of it already on its way
+  lands first (the merge then merges against it). `applyFromMain` drops the
+  `pending` row of each path it changes: a live save there was replaced by
+  the merge, so no later commit puts its older bytes back on git main over
+  the merge. The reservation ends with `applyFromMain`, or with `release`
+  when the merge did not land; a reservation whose merge never answered
+  (the monorepo object stopped mid-merge) is released after 5 minutes.
+- **A live save the merge replaces.** For now the merge wins, as before: a
+  live save of a path the branch changes, made in the seconds before the
+  merge lands, is replaced on every machine by the merged bytes, with no
+  conflict copy. It stays in history with `commit: null`. The owner is
+  choosing between this and "the merge waits" (question 3, 2026-10-04): the
+  merge would first commit such a save, then be refused as a normal
+  conflict if the branch changed the same file, and a live save of a
+  reserved path would be answered `stale` while the merge lands.
+- Into the meta layer, a merge whose `main` moved meanwhile (a live commit)
+  is tried up to three times, each against `main` as it is, before it
+  answers 409 `ref_moved`.
+
+- **Never lost.** The monorepo object writes the update as a row of its
+  outbox (`meta_apply`) in the same step as the merge's record, and tries it
+  once before the merge answers. A failed try is tried again after 1 s, 5 s
+  and 30 s, then every 5 minutes, until it is done. Updates go in merge
+  order: a later merge never reaches machines before an earlier one.
+- **Once.** The meta layer object keeps the commits it applied. A call for a
+  commit already applied changes nothing, so a call sent again after a lost
+  answer never replaces a newer live save.
+- A file whose bytes the monorepo object cannot read is an error, tried
+  again, never a delete on every machine.
 
 ## Deleting a monorepo
 

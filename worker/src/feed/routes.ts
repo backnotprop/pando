@@ -6,6 +6,7 @@
 // Cookie or Bearer; with the cookie, the socket upgrade must come from
 // Pando's own origin (accounts/auth.ts).
 
+import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { credential, HttpError, toErrorResponse } from "../http";
 import { accounts, authenticateRequest } from "../accounts/auth";
@@ -89,10 +90,10 @@ async function route(request: Request, env: Env): Promise<Response> {
       return feedStub(env, login).fetch(new Request(request, { headers }));
     }
 
-    return Response.json(await eventsPage(env, login, url));
+    return Response.json((await eventsPage(env, login, url)) satisfies typeof Contract.EventsPage.Encoded);
   }
 
-  return Response.json(await needsPage(env, login, url));
+  return Response.json((await needsPage(env, login, url)) satisfies typeof Contract.NeedsPage.Encoded);
 }
 
 /** Queue `member` messages (the consumer joins or leaves). */

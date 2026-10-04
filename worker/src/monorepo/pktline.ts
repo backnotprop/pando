@@ -172,11 +172,16 @@ function sideband(caps: Set<string>): number {
  * every command, so git prints `! [remote rejected] <ref> (<reason>)`.
  */
 export function refusal(commands: RefCommand[], reasons: Map<string, string>, caps: Set<string>, message: string): Uint8Array {
+  return statusReport(commands, new Map(commands.map((c) => [c.ref, reasons.get(c.ref) ?? "refused with the rest of this push"])), caps, message);
+}
+
+/** A report-status for these commands: `ok` for each ref, `ng` with its reason for those in `ng`; `message` first on side-band 2. */
+export function statusReport(commands: RefCommand[], ng: Map<string, string>, caps: Set<string>, message: string): Uint8Array {
   const report: Uint8Array[] = [pkt("unpack ok\n")];
 
   for (const c of commands) {
-    const reason = reasons.get(c.ref) ?? "refused with the rest of this push";
-    report.push(pkt(`ng ${c.ref} ${reason}\n`));
+    const reason = ng.get(c.ref);
+    report.push(pkt(reason === undefined ? `ok ${c.ref}\n` : `ng ${c.ref} ${reason}\n`));
   }
 
   report.push(FLUSH);

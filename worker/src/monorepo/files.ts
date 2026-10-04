@@ -173,7 +173,10 @@ export class Walker<R extends WalkedRepo = RepoRecord> {
 
 // ── A folder at a ref ─────────────────────────────────────────────────────
 
-const TYPE: Record<TreeEntry["type"], string> = { tree: "dir", blob: "file", exec: "file", symlink: "symlink", gitlink: "submodule" };
+/** What a folder listing calls each git entry. */
+type FolderEntryType = "dir" | "file" | "symlink" | "submodule";
+
+const TYPE: Record<TreeEntry["type"], FolderEntryType> = { tree: "dir", blob: "file", exec: "file", symlink: "symlink", gitlink: "submodule" };
 
 export async function listFolder(w: Walker, commit: CommitMeta, path: string, limit: number, cursor: string | null) {
   const at = await w.entryAt(commit.treeHash, path);

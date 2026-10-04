@@ -30,7 +30,7 @@ export interface Env extends Omit<Cloudflare.Env, Secrets> {
   HOOKS_TEST?: string;
   /** Tests only: "1" opens /v1/_checks/test (the next reads of pando.toml fail). Never set on a deployed Worker. */
   CHECKS_TEST?: string;
-  /** Tests only: "1" opens /v1/_meta/test (fail, lose or crash the meta layer's next event sends). Never set on a deployed Worker. */
+  /** Tests only: "1" opens /v1/_meta/test (fail, lose or crash the meta layer's next event sends; fail its next updates from main). Never set on a deployed Worker. */
   META_TEST?: string;
   /** Tests only: "1" honours X-Pando-Test-Busy at the git door (the first receive-pack is taken as busy, unsent). */
   DOOR_TEST?: string;

@@ -196,6 +196,27 @@ try {
   r = await call("POST", `${base}/hooks/${flaky}/redeliver?since=${merged.body.seq}`, S);
   check("replay from the newest seq queues nothing", r.status === 202 && r.json?.queued === 0);
 
+  // A push whose record and keep both fail is found by the refs compare (DOOR_TEST): its catch-up has no known pusher
+  // (null), and the web hook and Buildkite still take it.
+  if ((await call("GET", `/v1/_door/test?monorepo=${MID}&repo=${M}`, BOOT)).status !== 200) {
+    console.log("SKIP  a catch-up delivery with no known pusher (start wrangler dev with --var DOOR_TEST:1 too)");
+  } else {
+    git(["checkout", "-qb", "catchup", "main"], src);
+    writeFileSync(join(src, "c"), "caught up\n");
+    git(["add", "-A"], src);
+    git(["commit", "-qm", "catchup"], src);
+    const lost = ["X-Pando-Test-Record-Fail: 1", "X-Pando-Test-Keep-Fail: 1", "X-Pando-Test-Refs-Check-Ms: 1000"].flatMap((h) => ["-c", `http.extraHeader=${h}`]);
+    const pushedC = git([...lost, "push", "-q", url, "catchup"], src).status === 0;
+    const headC = git(["rev-parse", "HEAD"], src).stdout.trim();
+    const web = await waitFor(() => got.flaky.find((x) => x.event === "push" && x.body?.head === headC && tries.get(x.delivery) === 3) ?? null, 60_000);
+    check("a catch-up delivery with no known pusher (null) reaches a web hook, signed", pushedC && !!web && web.valid && web.body.pusher === null, `${pushedC} ${web ? `pusher ${JSON.stringify(web.body.pusher)}` : "none"}`);
+    const bkC = await waitFor(() => got.buildkite.find((b) => b?.commit === headC) ?? null, 30_000);
+    check("and Buildkite gets its build, the author's name empty", !!bkC && bkC.author?.name === "", JSON.stringify(bkC?.author));
+    // Let its other deliveries finish (the dead hook's five tries, the slow one) before the crash below is armed.
+    await waitFor(() => got.dead.filter((x) => x.body?.head === headC).length >= 5 && got.slow.some((x) => x.body?.head === headC), 60_000);
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+
   // ── the object dies after a delivery was sent, before its answer is recorded ──
   const arm = await call("POST", "/v1/_hooks/test", BOOT, { monorepo: MID, crash: true });
 

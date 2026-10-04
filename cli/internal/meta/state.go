@@ -40,9 +40,14 @@ type Op struct {
 	ToBase int64  `json:"to_base,omitempty"`
 	SHA    string `json:"sha,omitempty"` // rename: the bytes moved
 
+	// What a save or delete last sent, kept with the outbox: an answer lost
+	// with a dropped socket is known by it when the change comes back in
+	// the catch-up (meta-sync.md, "A lost answer"). Empty: never sent.
+	SentSHA    string `json:"sent_sha,omitempty"`
+	SentDelete bool   `json:"sent_delete,omitempty"`
+
 	// In flight on the current connection (not saved).
 	id       string
-	sentSHA  string
 	sentOid  string
 	sentSize int64
 	sentMt   int64
@@ -61,8 +66,10 @@ type state struct {
 	Files    map[string]*FileState `json:"files"`
 	Outbox   map[string]*Op        `json:"outbox"`  // by Path
 	Refused  map[string]string     `json:"refused"` // path -> sha the server refused
-	NextSeq  int64                 `json:"next_seq"`
-	TextOnly bool                  `json:"text_only,omitempty"` // pando clone --text-only: large files stay pointers
+	// path -> why the server refused it, for pando sync --once's report
+	RefusedWhy map[string]string `json:"refused_why,omitempty"`
+	NextSeq    int64             `json:"next_seq"`
+	TextOnly   bool              `json:"text_only,omitempty"` // pando clone --text-only: large files stay pointers
 }
 
 func loadState(root, monorepo string) (*state, error) {
@@ -88,6 +95,9 @@ func loadState(root, monorepo string) (*state, error) {
 	}
 	if st.Refused == nil {
 		st.Refused = map[string]string{}
+	}
+	if st.RefusedWhy == nil {
+		st.RefusedWhy = map[string]string{}
 	}
 	return st, nil
 }

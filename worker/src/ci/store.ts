@@ -12,7 +12,7 @@
 import type { Env } from "../env";
 import { HttpError, now } from "../http";
 import type { Identity, ObjectInfo, StatusRecord, StreamEvent } from "../monorepo/types";
-import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
+import { isOneOf, isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
 import {
   CHECK_TYPES, duration, jobCheck, normalizeBuild, normalizeJob, normalizePipeline, rank, TERMINAL, verifyWebhook,
   type CiState, type NormBuild, type NormJob, type NormPipeline,
@@ -139,9 +139,19 @@ export interface CiHost {
 
 export type IngestResult = { result: "recorded" | "ignored"; reason?: string; build?: string };
 
+/** The CI services Pando connects (routes.ts SERVICES). */
+export type CiServiceName = "buildkite";
+
+const CI_SERVICES: readonly CiServiceName[] = ["buildkite"];
+
+/** A stored connection's service, checked as it is read back from SQL. */
+export function isCiService(v: string): v is CiServiceName {
+  return isOneOf(CI_SERVICES, v);
+}
+
 export interface ConnectionView {
   id: string;
-  service: string;
+  service: CiServiceName;
   organization: string;
   web_url: string;
   token: "worker_secret" | "stored";
@@ -316,7 +326,7 @@ export class CiStore {
        VALUES (?, ?, ?, ?, 'worker', 'BUILDKITE_API_TOKEN', NULL, ?, ?, ?)`,
       id, c.service, c.organization, c.api_base, `plain:${token}`, now(), by.login,
     );
-    const view = this.connectionView(this.connection(id)!);
+    const view = this.connectionView(this.connection(id)!, c.service);
     this.host.publish({ kind: "ci.connection", collection: "ci_connections", key: id, op: "upsert", repo: null, actor: by.login, machine: by.credential_name, agent: null, row: view });
 
     return { connection: view, webhook_token: token };
@@ -340,10 +350,11 @@ export class CiStore {
     return this.row<ConnectionRow>("SELECT * FROM ci_connections WHERE id = ?", id);
   }
 
-  private connectionView(c: ConnectionRow): ConnectionView {
+  /** A connection as the CI tab shows it; `service` is the row's, already checked (isCiService). */
+  private connectionView(c: ConnectionRow, service: CiServiceName): ConnectionView {
     return {
       id: c.id,
-      service: c.service,
+      service,
       organization: c.organization,
       web_url: `https://buildkite.com/${encodeURIComponent(c.organization)}`,
       token: c.token_source === "worker" ? "worker_secret" : "stored",
@@ -754,7 +765,8 @@ export class CiStore {
       }
     }
 
-    return { connections: conns.map((c) => this.connectionView(c)), pipelines };
+    // A row whose service is none Pando knows is left out (connect() writes only known ones).
+    return { connections: conns.flatMap((c) => (isCiService(c.service) ? [this.connectionView(c, c.service)] : [])), pipelines };
   }
 
   private pipelineView(

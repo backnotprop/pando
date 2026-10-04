@@ -87,7 +87,8 @@ export interface RepoEvent {
   head: string;
   base: string | null;
   author: string | null;
-  pusher: string;
+  /** Null when the refs compare caught up a push whose pusher Pando never learned. */
+  pusher: string | null;
   title: string | null;
   description: string | null;
   merge_commit?: string;
@@ -134,6 +135,32 @@ export interface KeyedEvent {
   source: string;
   version: number;
   event: StreamEvent;
+}
+
+/** The pull's narrowing (GET .../events): before a seq, one repo, some kinds. */
+export interface EventFilter {
+  before?: number | null;
+  repo?: string | null;
+  kinds?: string[] | null;
+}
+
+/** What a reconcile saw before it read Artifacts' refs (object.ts reconcileSeen). */
+export interface ReconcileSeen {
+  /** The repo's record-move count then. */
+  moves: number;
+  /** The kept pushes then. */
+  ids: number[];
+}
+
+/** A review's verdict; a review is comments and an approval, not a gate. */
+export type ReviewVerdict = "comment" | "request_changes" | "approve";
+
+/** One comment of a review: a line in the new file (`side` new) or the old one. */
+export interface ReviewComment {
+  path: string;
+  line?: number;
+  side: "new" | "old";
+  body: string;
 }
 
 /** A merge's result, as the merge route answers and merged events carry it. */

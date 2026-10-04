@@ -113,20 +113,29 @@ try {
     const one = await call("GET", `${base}/branches/${encodeURIComponent(row?.name ?? "feat/x")}`);
     const status = await call("GET", `${base}/commits/${row?.head}/status`);
     const repoRead = await call("GET", base);
+    const ci = await call("GET", `/v1/monorepos/${O}/${M}/ci`);
+    const ciRepo = ci.json?.required_checks?.find((x) => x.repo === repo);
+    const ciPipeline = ci.json?.pipelines?.find((x) => x.repo === repo);
     const unknown = (c) => c?.state === "unknown" && c?.required === null && why.test(c?.checks_unknown ?? "");
 
     return {
       ok: list.status === 200 && unknown(row?.checks) && one.status === 200 && unknown(one.json?.checks) && status.status === 200 && unknown(status.json) &&
-        repoRead.status === 200 && repoRead.json?.required_checks === null && why.test(repoRead.json?.checks_unknown ?? ""),
-      detail: `${list.status} ${one.status} ${status.status} ${repoRead.status}: ${row?.checks?.state} ${JSON.stringify(row?.checks?.required)} "${row?.checks?.checks_unknown}"`,
+        repoRead.status === 200 && repoRead.json?.required_checks === null && why.test(repoRead.json?.checks_unknown ?? "") &&
+        ci.status === 200 && ciRepo?.checks === null && ciPipeline?.required_checks === null,
+      detail: `${list.status} ${one.status} ${status.status} ${repoRead.status} ${ci.status}: ${row?.checks?.state} ${JSON.stringify(row?.checks?.required)} "${row?.checks?.checks_unknown}", CI ${JSON.stringify(ciRepo?.checks)} ${JSON.stringify(ciPipeline?.required_checks)}`,
     };
   };
+
+  // A Buildkite connection and a pipeline on projects/web, so the CI tab lists it with its repo's required checks (nothing is called).
+  const conn = await call("POST", `/v1/monorepos/${O}/${M}/ci/connections`, { service: "buildkite", organization: "o", api_url: "http://127.0.0.1:9" });
+  r = await call("POST", `${base}/hooks`, { type: "buildkite", buildkite: { organization: "o", pipeline: "web", api_url: "http://127.0.0.1:9/builds" } });
+  check("a Buildkite connection and pipeline on projects/web", conn.status === 201 && r.status === 201, `${conn.status} ${r.status}`);
 
   // pando.toml cannot be read (as when Artifacts fails): reads say so, the merge refuses; nothing is kept as "none".
   r = await call("POST", "/v1/_checks/test", { monorepo: MID, fail: 50 }, BOOT);
   check("the test switch is on (CHECKS_TEST)", r.status === 200 && r.json?.fail === 50, JSON.stringify(r.json));
   const failing = await unknownReads(/couldn't read this monorepo's required checks; try again/);
-  check("the branch list, the branch, its status and the repo answer 200 with required null and the reason", failing.ok, failing.detail);
+  check("the branch list, the branch, its status, the repo and the CI tab answer 200 with required null and the reason", failing.ok, failing.detail);
   r = await call("POST", `${base}/branches/feat%2Fx/merge`, { expected_head: head });
   check(
     "an unforced merge while the required checks are unknown is refused, plainly",

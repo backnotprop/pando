@@ -17,6 +17,7 @@ import { redact } from "../http";
 import { isRecord, isText, isTextList, parseJson, type Json } from "../parse";
 import { note, timed } from "../timing";
 import type { HookJob, HookResult } from "./hooks-out";
+import type { HookEvent } from "./types";
 import { deliveryReadToken, withRepo } from "./artifacts";
 import { CI_READ_REUSE_MS, CI_READ_TTL_S, pandoBuildEnv } from "../ci/buildkite";
 import { mintStatusToken, type StatusClaims } from "../ci/statustoken";
@@ -68,10 +69,18 @@ function hookConfig(h: HookRow): HookConfig {
 }
 
 /** The events a hook receives, from its stored JSON list. */
-function hookEvents(h: HookRow): string[] {
+/** The events a hook can take. */
+export const EVENTS: HookEvent[] = ["push", "branch.opened", "merged"];
+
+/** One of them: a request's, or a stored hook's read back from its JSON column. */
+export function isHookEvent(v: Json): v is HookEvent {
+  return v === "push" || v === "branch.opened" || v === "merged";
+}
+
+function hookEvents(h: HookRow): HookEvent[] {
   const events = parseJson(h.events);
 
-  return isTextList(events) ? events : [];
+  return isTextList(events) ? events.filter(isHookEvent) : [];
 }
 
 /** The delivery's status token, or null when PANDO_STATUS_SECRET is not set or there is no commit. */
@@ -158,7 +167,8 @@ export function hookView(h: HookRow) {
     type: h.type,
     url: h.url,
     events: hookEvents(h),
-    buildkite: h.type === "buildkite" ? { organization: config.organization, pipeline: config.pipeline } : null,
+    // A Buildkite hook is made with both (api.ts); a stored config missing one shows none.
+    buildkite: h.type === "buildkite" && config.organization !== null && config.pipeline !== null ? { organization: config.organization, pipeline: config.pipeline } : null,
     // The CI service its status tokens stamp: buildkite, a web hook's own app, or null.
     app: h.type === "buildkite" ? "buildkite" : config.app,
     active: h.active === 1,
@@ -247,7 +257,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
       commit: p.head,
       branch: p.branch,
       message: p.title ?? `${p.event} ${p.branch}`,
-      author: { name: p.pusher },
+      author: { name: p.pusher ?? "" },
       env: pandoBuildEnv({
         clone_url: u.clone_url, read_token: read.token, status_url: u.status_url, status_token: status?.token ?? null,
         monorepo: p.monorepo, repo: p.repo, branch: p.branch, head: p.head, delivery: deliveryId, seq: p.seq ?? null,

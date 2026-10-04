@@ -1190,11 +1190,15 @@ export class MonorepoObject extends DurableObject<Env> {
       );
 
     // Into the meta layer, each try first reserves the paths the branch
-    // changes in the live layer (CODE-VS-MODEL M1): no commit of an older
-    // live save of them lands on main after the merge, until the merge's
-    // update reaches the live files. The reservation always ends: by that
-    // update (its meta_apply row), or by a release if the try did not land.
+    // changes in the live layer (CODE-VS-MODEL M1). The merge waits for live
+    // saves (the owner's choice, 2026-10-04): the meta layer object commits
+    // the ones of these paths still waiting for their commit, and the merge
+    // merges against that, so a branch that changed the same file is a
+    // conflict. Until the merge reaches the live files, saves of these paths
+    // are answered stale. The reservation always ends: by the merge's update
+    // (its meta_apply row), or by a release if the try did not land.
     let metaMerge: string | null = null;
+    let committedLive: string[] = [];
 
     const attemptMeta = async (h: string, baseSha: string) => {
       const dry = await engine.mergeCommit(repo(), { ...options(h, baseSha), dryRun: true });
@@ -1206,8 +1210,13 @@ export class MonorepoObject extends DurableObject<Env> {
 
       try {
         const paths = await this.branchPaths(r.artifacts_name, dry.mergeBase, h);
-        await this.env.META.get(this.env.META.idFromName(this.info()!.id)).reserve(merge, paths);
-        const res = await attemptMerge(h, dry.old);
+
+        const reserved = await this.env.META.get(this.env.META.idFromName(this.info()!.id))
+          .reserve(merge, paths)
+          .catch((err) => fail(503, "repo_busy", `couldn't commit the live saves of the branch's files first (${redact(err instanceof Error ? err.message : String(err))}); try again`));
+
+        committedLive = [...committedLive, ...reserved.committed]; // a later try may commit nothing more
+        const res = await attemptMerge(h, reserved.sha ?? dry.old);
         landed = res.status === "merged";
 
         return res;
@@ -1253,6 +1262,10 @@ export class MonorepoObject extends DurableObject<Env> {
     }
 
     if (out.status === "conflict") {
+      // A live save the merge waited for, committed just now, clashes with the branch.
+      const live = out.paths.filter((p) => committedLive.includes(p));
+
+      if (live.length) fail(409, "conflict", `${live.join(", ")} changed live; merge ${r.default_branch} into your branch, push, and merge again`, { paths: out.paths });
       fail(409, "conflict", `${out.paths.length} file(s) changed differently on both sides; merge ${r.default_branch} into the branch, push, and merge again`, { paths: out.paths });
     }
 

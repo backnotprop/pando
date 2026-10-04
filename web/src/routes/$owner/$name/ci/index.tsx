@@ -111,7 +111,7 @@ function PipelineRow({ p, ran }: { p: CiPipeline; ran: ReadonlySet<string> }) {
         </Link>
       </code>
       <span className="min-w-0 phone:hidden">
-        <Checks checks={p.required_checks} ran={ran} service={p.service} />
+        <Checks checks={p.required_checks ?? []} ran={ran} service={p.service} />
       </span>
       <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">
         {last ? (
@@ -156,7 +156,7 @@ function Pipelines() {
               <code className="overflow-hidden text-ellipsis whitespace-nowrap">{r.path}</code>
               <span className="text-ash phone:row-start-2">none</span>
               <span className="min-w-0 phone:hidden">
-                <Checks checks={r.checks} ran={new Set()} service="" />
+                <Checks checks={r.checks ?? []} ran={new Set()} service="" />
               </span>
               <span className="text-right">
                 <CommandButton label="Add pipeline" size={28} heading="Add a pipeline" command={`pando ci pipeline add ${r.path} <pipeline> --monorepo ${monorepo.full}`} />

@@ -1983,3 +1983,73 @@ func TestE2ECommitCreditsFoldedSave(t *testing.T) {
 		t.Error("the commit does not name both machines")
 	}
 }
+
+// A file saved every 5 s never has 10 s of quiet, but it still reaches git:
+// at the latest 60 s after its first save not yet in git (the default of
+// META_COMMIT_MAX_WAIT_MS), plus the commit's own time (CODE-VS-MODEL M6).
+func TestE2ECommitsAFileSavedEvery5s(t *testing.T) {
+	env := artifactsEnv(t, "e2e-maxwait-")
+	server, mono := env.server, env.mono
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	a := env.machine(t, "ana")
+	c := env.client()
+	ctx := context.Background()
+
+	committed := func() (int64, bool) {
+		h, err := c.History(ctx, env.p("loop.md"), 50)
+		if err != nil {
+			return 0, false
+		}
+		for _, v := range h.Versions {
+			if v.Commit != "" {
+				return v.Version, true
+			}
+		}
+		return 0, false
+	}
+	start := time.Now()
+	var took time.Duration
+	var version int64
+	for i := 1; time.Since(start) < 75*time.Second; i++ {
+		a.write("loop.md", fmt.Sprintf("save %d\n", i))
+		for next := start.Add(time.Duration(i) * 5 * time.Second); time.Now().Before(next); time.Sleep(250 * time.Millisecond) {
+			if v, ok := committed(); ok && took == 0 {
+				took, version = time.Since(start), v
+			}
+		}
+		if took != 0 {
+			break
+		}
+	}
+	if took == 0 {
+		t.Fatalf("saved every 5 s for 75 s: no version of loop.md reached git")
+	}
+	t.Logf("saved every 5 s: version %d reached git %s after the first save", version, took.Round(100*time.Millisecond))
+	if took < 50*time.Second || took > 66*time.Second {
+		t.Errorf("the first commit came %s after the first save, want about 62 s (60 s maximum wait, then the commit)", took.Round(time.Second))
+	}
+	want, err := c.File(ctx, env.p("loop.md"), version)
+	var r struct{ Content *string }
+	json.Unmarshal(metaRepo(t, server, mono, "read", map[string]string{"path": env.p("loop.md")}), &r)
+	if err != nil || r.Content == nil || *r.Content != string(want) {
+		t.Errorf("git has loop.md %v, want version %d's bytes %q (%v)", r.Content, version, want, err)
+	}
+
+	// The saves go on: the wait starts again at the first save after that
+	// commit, so 20 s more of saving makes no second commit.
+	for i := 0; i < 4; i++ {
+		a.write("loop.md", fmt.Sprintf("after the commit %d\n", i))
+		time.Sleep(5 * time.Second)
+	}
+	h, err := c.History(ctx, env.p("loop.md"), 50)
+	commits := map[string]bool{}
+	for _, v := range h.Versions {
+		if v.Commit != "" {
+			commits[v.Commit] = true
+		}
+	}
+	if err != nil || len(commits) != 1 || h.Versions[0].Commit != "" {
+		t.Errorf("after 20 s more of saving: %d commits, the newest version's %q; want still 1, the newest not committed (%v)", len(commits), h.Versions[0].Commit, err)
+	}
+}

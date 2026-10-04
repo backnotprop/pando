@@ -23,6 +23,10 @@ export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoOb
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
 
+// ...or this long after its first save not yet in git, if it never goes quiet
+// (CODE-VS-MODEL M6; the owner's choice, 2026-10-04). META_COMMIT_MAX_WAIT_MS sets it.
+const MAX_WAIT_MS = 60_000;
+
 const TREE_LIMIT = 1000; // GET tree: files per page by default
 
 const TREE_MAX = 5000; // and at most
@@ -294,6 +298,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // Objects made before the lfs_* columns existed: add them, and fill them
   // from the stored pointers once.
   private migrate(): void {
+    const pcols = this.sql.exec<{ name: string }>("PRAGMA table_info(pending)").toArray().map((c) => c.name);
+
+    if (!pcols.includes("first_at")) this.sql.exec("ALTER TABLE pending ADD COLUMN first_at INTEGER");
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(versions)").toArray().map((c) => c.name);
 
     if (!cols.includes("login")) this.sql.exec("ALTER TABLE versions ADD COLUMN login TEXT");
@@ -338,7 +345,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE INDEX IF NOT EXISTS versions_by_path ON versions(path, version);
       CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, version INTEGER NOT NULL, sha TEXT, deleted INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS files_by_version ON files(version);
-      CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL, first_at INTEGER);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS applied (commit_sha TEXT PRIMARY KEY, at INTEGER NOT NULL);
@@ -588,6 +595,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     }
 
     return fail(400, "invalid_input", 'action is "start" or "done"');
+  }
+
+  /** The longest a path saved again and again waits for its commit (META_COMMIT_MAX_WAIT_MS, else 60 s). */
+  private maxWait(): number {
+    return intParam(this.env.META_COMMIT_MAX_WAIT_MS ?? null, MAX_WAIT_MS) || MAX_WAIT_MS;
   }
 
   private initializing(): boolean {
@@ -979,13 +991,19 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       n.deleted ? 1 : 0,
     );
 
+    // Due after 10 s of quiet, but never later than the maximum wait after
+    // the path's first save not yet in git (first_at, kept across saves).
     if (n.source !== "main") {
+      const wait = this.maxWait();
       this.sql.exec(
-        `INSERT INTO pending (path, version, due) VALUES (?, ?, ?)
-         ON CONFLICT(path) DO UPDATE SET version = excluded.version, due = excluded.due`,
+        `INSERT INTO pending (path, version, due, first_at) VALUES (?1, ?2, MIN(?3 + ?4, ?3 + ?5), ?3)
+         ON CONFLICT(path) DO UPDATE SET version = excluded.version,
+           due = MIN(?3 + ?4, COALESCE(pending.first_at, ?3) + ?5), first_at = COALESCE(pending.first_at, ?3)`,
         n.path,
         version,
-        at + QUIET_MS,
+        at,
+        QUIET_MS,
+        wait,
       );
     }
 
@@ -1555,9 +1573,18 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.setKv("parent", sha);
     this.setKv("commit_error", null);
 
+    const wait = this.maxWait();
+
     for (const r of rows) {
       this.sql.exec(`UPDATE versions SET commit_sha = ?3 WHERE ${CARRIED}`, r.path, r.version, sha);
       this.sql.exec("DELETE FROM pending WHERE path = ? AND version = ?", r.path, r.version);
+      // Saved again meanwhile: its maximum wait starts at the first save after this commit.
+      this.sql.exec(
+        `UPDATE pending SET first_at = (SELECT MIN(at) FROM versions WHERE path = ?1 AND version > ?2),
+           due = MIN((SELECT at FROM versions WHERE version = pending.version) + ?3, (SELECT MIN(at) FROM versions WHERE path = ?1 AND version > ?2) + ?4)
+         WHERE path = ?1`,
+        r.path, r.version, QUIET_MS, wait,
+      );
     }
   }
 }

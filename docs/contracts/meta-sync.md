@@ -10,7 +10,8 @@ layer's main through a reviewed branch). Ask pando-ops for changes.
 The meta layer is the monorepo's root: every file outside `projects/` and
 outside references. It is plain files on every machine. A save on one machine
 reaches every other machine within about a second, and becomes a git commit
-on the meta layer's `main` after about 10 seconds of quiet.
+on the meta layer's `main` after about 10 seconds of quiet (at most about
+60 seconds for a file saved again and again).
 
 One `MetaLayerObject` (a Durable Object with SQLite) per monorepo holds every
 saved version. Each machine keeps one WebSocket to it.
@@ -345,8 +346,18 @@ pando resolve decisions/HISTORY.md                # unfreeze after a conflict
 When a path has had no change for 10 seconds, the object commits it to the
 meta layer's `main` (the Artifacts repo `<id>--meta`) through
 gitwrite's `commitChanges` (see `gitwrite.md`), one commit at a time
-through the repo's write gate. Which paths share a commit is one Worker
-setting, `META_COMMIT_GROUPING`:
+through the repo's write gate.
+
+A path that never goes quiet (an agent's running notes, a board a script
+updates every 5 seconds) is committed anyway: a path is due at the earlier
+of 10 seconds after its last save and 60 seconds after its first save not
+yet in git (the owner's choice, 2026-10-04). After that commit, the next
+wait starts at the path's next save. A file saved every 5 seconds becomes
+about one commit a minute, git at most about 62 seconds behind for it
+(measured: 62.2 s, on Artifacts). The maximum wait is one Worker setting,
+`META_COMMIT_MAX_WAIT_MS` (default `60000`).
+
+Which paths share a commit is one Worker setting, `META_COMMIT_GROUPING`:
 
 - `author` (the default today): paths due within 2 seconds of each other
   that share an author, machine and agent go in one commit.

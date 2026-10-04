@@ -23,6 +23,10 @@ export interface CommitEnv {
   // "window": everything due is one commit; the last saver is its author and
   //   the others are Co-authored-by trailers (ARCHITECTURE C7, owner question 8).
   META_COMMIT_GROUPING?: string;
+  // A path is committed after 10 s with no save, or at the latest this many
+  // ms after its first save not yet in git (default 60000: a file saved every
+  // few seconds still reaches git; CODE-VS-MODEL M6, the owner's choice).
+  META_COMMIT_MAX_WAIT_MS?: string;
 }
 
 // gitWriter is null when the Worker has no Artifacts binding (a local test

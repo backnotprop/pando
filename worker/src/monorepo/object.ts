@@ -333,6 +333,9 @@ export interface MergeArgs {
 
 export type { MergeResult } from "./types";
 
+import { MirrorOut, type TargetInput } from "../mirror/out";
+import type { MirrorMode } from "../mirror/types";
+
 export class MonorepoObject extends DurableObject<Env> {
   private sql: SqlStorage;
   private locks = new Map<string, Promise<unknown>>();
@@ -354,6 +357,7 @@ export class MonorepoObject extends DurableObject<Env> {
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
   private issues: IssueStore;
+  private mirror: MirrorOut;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -382,6 +386,7 @@ export class MonorepoObject extends DurableObject<Env> {
       branchWord: (repo, branch) => this.branchWord(repo, branch),
       summaryChanged: () => this.feed.scheduleSummary(),
     });
+    this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
     const m = this.info();
@@ -484,6 +489,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.hooksOut.ensureSchema();
     this.metaApply.ensureSchema();
     this.ci.ensureSchema();
+    this.mirror?.ensureSchema();
   }
 
   private rows<T extends Row>(query: string, ...args: SqlStorageValue[]): T[] {
@@ -686,7 +692,12 @@ export class MonorepoObject extends DurableObject<Env> {
       sha, now(), title, repo, sha,
     ).rowsWritten;
 
-    if (moved) this.recordMoved(repo);
+    if (moved) {
+      this.recordMoved(repo);
+
+      // Mirror to GitHub: this main moved (mirror/out.ts).
+      if (sha) this.mirror.dirty(repo);
+    }
   }
 
   /** Count a move of one of the repo's records (a branch head or main): a reconcile that read Artifacts' refs before it reads them again. */
@@ -715,6 +726,52 @@ export class MonorepoObject extends DurableObject<Env> {
   /** The code repos (the meta layer's repo is not listed). */
   listRepos(): RepoRecord[] {
     return this.rows<Stored<RepoRecord>>("SELECT * FROM repos WHERE NOT (name = 'meta' AND artifacts_name LIKE '%--meta') ORDER BY path");
+  }
+
+  // ── Mirror to GitHub (mirror/out.ts) ─────────────────────────────────────
+
+  /** Every repo a mirror can send: the projects (or the plain repo) and the files outside projects/ when they have a repo. */
+  private mirrorRepos(): RepoRecord[] {
+    const meta = this.repoRow("meta");
+
+    return [...this.listRepos(), ...(meta ? [meta] : [])];
+  }
+
+  async mirrorState() {
+    // The files outside projects/ have a repo record once asked for (it is made lazily).
+    if (this.info()?.kind === "monorepo" && !this.repoRow("meta")) await this.getRepo("meta");
+
+    return { settings: this.mirror.settings(), targets: this.mirror.views(), repos: this.mirrorRepos(), pending: this.mirror.pending() };
+  }
+
+  mirrorLink(i: { id: number; account_login: string; account_type: "User" | "Organization"; repository_selection: "all" | "selected" }, by: string): void {
+    this.mirror.link(i, by);
+  }
+
+  mirrorSave(mode: MirrorMode, targets: TargetInput[], by: string): void {
+    this.mirror.save(mode, targets, by);
+  }
+
+  /** Targets waiting for repositories Pando creates at the callback (a JSON list), or null. */
+  mirrorSetPending(pending: string | null): void {
+    this.mirror.setPending(pending);
+  }
+
+  mirrorSetOn(on: boolean, by: string): void {
+    this.mirror.setOn(on, by);
+  }
+
+  mirrorRetry(repos: string[] | null): string[] {
+    return this.mirror.retry(repos);
+  }
+
+  mirrorDisconnect(): void {
+    this.mirror.disconnect();
+  }
+
+  /** A main moved outside this object's records (the files outside projects/, committed by the meta layer object). */
+  mirrorDirty(repo: string): void {
+    this.mirror.dirty(repo);
   }
 
   // ── Branches and pushes ──────────────────────────────────────────────────
@@ -1684,6 +1741,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (closesNext !== null) this.feed.armAt(closesNext);
     await this.factsOut.alarm();
     await this.hooksOut.alarm();
+    await this.mirror.alarm();
     await this.metaApply.alarm();
   }
 

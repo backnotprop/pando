@@ -7,6 +7,7 @@ import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
 import { isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
 import { ciRoutes } from "../ci/routes";
+import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
@@ -1387,6 +1388,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
 // ── CI (ci/routes.ts): the CI tab's reads and actions, and connections ──
 
 ciRoutes(api);
+
+// ── Mirror to GitHub (mirror/routes.ts) ──
+
+mirrorRoutes(api);
 
 // ── Issues and labels (issues/routes.ts) ──
 

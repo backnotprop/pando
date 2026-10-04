@@ -1682,6 +1682,11 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       this.ctx.waitUntil(this.drainCredits());
     }
 
+    // Mirror to GitHub: the files outside projects/ moved (mirror/out.ts). Not awaited.
+    const monorepo = this.kv("monorepo");
+
+    if (monorepo && this.env.MONOREPO) this.ctx.waitUntil(this.env.MONOREPO.getByName(monorepo).mirrorDirty("meta").catch(() => {}));
+
     const wait = this.maxWait();
 
     for (const r of rows) {

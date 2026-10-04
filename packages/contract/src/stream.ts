@@ -152,8 +152,24 @@ export const LabelEvent = Schema.Union([
   Schema.Struct({ ...envelope, kind: Schema.Literal("label.updated"), collection: Schema.Literal("labels"), op: Schema.Literal("delete"), row: Schema.Struct({ name: Schema.String }) }),
 ]);
 
+/**
+ * Mirror to GitHub: a run ended or a setting changed (worker/src/mirror/out.ts). `key` is the source's repo, `*` in
+ * whole repository mode, or `settings`. No person did it, so the frame names none. The row is the server's own
+ * record, not GET .../mirror's: a page reads GET .../mirror again.
+ */
+export const MirrorEvent = Schema.Struct({
+  type: Schema.tag("event"),
+  seq: Count,
+  at: Timestamp,
+  key: Schema.String,
+  repo: Schema.NullOr(Schema.String),
+  kind: Schema.Literal("mirror.updated"),
+  collection: Schema.Literal("mirror"),
+  op: Schema.Literal("upsert"),
+});
+
 /** The row kinds the web subscribes to, each a `kind:<kind>` topic. */
-export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection"] as const;
+export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection", "mirror.updated"] as const;
 
 /** Frames of a monorepo's event socket opened with row topics. */
 export const MonorepoEventFrame = Schema.Union([
@@ -167,6 +183,7 @@ export const MonorepoEventFrame = Schema.Union([
   CiConnectionEvent,
   IssueEvent,
   LabelEvent,
+  MirrorEvent,
   /** The replay after `since` is done; keep the highest `seq` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), seq: Count }),
   /** More was missed than the stream replays: refetch what is on screen, then reconnect from `seq`. */

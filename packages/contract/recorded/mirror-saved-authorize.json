@@ -1,0 +1,52 @@
+{
+  "schema": "MirrorSaved",
+  "route": "PUT .../mirror/targets (a Create row: authorize first)",
+  "status": 200,
+  "body": {
+    "mirror": {
+      "app": {
+        "configured": true
+      },
+      "connection": {
+        "installation_id": 101,
+        "login": "backnotprop",
+        "type": "User",
+        "repository_selection": "selected",
+        "manage_url": "http://127.0.0.1:8835/web/settings/installations/101",
+        "connected_at": "2026-10-04T18:07:28.886Z",
+        "connected_by": "mr-muu4v9az"
+      },
+      "mode": "projects",
+      "on": false,
+      "started": false,
+      "paused": null,
+      "targets": [
+        {
+          "repo": "projects-app",
+          "path": "projects/app",
+          "on": false,
+          "github": null,
+          "state": "off",
+          "last": null,
+          "behind": null,
+          "waiting_since": null,
+          "next_try_at": null,
+          "problem": null
+        },
+        {
+          "repo": "meta",
+          "path": "",
+          "on": false,
+          "github": null,
+          "state": "off",
+          "last": null,
+          "behind": null,
+          "waiting_since": null,
+          "next_try_at": null,
+          "problem": null
+        }
+      ]
+    },
+    "authorize_url": "/v1/monorepos/mr-muu4v9az/mr-muu4v9az/mirror/connect?purpose=create"
+  }
+}

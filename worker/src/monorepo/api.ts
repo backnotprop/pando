@@ -659,11 +659,12 @@ async function branchViews(
   const ask = { names: names ?? undefined, state, limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
   let list: BranchList = await stub.branchRows(r.name, ask);
 
-  // Kept pushes (C2): catch the records up to Artifacts' refs, then read again.
+  // Kept pushes (C2): catch the records up to Artifacts' refs, then read again (another reconcile may have written them).
   if (list.reconcile) {
     const pause = c.env.DOOR_TEST === "1" ? Math.min(Number(c.req.header("x-pando-test-reconcile-pause-ms") ?? 0), 10_000) : 0;
 
-    if (await runReconcile(c.env, stub, r, { pauseMs: pause > 0 ? pause : 0 }).catch(() => 0)) list = await stub.branchRows(r.name, ask);
+    await runReconcile(c.env, stub, r, { pauseMs: pause > 0 ? pause : 0 }).catch(() => 0);
+    list = await stub.branchRows(r.name, ask);
   }
 
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);

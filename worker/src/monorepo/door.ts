@@ -373,6 +373,10 @@ async function receivePack(
   // ones (it did not), or anything else (or unreadable).
   const readWhere = async (): Promise<{ at: "new" | "old" | "unknown"; refs: Map<string, string> | null }> => {
     try {
+      // Tests only: a pause after the lost answer, before the read, for another push to move the ref meanwhile.
+      const pause = env.DOOR_TEST === "1" ? Math.min(Number(req.headers.get("x-pando-test-pause-after-lost-ms") ?? 0), 10_000) : 0;
+
+      if (pause > 0) await new Promise((r) => setTimeout(r, pause));
       const refs = await listRefs(env, repo);
       const there = (c: RefCommand) => refs.get(c.ref) ?? ZERO;
 
@@ -449,17 +453,19 @@ async function receivePack(
   // Still busy: a plain message, not Artifacts' code.
   if (busy) return busyRefusal(section, `Pando: ${repo.name} is busy with other pushes right now; push again`);
 
-  // Not known to have landed: kept as 'unknown' and reconciled at once from Artifacts' refs, so a push that did land is
-  // recorded (its events, its hook delivery). git hears ok for each ref already at its new head, "push again" for the rest.
+  // Not known to have landed: kept as 'unknown' and reconciled from Artifacts' refs before git hears anything (record
+  // before ack), so a push that did land is recorded with its events and hook delivery. If either fails, git is answered
+  // anyway; the refs compare covers it. git hears ok for each ref already at its new head, "push again" for the rest.
   if (outcome === "unknown") {
     note({ push_outcome: "unknown" });
     const notThere = section.commands.filter((c) => (refsNow?.get(c.ref) ?? ZERO) !== c.new);
 
-    ctx.waitUntil(
-      keepUnrecorded(stub, repo.name, identity, section.commands, origin, false, "unknown")
-        .then(() => runReconcile(env, stub, repo))
-        .catch((err) => console.error(`reconciling ${repo.name} after a lost answer failed: ${err instanceof Error ? err.message : String(err)}`)),
-    );
+    try {
+      await keepUnrecorded(stub, repo.name, identity, section.commands, origin, false, "unknown");
+      await runReconcile(env, stub, repo);
+    } catch (err) {
+      console.error(`reconciling ${repo.name} after a lost answer failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     return reportResponse(section, new Map(notThere.map((c) => [c.ref, "couldn't take it; push again"])), notThere.length ? `Pando: ${repo.name} couldn't take this push right now; push again` : "");
   }
@@ -555,3 +561,20 @@ function busyRefusal(section: { commands: import("./pktline").RefCommand[]; caps
   });
 }
 
+
+/**
+ * Tests only (DOOR_TEST=1 and the bootstrap secret): GET
+ * /v1/_door/test?monorepo=<id>&repo=<name> lists the repo's kept pushes.
+ */
+export async function doorTestRoute(request: Request, env: Env): Promise<Response> {
+  if (env.DOOR_TEST !== "1") return Response.json({ error: { code: "not_found", message: "no such route" } }, { status: 404 });
+  const { isBootstrap } = await import("./session");
+
+  if (!(await isBootstrap(env, credential(request)))) return Response.json({ error: { code: "unauthorized", message: "the bootstrap secret only" } }, { status: 401 });
+  const q = new URL(request.url).searchParams;
+  const [monorepo, repo] = [q.get("monorepo"), q.get("repo")];
+
+  if (!monorepo || !repo) return Response.json({ error: { code: "bad_request", message: "monorepo (its id) and repo" } }, { status: 400 });
+
+  return Response.json({ kept: await env.MONOREPO.getByName(monorepo).testKept(repo) });
+}

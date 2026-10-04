@@ -15,7 +15,7 @@ import { authenticateRequest } from "./accounts/auth";
 import { finishTiming, note, runTimed, startTiming } from "./timing";
 import { metaRoute, metaTestRoute, routeMeta } from "./live/route";
 import { api } from "./monorepo/api";
-import { handleDoor, isDoorPath, type IncomingRequest } from "./monorepo/door";
+import { doorTestRoute, handleDoor, isDoorPath, type IncomingRequest } from "./monorepo/door";
 import { handleRaw, RAW_RE } from "./monorepo/raw";
 import { handleHistoryBatch, type HistoryMessage } from "./monorepo/files";
 import { objectsClient } from "./objects";
@@ -162,6 +162,8 @@ export default {
     if (url.pathname === "/v1/_facts/test") return factsTestRoute(request, env);
 
     if (url.pathname === "/v1/_hooks/test") return hooksTestRoute(request, env);
+
+    if (url.pathname === "/v1/_door/test") return doorTestRoute(request, env);
 
     if (url.pathname === "/v1/_meta/test") return metaTestRoute(request, env);
 

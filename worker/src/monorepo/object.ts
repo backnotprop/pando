@@ -879,6 +879,13 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.branchRecord(repo, ref.slice(11))?.head ?? null;
   }
 
+  /** Tests only (DOOR_TEST=1): a repo's kept pushes. */
+  testKept(repo: string): { ref: string; old: string; new: string; landed: string }[] {
+    if (this.env.DOOR_TEST !== "1") return [];
+
+    return this.rows<{ ref: string; old: string; new: string; landed: string }>("SELECT ref, old, new, landed FROM unrecorded WHERE repo = ? ORDER BY id", repo);
+  }
+
   /** What a reconcile saw before reading Artifacts' refs: the record-move count and the kept pushes. */
   reconcileSeen(repo: string): ReconcileSeen {
     const moves = this.row<{ n: number }>("SELECT record_moves AS n FROM repos WHERE name = ?", repo)?.n ?? 0;

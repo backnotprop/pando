@@ -6,6 +6,11 @@
 //       newest head, the events come in push order, and a merge naming the
 //       older head is refused.
 //   (c) A reconcile racing a new push never moves the record back.
+//   (e) An answer is lost and the branch moves on before the door reads it:
+//       git hears "push again", and the record is caught up before it does.
+//   (f) A push that did not land, its answer lost, is never recorded.
+//   (g) A push whose record failed, then a second push on top of it: both
+//       are recorded, in order, by their pushers.
 //   (d) A push whose record and keep both fail is found by the periodic
 //       compare of Artifacts' refs with the records.
 //
@@ -16,6 +21,7 @@
 // Credentials stay in memory and are never printed; git never reaches the
 // keychain. It deletes its monorepo.
 import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -122,6 +128,7 @@ try {
 
   if (made) tw.add(`${O}/${M}`);
   const url = r.json?.repos?.[0]?.clone_url;
+  const MID = r.json?.monorepo?.id;
   check("a user and a plain repo", !!S && made && !!url, `${r.status}`);
 
   if (!url) throw new Error("no repo to test with");
@@ -142,6 +149,8 @@ try {
   const events = async () => (await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500`)).json?.events ?? [];
   const pushesOf = async (name) => (await events()).filter((e) => (e.kind === "push" || e.kind === "branch.opened") && e.collection === "branches" && e.key === `${M}/${name}`);
   const lsRemote = (name) => git(["ls-remote", url, `refs/heads/${name}`], a).out.split(/\s/)[0] ?? "";
+  // The repo's kept pushes (tests only, DOOR_TEST).
+  const kept = async () => (await call("GET", `/v1/_door/test?monorepo=${MID}&repo=${M}`, undefined, { authorization: `Bearer ${BOOT}` })).json?.kept ?? null;
 
   // A branch at X, pushed normally.
   const open = (name) => {
@@ -216,6 +225,64 @@ try {
   check("(c) no push event moves it back from the newest head", back.length === 0, back.map((e) => `${e.before?.slice(0, 7)}->${e.head?.slice(0, 7)}`).join(","));
   await call("GET", `${base}/branches?state=open`);
   check("(c) the next list leaves it there", (await branch("c-race"))?.head === zc);
+
+  // (e) The answer is lost; before the door reads the refs, agent B pushes on top. The ref is at neither head: unknown.
+  git(["checkout", "-q", "main"], a);
+  const xe = open("e-moved");
+  const edir = join(work, "e");
+  git(["clone", "-q", "--branch", "e-moved", url, edir], work);
+  const ye = commit(a, "e-moved.txt", "y\n");
+  const lostPush = gitAsync(["push", url, "e-moved"], a, [...header("X-Pando-Test-Lose-Answer", "1"), ...header("X-Pando-Test-Pause-After-Lost-Ms", "4000")]);
+  await waitFor(() => (lsRemote("e-moved") === ye ? true : null), 10_000);
+  git(["pull", "-q", "--ff-only", "origin", "e-moved"], edir);
+  const ze = commit(edir, "e-moved.txt", "z\n");
+  const bPush = git(["push", url, "e-moved"], edir);
+  const lostOut = await lostPush;
+  // Read the log only: a branch read would reconcile by itself.
+  const atAnswer = (await pushesOf("e-moved")).filter((e) => e.head === ze);
+  check("(e) a lost answer whose ref moved on meanwhile: git hears push again (B's push on top went through)", !lostOut.ok && /push again/.test(lostOut.out) && bPush.ok, lostOut.out.split("\n").filter(Boolean).slice(-2).join(" | "));
+  check("(e) the record was caught up to the newest head before that answer: its push event is already in the log", atAnswer.length === 1, `${atAnswer.length}`);
+  await call("GET", `${base}/branches?state=open`);
+  const eEvents = await pushesOf("e-moved");
+  const eKept = (await kept())?.filter((k) => k.ref === "refs/heads/e-moved");
+  check(
+    "(e) after a list: the record at the newest head, no kept row left, and no event naming a head never on the branch or moving it back",
+    (await branch("e-moved"))?.head === ze && eKept?.length === 0 && eEvents.every((e) => [xe, ye, ze].includes(e.head) && e.before !== ze),
+    `${(await branch("e-moved"))?.head?.slice(0, 7)}, ${eKept?.length} kept, ${eEvents.map((e) => `${e.before?.slice(0, 7)}->${e.head?.slice(0, 7)}`).join(",")}`,
+  );
+
+  // (f) A large push (not held, so not sent again) fails before reaching Artifacts: kept as unknown, never recorded.
+  git(["checkout", "-q", "main"], a);
+  const xf = open("f-unlanded");
+  writeFileSync(join(a, "big.bin"), randomBytes(1_600_000));
+  const yf = commit(a, "f-unlanded.txt", "y\n");
+  g = git(["push", url, "f-unlanded"], a, header("X-Pando-Test-Fail", "1"));
+  check("(f) a push that did not land, its answer lost: git hears push again, and Artifacts never had it", !g.ok && /push again/.test(g.out) && lsRemote("f-unlanded") === xf, g.out.split("\n").filter(Boolean).slice(-1).join(""));
+  await call("GET", `${base}/branches?state=open`);
+  await sleep(1_000);
+  const fKept = await kept();
+  check(
+    "(f) it is never recorded: the branch stays, no event and no hook delivery for it, and nothing is kept after the next list",
+    (await branch("f-unlanded"))?.head === xf && !(await events()).some((e) => e.head === yf) && !got.some((x) => x.body?.head === yf) && fKept?.length === 0,
+    `${(await branch("f-unlanded"))?.head?.slice(0, 7)}, ${fKept?.length} kept`,
+  );
+  git(["reset", "-q", "--hard", xf], a);
+
+  // (g) The first push's record fails (it is kept); a second push on top: kept too until the first is recorded.
+  git(["checkout", "-q", "main"], a);
+  open("g-kept");
+  const yg = commit(a, "g-kept.txt", "y\n");
+  const gy = git(["push", url, "g-kept"], a, header("X-Pando-Test-Record-Fail", "1"));
+  await sleep(300);
+  const zg = commit(a, "g-kept.txt", "z\n");
+  const gz = git(["push", url, "g-kept"], a);
+  await call("GET", `${base}/branches?state=open`);
+  const gOrder = (await pushesOf("g-kept")).filter((e) => e.head === yg || e.head === zg).map((e) => (e.head === yg ? "Y" : "Z"));
+  check("(g) a failed record, kept, then a push on top: a branch list records both, in push order", gy.ok && gz.ok && (await branch("g-kept"))?.head === zg && gOrder.join(",") === "Y,Z", `${gOrder.join(",")} head ${(await branch("g-kept"))?.head?.slice(0, 7)}`);
+  const gGot = (h) => got.filter((x) => x.event === "push" && x.body?.branch === "g-kept" && x.body?.head === h).length;
+  await waitFor(() => (gGot(yg) && gGot(zg) ? true : null), 10_000);
+  await sleep(1_000);
+  check("(g) the hook got each push once", gGot(yg) === 1 && gGot(zg) === 1, `${gGot(yg)} and ${gGot(zg)}`);
 
   // (d) The record fails and keeping the push fails too: the periodic compare of Artifacts' refs finds it.
   git(["checkout", "-q", "main"], a);

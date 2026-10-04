@@ -13,19 +13,19 @@
         "project_path": null,
         "labels": [],
         "assignees": [],
-        "author": "rec-muu1ufmn",
+        "author": "rec-muu2mhw1",
         "comments": 0,
         "tasks": null,
         "linked_branches": 1,
-        "created_at": "2026-10-04T16:43:25.627Z",
-        "updated_at": "2026-10-04T16:43:29.998Z",
-        "closed_at": "2026-10-04T16:43:29.998Z",
-        "closed_by": "rec-muu1ufmn",
+        "created_at": "2026-10-04T17:05:12.853Z",
+        "updated_at": "2026-10-04T17:05:16.983Z",
+        "closed_at": "2026-10-04T17:05:16.983Z",
+        "closed_by": "rec-muu2mhw1",
         "closed_by_merge": {
           "repo": "projects-web",
           "repo_path": "projects/web",
           "branch": "fix/login",
-          "merge_commit": "77089e5301dba737b6a7ec0ed13385234256219d"
+          "merge_commit": "45b18812493e6c01b13f1a99d559ca822ef8ca08"
         }
       }
     ],

@@ -11,25 +11,25 @@
     ],
     "connections": [
       {
-        "id": "m_77b463f0c88a971b--cic_8aeff9135c81",
+        "id": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
         "service": "buildkite",
         "organization": "o",
         "web_url": "https://buildkite.com/o",
         "token": "worker_secret",
-        "created_at": "2026-10-04T16:43:01.160Z",
-        "created_by": "rec-muu1ufmn",
+        "created_at": "2026-10-04T17:04:50.344Z",
+        "created_by": "rec-muu2mhw1",
         "last_event": {
-          "at": "2026-10-04T16:43:01.174Z",
+          "at": "2026-10-04T17:04:50.362Z",
           "event": "build.finished",
           "result": "recorded"
         },
         "last_refused": null,
-        "webhook_url": "http://localhost:8825/v1/integrations/buildkite/m_77b463f0c88a971b--cic_8aeff9135c81"
+        "webhook_url": "http://localhost:8825/v1/integrations/buildkite/m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b"
       }
     ],
     "pipelines": [
       {
-        "connection": "m_77b463f0c88a971b--cic_8aeff9135c81",
+        "connection": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
         "service": "buildkite",
         "slug": "web",
         "name": "web",
@@ -39,23 +39,23 @@
         "default_branch": "main",
         "hook_id": null,
         "last_build": {
-          "id": "cib_c0b5b5626d64e400",
+          "id": "cib_5fa125a40750929f",
           "service": "buildkite",
-          "connection": "m_77b463f0c88a971b--cic_8aeff9135c81",
+          "connection": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
           "pipeline": "web",
           "number": 1,
           "repo": "projects-web",
           "repo_path": "projects/web",
-          "sha": "e8f688da53f0764fcefa04c778eb7ef2acdd8f96",
+          "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
           "branch": "feat/ready",
           "message": "Add the ready file",
           "state": "passed",
           "service_state": "passed",
           "web_url": "https://buildkite.com/o/web/builds/1",
-          "pushed_by": "rec-muu1ufmn",
-          "created_at": "2026-10-04T16:43:01.162Z",
-          "started_at": "2026-10-04T16:43:02.162Z",
-          "finished_at": "2026-10-04T16:43:11.162Z",
+          "pushed_by": "rec-muu2mhw1",
+          "created_at": "2026-10-04T17:04:50.346Z",
+          "started_at": "2026-10-04T17:04:51.346Z",
+          "finished_at": "2026-10-04T17:05:00.346Z",
           "duration_s": 9,
           "rebuilt_from": null
         },

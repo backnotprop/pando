@@ -6,7 +6,7 @@ import { getRouteApi } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { Machine, Repo } from "@pando/contract";
 import { openCountQuery } from "../../../../api/issues";
-import { machinesQuery, membersQuery, openBranchesQuery, reposQuery } from "../../../../api/queries";
+import { machinesQuery, membersQuery, monorepoQuery, openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Avatar } from "../../../../ui/Avatar";
 import { branchesLink, issuesLink, monoLink, ownerLink, repoLink, tabLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
@@ -29,13 +29,24 @@ export function usePlainRepo() {
   return info.kind === "repo" ? (repos.find((r) => r.path === ".") ?? null) : null;
 }
 
-function Head({ title, right }: { title: ReactNode; right?: ReactNode }) {
+function Head({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
   return (
     <div className="flex items-end justify-between gap-8 phone:flex-col phone:items-start phone:gap-4">
-      <h1 className="flex items-center gap-3.5 text-[24px] leading-[30px] tracking-[-.01em]">{title}</h1>
+      <div className="min-w-0">
+        <h1 className="flex items-center gap-3.5 text-[24px] leading-[30px] tracking-[-.01em]">{title}</h1>
+        {sub}
+      </div>
       {right}
     </div>
   );
+}
+
+/** The repository's one-line description under its name (Settings), when it has one. */
+function Description() {
+  const { monorepo } = useMonorepo();
+  const description = useQuery(monorepoQuery(monorepo)).data?.description;
+
+  return description ? <p className="mt-2 max-w-[60em] text-[14.5px] leading-[21px] text-bark-dim">{description}</p> : null;
 }
 
 /** The repository's name, as GitHub heads one (links R): its owner's avatar (a person round, an organization square), then owner / name in Link. */
@@ -69,7 +80,7 @@ export function MonorepoHead({ tab }: { tab: MonorepoTab }) {
 
   return (
     <>
-      <Head title={<FullName />} />
+      <Head title={<FullName />} sub={<Description />} />
       <TabBar label={full}>
         <Tab link={monoLink(full)} current={tab === "code"} label="Code" />
         <Tab link={issuesLink(full)} current={tab === "issues"} label="Issues" count={issues || undefined} />
@@ -97,7 +108,7 @@ export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "issu
 
   return (
     <>
-      <Head title={plain ? <FullName /> : repo.path} right={right} />
+      <Head title={plain ? <FullName /> : repo.path} sub={plain ? <Description /> : null} right={right} />
       <TabBar label={plain ? full : repo.path}>
         <Tab link={repoLink(full, repo.path)} current={tab === "code"} label="Code" />
         {plain ? <Tab link={issuesLink(full)} current={tab === "issues"} label="Issues" count={issues || undefined} /> : null}

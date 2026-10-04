@@ -5,23 +5,25 @@
   "body": {
     "monorepos": [
       {
-        "id": "m_a2ffdef10b103677",
-        "owner": "org-muu1ufmn",
-        "name": "in-muu1ufmn",
-        "full_name": "org-muu1ufmn/in-muu1ufmn",
+        "id": "m_66fe0c14f6c7268e",
+        "owner": "org-muu2mhw1",
+        "name": "in-muu2mhw1",
+        "full_name": "org-muu2mhw1/in-muu2mhw1",
         "kind": "repo",
-        "created_at": "2026-10-04T16:43:30.259Z",
+        "created_at": "2026-10-04T17:05:17.276Z",
         "owner_type": "org",
+        "description": null,
         "role": "owner"
       },
       {
-        "id": "m_77b463f0c88a971b",
-        "owner": "org-muu1ufmn",
-        "name": "rec-muu1ufmn-renamed",
-        "full_name": "org-muu1ufmn/rec-muu1ufmn-renamed",
+        "id": "m_45d69c4a03ba6d4e",
+        "owner": "org-muu2mhw1",
+        "name": "rec-muu2mhw1-renamed",
+        "full_name": "org-muu2mhw1/rec-muu2mhw1-renamed",
         "kind": "monorepo",
-        "created_at": "2026-10-04T16:42:45.058Z",
+        "created_at": "2026-10-04T17:04:34.363Z",
         "owner_type": "org",
+        "description": "The web app, its API and the sync engine.",
         "role": "owner"
       }
     ]

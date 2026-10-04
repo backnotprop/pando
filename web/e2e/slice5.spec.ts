@@ -119,6 +119,17 @@ test("slice 5: organizations, their people and repositories, Members by org, tra
       await page.goto(`${BASE}/${org}`);
     });
 
+    await test.step("a one-line description set in the repository's Settings shows on the org page's row", async () => {
+      await page.goto(`${BASE}/${org}/${repo}/settings`);
+      await page.getByRole("textbox", { name: "Description" }).fill("The web app, its API and the sync engine.");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+      // The header says it too.
+      await expect(page.getByText("The web app, its API and the sync engine.", { exact: true }).first()).toBeVisible();
+      await page.goto(`${BASE}/${org}`);
+      await expect(page.getByRole("region", { name: "Repositories" }).getByRole("listitem").filter({ hasText: repo })).toContainText("The web app, its API and the sync engine.");
+    });
+
     await test.step("People: add a second person by login", async () => {
       await page.getByRole("navigation", { name: `Organization ${org}` }).getByRole("link", { name: "People" }).click();
       await expect(page).toHaveURL(`${BASE}/orgs/${org}/people`);

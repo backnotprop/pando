@@ -3,13 +3,14 @@
   "route": "GET /v1/monorepos/{owner}/{monorepo}",
   "status": 200,
   "body": {
-    "id": "m_77b463f0c88a971b",
-    "owner": "rec-muu1ufmn",
-    "name": "rec-muu1ufmn",
-    "full_name": "rec-muu1ufmn/rec-muu1ufmn",
+    "id": "m_45d69c4a03ba6d4e",
+    "owner": "rec-muu2mhw1",
+    "name": "rec-muu2mhw1",
+    "full_name": "rec-muu2mhw1/rec-muu2mhw1",
     "kind": "monorepo",
-    "created_at": "2026-10-04T16:42:45.058Z",
+    "created_at": "2026-10-04T17:04:34.363Z",
     "owner_type": "user",
+    "description": null,
     "role": "owner"
   }
 }

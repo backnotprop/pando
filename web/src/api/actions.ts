@@ -39,6 +39,9 @@ export const removeMember = (m: MonorepoRef, login: Login) => remove(Routes.remo
 /** A new name within the same owner; the old one keeps leading here. */
 export const rename = (m: MonorepoRef, name: string) => write(Routes.renameMonorepo(m.owner, m.name), { name });
 
+/** Its one-line description, under its name (owners); an empty one clears it. */
+export const describe = (m: MonorepoRef, description: string) => write(Routes.describeMonorepo(m.owner, m.name), { description: description.trim() || null });
+
 /** Deletes the monorepo, its repos and their history: the full owner/name is the confirmation. */
 export const deleteMonorepo = (m: MonorepoRef) => remove(Routes.deleteMonorepo(m.owner, m.name));
 

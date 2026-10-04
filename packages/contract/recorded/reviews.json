@@ -5,9 +5,9 @@
   "body": {
     "reviews": [
       {
-        "id": "rv_d22cefcf2a9c9238",
+        "id": "rv_7735eb7a666a7109",
         "branch": "feat/ready",
-        "head": "e8f688da53f0764fcefa04c778eb7ef2acdd8f96",
+        "head": "ec2a63d55a41070e53dccdded163c94161f90746",
         "verdict": "approve",
         "body": "Looks right.",
         "comments": [
@@ -18,8 +18,8 @@
             "body": "Good."
           }
         ],
-        "author": "rec-muu1ufmn",
-        "created_at": "2026-10-04T16:43:01.156Z"
+        "author": "rec-muu2mhw1",
+        "created_at": "2026-10-04T17:04:50.338Z"
       }
     ]
   }

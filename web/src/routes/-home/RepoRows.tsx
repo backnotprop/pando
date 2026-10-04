@@ -1,6 +1,7 @@
 // Repositories in a list (owner ruling, links R): the name first, in Link,
 // semibold; the owner's avatar beside it (a person round, an organization
-// square), none on the owner's own page; then a quiet row of facts, each led
+// square), none on the owner's own page; its one-line description, when it has
+// one; then a quiet row of facts, each led
 // by its glyph and each a link to its page where one exists: projects, open
 // branches, what is ready or failing (in their state colours), machines
 // connected now, open issues. Zeros are left out, except open branches.
@@ -110,6 +111,7 @@ export function MonorepoList({ lines, ownerPage = false }: { lines: readonly Mon
                   {m.name}
                 </Ref>
               </span>
+              {m.description ? <span className="overflow-hidden text-[13px] leading-[17px] text-ellipsis whitespace-nowrap text-bark-dim">{m.description}</span> : null}
               <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[12.5px] leading-[17px]">
                 <Facts m={m} words={false} />
               </span>
@@ -137,6 +139,7 @@ export function RepoRows({ lines }: { lines: readonly MonorepoSummary[] }) {
             <Ref kind="name" link={monoLink(m.full_name)} above className="self-start text-[17px] leading-[22px]">
               {m.name}
             </Ref>
+            {m.description ? <p className="max-w-[60em] text-[14px] leading-[20px] text-bark-dim">{m.description}</p> : null}
             <span className="flex flex-wrap items-center gap-x-[18px] gap-y-1.5 text-[13px] leading-[18px]">
               <Facts m={m} words />
               {m.last_activity_at ? <span className="text-ash">Updated {ago(m.last_activity_at, clock)}</span> : null}

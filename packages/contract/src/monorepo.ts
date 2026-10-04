@@ -16,6 +16,8 @@ export const Monorepo = Schema.Struct({
   full_name: FullName,
   kind: MonorepoKind,
   created_at: Timestamp,
+  /** Its one line under the name (at most 160 characters); null when it has none. Set with PATCH {description}, owners only. */
+  description: Schema.NullOr(Schema.String),
 });
 
 export interface Monorepo extends Schema.Schema.Type<typeof Monorepo> {}

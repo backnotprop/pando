@@ -5,12 +5,12 @@
   "body": {
     "status": "merged",
     "branch": "fix/login",
-    "head": "393da942f2f7ecd6ce73bf8674ba07967caa4fd6",
-    "sha": "77089e5301dba737b6a7ec0ed13385234256219d",
-    "base_before": "9ebf399e749ebc66f950c1bb427eae693c8522f0",
-    "merge_base": "9ebf399e749ebc66f950c1bb427eae693c8522f0",
+    "head": "e4bb41e74cdb1bedd61bfa6523a112dde2e0516a",
+    "sha": "45b18812493e6c01b13f1a99d559ca822ef8ca08",
+    "base_before": "03cdb29aeb9fbbd7e95b9bd748fe443722f3ef27",
+    "merge_base": "03cdb29aeb9fbbd7e95b9bd748fe443722f3ef27",
     "forced": true,
-    "merged_by": "rec-muu1ufmn",
+    "merged_by": "rec-muu2mhw1",
     "closes": [
       2
     ]

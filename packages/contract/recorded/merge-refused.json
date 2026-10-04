@@ -5,9 +5,9 @@
   "body": {
     "error": {
       "code": "checks_not_green",
-      "message": "checks are failure on ecce3ac9b4eb; wait, or merge with force",
+      "message": "checks are failure on aa0a83fa51ec; wait, or merge with force",
       "checks": {
-        "sha": "ecce3ac9b4eb4c1fd9e8be8627e31d5098aa8a29",
+        "sha": "aa0a83fa51ec4109ce02183c80f6bd791846c876",
         "state": "failure",
         "required": [
           "ci/test"
@@ -15,14 +15,14 @@
         "missing": [],
         "statuses": [
           {
-            "sha": "ecce3ac9b4eb4c1fd9e8be8627e31d5098aa8a29",
+            "sha": "aa0a83fa51ec4109ce02183c80f6bd791846c876",
             "context": "ci/test",
             "state": "failure",
             "target_url": null,
             "description": "2 tests failed",
-            "creator": "rec-muu1ufmn",
+            "creator": "rec-muu2mhw1",
             "app": null,
-            "created_at": "2026-10-04T16:43:00.369Z"
+            "created_at": "2026-10-04T17:04:49.482Z"
           }
         ],
         "checks_unknown": null

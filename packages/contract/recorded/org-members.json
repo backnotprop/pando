@@ -5,22 +5,22 @@
   "body": {
     "members": [
       {
-        "login": "bo-muu1ufmn",
+        "login": "bo-muu2mhw1",
         "name": "Bo Diaz",
         "picture_url": null,
         "role": "member",
-        "added_at": "2026-10-04T16:43:30.246Z",
-        "added_by": "rec-muu1ufmn",
+        "added_at": "2026-10-04T17:05:17.259Z",
+        "added_by": "rec-muu2mhw1",
         "last_active_at": null
       },
       {
-        "login": "rec-muu1ufmn",
+        "login": "rec-muu2mhw1",
         "name": "Ana Lima",
         "picture_url": null,
         "role": "owner",
-        "added_at": "2026-10-04T16:43:30.237Z",
+        "added_at": "2026-10-04T17:05:17.249Z",
         "added_by": null,
-        "last_active_at": "2026-10-04T16:42:45.052Z"
+        "last_active_at": "2026-10-04T17:04:34.355Z"
       }
     ]
   }

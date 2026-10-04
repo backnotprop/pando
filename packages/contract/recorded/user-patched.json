@@ -1,0 +1,18 @@
+{
+  "schema": "Profile",
+  "route": "PATCH /v1/user {bio, location, links}",
+  "status": 200,
+  "body": {
+    "type": "user",
+    "login": "rec-muu2fpbm",
+    "name": "Ana Lima",
+    "bio": "Plans and code.",
+    "location": "Lisbon",
+    "links": [
+      "https://example.com/ana"
+    ],
+    "picture_url": null,
+    "created_at": "2026-10-04T16:59:17.374Z",
+    "orgs": []
+  }
+}

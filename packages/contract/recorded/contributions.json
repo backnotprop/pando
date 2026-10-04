@@ -1,0 +1,119 @@
+{
+  "schema": "Contributions",
+  "route": "GET /v1/users/{login}/contributions?tz=-420 (your own)",
+  "status": 200,
+  "body": {
+    "login": "rec-muu2fpbm",
+    "tz": -420,
+    "from": "2025-10-05",
+    "to": "2026-10-04",
+    "total": 14,
+    "levels": [
+      1,
+      14,
+      15,
+      16
+    ],
+    "days": [
+      {
+        "date": "2026-10-04",
+        "n": 14,
+        "commit": 5,
+        "branch": 6,
+        "review": 1,
+        "created": 2
+      }
+    ],
+    "monorepos": [
+      {
+        "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+        "owner_type": "org",
+        "kind": "monorepo",
+        "n": 13,
+        "months": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          13
+        ]
+      },
+      {
+        "full_name": "org-muu2fpbm/in-muu2fpbm",
+        "owner_type": "org",
+        "kind": "repo",
+        "n": 1,
+        "months": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    ],
+    "kinds": {
+      "commit": 5,
+      "branch": 6,
+      "review": 1,
+      "created": 2
+    },
+    "months": [
+      {
+        "period": "2026-10",
+        "commit": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "n": 5
+          }
+        ],
+        "branch": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "n": 6
+          }
+        ],
+        "review": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "n": 1
+          }
+        ],
+        "created": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "at": "2026-10-04T16:59:17.390Z"
+          },
+          {
+            "full_name": "org-muu2fpbm/in-muu2fpbm",
+            "at": "2026-10-04T17:00:00.835Z"
+          }
+        ],
+        "joined": [
+          {
+            "org": "org-muu2fpbm",
+            "name": "Rec Org",
+            "at": "2026-10-04T17:00:00.801Z",
+            "created": true
+          }
+        ]
+      }
+    ]
+  }
+}

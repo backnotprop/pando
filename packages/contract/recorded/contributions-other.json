@@ -1,0 +1,87 @@
+{
+  "schema": "Contributions",
+  "route": "GET /v1/users/{login}/contributions?tz=0 (another viewer: only repositories they can open)",
+  "status": 200,
+  "body": {
+    "login": "rec-muu2fpbm",
+    "tz": 0,
+    "from": "2025-10-05",
+    "to": "2026-10-04",
+    "total": 13,
+    "levels": [
+      1,
+      13,
+      14,
+      15
+    ],
+    "days": [
+      {
+        "date": "2026-10-04",
+        "n": 13,
+        "commit": 5,
+        "branch": 6,
+        "review": 1,
+        "created": 1
+      }
+    ],
+    "monorepos": [
+      {
+        "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+        "owner_type": "org",
+        "kind": "monorepo",
+        "n": 13,
+        "months": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          13
+        ]
+      }
+    ],
+    "kinds": {
+      "commit": 5,
+      "branch": 6,
+      "review": 1,
+      "created": 1
+    },
+    "months": [
+      {
+        "period": "2026-10",
+        "commit": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "n": 5
+          }
+        ],
+        "branch": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "n": 6
+          }
+        ],
+        "review": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "n": 1
+          }
+        ],
+        "created": [
+          {
+            "full_name": "org-muu2fpbm/rec-muu2fpbm-renamed",
+            "at": "2026-10-04T16:59:17.390Z"
+          }
+        ],
+        "joined": []
+      }
+    ]
+  }
+}

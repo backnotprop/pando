@@ -158,7 +158,7 @@ function Line({ e, withMonorepo, clock }: { e: FeedEvent; withMonorepo: boolean;
     <li className={`border-t border-rule-faint first:border-t-0 ${fresh ? "arrived" : ""}`}>
       <div
         tabIndex={-1}
-        className={`group -mx-2.5 grid min-h-[38px] items-center gap-4 rounded-[7px] px-2.5 py-1.5 phone:grid-cols-[52px_minmax(0,1fr)] ${withMonorepo ? "grid-cols-[64px_186px_minmax(0,1fr)]" : "grid-cols-[64px_minmax(0,1fr)]"}`}
+        className={`group -mx-2.5 grid min-h-[38px] items-center gap-4 rounded-[7px] px-2.5 py-1.5 ${withMonorepo ? "grid-cols-[64px_186px_minmax(0,1fr)] phone:grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[64px_minmax(0,1fr)]"}`}
       >
         <span className="fox-cool font-mono text-[12.5px] whitespace-nowrap text-ash">{since(e.at, clock)}</span>
         {withMonorepo ? (

@@ -106,6 +106,10 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
       await expect(open.getByRole("link", { name: /feature/ })).toBeVisible();
       await expect(open.getByRole("link", { name: /clash/ })).toBeVisible();
+      // On a phone nothing runs past the screen (the worktree command fits, with its Copy).
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+      await page.setViewportSize({ width: 1440, height: 900 });
       await open.getByRole("link", { name: /feature/ }).click();
       await expect(page).toHaveURL(`${project}/branches/feature`);
       await expect(page.getByRole("list", { name: "Commits" }).getByText("Two is better")).toBeVisible();

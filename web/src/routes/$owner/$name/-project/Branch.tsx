@@ -40,9 +40,10 @@ function Authors({ c }: { c: Commit }) {
   const co = (c.co_authors ?? []).map((a) => a.name);
 
   return (
-    <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[13px] whitespace-nowrap text-bark-dim">
+    // On a phone the line spans the row under the title, in full.
+    <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[13px] whitespace-nowrap text-bark-dim phone:whitespace-normal">
       {c.author.name ? <Avatar name={c.author.name} size={18} /> : null}
-      <span className="min-w-0 overflow-hidden text-ellipsis">
+      <span className="min-w-0 overflow-hidden text-ellipsis phone:overflow-visible">
         {c.author.name ?? ""}
         {co.length ? <span className="text-ash"> and {co.join(", ")}</span> : null}
       </span>
@@ -60,7 +61,7 @@ function Commits({ commits }: { commits: readonly Commit[] }) {
           <div className="-mx-2.5 grid min-h-10 grid-cols-[76px_minmax(0,1fr)_200px_56px] items-center gap-4 rounded-[7px] px-2.5 py-2 phone:grid-cols-[64px_minmax(0,1fr)]">
             <span className="font-mono text-[13.5px] leading-[16px] text-bark-dim">{c.sha.slice(0, 7)}</span>
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{c.title}</span>
-            <span className="phone:hidden">
+            <span className="phone:col-span-2">
               <Authors c={c} />
             </span>
             <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">{c.author.date ? since(c.author.date, clock) : ""}</span>
@@ -224,11 +225,22 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
 
     const heading = failed ? (
       <p className={`${big} text-rust`}>
-        {failed.app === "buildkite" ? <CheckMark height={12} /> : null}
+        {failed.app === "buildkite" ? <CheckMark height={12} big /> : null}
         {failed.context} failed
       </p>
     ) : s.tone === "wait" ? (
-      <p className={`${big} text-bark-dim`}>{s.text === "no ci yet" ? "No ci has reported" : s.text === "checking" ? "Checking main" : `Waiting for ${s.text.replace(/ running$/, "")}`}</p>
+      <p className={`${big} text-bark-dim`}>
+        {s.text === "no ci yet" ? (
+          "No ci has reported"
+        ) : s.text === "checking" ? (
+          "Checking main"
+        ) : (
+          <>
+            Waiting for {s.app === "buildkite" ? <CheckMark height={12} big /> : null}
+            {s.text.replace(/ running$/, "")}
+          </>
+        )}
+      </p>
     ) : (
       <p className={big}>Ready to merge</p>
     );
@@ -267,7 +279,9 @@ function Worktree({ repo, branch }: { repo: Repo; branch: string }) {
     <div className="mt-10">
       <SectionHead title="Worktree" />
       <div className="grid gap-2.5 text-[13px]">
-        <code className="break-all text-bark">{w.path}</code>
+        <span>
+          <code className="break-all text-bark">{w.path}</code>
+        </span>
         <span className="text-bark-dim">
           {w.reported_by} <span className="text-ash">on {w.machine}, {w.kind}</span>
         </span>

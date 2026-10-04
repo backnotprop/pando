@@ -4,6 +4,7 @@ import { Menu } from "@base-ui/react/menu";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { AppLink } from "./paths";
+import { EXACT } from "./TabBar";
 
 /** Where a menu row goes: a monorepo, the home (narrowed or not), or Your machines. */
 export type MenuTarget = AppLink | { to: "/"; search?: { in: string } } | { to: "/settings/machines" };
@@ -30,7 +31,7 @@ export const MenuRule = () => <Menu.Separator className="mx-1 my-1.5 border-t bo
 /** A menu row that navigates within the app. */
 export function MenuLink({ link, current = false, children }: { link: MenuTarget; current?: boolean; children: ReactNode }) {
   return (
-    <Menu.Item render={<Link {...link} />} data-current={current || undefined} className={menuItem}>
+    <Menu.Item render={<Link {...link} activeOptions={EXACT} />} data-current={current || undefined} className={menuItem}>
       {children}
     </Menu.Item>
   );

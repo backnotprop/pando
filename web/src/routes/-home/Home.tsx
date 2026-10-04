@@ -46,7 +46,7 @@ function MonorepoList({ lines }: { lines: readonly MonorepoSummary[] }) {
         <li key={m.id} className="border-t border-rule-faint first:border-t-0">
           <Link
             {...monoLink(m.full_name)}
-            className="-mx-2.5 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3.5 rounded-[7px] px-2.5 py-2 hover:bg-air"
+            className="-mx-2.5 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3.5 rounded-[7px] px-2.5 py-2 hover:bg-air focus-visible:bg-air"
           >
             <Avatar name={m.name} org size={28} />
             <span className="flex min-w-0 flex-col gap-0.5 *:overflow-hidden *:text-ellipsis *:whitespace-nowrap">

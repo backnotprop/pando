@@ -64,7 +64,7 @@ export function FileList({ bar, rows }: { bar: ReactNode; rows: readonly Row[] }
               <Link
                 {...r.link}
                 aria-label={r.kind === "up" ? "Up one folder" : undefined}
-                className="grid min-h-10 grid-cols-[16px_minmax(0,300px)_minmax(0,1fr)_72px] items-center gap-3.5 px-4 hover:bg-air focus-visible:outline-offset-[-1.5px] narrow:grid-cols-[16px_minmax(0,220px)_minmax(0,1fr)_64px] phone:grid-cols-[16px_minmax(0,1fr)_52px] phone:px-3"
+                className="grid min-h-10 grid-cols-[16px_minmax(0,300px)_minmax(0,1fr)_72px] items-center gap-3.5 px-4 hover:bg-air focus-visible:bg-air focus-visible:outline-offset-[-1.5px] narrow:grid-cols-[16px_minmax(0,220px)_minmax(0,1fr)_64px] phone:grid-cols-[16px_minmax(0,1fr)_52px] phone:px-3"
               >
                 <Icon className={`block size-4 ${r.kind === "file" ? "text-ash" : "text-bark-dim"}`} />
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap text-bark">{r.name}</span>

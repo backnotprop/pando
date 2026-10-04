@@ -273,6 +273,10 @@ test("fidelity shots of slice 1 beside the prototype", async ({ page, browser })
       await pair(page, proto, "activity", "/ramos/pando/activity");
     } else {
       await pair(page, proto, "branch", "/ramos/pando/projects/pando/branches/web-api");
+      await pair(page, proto, "branches", "/ramos/pando/projects/pando/branches");
+      await pair(page, proto, "activity", "/ramos/pando/activity");
+      await pair(page, proto, "file-history", "/ramos/pando/history/decisions/RULINGS.md");
+      await pair(page, proto, "file-history-long", "/ramos/pando/history/research/plans/architecture-2026-10-03/NAMESPACES.md");
     }
 
     await proto.close();

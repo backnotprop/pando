@@ -5,10 +5,14 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { AppLink } from "./paths";
 
+export const EXACT = { exact: true, includeSearch: true };
+
 export function Tab({ link, current, label, count }: { link: AppLink; current: boolean; label: string; count?: number | string | undefined }) {
   return (
     <Link
       {...link}
+      // The router marks a link current on a prefix match unless told otherwise; a tab is current only when it says so.
+      activeOptions={EXACT}
       aria-current={current ? "page" : undefined}
       className="flex flex-none items-baseline gap-2 border-b-[1.5px] border-transparent pb-[11px] text-[14px] text-ash hover:text-bark aria-[current=page]:border-bark aria-[current=page]:text-bark"
     >

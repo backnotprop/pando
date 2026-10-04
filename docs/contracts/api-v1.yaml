@@ -6,7 +6,7 @@ info:
   description: |
     Shape:
     - A monorepo is `owner/name`, like GitHub: the owner is
-      a namespace (a person's login; organizations later), the name is
+      a namespace (a person's login, or an organization's), the name is
       unique within its owner, and a permanent `id` keys everything stored.
       A rename or a transfer changes the label only; the old `owner/name`
       keeps working (an alias) until its owner gives that name to another
@@ -74,6 +74,16 @@ info:
     (agents included, through the user's credential). Reviews are comments
     and approvals, not a gate. The merge gate is the checks, and `?force=1`
     merges past them. Owners also manage members and hooks.
+
+    Organizations: anyone signed in creates one (`POST /v1/orgs`); its name
+    is a namespace in the same space as logins. Roles are `owner` and
+    `member`. Everyone in an org can open and push to every monorepo the
+    org owns, and its owners are owners of all of them: a person's role in
+    an org's monorepo is the higher of their own row in the monorepo and
+    their org role. A monorepo can still add people from outside the org
+    itself. People are added at once (by login, or by an email that has
+    signed in), or at that email's first sign-in. Removal from an org takes
+    effect within 15 s, as for a monorepo.
 
     Signing in (`pando login`): WorkOS AuthKit's CLI Auth, the OAuth device
     flow, run through the Worker. `POST /v1/login/device` returns a code
@@ -483,6 +493,247 @@ paths:
       responses:
         "204": { description: Revoked }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/users/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: A login or an org (any case).
+        schema: { $ref: "#/components/schemas/Login" }
+    get:
+      operationId: getOwner
+      summary: Whose namespace this is, a person or an organization (what `/{name}` shows)
+      tags: [users]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Profile"
+                  - $ref: "#/components/schemas/Org"
+                discriminator: { propertyName: type }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/user/orgs:
+    get:
+      operationId: listMyOrgs
+      summary: The organizations this user is in, with their role, by login
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orgs]
+                properties:
+                  orgs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Org" }
+  /v1/orgs:
+    post:
+      operationId: createOrg
+      summary: Create an organization; the caller is its first owner
+      description: |
+        The login follows the namespace rule (`Login`): one space with
+        people's logins, so a taken name (a person's or an org's) is 409
+        `namespace_taken` and a reserved one 400 `reserved_name`. The
+        namespace, the org and the caller's owner row are written in one
+        batch, so of two creates of one name at once, one wins.
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login]
+              properties:
+                login: { $ref: "#/components/schemas/Login" }
+                name: { type: string, maxLength: 100, description: "The display name (\"Plannotator\")." }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}:
+    parameters:
+      - $ref: "#/components/parameters/org"
+    get:
+      operationId: getOrg
+      summary: An organization's header (anyone signed in)
+      description: "`role` is the caller's (null when not in it); `members` is the count of its people, shown to its people only (null otherwise)."
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateOrg
+      summary: Change an organization's details (owners)
+      description: Fields left out are kept; null clears one.
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: [string, "null"], maxLength: 100 }
+                description: { type: [string, "null"], maxLength: 160 }
+                website: { type: [string, "null"], maxLength: 2048, description: An https URL. }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}/members:
+    parameters:
+      - $ref: "#/components/parameters/org"
+    get:
+      operationId: listOrgMembers
+      summary: An organization's people, by login (its people only)
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgMember" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}/members/{login}:
+    parameters:
+      - $ref: "#/components/parameters/org"
+      - name: login
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Login" }
+    put:
+      operationId: putOrgMember
+      summary: Add a person to the organization by login, or change their role (owners)
+      description: They are in at once, and gain every monorepo the org owns. 409 `last_owner` when it would leave the org with no owner.
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/MemberRole" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgMember" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: removeOrgMember
+      summary: Remove a person from the organization (owners), or leave it (yourself)
+      description: Their access to the org's monorepos ends within 15 s (plus replica lag); rows of their own in a monorepo stay. 409 `last_owner` for the org's only owner.
+      tags: [orgs]
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/orgs/{org}/invites:
+    parameters:
+      - $ref: "#/components/parameters/org"
+    post:
+      operationId: orgInvite
+      summary: Add a person to the organization by email (owners)
+      description: |
+        As a monorepo's invite: someone who has already signed in with that
+        email is added now (200, `status: added`); otherwise the invite waits
+        (201, `status: invited`) and becomes a membership at that email's
+        first sign-in (a verified email only).
+      tags: [orgs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+                role: { $ref: "#/components/schemas/MemberRole" }
+      responses:
+        "200":
+          description: Added now
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [added] }
+                  member: { $ref: "#/components/schemas/OrgMember" }
+        "201":
+          description: Invited; waiting for that email to sign in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [invited] }
+                  invite: { $ref: "#/components/schemas/Invite" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listOrgInvites
+      summary: Invites still waiting (its people)
+      tags: [orgs]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invites]
+                properties:
+                  invites:
+                    type: array
+                    items: { $ref: "#/components/schemas/Invite" }
+  /v1/orgs/{org}/invites/{email}:
+    parameters:
+      - $ref: "#/components/parameters/org"
+      - name: email
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: revokeOrgInvite
+      summary: Withdraw an invite (owners)
+      tags: [orgs]
+      responses:
+        "204": { description: Withdrawn }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos:
     post:
       operationId: createMonorepo
@@ -497,7 +748,7 @@ paths:
               required: [name]
               properties:
                 name: { $ref: "#/components/schemas/Name" }
-                owner: { $ref: "#/components/schemas/Login", description: "The namespace; default and, for now, only your own (403 `not_your_namespace`; organizations later)." }
+                owner: { $ref: "#/components/schemas/Login", description: "The namespace: your own login (the default), or an organization you are in (any member may). Else 403 `not_your_namespace`. In an org, the creator also gets their own owner row, so they can rename or delete what they made." }
                 kind:
                   type: string
                   enum: [monorepo, repo]
@@ -516,7 +767,7 @@ paths:
                 type: object
                 required: [monorepo, repos, replaced_alias]
                 properties:
-                  monorepo: { $ref: "#/components/schemas/Monorepo" }
+                  monorepo: { $ref: "#/components/schemas/MonorepoEntry" }
                   repos:
                     type: array
                     description: The plain repo for kind `repo`; empty for kind `monorepo`.
@@ -527,9 +778,10 @@ paths:
         "409": { description: "`monorepo_exists`: the owner has a monorepo with that name.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
     get:
       operationId: listMonorepos
-      summary: The monorepos this user belongs to
+      summary: The monorepos this user belongs to (their own, by membership, and by organization)
       description: |
-        By owner, then name. With `?name=<name>`: only those named so, under
+        By owner (the person's own first), then name. With `?owner=<owner>`: only
+        that owner's (an org's page). With `?name=<name>`: only those named so, under
         any owner (`pando clone <name>`: the cli prefers your own namespace,
         else the only match, else it asks). With `?summary=1` (the web home): most recently active first,
         each with its one line (`MonorepoSummary`), answered from the person's
@@ -546,6 +798,10 @@ paths:
           in: query
           description: A monorepo name (any case). No match is an empty list.
           schema: { type: string }
+        - name: owner
+          in: query
+          description: One owner's monorepos only (a login or an org, any case). Works with `summary`. No match is an empty list.
+          schema: { $ref: "#/components/schemas/Login" }
       responses:
         "200":
           description: OK
@@ -559,7 +815,7 @@ paths:
                     type: array
                     items:
                       oneOf:
-                        - $ref: "#/components/schemas/Monorepo"
+                        - $ref: "#/components/schemas/MonorepoEntry"
                         - $ref: "#/components/schemas/MonorepoSummary"
   /v1/events:
     get:
@@ -630,6 +886,10 @@ paths:
           in: query
           description: "One monorepo's `owner/name` (an old name works too). The home narrows by monorepo only."
           schema: { type: string }
+        - name: owner
+          in: query
+          description: "Only the person's monorepos under this owner (an org's page shows its activity this way). Not with `in` (400). An owner with none of the person's monorepos gives an empty page."
+          schema: { $ref: "#/components/schemas/Login" }
       responses:
         "200":
           description: A page, newest first
@@ -718,7 +978,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Monorepo" }
+              schema: { $ref: "#/components/schemas/MonorepoEntry" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
     patch:
@@ -728,10 +988,12 @@ paths:
         The label moves; the id, repos, history, members, Artifacts repos and
         feeds stay. The old `owner/name` keeps working for the API and the git
         door (an alias) until that owner gives the name to another monorepo.
-        A transfer goes, for now, to a person who is already an owner of it
-        (400 `bad_owner`; organizations later). 409 `monorepo_exists` when the
-        new name is taken. `replaced_alias` reports an old name of another
-        monorepo that this one took over.
+        A transfer (`owner`) goes to an organization the caller is in (else
+        403 `not_your_namespace`), or to a person who already has their own
+        owner row in it (else 400 `bad_owner`). Its own members stay; moved
+        into an org, the org's people gain it, and moved out, they lose it.
+        409 `monorepo_exists` when the new name is taken. `replaced_alias`
+        reports an old name of another monorepo that this one took over.
       tags: [monorepos]
       requestBody:
         required: true
@@ -749,7 +1011,7 @@ paths:
             application/json:
               schema:
                 allOf:
-                  - $ref: "#/components/schemas/Monorepo"
+                  - $ref: "#/components/schemas/MonorepoEntry"
                   - type: object
                     required: [replaced_alias]
                     properties:
@@ -966,6 +1228,7 @@ paths:
     get:
       operationId: listMembers
       summary: The monorepo's members
+      description: Everyone who can open it, by login. In an org's monorepo that is its own members and the org's people; `via` says which, and `role` is the higher of the two.
       tags: [monorepos]
       responses:
         "200":
@@ -1064,6 +1327,7 @@ paths:
     put:
       operationId: putMember
       summary: Add a user to the monorepo, or change their role (owners)
+      description: Their own row; in an org's monorepo it adds to what the org gives them. 409 `last_owner` when it would leave a person's monorepo with no owner.
       tags: [monorepos]
       requestBody:
         required: true
@@ -1084,7 +1348,8 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: removeMember
-      summary: Remove a user from the monorepo (owners; the last owner stays)
+      summary: Remove a user's own row from the monorepo (owners; a person's monorepo keeps one owner)
+      description: Removes their own row only (404 when they have none); someone in the owning org keeps the org's access. An org's monorepo needs no owner row of its own (its org's owners own it).
       tags: [monorepos]
       responses:
         "204": { description: Removed }
@@ -2572,7 +2837,7 @@ components:
       name: owner
       in: path
       required: true
-      description: The monorepo's owner, a namespace (a person's login). Matched without case.
+      description: The monorepo's owner, a namespace (a person's login or an organization). Matched without case.
       schema: { $ref: "#/components/schemas/Login" }
     monorepo:
       name: monorepo
@@ -2580,6 +2845,12 @@ components:
       required: true
       description: The monorepo's name within its owner (or an old name). Matched without case.
       schema: { $ref: "#/components/schemas/Name" }
+    org:
+      name: org
+      in: path
+      required: true
+      description: An organization's login. Matched without case.
+      schema: { $ref: "#/components/schemas/Login" }
     repo:
       name: repo
       in: path
@@ -2624,7 +2895,7 @@ components:
     Login:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"
-      description: "A user's login, which is their namespace (organizations share the same space, later): 1 to 39 lower-case letters, digits and single hyphens, no hyphen at either end (input in any case is lowered). Reserved, because a namespace is the first URL segment: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, orgs, users, docs. A login made at sign-in comes from the email's local part, skipping reserved and taken names (`base`, `base-2`, ... `base-999`, then a random tail)."
+      description: "A user's login, which is their namespace, or an organization's (one space for both): 1 to 39 lower-case letters, digits and single hyphens, no hyphen at either end (input in any case is lowered). Reserved, because a namespace is the first URL segment: v1, healthz, login, logout, settings, assets, fonts, new, api, app, static, orgs, users, docs. A login made at sign-in comes from the email's local part, skipping reserved and taken names (`base`, `base-2`, ... `base-999`, then a random tail)."
     MemberRole:
       type: string
       enum: [owner, member]
@@ -2651,8 +2922,48 @@ components:
         name: { $ref: "#/components/schemas/Name" }
         full_name: { type: string, description: "`owner/name`." }
         kind: { type: string, enum: [monorepo, repo] }
-        role: { $ref: "#/components/schemas/MemberRole" }
         created_at: { type: string, format: date-time }
+    MonorepoEntry:
+      allOf:
+        - $ref: "#/components/schemas/Monorepo"
+        - type: object
+          required: [role, owner_type]
+          properties:
+            role: { $ref: "#/components/schemas/MemberRole", description: "The caller's: the higher of their own row and, in an org's monorepo, their org role." }
+            owner_type: { type: string, enum: [user, org], description: "Whose namespace `owner` is: a person's or an organization's." }
+    Profile:
+      type: object
+      description: A person, as getOwner answers (the profile work adds more fields).
+      required: [type, login, name, picture_url, created_at]
+      properties:
+        type: { type: string, enum: [user] }
+        login: { $ref: "#/components/schemas/Login" }
+        name: { type: [string, "null"] }
+        picture_url: { type: [string, "null"], description: As on User. }
+        created_at: { type: string, format: date-time }
+    Org:
+      type: object
+      required: [type, login, name, description, website, created_at, role, members]
+      properties:
+        type: { type: string, enum: [org] }
+        login: { $ref: "#/components/schemas/Login" }
+        name: { type: [string, "null"], description: "The display name (\"Plannotator\")." }
+        description: { type: [string, "null"] }
+        website: { type: [string, "null"], description: An https URL. }
+        created_at: { type: string, format: date-time }
+        role: { oneOf: [{ $ref: "#/components/schemas/MemberRole" }, { type: "null" }], description: "The caller's role in it; null when not in it." }
+        members: { type: [integer, "null"], description: "How many people are in it; null for someone who is not in it." }
+    OrgMember:
+      type: object
+      required: [login, name, picture_url, role, added_at, added_by, last_active_at]
+      properties:
+        login: { $ref: "#/components/schemas/Login" }
+        name: { type: [string, "null"] }
+        picture_url: { type: [string, "null"] }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        added_at: { type: string, format: date-time }
+        added_by: { type: [string, "null"], description: Null for the org's creator. }
+        last_active_at: { type: [string, "null"], format: date-time }
     TreeEntry:
       type: object
       required: [name, type, mode, oid]
@@ -2796,7 +3107,7 @@ components:
         at: { type: string, format: date-time, description: When the monorepo computed it. }
     MonorepoSummary:
       allOf:
-        - $ref: "#/components/schemas/Monorepo"
+        - $ref: "#/components/schemas/MonorepoEntry"
         - type: object
           description: "listMonorepos with ?summary=1. Nulls until the person's feed has the monorepo's line."
           properties:
@@ -2877,7 +3188,7 @@ components:
               email: { type: [string, "null"] }
     Member:
       type: object
-      required: [login, name, picture_url, role, added_at, last_active_at]
+      required: [login, name, picture_url, role, added_at, last_active_at, via]
       properties:
         login: { type: string }
         name: { type: [string, "null"], description: "The user's display name, if known." }
@@ -2891,6 +3202,10 @@ components:
           description: >-
             The newest last use of any of their credentials (written at most
             once a minute per credential); null if none was ever used.
+        via:
+          type: string
+          enum: [direct, org, both]
+          description: "Where their access comes from: their own row (`direct`), the org that owns the monorepo (`org`), or both. `added_at` and `added_by` come from their own row when they have one."
     Repo:
       type: object
       required: [monorepo, name, path, default_branch, clone_url, created_at]

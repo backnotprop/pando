@@ -6,12 +6,11 @@
 import type { Env } from "../env";
 import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
 import { gitRequest, listRefs, withRepo } from "./artifacts";
-import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal, statusReport, type RefCommand } from "./pktline";
+import { concat, drain, parseReport, pkt, readCommandSection, refusal, statusReport, type RefCommand } from "./pktline";
 import { isBusy, LEASE_MS } from "./gate";
 import { wholeThinTrees } from "./thinpack";
 import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
 
-/** Count the pack bytes git sends (push_bytes on the timing line). */
 /**
  * A push up to this size is held in memory, so the door can send it to
  * Artifacts again when Artifacts answers that the repo is busy (about 2
@@ -19,6 +18,19 @@ import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, start
  * still be refused; the person pushes again.
  */
 export const BUSY_REPLAY_MAX = 1 << 20;
+
+/**
+ * The largest push Artifacts takes: 64 MiB of receive-pack request (measured 2026-10-04: 67,101,123 bytes landed,
+ * 67,116,129 got "receive-pack request exceeds maximum size"). A larger push is refused by the door, never sent whole.
+ */
+export const PUSH_MAX = 64 << 20;
+
+/** Tests only (DOOR_TEST=1): X-Pando-Test-Push-Max lowers PUSH_MAX for one push, so a small push can be over it. */
+function pushMax(env: Env, req: Request): number {
+  const lowered = env.DOOR_TEST === "1" ? Number(req.headers.get("x-pando-test-push-max") ?? 0) : 0;
+
+  return lowered > 0 ? Math.min(lowered, PUSH_MAX) : PUSH_MAX;
+}
 
 /** The wait before the one retry: jittered, so two refused pushes do not collide again. */
 const BUSY_WAIT_MS = [150, 400] as const;
@@ -39,21 +51,69 @@ async function bufferUpTo(head: Uint8Array, reader: ReadableStreamDefaultReader<
   return { all: false, bytes: concat(chunks) };
 }
 
-function countBytes(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+interface CappedPush {
+  body: ReadableStream<Uint8Array>;
+  /** Aborts the call to Artifacts when the push goes over the cap. */
+  signal: AbortSignal;
+  /** Whether the push is over the cap: stopped on its way, or found so when the rest of git's body was read. */
+  over: () => boolean;
+  /** Read what git still sends (after a failed or early answer), still counting: git reads the answer only after. */
+  readRest: () => Promise<void>;
+}
+
+/**
+ * A streamed push on its way to Artifacts: `first`, then the rest of git's body, counted (push_bytes on the timing
+ * line). Going over `max`, it aborts the call before the pack's last bytes (its checksum) are sent, so Artifacts
+ * cannot take the push. git's body is never cancelled: readRest reads it to the end.
+ */
+function capped(first: Uint8Array, rest: ReadableStreamDefaultReader<Uint8Array>, max: number): CappedPush {
   const t = currentTiming(); // the stream's callbacks may run outside the request's context
   let n = 0;
+  let next: Uint8Array | null = first;
+  let over = false;
+  const abort = new AbortController();
 
-  return body.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, ctl) {
-        n += chunk.byteLength;
-        ctl.enqueue(chunk);
-      },
-      flush() {
+  const readRest = async () => {
+    for (;;) {
+      const { done, value } = await rest.read();
+
+      if (done) {
         if (t) t.fields.push_bytes = n;
-      },
-    }),
-  );
+
+        return;
+      }
+
+      n += value.byteLength;
+      over ||= n > max;
+    }
+  };
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(ctl) {
+      const { done, value } = next ? { done: false, value: next } : await rest.read();
+      next = null;
+
+      if (done) {
+        if (t) t.fields.push_bytes = n;
+        ctl.close();
+
+        return;
+      }
+
+      n += value.byteLength;
+
+      if (n > max) {
+        over = true;
+        abort.abort();
+
+        return;
+      }
+
+      ctl.enqueue(value);
+    },
+  });
+
+  return { body, signal: abort.signal, over: () => over, readRest };
 }
 
 import type { Identity, RepoRecord } from "./types";
@@ -273,9 +333,9 @@ async function receivePack(
   if (!req.body) throw new HttpError(400, "bad_request", "empty push");
   let body: ReadableStream<Uint8Array> = req.body;
 
-  if ((req.headers.get("content-encoding") ?? "").toLowerCase() === "gzip") {
-    body = body.pipeThrough(new DecompressionStream("gzip"));
-  }
+  const gzip = (req.headers.get("content-encoding") ?? "").toLowerCase() === "gzip";
+
+  if (gzip) body = body.pipeThrough(new DecompressionStream("gzip"));
 
   const section = await readCommandSection(body);
   const stub = monorepoStub(env, monorepo);
@@ -291,6 +351,16 @@ async function receivePack(
     return new Response(refusal(section.commands, reasons, section.caps, message), {
       headers: { "content-type": "application/x-git-receive-pack-result", "cache-control": "no-cache" },
     });
+  }
+
+  const max = pushMax(env, req);
+  const declared = Number(req.headers.get("content-length") ?? 0);
+
+  // Over the most Artifacts takes, by git's own count: refused before anything is sent.
+  if (declared > max && !gzip) {
+    await drain(section.rest);
+
+    return tooLarge(section, max, repo);
   }
 
   // Small pushes are read in full first (before taking a slot), so a busy answer can be replayed.
@@ -324,6 +394,8 @@ async function receivePack(
   // A failed call (thrown, or Artifacts answering 5xx): its reason, for the log. The push may have landed anyway.
   let failed: string | null = null;
   let fakeFail = env.DOOR_TEST === "1" && req.headers.get("x-pando-test-fail") === "1";
+  // A push not held in memory, as it streams to Artifacts (stopped if it goes over `max`). Sent once: never resent.
+  const streamed = buffered.all ? null : capped(buffered.bytes, section.rest, max);
   // Tests only: the pack reaches Artifacts for real; its answer is dropped as if the call threw.
   let loseAnswer = env.DOOR_TEST === "1" && req.headers.get("x-pando-test-lose-answer") === "1";
 
@@ -355,7 +427,8 @@ async function receivePack(
         "content-type": "application/x-git-receive-pack-request",
         accept: "application/x-git-receive-pack-result",
       },
-      body: buffered.all ? payload : countBytes(prepend(buffered.bytes, section.rest)),
+      body: streamed ? streamed.body : payload,
+      signal: streamed?.signal,
     });
 
     // The whole report, before git sees it: the push is recorded first (it is small).
@@ -410,6 +483,9 @@ async function receivePack(
       ({ res, bytes, busy, failed } = await send());
       const again = buffered.all && !resent;
 
+      // Over the most Artifacts takes: the door stopped the pack before its end, so it cannot have landed.
+      if (streamed?.over()) break;
+
       if (busy) {
         // Busy (mid-push with others): no pack taken. A push held in memory is sent again after a moment.
         note({ busy_retry: again ? "resent" : buffered.all ? "failed" : "too_large" });
@@ -420,7 +496,6 @@ async function receivePack(
           continue;
         }
 
-        if (!res) await drain(section.rest); // the test's unsent large push
         break;
       }
 
@@ -443,8 +518,6 @@ async function receivePack(
       if (failed) {
         console.warn(`receive-pack on ${repo.artifacts_name} failed: ${failed}`);
         note({ push_error: failed.slice(0, 200) });
-
-        if (!buffered.all) await drain(section.rest).catch(() => undefined); // whatever git still sends
       }
 
       // The push may have landed: read its refs before sending it again.
@@ -469,6 +542,14 @@ async function receivePack(
   } finally {
     clearInterval(renew);
     await stub.releaseWrite(repo.artifacts_name, lease, false).catch(() => false);
+  }
+
+  // A streamed push: whatever git still sends, read with the slot free. Over the cap in all, it cannot have landed:
+  // the door never sent it whole.
+  if (streamed) {
+    await streamed.readRest().catch(() => undefined);
+
+    if (streamed.over()) return tooLarge(section, max, repo);
   }
 
   // Still busy: a plain message, not Artifacts' code.
@@ -598,6 +679,26 @@ async function keepUnrecorded(
       console.error(`keeping an unrecorded push to ${repo} failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+}
+
+/**
+ * A push over the most one push carries: every ref refused, nothing sent whole to Artifacts, so nothing landed. It
+ * names the limit and the way that works: steps under it, oldest commits first. main takes only its first push, so a
+ * main too large for one push goes up through pando init, which pushes it in steps.
+ */
+function tooLarge(section: { commands: RefCommand[]; caps: Set<string> }, max: number, repo: RepoRecord): Response {
+  note({ push_outcome: "too_large" });
+  const limit = max % (1 << 20) ? `${max} bytes` : `${max >> 20} MiB`;
+  const main = section.commands.some((c) => c.ref === `refs/heads/${repo.default_branch}`);
+
+  const how = main
+    ? [`Pando: ${repo.default_branch} takes only its first push, so run pando init in this checkout: it pushes the history in steps.`]
+    : [
+        "Pando: push it in steps, oldest commits first, each under the limit:",
+        "Pando:   git push <remote> <an older commit>:refs/heads/<branch>   then the next, then git push",
+      ];
+
+  return busyRefusal(section, [`Pando: this push is over ${limit}, the most one push can carry (Artifacts' limit); nothing landed.`, ...how].join("\n"), `over ${limit}; push in steps`);
 }
 
 /** Every ref refused with `message` (side-band aware: git prints it, then "! [remote rejected] ... (busy; push again)"). */

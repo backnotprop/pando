@@ -20,6 +20,7 @@ import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS, type Facts } from "./facts";
 import { FactsOut, type FactsRequest } from "./facts-out";
 import { HooksOut } from "./hooks-out";
+import { MetaApplyOut, type MetaApplyRow } from "./meta-apply";
 import type { BranchList, BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
 import { changedFiles } from "./diff";
@@ -281,6 +282,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private factsOut: FactsOut;
   /** Hook deliveries, sent by RPC (hooks-out.ts). */
   private hooksOut: HooksOut;
+  /** Merges into the meta layer, on their way to the live files (meta-apply.ts). */
+  private metaApply: MetaApplyOut;
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
 
@@ -294,6 +297,7 @@ export class MonorepoObject extends DurableObject<Env> {
       ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t),
       (name) => this.repoRow(name), (repo) => this.currentMain(repo), ATTEMPTS_KEPT,
     );
+    this.metaApply = new MetaApplyOut(this.sql, (row) => this.applyToMetaLayer(row), (t) => this.feed.armAt(t));
     this.ci = new CiStore(ctx, env, this.sql, {
       info: () => this.info(),
       publish: (e) => this.publish(e),
@@ -362,6 +366,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.machines.ensureSchema();
     this.factsOut.ensureSchema();
     this.hooksOut.ensureSchema();
+    this.metaApply.ensureSchema();
     this.ci.ensureSchema();
   }
 
@@ -924,6 +929,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   private async mergeNow(a: MergeArgs): Promise<MergeResult> {
     const r = (await this.getRepo(a.repo)) ?? fail(404, "not_found", `no repo ${a.repo}`);
+    const isMeta = r.artifacts_name === metaArtifactsName(this.info()!.id);
     let { head, base, read } = await this.mergeHeads(r, a, false);
     note({ heads_from: read ? "artifacts" : "records" });
     let checks: Checks | null = null;
@@ -1013,6 +1019,9 @@ export class MonorepoObject extends DurableObject<Env> {
       "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at, machine, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       a.repo, a.branch, head, out.old, out.sha, out.mergeBase, a.identity.login, forced ? 1 : 0, at, a.identity.credential_name, a.identity.agent ?? null,
     );
+
+    // The live files get the merge through the outbox, written with the record (CODE-VS-MODEL M2).
+    if (isMeta) this.metaApply.landed(randomId("mg_"), out.old, out.sha, a.identity);
     this.sql.exec(
       `INSERT INTO branches (repo, name, head, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (repo, name) DO UPDATE SET deleted_at = NULL`,
@@ -1042,21 +1051,18 @@ export class MonorepoObject extends DurableObject<Env> {
       a.origin,
     );
 
-    if (r.artifacts_name === metaArtifactsName(this.info()!.id)) {
-      // The merge has landed; machines get it on the live layer's next try if this fails.
-      await this.applyToMetaLayer(out.old, out.sha, a.identity).catch((err) =>
-        console.error("applyFromMain failed:", redact(err instanceof Error ? err.message : String(err))),
-      );
-    }
+    // The first try before answering, as before: the merge is on machines when the caller hears of it. A failed try is retried.
+    if (isMeta) await this.metaApply.flush();
 
     const result: MergeResult = { status: "merged", branch: a.branch, head, sha: out.sha, base_before: out.old, merge_base: out.mergeBase, forced, merged_by: a.identity.login };
 
     return result;
   }
 
-  /** A merge landed on the meta layer's main: hand the changed files to the live meta layer. */
-  private async applyToMetaLayer(before: string, commit: string, who: Identity): Promise<void> {
+  /** A merge landed on the meta layer's main: hand the changed files to the live meta layer (a meta_apply row). Throws when it did not. */
+  private async applyToMetaLayer(row: MetaApplyRow): Promise<void> {
     const m = this.info()!.id;
+    const { before, commit_sha: commit, who } = row;
 
     const changes = await withRepo(this.env, metaArtifactsName(m), async (repo) => {
       const [a, b] = await Promise.all([repo.readCommit(before), repo.readCommit(commit)]);
@@ -1069,7 +1075,10 @@ export class MonorepoObject extends DurableObject<Env> {
           if (!f.sha) return { path: f.path, bytes: null };
           const blob = await repo.readBlob(f.sha);
 
-          return { path: f.path, bytes: blob ? new Uint8Array(await blob.arrayBuffer()) : null };
+          // A blob that cannot be read is an error to try again, never a delete on every machine.
+          if (!blob) throw new HttpError(502, "artifacts", `${f.path}'s bytes (${f.sha}) could not be read`);
+
+          return { path: f.path, bytes: new Uint8Array(await blob.arrayBuffer()) };
         }),
       );
     });
@@ -1207,11 +1216,12 @@ export class MonorepoObject extends DurableObject<Env> {
     });
   }
 
-  /** The one alarm: the feed's outbox and tick, then the facts' and the hooks' retries. */
+  /** The one alarm: the feed's outbox and tick, then the facts', the hooks' and the meta layer updates' retries. */
   async alarm(): Promise<void> {
     await this.feed.alarm();
     await this.factsOut.alarm();
     await this.hooksOut.alarm();
+    await this.metaApply.alarm();
   }
 
   // ── Object sizes (git protocol v2 object-info) ───────────────────────────

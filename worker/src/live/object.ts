@@ -93,11 +93,15 @@ type VersionRow = {
   lfs_size: number | null; // and the large file's own size
 };
 
-/** Tests only (META_TEST=1): what the next event sends do. */
+/** Tests only (META_TEST=1): what the next event sends do, and the next updates from main. */
 export interface MetaOutboxTest {
   fail: number;
   lose: number;
   crash: boolean;
+  /** The next n applyFromMain calls fail before applying anything. */
+  applyFail: number;
+  /** The next n apply everything, then fail: the caller's answer is lost. */
+  applyLose: number;
 }
 
 /** The outbox as it is: rows waiting and the failed tries in a row, with the test switches. */
@@ -336,6 +340,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS applied (commit_sha TEXT PRIMARY KEY, at INTEGER NOT NULL);
     `);
   }
 
@@ -1111,7 +1116,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- tests only (META_TEST=1) ----
 
-  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false };
+  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false, applyFail: 0, applyLose: 0 };
 
   /** Fail the next `fail` sends, lose the answer of the next `lose` (sent, then taken as failed), crash the object before the next send; and the outbox as it is. */
   testOutbox(set: Partial<MetaOutboxTest> = {}): MetaOutboxState {
@@ -1131,6 +1136,21 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     if (this.env.META_TEST !== "1" || this.testSet.fail <= 0) return;
     this.testSet.fail--;
     throw new Error("meta test: the send failed");
+  }
+
+  /** Throws for the next `applyFail` applyFromMain calls (`lose`: for the next `applyLose`, after applying). */
+  private testApply(lose: boolean): void {
+    if (this.env.META_TEST !== "1") return;
+
+    if (lose && this.testSet.applyLose > 0) {
+      this.testSet.applyLose--;
+      throw new Error("meta test: applied, and the answer was lost");
+    }
+
+    if (!lose && this.testSet.applyFail > 0) {
+      this.testSet.applyFail--;
+      throw new Error("meta test: applyFromMain failed");
+    }
   }
 
   private testAfterSend(): void {
@@ -1327,9 +1347,19 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   // ---- updates from main (Durable Object RPC, called by the monorepo object) ----
 
+  //
+  // Idempotent per merge commit (CODE-VS-MODEL M2): the monorepo object tries
+  // again until a call succeeds, so a call whose answer was lost may come
+  // twice. A commit already applied changes nothing, so a live save made
+  // since is never replaced a second time.
   async applyFromMain(input: { monorepo?: string; commit: string; author?: string; login?: string; changes: MainChange[] }): Promise<{ versions: number[] }> {
+    this.testApply(false);
+
+    if (this.applied(input.commit)) return { versions: [] };
     // Hash first, the only await: the loop below reads and writes with no await.
     const changes = await Promise.all(input.changes.map((c) => hashed(c)));
+
+    if (this.applied(input.commit)) return { versions: [] }; // the same commit, applied by a call that ran meanwhile
 
     if (input.monorepo && this.kv("monorepo") !== input.monorepo) this.setKv("monorepo", input.monorepo);
     const versions: number[] = [];
@@ -1363,9 +1393,15 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       this.broadcast(this.changeMessage(this.row(version)));
     }
 
+    this.sql.exec("INSERT INTO applied (commit_sha, at) VALUES (?, ?)", input.commit, Date.now());
     this.setKv("parent", input.commit);
+    this.testApply(true);
 
     return { versions };
+  }
+
+  private applied(commit: string): boolean {
+    return this.sql.exec("SELECT 1 FROM applied WHERE commit_sha = ?", commit).toArray().length > 0;
   }
 
   // ---- commits after quiet ----

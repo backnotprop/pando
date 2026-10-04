@@ -395,6 +395,17 @@ await env.META.get(id).applyFromMain({
 Each change becomes a version with `source: "main"`, with no base check (main
 wins), and is broadcast. This is the only way `.pando/**` changes.
 
+- **Never lost.** The monorepo object writes the update as a row of its
+  outbox (`meta_apply`) in the same step as the merge's record, and tries it
+  once before the merge answers. A failed try is tried again after 1 s, 5 s
+  and 30 s, then every 5 minutes, until it is done. Updates go in merge
+  order: a later merge never reaches machines before an earlier one.
+- **Once.** The meta layer object keeps the commits it applied. A call for a
+  commit already applied changes nothing, so a call sent again after a lost
+  answer never replaces a newer live save.
+- A file whose bytes the monorepo object cannot read is an error, tried
+  again, never a delete on every machine.
+
 ## Deleting a monorepo
 
 `DELETE /v1/monorepos/{owner}/{monorepo}` (owner only, server-git) calls the meta

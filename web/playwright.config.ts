@@ -1,8 +1,10 @@
 // End-to-end tests: a real browser against the real Worker (wrangler dev with
 // its local D1 and Durable Objects, real Artifacts, real git pushes), and a
-// stand-in WorkOS on this machine for sign-in. Ports are in e2e/ports.ts; the
-// Worker keeps its own --persist-to state. A server already on either port is
-// an error, never reused, so a run never tests another lane's Worker.
+// stand-in WorkOS on this machine for sign-in, which also serves the docs
+// site's What's new (the Worker's DOCS_URL points at it). Ports are in
+// e2e/ports.ts; the Worker keeps its own --persist-to state. A server already
+// on either port is an error, never reused, so a run never tests another
+// lane's Worker.
 //
 // Before a run:
 // - worker/.dev.vars in this worktree (gitignored; the owner's secrets, never
@@ -33,7 +35,7 @@ export default defineConfig({
   webServer: [
     { command: "node e2e/workos.ts", url: `http://127.0.0.1:${STANDIN_PORT}/healthz`, reuseExistingServer: false },
     {
-      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state}`,
+      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site`,
       url: `http://localhost:${WORKER_PORT}/healthz`,
       reuseExistingServer: false,
       timeout: 180_000,

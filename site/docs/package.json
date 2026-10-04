@@ -1,0 +1,41 @@
+{
+  "name": "pando-docs",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pando's docs: a nimbus site (github.com/cloudflare/nimbus, scaffolded with @cloudflare/create-nimbus-docs 0.7.9), built static and deployed as the assets-only Worker pando-docs.",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "check": "astro build && nimbus-docs lint",
+    "preview": "astro preview",
+    "typecheck": "astro check",
+    "lint:docs": "nimbus-docs lint",
+    "lint:docs:fix": "nimbus-docs lint --fix",
+    "prepreview:cf": "astro build",
+    "preview:cf": "wrangler dev",
+    "predeploy": "astro check && npm run check",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/nimbus-docs": "0.15.2",
+    "@iconify-json/ph": "1.2.2",
+    "@readme/httpsnippet": "11.4.0",
+    "@scalar/openapi-parser": "0.28.12",
+    "astro": "7.3.1",
+    "astro-og-canvas": "0.13.2",
+    "canvaskit-wasm": "0.41.1",
+    "clsx": "2.1.1",
+    "openapi-sampler": "1.7.4",
+    "tailwind-merge": "3.7.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/language-server": "2.16.13",
+    "@tailwindcss/vite": "4.3.3",
+    "pagefind": "1.5.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "wrangler": "4.147.0"
+  }
+}

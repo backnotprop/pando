@@ -1,0 +1,5 @@
+# Workers static assets apply these rules; the file itself is not served.
+# The web app's home fetches What's new from another origin.
+/whats-new.json
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=300

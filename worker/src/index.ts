@@ -1,6 +1,7 @@
 // The Pando Worker: the one way in. Routes are owned by lanes (see
 // docs/contracts/README.md); this file only wires them together.
-//   /healthz                       up check
+//   /healthz                       up check (readable from any origin: the docs' Status page)
+//   /docs, /docs/<path>            302 to the docs site (wrangler.jsonc DOCS_URL)
 //   /v1/openapi.yaml               the contract (docs/contracts/api-v1.yaml)
 //   /<owner>/<monorepo>/<repo>.git, /<owner>/<repo>.git   the git door (server-git)
 //   /v1/users, /v1/login/...       sign-in (accounts/signin.ts)
@@ -90,9 +91,17 @@ async function metaInner(request: Request, env: Env): Promise<Response> {
 
 // ── The web app (web/, served from wrangler.jsonc `assets`) ──────────────────
 
-/** Headers on the app's pages (APPROACH.md, "Where it lives"). */
-const APP_CSP =
-  "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:";
+/** Headers on the app's pages (APPROACH.md, "Where it lives"). connect-src adds the docs site, where the home reads What's new. */
+const appCsp = (env: Env) =>
+  `default-src 'self'; connect-src 'self' ${new URL(env.DOCS_URL).origin}; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:`;
+
+/** The docs site (decisions/RULINGS.md: docs.<domain>, the app's /docs redirecting there): /docs/<path>?<query> to the same path there. */
+function docs(env: Env, url: URL): Response {
+  const rest = url.pathname.slice("/docs".length).replace(/^\//, "");
+
+  // Appended to the base's own path, so the redirect never leaves the docs site.
+  return Response.redirect(`${env.DOCS_URL.replace(/\/$/, "")}/${rest}${url.search}`, 302);
+}
 
 /** A page of the app: any GET or HEAD outside /v1 that no route above took. */
 function isAppPath(request: Request, url: URL): boolean {
@@ -107,7 +116,7 @@ async function app(request: Request, env: Env): Promise<Response> {
 
   const page = new Response(res.body, res);
 
-  page.headers.set("content-security-policy", APP_CSP);
+  page.headers.set("content-security-policy", appCsp(env));
   page.headers.set("x-content-type-options", "nosniff");
   page.headers.set("referrer-policy", "same-origin");
 
@@ -139,7 +148,9 @@ export default {
   async fetch(request: IncomingRequest, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/healthz") return new Response("ok\n");
+    if (url.pathname === "/healthz") return new Response("ok\n", { headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } });
+
+    if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/docs" || url.pathname.startsWith("/docs/"))) return docs(env, url);
 
     if (url.pathname === "/v1/openapi.yaml") return new Response(contract, { headers: { "content-type": "application/yaml; charset=utf-8" } });
 

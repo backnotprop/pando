@@ -1,0 +1,126 @@
+---
+title: CI with Buildkite
+description: Run a repo's tests on Buildkite's hosted machines on every push, and see the results as checks in Pando.
+sidebar:
+  order: 1
+---
+
+When this is set up, a push to a branch of a repo starts a Buildkite build. The build runs your tests on a Buildkite hosted Linux machine, and its result shows in Pando as a check. Merge can wait for that check.
+
+You need a Buildkite organization, and you must be an owner of the monorepo.
+
+<Aside type="note" title="The Pando server's Buildkite token">
+Pando starts builds, and reads their logs and artifacts, with one Buildkite API token set on the Pando server (the Worker secret `BUILDKITE_API_TOKEN`). Your Buildkite organization must be one that token can reach. A token of your own per monorepo is not built yet. If you run your own Pando server, make that token in Buildkite with the scopes `read_builds`, `read_build_logs`, `read_artifacts`, `read_pipelines` and `write_builds`.
+</Aside>
+
+## 1. A hosted Linux queue
+
+A queue is where Buildkite sends a pipeline's jobs. A hosted queue runs them on Buildkite's own machines, so nothing needs installing anywhere.
+
+1. In Buildkite, select **Agents** in the top navigation. This opens the **Clusters** page.
+2. Select the cluster. A new organization has one, named **Default cluster**.
+3. On its **Queues** page, look for a hosted Linux queue. If there is one, note its key and go to step 2.
+4. Otherwise select **New Queue**: key `linux-small`, agent infrastructure **Hosted**, machine type **Linux**, architecture **AMD64**, capacity **Small** (Buildkite's free plan has Small only). Select **Create Queue**.
+
+## 2. The pipeline
+
+1. Select **Pipelines**, then **New pipeline**.
+2. **Git scope**: pick **Any account**, under "Use remote URL (SSH or HTTPS)".
+3. **Repository**: the repo's address in Pando, `https://<server>/<owner>/<name>/<repo>.git`, where `<repo>` is the repo's path with each `/` turned into `-` (`projects/web` is `projects-web`). Buildkite never clones this address; the step below fetches the code itself, with a token Pando gives each build. Buildkite only requires one. If **Checkout using** appears, pick **HTTPS**.
+4. **Pipeline name**: any name. Its slug, the name in its URL, is what Pando uses.
+5. **Default Branch**: `main`.
+6. **Cluster**: the cluster from step 1.
+7. In the **Pipeline configuration** editor, replace everything with the YAML below. Paste it rather than typing it, since the editor indents typed lines. Change the queue key if yours is not `linux-small`, and the last line to your test command.
+8. Select **Create pipeline**. Don't start a build from Buildkite: a build started there has no Pando token and fails at once, by design.
+
+```yaml
+steps:
+  - label: "test"
+    key: ci                     # the check's name in Pando
+    agents:
+      queue: "linux-small"      # your hosted queue's key
+    timeout_in_minutes: 10      # a stuck job stops here
+    checkout:
+      skip: true                # Buildkite cannot clone Pando by itself
+    env:
+      BUILDKITE_SKIP_CHECKOUT: "true"   # the same, for agents older than v3.136.0
+    command: |
+      set -eu
+      if [ -z "$${PANDO_READ_TOKEN:-}" ]; then
+        echo "This build has no PANDO_READ_TOKEN. Builds start from Pando: push a branch."
+        exit 1
+      fi
+      git init -q repo
+      cd repo
+      git -c "http.extraHeader=Authorization: Bearer $$PANDO_READ_TOKEN" fetch -q --depth 1 "$$PANDO_CLONE_URL" "$$PANDO_HEAD"
+      git checkout -q --detach FETCH_HEAD
+      ./test.sh
+```
+
+Why it looks like this:
+
+- **`$$` is on purpose.** Buildkite fills in `$NAME` in this editor before the build exists, when Pando's values are not there yet. `$$` leaves a plain `$` for the machine to fill in when the job runs.
+- **The token stays out of the log.** The log shows the command text, not the value, and the Buildkite agent also blanks out the value of any variable whose name ends in `_TOKEN`. The token goes in a header, never in a URL or in `.git/config`.
+- **One step, one check.** Any step with a `key` becomes a check of that name in Pando. Add more steps with their own keys (`lint`, `build`) for more checks.
+
+Each build Pando starts has these in its environment: `PANDO_CLONE_URL`, `PANDO_READ_TOKEN` (reads this one repo), `PANDO_HEAD` (the commit), `PANDO_BRANCH`, `PANDO_REPO`, `PANDO_MONOREPO`, `PANDO_STATUS_URL` and `PANDO_STATUS_TOKEN`. With the last two, `pando status success --context lint` posts a check of its own from a step.
+
+## 3. Connect Buildkite to the monorepo
+
+Run this in a terminal:
+
+```sh
+pando ci connect --org <your-buildkite-org> --monorepo <owner/name>
+```
+
+It prints a **Webhook URL** and a **Token**. The token is shown this one time, only on a terminal, never to a pipe, so an agent's session cannot read it. Keep the terminal open for the next step. (`--out <file>` writes the token to a file only you can read instead.)
+
+## 4. The webhook in Buildkite
+
+The webhook is how Buildkite tells Pando about each build and job.
+
+1. Select **Settings** in the top navigation, then **Notification Services**.
+2. Select **Add** on **Webhook**.
+3. **Description**: `Pando <owner/name>`.
+4. **Webhook URL**: the URL from step 3.
+5. **Token**: select everything in the box and paste the token from step 3 over it. Below it, pick "Send an HMAC signature in the X-Buildkite-Signature header".
+6. Leave **Verify TLS Certificates** ticked.
+7. **Events**: tick `ping`, `build.scheduled`, `build.running`, `build.failing`, `build.finished`, `build.skipped`, `job.scheduled`, `job.started`, `job.finished` and `job.activated`.
+8. **Pipelines**: **Only Some pipelines**, then pick yours.
+9. Select **Add Webhook Notification**.
+
+Buildkite then sends a ping. Check it arrived:
+
+```sh
+pando ci status --monorepo <owner/name>
+```
+
+The line `last event` says `ping ... recorded`.
+
+If Buildkite keeps its own token instead of yours, run `pando ci disconnect --org <your-buildkite-org> --monorepo <owner/name>`, then connect again with `--paste-token` and paste Buildkite's token when asked. Nothing shows as you type.
+
+## 5. Start the pipeline on each push
+
+```sh
+pando ci pipeline add projects/web <pipeline-slug> --monorepo <owner/name>
+```
+
+Each push to a branch of `projects/web` now starts a build. Push a branch and watch the check appear on the branch's page in the web app, and in `pando branch list`.
+
+To make Merge wait for it, require the check named by the step's `key` (see [Checks and CI](/ci/)):
+
+<Render file="required-checks" />
+
+## If something does not work
+
+| What you see | Where to look | Likely cause |
+| --- | --- | --- |
+| `last event none yet` after saving the webhook | the webhook's settings page in Buildkite, **Load recent requests** | a wrong URL, or `ping` not ticked |
+| `last refused ... does not match` | `pando ci status` | the token in Buildkite is not the one Pando made; see the end of step 4 |
+| A push starts no build | `pando ci status` | the pipeline is not added (step 5), or the Pando server's Buildkite token cannot reach your organization or lacks `write_builds` |
+| The job waits and never starts | the build's page in Buildkite | the queue key in the YAML does not match a hosted queue in the pipeline's cluster |
+| The job fails at `git fetch` with 401 | the job's log in Buildkite | a build started in Buildkite rather than by a push, or a Retry more than 25 hours after the push; push again, or [rebuild it through the API](/api/ci/rebuildCiBuild/), which gives fresh tokens |
+
+Only pushes to branches start builds. A merge into main does not, so main's merge commits carry no check of their own.
+
+See [Limits](/limits/#ci-with-buildkite) for Buildkite's free plan and Pando's own numbers.

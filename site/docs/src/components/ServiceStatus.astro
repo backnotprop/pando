@@ -1,0 +1,47 @@
+---
+// Whether the Pando server is up, asked from the reader's browser each time
+// the page opens: its up check, /healthz, answers "ok" to any origin.
+import { APP } from "@/pando";
+
+const host = new URL(APP).host;
+---
+
+<div data-pando-status data-url={`${APP}/healthz`} data-host={host} class="not-prose my-6 flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+  <span data-dot aria-hidden="true" class="size-2.5 shrink-0 rounded-full bg-muted-foreground"></span>
+  <p data-text role="status" class="m-0 text-sm">Checking {host}</p>
+  <button type="button" data-again hidden class="ml-auto text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground">Check again</button>
+</div>
+
+<script>
+  const time = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  async function check(box: HTMLElement) {
+    const dot = box.querySelector<HTMLElement>("[data-dot]");
+    const text = box.querySelector<HTMLElement>("[data-text]");
+    const again = box.querySelector<HTMLButtonElement>("[data-again]");
+    const host = box.dataset.host ?? "";
+
+    if (!dot || !text || !again) return;
+    text.textContent = `Checking ${host}`;
+    again.hidden = true;
+    let up = false;
+
+    try {
+      const res = await fetch(box.dataset.url ?? "", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      up = res.ok && (await res.text()).trim() === "ok";
+    } catch {
+      up = false;
+    }
+
+    dot.style.background = up ? "var(--nb-success)" : "var(--nb-danger)";
+    text.textContent = up ? `${host} is up. Checked at ${time()}.` : `Can't reach ${host} right now. Checked at ${time()}.`;
+    again.hidden = false;
+  }
+
+  document.addEventListener("astro:page-load", () => {
+    for (const box of document.querySelectorAll<HTMLElement>("[data-pando-status]")) {
+      void check(box);
+      box.querySelector("[data-again]")?.addEventListener("click", () => void check(box));
+    }
+  });
+</script>

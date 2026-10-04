@@ -1,0 +1,63 @@
+---
+title: Worktrees
+description: One branch of one repo, in its own folder, for one person or one agent.
+sidebar:
+  order: 2
+---
+
+A worktree is one branch of one repo, in its own folder, for one person or one agent. Many worktrees run side by side, on one machine or many, and none of them can get in another's way.
+
+```
+acme/projects/web/worktrees/
+  main/             main, read-only, follows every merge
+  fix-login/        a branch, one agent
+  new-header/       another branch, on another machine
+```
+
+## Make one, list them, remove one
+
+```sh
+pando worktree add projects/web fix-login            # a new branch off main, or an existing branch
+pando worktree list                                  # every worktree in the monorepo, on every machine
+pando worktree remove projects/web/worktrees/fix-login
+```
+
+A `/` in a branch name becomes `-` in the folder name: the branch `fix/login` lives in `worktrees/fix-login/`.
+
+`pando worktree list` shows each worktree's branch, machine, how far it is ahead of and behind main, and when it was last seen.
+
+## A Pando worktree is not a `git worktree`
+
+If you know `git worktree`, this is the difference that matters:
+
+| | `git worktree` | Pando worktree |
+| --- | --- | --- |
+| What it is | a second checkout of a repo, sharing that repo's `.git` folder | a folder of its own, with its own git folder |
+| Its git folder | shared by every worktree of the repo | its own: the history and the folder lists, without file contents until they are needed |
+| Git inside it | normal | normal: `git status`, `diff`, `log`, `commit` and `push` all work |
+| One agent can break another's worktree | yes, through the shared `.git` | no, nothing is shared |
+| The same branch on two machines | no | yes; the branch lives on the server |
+
+## How the files get there
+
+`pando worktree add` picks the best way this machine has. `--kind` chooses one yourself.
+
+| Kind | Where | Files on disk |
+| --- | --- | --- |
+| `fuse` | Linux with ArtifactFS installed | The folder is mounted. Every file is listed at once, and a file downloads the first time something opens it. Your edits stay in the worktree's own layer until you push. |
+| `fskit` | a Mac with Pando.app and its file system extension turned on | The same, through macOS's own file system extensions. |
+| `sparse` | everywhere else | A partial clone: the history and folder lists first, file contents as git checks them out. Add folder names after the branch to check out only those folders. |
+
+On a Mac without Pando.app, worktrees use `sparse`, and `pando` says why once.
+
+## What it costs
+
+Each worktree keeps its own git folder. It is small, because it holds no file contents up front. Two worktrees of the same repo on one machine each download a file they both open. Opening a file the first time takes a moment; after that it is on disk.
+
+## Read-only main
+
+Every repo has a `worktrees/main/` that nobody edits. When a branch merges, every machine with a branch worktree in that repo moves its `main` to the new commit within seconds. A machine with no worktree in that repo catches up within 5 minutes. See [Limits](/limits/) for the exact numbers.
+
+## When you are done
+
+Push your branch, ask for review, merge, and remove the worktree. `pando worktree remove` refuses while there is work that is not committed or not pushed. The branch stays on the server until it merges.

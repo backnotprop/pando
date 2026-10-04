@@ -14,6 +14,7 @@ Checked 2026-10-02.
 | [Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) | The git storage Pando runs on: repos, refs, tokens, event subscriptions. | Cloudflare service terms |
 | [Workers KV, Instant mode](https://blog.cloudflare.com/workers-kv-instant/) | A low-latency key-value mode in private beta (1 MB per namespace, one write per second). Optional for small, rarely changed monorepo settings. | Cloudflare service terms |
 | [Durable Objects](https://developers.cloudflare.com/durable-objects/) | The live tier's fan-out and the per-monorepo state. | Cloudflare service terms |
+| [nimbus](https://github.com/cloudflare/nimbus) | Cloudflare's docs-site framework on Astro. `site/docs` is its scaffold (`@cloudflare/create-nimbus-docs` 0.7.9) and builds with `@cloudflare/nimbus-docs` 0.15.2, including the API reference from `docs/contracts/api-v1.yaml`. | MIT |
 | [Plannotator](https://github.com/backnotprop/plannotator) | The human review surface (`plannotator review --patch-file`). | MIT or Apache 2.0 (dual) |
 | [Competition page](https://www.cloudflare.com/git-competition/) and [Official Rules](https://www.cloudflare.com/documents/build-next-gen-git-platform-competition-terms.pdf) | "Build the Next-Gen Git Platform on Cloudflare": submit by October 14, 2026, 11:59 PM PDT; a 5 to 10 minute video, the source repository, run instructions; MIT, Apache 2.0 or BSD. | Cloudflare, Inc. contest rules |
 

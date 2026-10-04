@@ -1,0 +1,92 @@
+---
+title: Changelog
+description: Every notable change to Pando, dated, newest first.
+sidebar:
+  order: 90
+---
+
+What changed in Pando, newest first. Dates are UTC.
+
+## 2026-10-04
+
+### Branches, reviews and Merge in the web app
+
+Open a project's code at any branch or commit with the branch picker, and see its open and merged branches. A branch's page shows its commits and co-authors, reviews, checks with the Buildkite mark, and the Merge box. A monorepo's Activity tab updates as things happen.
+
+### `pando meta sync` is now `pando sync`
+
+The command that keeps a monorepo's shared files live on every machine is `pando sync`. The old name still works.
+
+### A push that landed is never lost
+
+If Pando takes a push but fails to record it, git still reports the push, and the next branch list records it, with its activity line and hook deliveries.
+
+### The branch page lists conflicting files before you merge
+
+When a branch conflicts with main, its page lists the conflicting paths and the Merge button stays off. Branch lists now show the most recently pushed branch first.
+
+### Start a Buildkite build of a branch from the API
+
+`POST /v1/monorepos/{owner}/{monorepo}/ci/pipelines/{pipeline}/builds` with a branch name starts a build of that branch's latest commit, titled with its commit message. `GET /v1/monorepos/{owner}/{monorepo}/ci/builds?pipeline=&number=` finds one build by its pipeline and number. See the [API reference](/api/).
+
+### Code in the web app uses Ioskeley Mono
+
+Code, paths and commands in the web app are set in Ioskeley Mono, an open font.
+
+## 2026-10-03
+
+### The Pando web app: sign in, your home, files
+
+Sign in from the browser. The home lists your monorepos, the branches that need you, and a live activity log across them. Open a monorepo's folders and files, with Raw, Copy, Copy link and each file's history.
+
+### Raw addresses for a monorepo's shared files
+
+`/{owner}/{name}/raw/{path}` returns one of a monorepo's shared files, and `/{owner}/{name}/projects/{project}/raw/{path}` a file in a project. Both are for members only.
+
+### The API lists the machines working in a monorepo
+
+`GET /v1/monorepos/{owner}/{monorepo}/machines` gives one row per machine: who, its worktrees, whether it is connected, and its last action. A machine reports its worktrees as soon as it connects.
+
+### Connect Buildkite to a monorepo
+
+`pando ci connect --org <slug>` links a Buildkite organization and prints the webhook URL and token once. `pando ci pipeline add <repo> <pipeline>` picks the pipeline a push starts. Each build's jobs show up as checks on the branch, and `pando status` posts a check from inside a build. See [CI with Buildkite](/ci/buildkite/).
+
+### A busy push asks you to push again
+
+When many pushes reach one repo at once, Pando retries a held push once. If it still can't take it, git prints "Pando: (repo) is busy with other pushes right now; push again" and nothing is written. Before, git printed "protocol error: bad band #69".
+
+### Monorepos are named owner/name
+
+Every monorepo now lives under its owner, as on GitHub: `pando clone owner/name`, and the same `owner/name` in web addresses. Clones made before this change need the new `pando` command.
+
+### Merges reach every machine in about 2 seconds
+
+After a merge, the read-only `worktrees/main` on every machine with a branch worktree in that repo moves to the new commit within about 2 seconds. Other machines catch up within 5 minutes. `pando merge` returns as soon as the merge is confirmed.
+
+### `pando init` retries a first push that drops
+
+If the connection drops during the first push of main, `pando init` checks whether main landed and pushes once more if it did not.
+
+### Size limits are checked before you push
+
+A worktree's pre-push check refuses a file over 32 MB and a push over 100 MB before git sends anything, and says why. See [Limits](/limits/).
+
+### List and delete monorepos from the CLI
+
+`pando monorepo list` shows your monorepos. `pando monorepo delete owner/name` deletes one after you type its name, or with `--yes`. Only owners can delete.
+
+### A fresh worktree runs `git status` without downloading files
+
+In a mounted worktree on Linux, the first `git status`, `ls -lR` and `stat` download no file contents. Files download when you open them.
+
+### Sign in through the browser, and invite members
+
+`pando login` opens your browser to sign in. `pando members invite <email>` invites people to a monorepo by email, and `pando credential create --name <sandbox>` makes a credential for a sandbox that acts as you.
+
+### Shared files stay the same on every machine
+
+`pando sync` keeps a monorepo's shared files (the ones outside `projects/`) live on every machine, and keeps every saved version. `pando history` and `pando restore` bring an old version back. A file two machines changed at once becomes a copy, which `pando resolve` clears. Files up to 100 MB sync, and `pando fetch` downloads them on demand.
+
+### Pando: monorepos over plain git, a worktree per branch
+
+Make a monorepo from a folder with `pando init`, and set it up on another machine with `pando clone`. Each branch gets its own folder with `pando worktree add`. Push with plain git: main is protected, so you push a branch, review it with `pando diff` and `pando review`, and land it with `pando merge`, which makes a merge commit. See [Get started](/get-started/) and [Worktrees](/worktrees/).

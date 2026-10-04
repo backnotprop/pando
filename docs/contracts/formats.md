@@ -29,7 +29,7 @@ is the root, and the root is the meta layer.
     <repo>/                    a repo: its own git history on the server
       worktrees/
         main/                  main, read-only, follows every merge
-        <name>/                one branch, one agent
+        <name>/                one branch in its own folder
   research/infra/<x>/          a folder with its own .git outside projects/: a reference
 ```
 

@@ -37,7 +37,7 @@ export function ProjectHistory({ repo, path, gitRef }: { repo: Repo; path: strin
       <div className="max-w-[1000px]">
         <div className="mb-[22px] flex items-center justify-between gap-8 phone:flex-col phone:items-start phone:gap-4">
           <h2 className="flex items-baseline gap-2.5 text-[17px] leading-6 font-semibold">
-            History of <code className="-mb-px text-[15px] leading-6">{path}</code>
+            History of <span className="font-normal">{path}</span>
           </h2>
           <Link {...codeBlobLink(monorepo.full, repo.path, path, gitRef)} className={lnk}>
             Back to the file

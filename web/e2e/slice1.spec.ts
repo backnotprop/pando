@@ -1,8 +1,13 @@
 // Slice 1, end to end: sign in, the home lists a monorepo just made, a git
 // push arrives in the activity log live, the monorepo's root folder, a folder,
-// a file with Raw and History, and sign-out. Real Worker, real data.
-import { readFileSync } from "node:fs";
-import { expect, test } from "@playwright/test";
+// a file with Raw and History, the theme setting, and sign-out. Real Worker,
+// real data; the fonts each kind of build ships, from real builds.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, type Page, test } from "@playwright/test";
 import { BASE, browserPost, Machine, nextSignIn, saveRootFiles } from "./seed";
 
 const id = Date.now().toString(36);
@@ -22,6 +27,33 @@ interface Made {
 const AGENTS = "You are in this monorepo.\n\n# What this place is\n\nA test monorepo for the web lane.\n";
 
 const RULINGS = "# Rulings in force\n\n- **One monorepo per project.** Code sits under `projects/`.\n";
+
+const WEB = fileURLToPath(new URL("..", import.meta.url));
+
+/** The app built into a folder of its own (not the dist the Worker serves), with or without Apple's fonts; its files by path. */
+function build(sf: boolean) {
+  const out = mkdtempSync(join(tmpdir(), "pando-build-"));
+
+  try {
+    const env = { ...process.env, PANDO_SF_FONTS: sf ? "1" : "" };
+    execFileSync("npx", ["vite", "build", "--outDir", out, "--emptyOutDir", "--logLevel", "error"], { cwd: WEB, env, stdio: "pipe" });
+    const files = readdirSync(out, { recursive: true, encoding: "utf8" });
+    const text = files.filter((f) => /\.(html|css)$/.test(f)).map((f) => readFileSync(join(out, f), "utf8")).join("\n");
+
+    return { files, text };
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}
+
+/** data-theme on <html> the moment the app's module script was put in the page (the init script below records it). */
+const themeAtApp = (page: Page) => page.evaluate(() => document.documentElement.dataset.atApp ?? null);
+
+/** Opens the name menu and picks a theme or a mode in it. */
+async function pick(page: Page, choice: string) {
+  if (!(await page.getByRole("menu").isVisible())) await page.getByRole("button", { name: login }).click();
+  await page.getByRole("menuitemradio", { name: choice, exact: true }).click();
+}
 
 // An HTML file whose scripts would mark the page if any ran: an inline script, a handler, a body script.
 const CARD = `<!doctype html><html><head><style>h1 { color: #2a6; }</style><script>window.__ran = "head";</script></head>
@@ -46,19 +78,34 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
   };
 
   try {
-    await test.step("the Worker serves Ioskeley Mono, and no font file of Apple's unless the build asked for SF Pro Text", async () => {
+    await test.step("the Worker serves Ioskeley Mono, and Apple's SF Pro Text and SF Mono only if the build asked for them", async () => {
       const html = await (await page.request.get("/")).text();
       const sheet = await (await page.request.get(html.match(/\/assets\/[\w.-]+\.css/)?.[0] ?? "/missing.css")).text();
       const mono = sheet.match(/\/assets\/IoskeleyMono-Regular-[\w-]+\.woff2/)?.[0] ?? "/missing.woff2";
+      const sf = process.env.PANDO_SF_FONTS === "1";
 
       expect(sheet).toContain("font-family:Ioskeley Mono");
       expect((await page.request.get(mono)).headers()["content-type"]).toBe("font/woff2");
-      expect(html + sheet).not.toMatch(/SFNSMono|SF Mono/);
 
-      if (process.env.PANDO_SF_FONTS !== "1") {
-        expect(html + sheet).not.toMatch(/SF-Pro-Text/);
-        expect((await page.request.get("/fonts/SF-Pro-Text-Regular.otf")).headers()["content-type"]).not.toMatch(/^font\//);
+      for (const file of ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SFNSMono.ttf"]) {
+        const type = (await page.request.get(`/fonts/${file}`)).headers()["content-type"];
+
+        if (sf) expect(type).toMatch(/^font\//);
+        else expect(type).not.toMatch(/^font\//);
       }
+    });
+
+    await test.step("a default build ships no font file of Apple's; an SF build ships SF Pro Text and SF Mono, with SF Mono first in the mono stack", async () => {
+      const sf = build(true);
+      const plain = build(false);
+
+      expect(sf.files).toEqual(expect.arrayContaining(["fonts/SF-Pro-Text-Regular.otf", "fonts/SF-Pro-Text-Semibold.otf", "fonts/SFNSMono.ttf"]));
+      expect(sf.text).toContain('font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf")');
+      expect(sf.text).toContain('--mono-face:"SF Mono","Ioskeley Mono"');
+      expect(plain.files.filter((f) => f.startsWith("fonts") || /SF-?Pro|SFNS|SF-?Mono/i.test(f))).toEqual([]);
+      expect(plain.text).not.toMatch(/SF-Pro-Text|SFNSMono|"SF Mono"|--mono-face:/);
+      // The SF build copied Apple's files into public/fonts; the default build cleared them again.
+      expect(existsSync(join(WEB, "public/fonts"))).toBe(false);
     });
 
     await test.step("a signed-out visitor gets the sign-in page", async () => {
@@ -110,7 +157,7 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       expect(docs.status()).toBe(302);
       expect(docs.headers().location).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/docs-site\/$/);
       await expect(page.getByRole("link", { name: news.headline })).toHaveAttribute("href", news.link);
-      await expect(page.getByText("Oct 4", { exact: true })).toBeVisible();
+      await expect(page.getByText("What's new · Oct 4", { exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", "/docs");
       await expect(page.getByRole("link", { name: "Changelog" })).toHaveAttribute("href", "/docs/changelog/");
       await expect(page.getByRole("link", { name: "Contact" })).toHaveAttribute("href", "/docs/contact/");
@@ -176,6 +223,50 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await views.getByRole("link", { name: "Preview" }).click();
       await expect(page).toHaveURL(`${BASE}/${full}/blob/decisions/RULINGS.md`);
       await expect(page.locator(".pn-doc article").getByRole("heading", { name: "Rulings in force" })).toBeVisible();
+    });
+
+    await test.step("the theme setting in the name menu: applied before the app's script, kept across a reload, followed by the viewer and the code colours", async () => {
+      // Records data-theme the moment the app's module script is put in the page: public/theme.js must have run by then.
+      await page.addInitScript(() => {
+        new MutationObserver((records, watch) => {
+          const app = records.some((r) => [...r.addedNodes].some((n) => n instanceof HTMLScriptElement && n.type === "module"));
+
+          if (!app) return;
+          document.documentElement.dataset.atApp = document.documentElement.getAttribute("data-theme") ?? "none";
+          watch.disconnect();
+        }).observe(document, { childList: true, subtree: true });
+      });
+      await page.reload();
+      expect(await themeAtApp(page)).toBe("pando-dark");
+      await expect(page.locator(".pn-doc article")).toBeVisible();
+
+      await pick(page, "Cloudflare");
+      await pick(page, "Light");
+      await expect(page.getByRole("menuitemradio", { name: "Cloudflare" })).toHaveAttribute("aria-checked", "true");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-light");
+      // Plannotator's viewer follows without a reload (its ThemeProvider marks <html> light).
+      await expect(page.locator("html")).toHaveClass(/(^|\s)light(\s|$)/);
+      await page.keyboard.press("Escape");
+
+      await page.reload();
+      expect(await themeAtApp(page)).toBe("cloudflare-light");
+      await expect(page.locator("body")).toHaveCSS("background-color", "rgb(252, 252, 252)");
+      // Pierre's code colours are the theme's own.
+      expect(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--diffs-token-keyword").trim())).toBe("#4b3bdc");
+
+      // System follows the computer, while the page is open.
+      await page.emulateMedia({ colorScheme: "dark" });
+      await pick(page, "System");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-dark");
+      await page.emulateMedia({ colorScheme: "light" });
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "cloudflare-light");
+
+      await pick(page, "Pando");
+      await pick(page, "Dark");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "pando-dark");
+      await expect(page.locator("html")).not.toHaveClass(/(^|\s)light(\s|$)/);
+      await page.keyboard.press("Escape");
+      expect(await page.evaluate(() => [localStorage.getItem("pando-theme"), localStorage.getItem("pando-mode")])).toEqual(["pando", "dark"]);
     });
 
     await test.step("an HTML file renders in the viewer with none of its scripts run, and its relative link opens that file", async () => {

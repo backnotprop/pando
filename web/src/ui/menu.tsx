@@ -24,7 +24,9 @@ export function MenuPopup({ children, align = "start", offset = 6 }: { children:
   );
 }
 
-export const MenuHeading = ({ children }: { children: ReactNode }) => <div className="px-2.5 pt-2 pb-1.5 text-[12px] text-ash">{children}</div>;
+export const menuHeading = "px-2.5 pt-2 pb-1.5 text-[12px] text-ash";
+
+export const MenuHeading = ({ children }: { children: ReactNode }) => <div className={menuHeading}>{children}</div>;
 
 export const MenuRule = () => <Menu.Separator className="mx-1 my-1.5 border-t border-rootline" />;
 

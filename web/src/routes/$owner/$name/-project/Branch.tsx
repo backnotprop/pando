@@ -22,7 +22,7 @@ import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { FilesChanged } from "./FilesChanged";
-import { mergeableOf, stateOf } from "./state";
+import { mergeableOf, stateOf, unknownWhy } from "./state";
 
 /** `files`: the Files changed tab waits for the diff; Overview fetches it alongside, for the tab's count. */
 export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean) {
@@ -73,7 +73,7 @@ function Commits({ commits }: { commits: readonly Commit[] }) {
             <span className="phone:col-span-2">
               <Authors c={c} />
             </span>
-            <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">{c.author.date ? since(c.author.date, clock) : ""}</span>
+            <span className="text-right text-[12.5px] whitespace-nowrap text-ash phone:hidden">{c.author.date ? since(c.author.date, clock) : ""}</span>
           </div>
         </li>
       ))}
@@ -101,7 +101,7 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
               <span className="text-bark-dim">{VERDICT[r.verdict]}</span>
               {r.body ? <span className="overflow-hidden text-[13px] text-ellipsis text-ash">{r.body}</span> : null}
             </span>
-            <span className="font-mono text-[12.5px] whitespace-nowrap text-ash">{since(r.created_at, clock)}</span>
+            <span className="text-[12.5px] whitespace-nowrap text-ash">{since(r.created_at, clock)}</span>
           </div>
         </li>
       ))}
@@ -135,42 +135,53 @@ function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch;
   const clock = useSeconds(words.includes("running"));
   const arrived = useArrivals(runs ? names.map((name, i) => ({ key: name, state: words[i] ?? "" })) : undefined);
 
-  if (!names.length) return <Empty>None required.</Empty>;
+  // pando.toml unreadable or broken: which checks are required is not known (the Merge box gives the reason in full).
+  const unknown =
+    checks.state === "unknown" ? (
+      <p title={checks.checks_unknown ?? undefined} className="mb-2.5 text-[13px] text-ash">
+        Required checks unknown
+      </p>
+    ) : null;
+
+  if (!names.length) return unknown ?? <Empty>None required.</Empty>;
 
   return (
-    <ul aria-label="Checks" className="grid gap-2.5">
-      {names.map((name, i) => {
-        const s = checks.statuses.find((x) => x.context === name);
-        const run = runs?.get(name);
-        const word = words[i] ?? "";
-        const mark = s?.app === "buildkite" || run?.build.service === "buildkite";
-        // A monorepo's build has its page here; a plain repo's opens in the service.
-        const page = run && info.kind === "monorepo" ? ciBuildLink(monorepo.full, run.build.pipeline, run.build.number) : null;
-        const url = run?.job.web_url ?? s?.target_url ?? null;
-        const label = <code className="fox-cool text-bark">{name}</code>;
+    <>
+      {unknown}
+      <ul aria-label="Checks" className="grid gap-2.5">
+        {names.map((name, i) => {
+          const s = checks.statuses.find((x) => x.context === name);
+          const run = runs?.get(name);
+          const word = words[i] ?? "";
+          const mark = s?.app === "buildkite" || run?.build.service === "buildkite";
+          // A monorepo's build has its page here; a plain repo's opens in the service.
+          const page = run && info.kind === "monorepo" ? ciBuildLink(monorepo.full, run.build.pipeline, run.build.number) : null;
+          const url = run?.job.web_url ?? s?.target_url ?? null;
+          const label = <span className="fox-cool text-bark">{name}</span>;
 
-        return (
-          <li key={`${name}:${word}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px] ${arrived(name) ? "arrived" : ""}`}>
-            <span className="text-bark-dim">
-              {mark ? <CheckMark /> : null}
-              {page && run ? (
-                <Link {...page} search={{ job: run.job.id }} className="hover:underline hover:decoration-ash hover:underline-offset-3">
-                  {label}
-                </Link>
-              ) : url ? (
-                <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:decoration-ash hover:underline-offset-3">
-                  {label}
-                </a>
-              ) : (
-                label
-              )}{" "}
-              <span className={`fox-cool text-[13px] whitespace-nowrap ${toneOf(word)}`}>{word}</span>
-            </span>
-            <span className="fox-cool font-mono text-[12.5px] whitespace-nowrap text-ash">{run ? elapsed(run.job, clock) : ""}</span>
-          </li>
-        );
-      })}
-    </ul>
+          return (
+            <li key={`${name}:${word}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px] ${arrived(name) ? "arrived" : ""}`}>
+              <span className="text-bark-dim">
+                {mark ? <CheckMark /> : null}
+                {page && run ? (
+                  <Link {...page} search={{ job: run.job.id }} className="hover:underline hover:decoration-ash hover:underline-offset-3">
+                    {label}
+                  </Link>
+                ) : url ? (
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:decoration-ash hover:underline-offset-3">
+                    {label}
+                  </a>
+                ) : (
+                  label
+                )}{" "}
+                <span className={`fox-cool text-[13px] whitespace-nowrap ${toneOf(word)}`}>{word}</span>
+              </span>
+              <span className="fox-cool text-[12.5px] whitespace-nowrap text-ash">{run ? elapsed(run.job, clock) : ""}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
@@ -209,7 +220,12 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
   const arrives = useArrivals([{ key: "line", state: line }])("line") ? "arrived fox-arrive" : "";
 
   const reviewLink = (
-    <button type="button" title={`pando review ${b.name}`} className="cursor-pointer border-b border-ash-half pb-px text-bark-dim hover:border-bark hover:text-bark" onClick={() => copyReview(`pando review ${b.name}`)}>
+    <button
+      type="button"
+      title={`pando review ${b.name}`}
+      className="cursor-pointer border-b border-ash-half pb-px text-bark-dim hover:border-bark hover:text-bark"
+      onClick={() => copyReview(`pando review ${b.name}`)}
+    >
       {review}
     </button>
   );
@@ -249,9 +265,9 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
         {paths.length ? (
           <p className={`${q} mt-1.5`}>
             {paths.map((p) => (
-              <code key={p} className="block text-[12.5px] text-bark">
+              <span key={p} className="block text-bark">
                 {p}
-              </code>
+              </span>
             ))}
           </p>
         ) : null}
@@ -294,6 +310,8 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
     body = (
       <>
         {heading}
+        {/* While pando.toml cannot be read, why: after the heading, which says it when nothing else comes first. */}
+        {b.checks.state === "unknown" ? <p className={`${q} mt-1.5`}>{s.text === "checks unknown" ? b.checks.checks_unknown : unknownWhy(b)}</p> : null}
         {moved ? (
           <p className={`${q} mt-1.5`}>
             Moved to <code className="text-[12.5px] text-bark">{b.head.slice(0, 7)}</code>
@@ -326,10 +344,13 @@ function Worktree({ repo, branch }: { repo: Repo; branch: string }) {
       <SectionHead title="Worktree" />
       <div className="grid gap-2.5 text-[13px]">
         <span>
-          <code className="break-all text-bark">{w.path}</code>
+          <span className="break-all text-bark">{w.path}</span>
         </span>
         <span className="text-bark-dim">
-          {w.reported_by} <span className="text-ash">on {w.machine}, {w.kind}</span>
+          {w.reported_by}{" "}
+          <span className="text-ash">
+            on {w.machine}, {w.kind}
+          </span>
         </span>
       </div>
     </div>

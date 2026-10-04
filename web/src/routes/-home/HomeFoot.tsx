@@ -51,10 +51,10 @@ export function HomeFoot() {
       <div className="flex flex-col items-start gap-2 pb-4">
         {news && (
           <>
-            <span className="flex items-center gap-2.5">
-              <span className="inline-flex h-5 items-center rounded-full border border-rootline px-2 text-[11.5px] leading-[14px] text-bark-dim">What's new</span>
-              <span className="font-mono text-[12.5px] text-ash">{shortDate(news.date)}</span>
-            </span>
+            {/* One quiet line, flush left with the headline and the link: no pill, no mono (owner: the labels felt off). */}
+            <p className="text-[12.5px] leading-[15px] text-ash">
+              <span className="text-bark-dim">What's new</span> · {shortDate(news.date)}
+            </p>
             <a href={news.link} className="text-[13.5px] leading-[19px] font-semibold text-bark hover:underline hover:decoration-ash hover:underline-offset-3">
               {news.headline}
             </a>

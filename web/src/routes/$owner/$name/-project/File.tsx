@@ -51,7 +51,7 @@ export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: s
         </div>
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           {last ? (
-            <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
+            <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} sha at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
           ) : null}
           <FileTools name={name} text={text} raw={codeRawHref(full, repo.path, path, gitRef)} views={isDoc(name) && text !== null ? views : undefined} />
           <FileShown

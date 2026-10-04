@@ -4,7 +4,7 @@ import { Popover } from "@base-ui/react/popover";
 import { useState } from "react";
 import type { Repo } from "@pando/contract";
 import { Cmd } from "../../../../ui/controls";
-import { Chevron } from "../../../../ui/Icons";
+import { Caret, Select } from "../../../../ui/dropdown";
 
 const heading = "mb-2 text-[13px] leading-[18px] font-semibold text-bark";
 
@@ -20,7 +20,7 @@ export function Clone({ full, repos, plain, only }: { full: string; repos: reado
     <Popover.Root>
       <Popover.Trigger className="inline-flex h-8 cursor-pointer items-center justify-center rounded-[7px] bg-bark px-3.5 text-[13.5px] leading-[16px] font-semibold whitespace-nowrap text-soil hover:bg-bark-hi">
         Clone
-        <Chevron className="ml-1.5 block size-[13px]" />
+        <Caret kind="button" />
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-10">
@@ -40,16 +40,11 @@ export function Clone({ full, repos, plain, only }: { full: string; repos: reado
                 <h4 className={heading}>{plain ? "With git" : "One project, with git"}</h4>
                 {plain || only ? null : (
                   <div className="mb-2 flex items-center gap-2">
-                    <select
-                      aria-label="Project"
-                      value={repo.path}
-                      onChange={(e) => setPath(e.target.value)}
-                      className="h-7 min-w-0 rounded-[7px] border border-rootline bg-air pr-[26px] pl-2 font-mono text-[12.5px] leading-[15px] text-bark focus:border-ash focus:outline-none"
-                    >
+                    <Select label="Project" value={repo.path} onChange={setPath} size="small">
                       {repos.map((r) => (
                         <option key={r.path}>{r.path}</option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                 )}
                 <Cmd text={repo.clone_url} url wide />

@@ -6,11 +6,12 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 /**
- * Apple's SF Pro Text (Regular and Semibold), served when the build is asked
- * to (owner: "serve sf pro for now"): PANDO_SF_FONTS=1 copies them in from the
- * landing page's folder in the meta layer (or PANDO_FONTS_DIR) and declares
- * them. They are never committed, and a build without the switch ships no file
- * of Apple's: regular text then falls back to the system's. The monospace is
+ * Apple's SF Pro Text (Regular and Semibold) and SF Mono, served when the
+ * build is asked to (owner: "serve sf pro for now"; "i want SF Mono for now
+ * while in development"): PANDO_SF_FONTS=1 copies them in from the landing
+ * page's folder in the meta layer (or PANDO_FONTS_DIR) and declares them. They
+ * are never committed, and a build without the switch ships no file of
+ * Apple's: regular text then falls back to the system's, and the monospace to
  * Ioskeley Mono, committed under src/fonts and declared in theme.css.
  */
 const SF_FONTS = process.env.PANDO_SF_FONTS === "1";
@@ -19,11 +20,13 @@ const FONTS_FROM = process.env.PANDO_FONTS_DIR ?? fileURLToPath(new URL("../../.
 
 const FONTS_TO = fileURLToPath(new URL("public/fonts", import.meta.url));
 
-const FILES = ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf"];
+const FILES = ["SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SFNSMono.ttf"];
 
 const FACES = `
 @font-face{font-family:"SF Pro Text";src:url("/fonts/SF-Pro-Text-Regular.otf") format("opentype");font-weight:400;font-style:normal;font-display:swap}
-@font-face{font-family:"SF Pro Text";src:url("/fonts/SF-Pro-Text-Semibold.otf") format("opentype");font-weight:600;font-style:normal;font-display:swap}`;
+@font-face{font-family:"SF Pro Text";src:url("/fonts/SF-Pro-Text-Semibold.otf") format("opentype");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"SF Mono";src:url("/fonts/SFNSMono.ttf") format("truetype");font-weight:300 900;font-style:normal;font-display:swap}
+:root{--mono-face:"SF Mono","Ioskeley Mono"}`;
 
 function sfFonts(): Plugin {
   return {
@@ -45,6 +48,7 @@ function sfFonts(): Plugin {
 
       return [
         { tag: "link", attrs: { rel: "preload", href: "/fonts/SF-Pro-Text-Regular.otf", as: "font", type: "font/otf", crossorigin: "" }, injectTo: "head" },
+        { tag: "link", attrs: { rel: "preload", href: "/fonts/SFNSMono.ttf", as: "font", type: "font/ttf", crossorigin: "" }, injectTo: "head" },
         { tag: "style", children: FACES, injectTo: "head" },
       ];
     },

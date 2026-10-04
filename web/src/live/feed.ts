@@ -3,9 +3,12 @@
 // reload. It reconnects with backoff, resumes from the last `landed` number,
 // and refetches what it may have missed.
 import type { FeedEvent, MonorepoId, MonorepoSummary } from "@pando/contract";
-import type { QueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { decodeFrame } from "../api/client";
+import { monorepoRef } from "../api/names";
 import { applyLine } from "./lines";
+import { startMonorepoFeed } from "./monorepo";
 
 const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
 
@@ -97,4 +100,44 @@ export function startFeed(qc: QueryClient): () => void {
     clearInterval(ping);
     socket?.close();
   };
+}
+
+/** The most large monorepos the home follows by their own sockets (audit M2, web-api's costing: the server needs nothing). */
+const LARGE_SOCKETS = 5;
+
+/** Past that many, the home reads its log again this often. */
+export const LARGE_REFETCH_MS = 60_000;
+
+/**
+ * A large monorepo (over 100 members) sends no lines to the person's socket.
+ * The home follows the 5 most recently active by their own feed sockets, each
+ * resuming from its last line; it answers true when there are more than 5,
+ * so the home reads its log again every minute for the rest.
+ */
+export function useLargeFeeds(lines: readonly MonorepoSummary[]): boolean {
+  const qc = useQueryClient();
+  const large = lines.filter((m) => m.large).sort(byActivity);
+
+  // The followed set, in a stable order: a change of rank alone opens or closes nothing.
+  const followed = large
+    .slice(0, LARGE_SOCKETS)
+    .map((m) => m.full_name)
+    .sort()
+    .join(" ");
+
+  useEffect(() => {
+    if (!followed) return;
+
+    const stops = followed.split(" ").map((full) => {
+      const [owner = "", name = ""] = full.split("/");
+
+      return startMonorepoFeed(qc, monorepoRef(owner, name));
+    });
+
+    return () => {
+      for (const stop of stops) stop();
+    };
+  }, [qc, followed]);
+
+  return large.length > LARGE_SOCKETS;
 }

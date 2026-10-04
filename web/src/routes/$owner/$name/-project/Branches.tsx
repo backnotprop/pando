@@ -16,7 +16,7 @@ import { since, useNow } from "../../../../ui/time";
 import { Older } from "../../../../ui/Older";
 import { useArrivals } from "../../../../ui/arrival";
 import { RepoHead, useMonorepo } from "../-frame/heads";
-import { stateOf, toneClass } from "./state";
+import { stateOf, toneClass, unknownWhy } from "./state";
 
 /** A plain repo's one repo (path `.`), for its pages at /{owner}/{name}. */
 export const plainRepo = async (qc: QueryClient, m: MonorepoRef) => (await qc.ensureQueryData(reposQuery(m))).find((r) => r.path === ".") ?? null;
@@ -48,7 +48,7 @@ export function StateWord({ b, mark = true, className = "" }: { b: Branch; mark?
   const s = stateOf(b);
 
   return (
-    <span className={`text-[13px] whitespace-nowrap ${toneClass[s.tone]} ${className}`}>
+    <span title={unknownWhy(b) ?? undefined} className={`text-[13px] whitespace-nowrap ${toneClass[s.tone]} ${className}`}>
       {mark && s.app === "buildkite" ? <CheckMark /> : null}
       {s.text}
     </span>
@@ -87,7 +87,7 @@ function Open({ repo }: { repo: Repo }) {
                 <Who person={b.author} machine={b.pushed_machine} />
               </span>
               <StateWord b={b} mark={false} className="phone:hidden" />
-              <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">{b.updated_at ? since(b.updated_at, clock) : ""}</span>
+              <span className="text-right text-[12.5px] whitespace-nowrap text-ash">{b.updated_at ? since(b.updated_at, clock) : ""}</span>
             </Link>
           </li>
         ))}
@@ -121,7 +121,7 @@ function Merged({ repo }: { repo: Repo }) {
               <span className="font-mono text-[13.5px] leading-[16px] text-bark-dim">{b.merge_commit?.slice(0, 7) ?? ""}</span>
               <span className="overflow-hidden text-[13.5px] text-ellipsis whitespace-nowrap text-bark-dim">{b.title ?? `Merge branch '${b.name}'`}</span>
               <span className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-bark-dim phone:hidden">{b.merged_by ?? ""}</span>
-              <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash phone:hidden">{b.merged_at ? since(b.merged_at, clock) : ""}</span>
+              <span className="text-right text-[12.5px] whitespace-nowrap text-ash phone:hidden">{b.merged_at ? since(b.merged_at, clock) : ""}</span>
             </Link>
           </li>
         ))}

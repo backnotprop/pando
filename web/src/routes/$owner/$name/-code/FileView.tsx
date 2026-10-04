@@ -10,10 +10,13 @@ import { MAX_SHOWN } from "../../../../api/client";
 import { CopyButton } from "../../../../ui/controls";
 import { Doc, isDoc } from "../../../../ui/doc/Doc";
 import { absolute, type AppLink } from "../../../../ui/paths";
-import { Lines } from "./Lines";
+import { Lines, Plain } from "./Lines";
+
+/** Without colour: the plain lines, numbered or not. */
+const Uncoloured = ({ text, numbers = true }: { text: string; numbers?: boolean }) => (numbers ? <Lines text={text} /> : <Plain text={text} />);
 
 // If the chunk cannot load (a deploy replaced it while the tab was open), the plain lines stay.
-const Colour = lazy(() => import("./Colour").catch(() => ({ default: Lines })));
+const Colour = lazy(() => import("./Colour").catch(() => ({ default: Uncoloured })));
 
 /** Owner board, code view limits: colour up to 1 MiB, plain text to 10 MiB (MAX_SHOWN), Raw only past it. */
 const MAX_COLOURED = 1024 * 1024;
@@ -59,9 +62,10 @@ export function FileTools({ name, text, raw, views }: { name: string; text: stri
 
   return (
     // On a phone: the name (with Preview | Code) on its own line, the four tools on one row below (design review, 2026-10-03).
-    <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pb-2.5">
+    // On a phone the row's padding is the prototype's 10 px above and below (its .ftool phone rule).
+    <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pt-2.5 phone:pb-2.5">
       <span
-        className={`mr-auto overflow-hidden font-mono text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash ${views ? "phone:min-w-0 phone:flex-1" : "phone:basis-full"}`}
+        className={`mr-auto overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap text-ash ${views ? "phone:min-w-0 phone:flex-1" : "phone:basis-full"}`}
       >
         {name}
       </span>
@@ -110,6 +114,15 @@ export function FileBody({ name, text, size, id = null, raw }: { name: string; t
   return (
     <Suspense fallback={<Lines text={text} />}>
       <Colour name={name} text={text} id={id} />
+    </Suspense>
+  );
+}
+
+/** Text coloured by its name's kind, without line numbers (a pipeline's YAML, as the prototype draws it): plain at once, coloured when Colour.tsx has loaded. */
+export function BareCode({ name, text }: { name: string; text: string }) {
+  return (
+    <Suspense fallback={<Plain text={text} />}>
+      <Colour name={name} text={text} id={null} numbers={false} />
     </Suspense>
   );
 }

@@ -137,6 +137,13 @@ export interface KeyedEvent {
   event: StreamEvent;
 }
 
+/** The pull's narrowing (GET .../events): before a seq, one repo, some kinds. */
+export interface EventFilter {
+  before?: number | null;
+  repo?: string | null;
+  kinds?: string[] | null;
+}
+
 /** What a reconcile saw before it read Artifacts' refs (object.ts reconcileSeen). */
 export interface ReconcileSeen {
   /** The repo's record-move count then. */

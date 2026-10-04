@@ -516,8 +516,18 @@ api.get("/v1/monorepos/:o/:m/events", async (c) => {
   const topics = parseTopics(c.req.query("topics") ?? null);
 
   if (!topics) bad("topics: up to 10 of all, main, main:<repo>, repo:<repo>, meta, kind:<kind>, comma-separated");
+  const beforeQ = c.req.query("before");
+  const before = beforeQ === undefined || beforeQ === "" ? null : Number(beforeQ);
 
-  return c.json(await stub.events(since, limit, topics));
+  if (before !== null && (!Number.isSafeInteger(before) || before < 1)) bad("before must be a whole number from 1");
+  const repo = c.req.query("repo") || null;
+
+  if (repo !== null && !/^[A-Za-z0-9._-]{1,200}$/.test(repo)) bad("repo is a repo's name (as in its URL), or meta");
+  const kinds = (c.req.query("kinds") ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+
+  if (kinds.length > 20 || kinds.some((k) => !/^[a-z._]{1,64}$/.test(k))) bad("kinds: up to 20 event kinds, comma-separated");
+
+  return c.json(await stub.events(since, limit, topics, { before, repo, kinds }));
 });
 
 // ── Members ───────────────────────────────────────────────────────────────

@@ -44,6 +44,7 @@ import type {
   StreamEvent,
   KeyedEvent,
   ReconcileSeen,
+  EventFilter,
   RefusalExtra,
   MergeResult,
   EventSocketAttachment,
@@ -387,6 +388,16 @@ export class MonorepoObject extends DurableObject<Env> {
     const ecols = this.rows<{ name: string }>("PRAGMA table_info(events)").map((c) => c.name);
 
     if (!ecols.includes("tags")) this.sql.exec("ALTER TABLE events ADD COLUMN tags TEXT");
+
+    // The pull's repo= and kinds= (C4): each event's repo as a column, indexed with the kinds.
+    if (!ecols.includes("repo")) {
+      this.sql.exec("ALTER TABLE events ADD COLUMN repo TEXT");
+      // Events from before: the repo is in the stored body too (publish() writes both).
+      this.sql.exec("UPDATE events SET repo = json_extract(body, '$.repo')");
+    }
+
+    this.sql.exec("CREATE INDEX IF NOT EXISTS events_repo ON events (repo, seq)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS events_kind ON events (kind, seq)");
 
     // A meta layer event's key (KeyedEvent): each (source, version) is in the log once.
     if (!ecols.includes("source")) {
@@ -1428,8 +1439,8 @@ export class MonorepoObject extends DurableObject<Env> {
     const tags = eventTags(e);
 
     const seq = this.sql.exec<{ seq: number }>(
-      "INSERT INTO events (at, kind, body, tags, source, source_version) VALUES (?, ?, ?, ?, ?, ?) RETURNING seq",
-      at, e.kind, body, ` ${tags.join(" ")} `, key?.source ?? null, key?.version ?? null,
+      "INSERT INTO events (at, kind, body, tags, source, source_version, repo) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      at, e.kind, body, ` ${tags.join(" ")} `, key?.source ?? null, key?.version ?? null, e.repo ?? null,
     ).one().seq;
 
     const line = this.feed.onPublish(seq, at, body);
@@ -1465,16 +1476,36 @@ export class MonorepoObject extends DurableObject<Env> {
     return seq;
   }
 
-  /** Events after `since` (or the latest), on any of `topics`; reads at most SCAN_MAX rows. */
-  private eventRows(since: number, limit: number, latest: boolean, topics: string[] = ["all"]): EventFrame[] {
+  /**
+   * Events after `since` (or the latest), on any of `topics`. `filter`
+   * narrows in SQL (before a seq; a repo and kinds, on their indexes); a topic
+   * other than `all` is matched here, over at most SCAN_MAX rows.
+   */
+  private eventRows(since: number, limit: number, latest: boolean, topics: string[] = ["all"], filter: EventFilter = {}): EventFrame[] {
     const all = topics.includes("all");
     const match = (tags: string | null) => all || topics.some((t) => (tags ?? " all ").includes(` ${t} `));
+    const where: string[] = [];
+    const args: SqlStorageValue[] = [];
 
-    const rows = latest
-      ? this.rows<{ seq: number; at: string; body: string; tags: string | null }>("SELECT seq, at, body, tags FROM events ORDER BY seq DESC LIMIT ?", all ? limit : SCAN_MAX)
-          .filter((r) => match(r.tags)).slice(0, limit).reverse()
-      : this.rows<{ seq: number; at: string; body: string; tags: string | null }>("SELECT seq, at, body, tags FROM events WHERE seq > ? ORDER BY seq LIMIT ?", since, all ? limit : SCAN_MAX)
-          .filter((r) => match(r.tags)).slice(0, limit);
+    const and = (clause: string, ...values: SqlStorageValue[]) => {
+      where.push(clause);
+      args.push(...values);
+    };
+
+    if (!latest) and("seq > ?", since);
+
+    if (filter.before) and("seq < ?", filter.before);
+
+    if (filter.repo) and("repo = ?", filter.repo);
+
+    if (filter.kinds?.length) and(`kind IN (${filter.kinds.map(() => "?").join(",")})`, ...filter.kinds);
+
+    const found = this.rows<{ seq: number; at: string; body: string; tags: string | null }>(
+      `SELECT seq, at, body, tags FROM events ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY seq ${latest ? "DESC" : "ASC"} LIMIT ?`,
+      ...args, all ? limit : SCAN_MAX,
+    ).filter((r) => match(r.tags)).slice(0, limit);
+
+    const rows = latest ? found.reverse() : found;
 
     // publish() writes body: JSON of the event without seq, at and via.
     return rows.map((r): EventFrame => ({ seq: r.seq, at: r.at, ...JSON.parse(r.body) }));
@@ -1491,16 +1522,20 @@ export class MonorepoObject extends DurableObject<Env> {
     return { head: b?.head ?? 0, oldest: b?.oldest ?? 0 };
   }
 
-  /** Events after `since` (oldest first), or the latest `limit` with no `since`. (An event's own `head` is a commit sha.) */
-  events(since: number | null, limit: number, topics: string[] = ["all"]): EventPage {
+  /**
+   * Events after `since` (oldest first), or the latest `limit` with no
+   * `since`; with `filter.before`, only those before that seq (page back with
+   * the first one's seq). (An event's own `head` is a commit sha.)
+   */
+  events(since: number | null, limit: number, topics: string[] = ["all"], filter: EventFilter = {}): EventPage {
     const { head, oldest } = this.eventBounds();
     const n = Math.min(Math.max(limit, 1), REPLAY_MAX);
     const bounds = { seq: head, oldest_seq: oldest };
 
-    if (since === null) return { events: this.eventRows(0, n, true, topics), ...bounds, resync: false };
+    if (since === null) return { events: this.eventRows(0, n, true, topics, filter), ...bounds, resync: false };
     const resync = since > head || (head > 0 && since < oldest - 1);
 
-    return { events: resync ? [] : this.eventRows(since, n, false, topics), ...bounds, resync };
+    return { events: resync ? [] : this.eventRows(since, n, false, topics, filter), ...bounds, resync };
   }
 
   /** The event socket (GET /v1/monorepos/{m}/events with Upgrade), after the Worker checked membership. */

@@ -4,8 +4,9 @@
 // through a stand-in; a branch's checks moving live as jobs report; a running
 // log growing on its build's page; the build failing there, with its
 // sanitised annotation, Retry, Rebuild and Cancel; the pipeline's page with
-// New build; the CI tab taking a build's change live; then a rename (the old
-// name redirects) and a delete with the typed confirmation. No page polls
+// New build; the CI tab taking a build's change live; a broken pando.toml
+// (required checks unknown, and why); then a rename (the old name
+// redirects) and a delete with the typed confirmation. No page polls
 // while its socket is up. Real Worker, real git, real browser.
 import { expect, type Page, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
@@ -348,6 +349,25 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(rebuilt.getByText("canceled", { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(rebuilt).toHaveClass(/arrived/);
       expect(ciReads.seen()).toEqual([]);
+    });
+
+    await test.step("a broken .pando/pando.toml: the branch says its required checks are unknown, and why; only Merge anyway", async () => {
+      const m = machine();
+      const meta = `${BASE}/${full}/meta.git`;
+
+      // The meta layer's first push of main (a save there is refused: .pando/ changes only through git), with a missing comma.
+      m.push(m.commit("meta", meta, "main", { ".pando/pando.toml": '[repos."projects/web"]\nrequired_checks = ["ci" "e2e"]\n' }, "Require checks, badly"), meta, "main");
+      await page.goto(`${BASE}/${full}/projects/web/branches/feature`);
+      // ci is queued again after its Retry, so the box leads with it; the reason follows.
+      await expect(page.getByText(/^Required checks unknown: pando\.toml line \d+: .+/)).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("complementary").getByText("Required checks unknown", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Merge anyway" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Merge", exact: true })).toHaveCount(0);
+      await page.goto(`${BASE}/${full}/projects/web/branches`);
+      // Its state word in the list (ci running, here) carries the reason as its title.
+      const state = page.getByRole("list", { name: "Open branches" }).getByRole("link", { name: /feature/ }).locator("[title]");
+
+      await expect(state).toHaveAttribute("title", /^Required checks unknown: pando\.toml line \d+: /);
     });
 
     await test.step("rename: the monorepo answers at its new name, and the old name redirects there", async () => {

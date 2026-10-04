@@ -85,8 +85,10 @@ function Service({ c, owner }: { c: CiConnection; owner: boolean }) {
 
 const pipeCols = "grid-cols-[minmax(0,1fr)_minmax(0,200px)_minmax(0,180px)_120px] phone:grid-cols-[minmax(0,1fr)_auto] phone:gap-y-0.5";
 
-/** Required checks; the service's mark beside each one its pipeline's last build ran. */
-function Checks({ checks, ran, service }: { checks: readonly string[]; ran: ReadonlySet<string>; service: string }) {
+/** Required checks; the service's mark beside each one its pipeline's last build ran. Null: pando.toml cannot be read (the branch pages say why). */
+function Checks({ checks, ran, service }: { checks: readonly string[] | null; ran: ReadonlySet<string>; service: string }) {
+  if (checks === null) return <span className="text-ash">unknown</span>;
+
   if (!checks.length) return <span className="text-ash">none</span>;
 
   return checks.map((c, i) => (
@@ -113,7 +115,7 @@ function PipelineRow({ p, ran }: { p: CiPipeline; ran: ReadonlySet<string> }) {
         </Link>
       </code>
       <span className="min-w-0 phone:hidden">
-        <Checks checks={p.required_checks ?? []} ran={ran} service={p.service} />
+        <Checks checks={p.required_checks} ran={ran} service={p.service} />
       </span>
       <span className="text-right font-mono text-[12.5px] whitespace-nowrap text-ash">
         {last ? (
@@ -159,7 +161,7 @@ function Pipelines({ owner }: { owner: boolean }) {
               <code className="overflow-hidden text-ellipsis whitespace-nowrap">{r.path}</code>
               <span className="text-ash phone:row-start-2">none</span>
               <span className="min-w-0 phone:hidden">
-                <Checks checks={r.checks ?? []} ran={new Set()} service="" />
+                <Checks checks={r.checks} ran={new Set()} service="" />
               </span>
               <span className="text-right">{owner ? <AddPipeline projects={projects} project={r.repo} connections={ci.connections} /> : null}</span>
             </div>

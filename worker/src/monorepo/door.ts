@@ -5,9 +5,10 @@
 
 import type { Env } from "../env";
 import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
-import { gitRequest, listRefs } from "./artifacts";
+import { gitRequest, listRefs, withRepo } from "./artifacts";
 import { concat, drain, parseReport, pkt, prepend, readCommandSection, refusal, statusReport, type RefCommand } from "./pktline";
 import { isBusy, LEASE_MS } from "./gate";
+import { wholeThinTrees } from "./thinpack";
 import { addGate, currentTiming, finishTiming, note, relayTimed, runTimed, startTiming, timeArtifacts } from "../timing";
 
 /** Count the pack bytes git sends (push_bytes on the timing line). */
@@ -316,6 +317,8 @@ async function receivePack(
   }, LEASE_MS / 3);
 
   let bytes: Uint8Array = new Uint8Array(0);
+  // What goes to Artifacts for a push held in memory: git's bytes, or the same push with its thin tree deltas whole.
+  let payload = buffered.bytes;
   let res: Response | null = null;
   let busy = false;
   // A failed call (thrown, or Artifacts answering 5xx): its reason, for the log. The push may have landed anyway.
@@ -352,7 +355,7 @@ async function receivePack(
         "content-type": "application/x-git-receive-pack-request",
         accept: "application/x-git-receive-pack-result",
       },
-      body: buffered.all ? buffered.bytes : countBytes(prepend(buffered.bytes, section.rest)),
+      body: buffered.all ? payload : countBytes(prepend(buffered.bytes, section.rest)),
     });
 
     // The whole report, before git sees it: the push is recorded first (it is small).
@@ -398,22 +401,39 @@ async function receivePack(
   try {
     let lost = false;
 
-    // At most two sends, in the same slot. A resend cannot apply twice: each ref update names the old head it expects.
-    for (let sends = 1; ; sends++) {
+    // In the same slot: one resend after a busy or lost answer, and one with whole trees after a delta cycle. A resend
+    // cannot apply twice: each ref update names the old head it expects.
+    let resent = false;
+    let rewritten = false;
+
+    for (;;) {
       ({ res, bytes, busy, failed } = await send());
-      const again = buffered.all && sends < 2;
+      const again = buffered.all && !resent;
 
       if (busy) {
         // Busy (mid-push with others): no pack taken. A push held in memory is sent again after a moment.
         note({ busy_retry: again ? "resent" : buffered.all ? "failed" : "too_large" });
 
         if (again) {
+          resent = true;
           await wait();
           continue;
         }
 
         if (!res) await drain(section.rest); // the test's unsent large push
         break;
+      }
+
+      // Artifacts refused a tree delta (a revert's tree, thinpack.ts): the push held in memory goes again with those trees whole.
+      if (!failed && !rewritten && buffered.all && DELTA_CYCLE.test(parseReport(bytes, section.caps).unpack ?? "")) {
+        rewritten = true;
+        const whole = await withWholeTrees(env, repo, payload, section.packAt);
+        note({ delta_cycle: whole ? "resent" : "no_tree_delta", whole_trees: whole?.trees ?? 0 });
+
+        if (whole) {
+          payload = whole.body;
+          continue;
+        }
       }
 
       // Artifacts' report decides, unless the answer was lost (a throw or a 5xx) or a resend after one was refused.
@@ -437,6 +457,7 @@ async function receivePack(
       }
 
       if (where.at === "old" && again) {
+        resent = true;
         note({ fail_retry: "resent" });
         await wait();
         continue;
@@ -515,6 +536,30 @@ async function receivePack(
   if (kept) ctx.waitUntil(runReconcile(env, stub, repo).catch((err) => console.error(`reconciling ${repo.name} on a push failed: ${err instanceof Error ? err.message : String(err)}`)));
 
   return answer;
+}
+
+/** Artifacts' unpack refusal of a tree sent as a delta against a tree it holds as a delta against that same tree. */
+const DELTA_CYCLE = /stored delta chain contains a cycle/;
+
+/** The push (command section, then pack at `packAt`) with its thin tree deltas whole, or null (none, or not readable). */
+async function withWholeTrees(env: Env, repo: RepoRecord, body: Uint8Array, packAt: number): Promise<{ body: Uint8Array; trees: number } | null> {
+  try {
+    const whole = await withRepo(env, repo.artifacts_name, (r) =>
+      wholeThinTrees(body.subarray(packAt), async (sha) => {
+        try {
+          return await r.readTree(sha);
+        } catch {
+          return null; // not a tree (a blob or commit base), or not there
+        }
+      }),
+    );
+
+    return whole && { body: concat([body.subarray(0, packAt), whole.pack]), trees: whole.trees };
+  } catch (err) {
+    console.warn(`writing ${repo.artifacts_name}'s pushed trees whole failed: ${err instanceof Error ? err.message : String(err)}`);
+
+    return null;
+  }
 }
 
 /** Whether a report refused any of the push's refs (or did not unpack). */

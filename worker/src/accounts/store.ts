@@ -947,6 +947,16 @@ export class Accounts {
     return (await this.rows<{ id: string }>("SELECT id FROM monorepos WHERE owner = ?1", org)).map((r) => r.id);
   }
 
+  /** An org's monorepos `login` cannot open (none while they are in it): after they leave, those they had only through it. */
+  async orgMonoreposWithout(org: string, login: string): Promise<Pick<MonorepoInfo, "id" | "kind">[]> {
+    return this.rows<Pick<MonorepoInfo, "id" | "kind">>(
+      `SELECT m.id, m.kind FROM monorepos m WHERE m.owner = ?1
+         AND NOT EXISTS (SELECT 1 FROM org_members WHERE org = ?1 AND login = ?2)
+         AND NOT EXISTS (SELECT 1 FROM members WHERE monorepo_id = m.id AND login = ?2)`,
+      org, login,
+    );
+  }
+
   /** Add a person to an org, or change their role. One statement, so two demotions at once cannot leave no owner. */
   async putOrgMember(org: string, login: string, role: MemberRole, by: string): Promise<Outcome<OrgMember>> {
     return this.guard(async () => {

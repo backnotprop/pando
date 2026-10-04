@@ -29,6 +29,7 @@ import type { RefCommand } from "./pktline";
 import { FeedOut, type HelloAnswer } from "../feed/out";
 import { isOneOf, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../parse";
 import { attachmentOf, Machines, type MachineRow } from "./machines";
+import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
@@ -1914,6 +1915,11 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   async webSocketError(_ws: WebSocket): Promise<void> {}
+
+  /** People who lost access (monorepo/access.ts): their event sockets close with NO_ACCESS, so clients stop. */
+  closeSockets(logins: string[]): number {
+    return closeLogins(this.ctx, logins, (ws) => attachmentOf(ws)?.login);
+  }
 
   /**
    * A branch's stored fields as an event row (no Artifacts reads in the

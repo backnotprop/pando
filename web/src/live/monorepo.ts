@@ -6,17 +6,18 @@
 // reconnects with backoff and asks for what it missed (feed_since, kept per
 // monorepo for the tab's life, so a socket opened again resumes too); past
 // 500 missed lines the server says feed_resync, and the logs are refetched.
+// A 4403 close (you no longer have access) ends it and calls `lost`.
 import { Routes } from "@pando/contract";
 import type { QueryClient } from "@tanstack/react-query";
 import { decodeMonorepoFrame } from "../api/client";
 import type { MonorepoRef } from "../api/names";
 import { applyLine } from "./lines";
-import { keepOpen } from "./socket";
+import { keepOpen, NO_ACCESS } from "./socket";
 
 /** The last line number each monorepo's socket saw, by `owner/name`. */
 const seen = new Map<string, number>();
 
-export function startMonorepoFeed(qc: QueryClient, m: MonorepoRef): () => void {
+export function startMonorepoFeed(qc: QueryClient, m: MonorepoRef, lost?: () => void): () => void {
   let lastN: number | null = seen.get(m.full) ?? null;
 
   const keep = (n: number | null) => {
@@ -29,6 +30,9 @@ export function startMonorepoFeed(qc: QueryClient, m: MonorepoRef): () => void {
   const refetch = () => void qc.invalidateQueries({ queryKey: ["activity"], predicate: (q) => q.queryKey[1] === null || q.queryKey[1] === m.full });
 
   return keepOpen(() => Routes.monorepoFeedSocketPath(m.owner, m.name, lastN), {
+    ended: (code) => {
+      if (code === NO_ACCESS) lost?.();
+    },
     frame: (data) => {
       const f = decodeMonorepoFrame(data);
 

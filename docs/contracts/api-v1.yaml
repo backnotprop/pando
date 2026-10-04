@@ -1234,7 +1234,9 @@ paths:
         "oldest_seq"}` frame: refetch, then resume from `seq`), then
         `{"type": "caught_up", "seq"}`, then live `{"type": "event", "seq", ...}`
         frames. The text `ping` gets `pong`. Close code 4404: the monorepo was
-        deleted.
+        deleted. Close code 4403: you no longer have access to it (an owner
+        removed you, you left the org that owns it, or a transfer moved it
+        away from that org); do not reconnect.
 
         Numbers and shas: `seq`, `oldest_seq` are stream sequence numbers. In
         an event, `head` and `before` (push and default_head events) are commit

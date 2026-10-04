@@ -42,6 +42,7 @@ import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../
 import type { Auth } from "../accounts/object";
 import { orgRoutes } from "../accounts/org-routes";
 import { feedMembership, membersBeforeDelete } from "../feed/membership";
+import { closeAfterTransfer, closeIfRemoved } from "./access";
 import { monoreposSummary } from "../feed/routes";
 
 /** Which branches a list shows. */
@@ -440,7 +441,11 @@ api.patch("/v1/monorepos/:o/:m", async (c) => {
   await c.get("stub").setLabel(out.info.full_name);
   forgetCachedAuth();
 
-  if (moving) await feedMembership(c.env, info.id, [...before, ...(await acc.members(info.id))].map((m) => m.login));
+  if (moving) {
+    const after = await acc.members(info.id);
+    await feedMembership(c.env, info.id, [...before, ...after].map((m) => m.login));
+    await closeAfterTransfer(c.env, info, before, after);
+  }
 
   return c.json({ ...out.info, role: "owner", replaced_alias: out.replaced_alias } satisfies typeof Contract.MonorepoRenamed.Encoded);
 });
@@ -596,6 +601,7 @@ api.delete("/v1/monorepos/:o/:m/members/:login", async (c) => {
   unwrap(await accounts(c.env).removeMember(c.get("m"), c.req.param("login")));
   forgetCachedAuth();
   await feedMembership(c.env, c.get("m"), [c.req.param("login")]);
+  await closeIfRemoved(c.env, c.get("info"), c.req.param("login"));
 
   return c.body(null, 204);
 });

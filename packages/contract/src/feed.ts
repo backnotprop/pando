@@ -60,6 +60,8 @@ export const StatusSummary = Schema.Struct({
   duration_s: Schema.NullOr(Count),
   /** The CI service that reported it; null when a member posted it (`actor` is then that member). */
   app: Schema.NullOr(Schema.String),
+  /** The build Pando holds for it (its page, /{owner}/{name}/ci/{pipeline}/{number}); null for a status with no stored build. */
+  build: Schema.NullOr(Schema.Struct({ pipeline: Schema.String, number: Count })),
 });
 
 export interface StatusSummary extends Schema.Schema.Type<typeof StatusSummary> {}

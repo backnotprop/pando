@@ -79,6 +79,8 @@ export const FeedSummary = Schema.Struct({
   open_branches: Count,
   /** Open issues assigned to each member, by login (none: left out): the home's "Needs you" shows the person's own; this frame moves it. */
   assigned: Schema.Record(Schema.String, AssignedIssues),
+  /** Its open issues, for the repository's row. */
+  open_issues: Count,
   at: Timestamp,
 });
 
@@ -96,6 +98,7 @@ export const MonorepoSummary = MonorepoEntry.pipe(
     repos: Schema.NullOr(Count),
     open_branches: Schema.NullOr(Count),
     assigned: Schema.NullOr(Schema.Record(Schema.String, AssignedIssues)),
+    open_issues: Schema.NullOr(Count),
   }),
 );
 

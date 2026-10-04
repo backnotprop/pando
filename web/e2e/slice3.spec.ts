@@ -204,6 +204,8 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
     const at = (ms: number) => new Date(t0 + ms).toISOString();
     // GETs of stored builds and jobs (the check rows', the CI tab's, a build page's): none while the socket is up.
     const runsReads = reads(page, /\/ci\/builds(\/cib_[^/]+)?$/);
+    // And of the branch itself: its checks and gate come as branch.updated rows.
+    const branchReads = reads(page, /\/repos\/projects-web\/branches\/feature$/);
     const ciReads = reads(page, /\/ci(\/builds(\/cib_[^/]+)?)?$/);
     const b7 = () => ({ commit: sha, branch: "feature", message: "Start a feature", created_at: at(-60_000) });
     const run7 = () => ({ ...b7(), state: "running", started_at: at(-59_000) });
@@ -219,6 +221,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       // The check rows' builds and jobs come as rows on the page's socket: no read of them once it is up.
       await page.waitForTimeout(2000);
       runsReads.from();
+      branchReads.from();
       await bk.send("build.scheduled", "web-ci", 7, b7());
       await bk.send("job.scheduled", "web-ci", 7, run7(), { id: "job-tc", key: "typecheck", state: "scheduled", created_at: at(-59_500) });
       await expect(typecheck.getByText("queued", { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -236,6 +239,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await bk.send("job.started", "web-ci", 7, run7(), { id: "job-ci", key: "ci", state: "running", created_at: at(-59_000), started_at: at(-6_000) });
       await expect(checks.getByRole("listitem").filter({ hasText: "ci" }).filter({ hasNotText: "typecheck" }).getByText("running", { exact: true })).toBeVisible({ timeout: 30_000 });
       expect(runsReads.seen()).toEqual([]);
+      expect(branchReads.seen()).toEqual([]);
     });
 
     await test.step("a check opens its job on the build's page, where the running log grows", async () => {

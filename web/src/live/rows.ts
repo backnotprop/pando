@@ -5,13 +5,12 @@
 // its data once more (rows from before the socket opened); on a reconnect it
 // asks for what it missed with since=<last seq>, and a resync reads again.
 // While the socket is down, the page polls as a fallback (`fallback`).
-import type { CiBuild, CiBuildDetail, CiJob, FeedEvent, Machine, RepoName } from "@pando/contract";
+import { type BranchEventRow, type CiBuild, type CiBuildDetail, type CiJob, decodeMonorepoEventFrame, type FeedEvent, type Machine, type MonorepoEventFrame, type RepoName, Routes } from "@pando/contract";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import type { MonorepoRef } from "../api/names";
-import { decodeMonorepoEventFrame, monorepoEventsSocketPath, type RowEvent } from "../api/pending";
 import { type CheckRuns, branchQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
 import { keepOpen } from "./socket";
@@ -91,6 +90,16 @@ function patchJob(qc: QueryClient, m: MonorepoRef, repo: RepoName | null, buildI
   }
 }
 
+/** A row event (not caught_up, resync or error). */
+type RowEvent = Extract<MonorepoEventFrame, { type: "event" }>;
+
+/** A branch's stored fields changed (a push, a merge, a title edit): merged into the cached branch; its facts follow as a full branch.updated. */
+function patchBranchFields(qc: QueryClient, m: MonorepoRef, row: BranchEventRow) {
+  const { repo, ...fields } = row;
+
+  qc.setQueryData(branchQuery(m, repo, row.name).queryKey, (b) => b && { ...b, ...fields });
+}
+
 function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
   switch (f.kind) {
     case "machine.updated":
@@ -103,25 +112,26 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
       patchJob(qc, m, f.repo, f.row.build, f.row);
       break;
     case "ci.connection":
-      // Connected or disconnected (rare): the tab's top is read again.
+      // Connected or disconnected (rare): the tab's top is read again (a row here has no webhook URL).
       void qc.invalidateQueries({ queryKey: ciQuery(m).queryKey });
       break;
-    case "branch.updated": {
-      const { repo, ...branch } = f.row;
+    case "branch.updated":
+    case "branch.opened":
+    case "merged":
+    case "push":
+      if (f.collection !== "branches") break;
 
-      qc.setQueryData(branchQuery(m, repo, branch.name).queryKey, branch);
-      break;
-    }
+      if (f.partial) {
+        patchBranchFields(qc, m, f.row);
+      } else {
+        const { repo, ...branch } = f.row;
 
-    case "status":
-      // Until fd9c23d lands (the server then sends branch.updated with the checks; pending.ts): a branch at this commit is read once.
-      if (f.repo) {
-        void qc.invalidateQueries({
-          queryKey: [...repoKey(m, f.repo), "branch"],
-          predicate: (q) => q.queryKey.length === 7 && qc.getQueryData<{ head: string }>(q.queryKey)?.head === f.row.sha,
-        });
+        qc.setQueryData(branchQuery(m, repo, branch.name).queryKey, branch);
       }
 
+      break;
+    case "status":
+      // The branches at that commit follow as branch.updated, with their checks and gate.
       break;
   }
 }
@@ -141,7 +151,7 @@ export function useRows(m: MonorepoRef, topics: readonly string[], sync: () => v
   useEffect(() => {
     let seq: number | null = null;
 
-    const stop = keepOpen(() => monorepoEventsSocketPath(m.owner, m.name, key.split(","), seq), {
+    const stop = keepOpen(() => Routes.monorepoEventsSocketPath(m.owner, m.name, key.split(","), seq), {
       up: (open) => {
         if (!open) setLive(false);
       },

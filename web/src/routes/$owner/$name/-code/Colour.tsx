@@ -10,7 +10,7 @@ import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
 import workerUrl from "@pierre/diffs/worker/worker.js?worker&url";
 import { useMemo } from "react";
 import { SYNTAX_THEME } from "../../../../ui/syntax";
-import { Lines } from "./Lines";
+import { Lines, Plain } from "./Lines";
 
 const pool = getOrCreateWorkerPoolSingleton({
   poolOptions: { workerFactory: () => new Worker(workerUrl, { type: "module" }), poolSize: 1 },
@@ -42,17 +42,28 @@ pre, code, [data-gutter], [data-content] { background: none; }
 
 const options = { theme: SYNTAX_THEME, disableFileHeader: true, unsafeCSS: LAYOUT };
 
-/** `id` is the blob's oid: the render cache's key, with the language (one blob can sit under two names). */
-export default function Colour({ name, text, id }: { name: string; text: string; id: string | null }) {
+// Without line numbers, as Plain draws text (the prototype's .yaml): 19 px lines, 14 px above and below, 18 px at the sides.
+const BARE = `${LAYOUT}
+:host { --diffs-line-height: 19px; --diffs-gap-block: 14px; }
+[data-line] { padding-inline: 18px; }
+`;
+
+const bareOptions = { theme: SYNTAX_THEME, disableFileHeader: true, disableLineNumbers: true, unsafeCSS: BARE };
+
+/**
+ * `id` is the blob's oid: the render cache's key, with the language (one blob
+ * can sit under two names). `numbers` false draws it without line numbers.
+ */
+export default function Colour({ name, text, id, numbers = true }: { name: string; text: string; id: string | null; numbers?: boolean }) {
   const lang = getFiletypeFromFileName(name);
   const file = useMemo(() => ({ name, contents: text, lang, cacheKey: id ? `${id}.${lang}` : undefined }), [name, text, lang, id]);
 
   // A kind with no grammar stays plain.
-  if (lang === "text") return <Lines text={text} />;
+  if (lang === "text") return numbers ? <Lines text={text} /> : <Plain text={text} />;
 
   return (
     <WorkerPoolContext.Provider value={pool}>
-      <File file={file} options={options} />
+      <File file={file} options={numbers ? options : bareOptions} />
     </WorkerPoolContext.Provider>
   );
 }

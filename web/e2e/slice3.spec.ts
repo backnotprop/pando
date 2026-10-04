@@ -200,6 +200,23 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       sha = machine().git(machine().dir("web"), "rev-parse", "HEAD").trim();
     });
 
+    await test.step("Add pipeline: a project with none gets one from a small form (its Buildkite hook)", async () => {
+      await browserPost(page, `/v1/monorepos/${full}/repos`, { path: "projects/api" });
+      await page.reload();
+      const row = page.getByRole("list", { name: "Pipelines" }).getByRole("listitem").filter({ hasText: "projects/api" });
+
+      await row.getByRole("button", { name: "Add pipeline" }).click();
+      const form = page.getByRole("form", { name: "Add pipeline" });
+
+      await expect(form.getByRole("combobox", { name: "Project" })).toHaveValue("projects-api");
+      await form.getByRole("textbox", { name: "Pipeline" }).fill("api-ci");
+      await form.getByRole("button", { name: "Add pipeline" }).click();
+      await expect(row.getByRole("link", { name: "api-ci" })).toBeVisible();
+      const hooks = await (await machine().api("GET", `/v1/monorepos/${full}/repos/projects-api/hooks`)).json();
+
+      expect(hooks.hooks.some((h: { type: string; buildkite: { pipeline: string } | null }) => h.type === "buildkite" && h.buildkite?.pipeline === "api-ci")).toBe(true);
+    });
+
     const t0 = Date.now();
     const at = (ms: number) => new Date(t0 + ms).toISOString();
     // GETs of stored builds and jobs (the check rows', the CI tab's, a build page's): none while the socket is up.

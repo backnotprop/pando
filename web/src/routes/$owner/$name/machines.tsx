@@ -28,8 +28,8 @@ export const Route = createFileRoute("/$owner/$name/machines")({
   component: Machines,
 });
 
-// On a phone: the machine (its name whole, wrapping), its worktrees, when, and connected; what it did is left out.
-const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px] phone:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_52px_72px] phone:gap-3";
+// On a phone: the machine (its name whole, on one line, 10 px from its worktrees), its worktrees, when, and connected; what it did is left out.
+const cols = "grid-cols-[minmax(0,230px)_minmax(0,200px)_minmax(0,1fr)_64px_92px] phone:grid-cols-[auto_minmax(0,1fr)_52px_72px] phone:gap-2.5";
 
 /** A worktree as a link to its branch: `cli` in the monorepo's own project (or its only one), `artifact-fs/mac-mount` in another. */
 function WorktreeLink({ w, full, home }: { w: MachineWorktree; full: string; home: string | null }) {
@@ -95,7 +95,7 @@ function Machines() {
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Avatar name={m.login} size={22} />
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="overflow-hidden font-mono text-[13px] text-ellipsis whitespace-nowrap text-bark phone:whitespace-normal phone:[overflow-wrap:anywhere]">
+                      <span className="overflow-hidden font-mono text-[13px] text-ellipsis whitespace-nowrap text-bark phone:overflow-visible">
                         {m.name}
                       </span>
                       <span className="overflow-hidden text-[12.5px] text-ellipsis whitespace-nowrap text-ash">{m.login}</span>

@@ -1,7 +1,8 @@
 // The CI tab, in a service-neutral shape (ruling): each CI service connected
 // (its webhook and last event), the pipelines with what each project needs to
 // merge, and the recent builds. A second service adds a block and rows, not a
-// new layout. Connecting shows a secret once, so it happens in a terminal.
+// new layout. Connecting shows a secret once, so it happens in a terminal;
+// adding a pipeline involves none, so it is a small form here.
 import type { CiConnection, CiPipeline } from "@pando/contract";
 import { useMutation, useQueries, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
@@ -14,6 +15,7 @@ import buildkiteMark from "../../../../ui/buildkite-mark.svg";
 import { button, copyInCmd, CopyButton, Empty, lnk, Refusal, row, SectionHead, thead } from "../../../../ui/controls";
 import { ciPipelineLink, isHomeProject } from "../../../../ui/paths";
 import { ago, since, useNow } from "../../../../ui/time";
+import { AddPipeline } from "../-ci/AddPipeline";
 import { BuildList, BuildState, CommandButton, ServiceMark, serviceName } from "../-ci/parts";
 import { MonorepoHead, useMonorepo } from "../-frame/heads";
 
@@ -125,7 +127,7 @@ function PipelineRow({ p, ran }: { p: CiPipeline; ran: ReadonlySet<string> }) {
 }
 
 /** Each project with its pipelines, and each project with none (Add pipeline, in a terminal). */
-function Pipelines() {
+function Pipelines({ owner }: { owner: boolean }) {
   const { monorepo } = useMonorepo();
   const ci = useSuspenseQuery(ciQuery(monorepo)).data;
   // The monorepo's own project first, then by path.
@@ -134,6 +136,7 @@ function Pipelines() {
   const lastBuilds = useQueries({ queries: pipelines.map((p) => ({ ...ciBuildQuery(monorepo, p.last_build?.id ?? ""), enabled: p.last_build !== null })) });
   const ranBy = (i: number) => new Set((lastBuilds[i]?.data?.jobs ?? []).flatMap((j) => (j.check && !j.retried ? [j.check] : [])));
   const without = ci.required_checks.filter((r) => !ci.pipelines.some((p) => p.repo === r.repo));
+  const projects = ci.required_checks.map((r) => ({ repo: r.repo, path: r.path }));
 
   return (
     <div className="mt-10">
@@ -158,9 +161,7 @@ function Pipelines() {
               <span className="min-w-0 phone:hidden">
                 <Checks checks={r.checks} ran={new Set()} service="" />
               </span>
-              <span className="text-right">
-                <CommandButton label="Add pipeline" size={28} heading="Add a pipeline" command={`pando ci pipeline add ${r.path} <pipeline> --monorepo ${monorepo.full}`} />
-              </span>
+              <span className="text-right">{owner ? <AddPipeline projects={projects} project={r.repo} connections={ci.connections} /> : null}</span>
             </div>
           </li>
         ))}
@@ -184,7 +185,7 @@ function CiTab() {
       <div className="max-w-[1000px]">
         <SectionHead title="CI service" />
         {connected ? ci.connections.map((c) => <Service key={c.id} c={c} owner={owner} />) : <Empty>None connected.</Empty>}
-        {connected ? <Pipelines /> : null}
+        {connected ? <Pipelines owner={owner} /> : null}
         <div className="mt-10">
           <SectionHead title="Recent builds" />
           {builds.length ? <BuildList full={monorepo.full} builds={builds} label="Recent builds" /> : <Empty>No builds yet.</Empty>}

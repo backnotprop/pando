@@ -62,8 +62,13 @@ export async function post<A, I>(schema: Schema.Codec<A, I>, path: string, body:
   return decoded(schema, res, path);
 }
 
+/** A JSON request body. */
+export interface JsonBody {
+  readonly [key: string]: string | number | boolean | null | JsonBody;
+}
+
 /** A write a route names (POST or PATCH), with an optional JSON body, and its decoded answer. */
-export async function write<A, I>(route: { method: "POST" | "PATCH"; path: string; response: Schema.Codec<A, I> }, body?: Record<string, string>): Promise<A> {
+export async function write<A, I>(route: { method: "POST" | "PATCH"; path: string; response: Schema.Codec<A, I> }, body?: JsonBody): Promise<A> {
   const headers = new Headers({ accept: "application/json" });
 
   if (body) headers.set("content-type", "application/json");

@@ -68,8 +68,8 @@
    (MIT, NOTICE), mapped in research/design/pando-ui-2026-10-03/themes/
    CLOUDFLARE-TOKENS.md: Foxfire is its cyan, Rust its danger red, clay its
    orange. Black Rainbow: the owner's drawing-sheet concept
-   (research/design/themes/black-rainbow.html), dark only, mapped in the
-   web-look README. The rules, hovers and dim text mix from each theme's roles. */
+   (research/design/themes/black-rainbow.html), plain black (no grid, owner),
+   dark only, mapped in the web-look README. The rules, hovers and dim text mix from each theme's roles. */
 html[data-theme="black-rainbow"],
 html[data-theme="pando-light"],
 html[data-theme="cloudflare-dark"],
@@ -156,9 +156,6 @@ html[data-theme="black-rainbow"] {
   --rust: #e23c2e;
   --bark-hi: #ffffff;
   --shadow: rgba(0, 0, 0, 0.6);
-  /* The drawing sheet's grid (below): the concept's minor 0.035 every 22.4 px; its major every 112 px at 0.055, not 0.06, so Rust keeps 4.5:1 over a major line. */
-  --grid-minor: rgba(255, 255, 255, 0.035);
-  --grid-major: rgba(255, 255, 255, 0.055);
 }
 html[data-theme="plannotator-dark"] {
   --soil: oklch(0.15 0.02 260);
@@ -369,30 +366,11 @@ html[data-theme="cloudflare-light"] {
   button {
     cursor: pointer;
   }
-  /* Under Black Rainbow's grid, a box on the page (the file list, a code file,
-     a diff, a README) is black, so the grid shows on the page's ground only.
-     In this layer, a box with its own background (bg-loam) keeps it. */
-  html[data-theme="black-rainbow"] main .border-rootline {
-    background-color: var(--soil);
-  }
   :focus-visible {
     outline: 1.5px solid var(--bark);
     outline-offset: 2px;
     border-radius: 5px;
   }
-}
-
-/* Black Rainbow's drawing sheet: a still grid on the page's ground, scrolling
-   with the page (no fixed background, which repaints on every scroll). */
-html[data-theme="black-rainbow"] body {
-  background-image:
-    linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
-    linear-gradient(var(--grid-minor) 1px, transparent 1px), linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
-  background-size:
-    112px 112px,
-    112px 112px,
-    22.4px 22.4px,
-    22.4px 22.4px;
 }
 
 /* An activity line that just arrived: it slides in, takes Foxfire for two

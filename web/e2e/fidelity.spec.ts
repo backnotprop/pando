@@ -606,7 +606,7 @@ async function themes(page: Page) {
   await page.goto("/?theme=pando");
 }
 
-/** Black Rainbow (dark only), with its drawing-sheet grid as built and with the grid taken off, for the owner to choose. */
+/** Black Rainbow (dark only, plain black): its screens and the menu at 1440, the home at 390. */
 async function blackRainbow(page: Page) {
   if (!wanted("br-")) return;
 
@@ -617,33 +617,23 @@ async function blackRainbow(page: Page) {
     ["files-changed", "/ramos/pando/projects/pando/branches/web-api?tab=files"],
   ] as const;
 
-  for (const grid of ["grid", "plain"] as const) {
-    const plain = async () => {
-      if (grid === "plain") await page.addStyleTag({ content: "html body { background-image: none !important; }" });
-    };
-
-    for (const [name, route] of screens) {
-      await page.goto(`${route}${route.includes("?") ? "&" : "?"}theme=black-rainbow`);
-      await settle(page);
-      await plain();
-      await page.screenshot({ path: `${SHOTS}br-${grid}-${name}-1440-real.png` });
-    }
-
-    await page.goto("/?theme=black-rainbow");
+  for (const [name, route] of screens) {
+    await page.goto(`${route}${route.includes("?") ? "&" : "?"}theme=black-rainbow`);
     await settle(page);
-    await plain();
-    await page.getByRole("button", { name: "ramos", exact: true }).click();
-    await page.waitForTimeout(400);
-    await page.screenshot({ path: `${SHOTS}br-${grid}-menu-1440-real.png`, clip: { x: 1440 - 360, y: 0, width: 360, height: 560 } });
-    await page.keyboard.press("Escape");
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/?theme=black-rainbow");
-    await settle(page);
-    await plain();
-    await page.screenshot({ path: `${SHOTS}br-${grid}-home-390-real.png` });
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: `${SHOTS}br-${name}-1440-real.png` });
   }
 
+  await page.goto("/?theme=black-rainbow");
+  await settle(page);
+  await page.getByRole("button", { name: "ramos", exact: true }).click();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${SHOTS}br-menu-1440-real.png`, clip: { x: 1440 - 360, y: 0, width: 360, height: 560 } });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?theme=black-rainbow");
+  await settle(page);
+  await page.screenshot({ path: `${SHOTS}br-home-390-real.png` });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/?theme=pando");
 }
 

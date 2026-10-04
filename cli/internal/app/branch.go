@@ -222,7 +222,6 @@ func Review(e *Env, args []string) error {
 		return err
 	}
 	name := repoName(root, repo)
-	agent := os.Getenv("PANDO_AGENT")
 	b, err := srv.GetBranch(e.Ctx, root.FullName(), name, branch)
 	if err != nil {
 		return fmt.Errorf("branch %s: %w", branch, err)
@@ -262,11 +261,6 @@ func Review(e *Env, args []string) error {
 		default:
 			return fmt.Errorf("plannotator answered %q", d.Decision)
 		}
-	}
-	if agent != "" {
-		// Agents act as the person (like gh); the body says which agent did.
-		word := map[string]string{"comment": "Comment", "approve": "Approved", "request_changes": "Changes requested"}[in.Verdict]
-		in.Body = strings.TrimSpace(in.Body + "\n\n" + word + " by agent " + agent + ".")
 	}
 	rv, err := srv.CreateReview(e.Ctx, root.FullName(), name, branch, in)
 	if err != nil {

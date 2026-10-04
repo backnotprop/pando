@@ -55,7 +55,7 @@ func (c *Config) defaults() {
 		c.MaxInFlight = 64
 	}
 	if c.Log == nil {
-		c.Log = log.New(os.Stderr, "pando meta: ", log.LstdFlags)
+		c.Log = log.New(os.Stderr, "pando sync: ", log.LstdFlags)
 	}
 	if c.Machine == "" {
 		c.Machine = defaultMachine()
@@ -86,7 +86,7 @@ func LoadConfig(root string) (Config, error) {
 	c := Config{Root: root}
 	if r, err := config.LoadRoot(root); err == nil {
 		if r.Kind == config.KindRepo {
-			return c, errors.New("a plain git repo has no meta layer")
+			return c, errors.New("a plain git repo has no shared files: those are a monorepo's files outside projects/")
 		}
 		c.Monorepo, c.Server = r.FullName(), r.Server // owner/name
 	} else if !errors.Is(err, fs.ErrNotExist) {

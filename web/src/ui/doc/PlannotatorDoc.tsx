@@ -9,8 +9,9 @@ import { ThemeProvider, useTheme } from "@plannotator/ui/components/ThemeProvide
 import { Viewer } from "@plannotator/ui/components/Viewer";
 import { configurePlannotatorUI } from "@plannotator/ui/configure";
 import { extractFrontmatter, parseMarkdownToBlocks } from "@plannotator/ui/utils/parser";
+import { SHIKI_THEME_MAP } from "@plannotator/ui/utils/syntaxTheme";
 import DOMPurify from "dompurify";
-import { useEffect, useMemo } from "react";
+import { use, useEffect, useMemo } from "react";
 import type { DocProps } from "./Doc";
 
 const remote = /^(https?:|data:|blob:|mailto:)/i;
@@ -62,8 +63,28 @@ function FollowPando() {
 
 const none = () => undefined;
 
+// Code fences take the code view's colours (ui/syntax.ts, the --diffs-token-*
+// palette in theme.css), not a stock Shiki theme. The viewer picks a fence's
+// Shiki theme from its colour theme ("plannotator" here) through this table;
+// it has no setting for it, so the entry is pointed at Pando's once the theme
+// is registered. A document with a fence waits for that (Pierre, which colours
+// the fence, loads then anyway); one without never loads it.
+let syntax: Promise<void> | null = null;
+
+const pandoFences = () =>
+  (syntax ??= import("../syntax").then(
+    ({ SYNTAX_THEME }) => {
+      SHIKI_THEME_MAP.plannotator = { dark: SYNTAX_THEME, light: SYNTAX_THEME };
+    },
+    // If the chunk cannot load (a deploy replaced it), the document still shows; its fences stay plain.
+    () => undefined,
+  ));
+
 function MarkdownDoc({ text, raw, open }: { text: string; raw: string; open: (href: string) => void }) {
   const { frontmatter, blocks } = useMemo(() => ({ frontmatter: extractFrontmatter(text).frontmatter, blocks: parseMarkdownToBlocks(text) }), [text]);
+
+  // `use` may sit in a condition: only a document with a fence waits.
+  if (blocks.some((b) => b.type === "code" && !!b.language)) use(pandoFences());
 
   return (
     <Viewer

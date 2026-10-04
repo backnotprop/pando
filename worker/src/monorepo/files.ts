@@ -11,6 +11,7 @@
 import type { Env } from "../env";
 import { hasControl, HttpError } from "../http";
 import type { ObjectStats, ObjectsClient } from "../objects";
+import type { BranchDiff } from "./diff";
 import { prepend } from "./pktline";
 import type { RepoRecord } from "./types";
 
@@ -465,7 +466,7 @@ export interface HistoryMessage {
   path: string;
 }
 
-export function answerKey(kind: "last" | "hist", commit: string, pathHash: string): string {
+export function answerKey(kind: "last" | "hist" | "diff", commit: string, pathHash: string): string {
   return `${kind}/${commit}/${pathHash}`;
 }
 
@@ -476,7 +477,7 @@ export interface HistoryPage {
   capped: boolean;
 }
 
-export async function storeAnswer(env: Env, artifacts: string, key: string, body: LastCommits | HistoryPage): Promise<void> {
+export async function storeAnswer(env: Env, artifacts: string, key: string, body: LastCommits | HistoryPage | BranchDiff): Promise<void> {
   await env.CACHE?.put(`answers/${artifacts}/${key}.json`, JSON.stringify(body), { httpMetadata: { contentType: "application/json" } });
 }
 

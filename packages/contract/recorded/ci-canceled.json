@@ -1,0 +1,29 @@
+{
+  "schema": "CiBuildAnswer",
+  "route": "POST .../ci/builds/{build}/cancel (the rebuild, still scheduled)",
+  "status": 202,
+  "body": {
+    "build": {
+      "id": "cib_affd1b810ac07b2f",
+      "service": "buildkite",
+      "connection": "m_ee92532e4bf06a36--cic_a4ce76a31593",
+      "pipeline": "web",
+      "number": 2,
+      "repo": "projects-web",
+      "repo_path": "projects/web",
+      "sha": "0dc5028ee5454014d196e78237ea51ddb05091f4",
+      "branch": "main",
+      "message": "a build",
+      "state": "running",
+      "service_state": "canceling",
+      "web_url": "https://buildkite.com/o/web/builds/2",
+      "pushed_by": "rec-mut7vro0",
+      "created_at": "2026-10-04T02:44:27.045Z",
+      "started_at": null,
+      "finished_at": null,
+      "duration_s": null,
+      "rebuilt_from": "bld-web-1",
+      "jobs": []
+    }
+  }
+}

@@ -9,6 +9,8 @@ export interface DiffOptions {
   hunks: boolean;
   maxBytes: number;
   paths: string[];
+  /** List at most this many files (in path order); the rest are counted in `files_total` only. */
+  maxFiles?: number;
 }
 
 export interface Hunk {
@@ -38,6 +40,10 @@ export interface DiffResult {
   files: DiffFile[];
   truncated: boolean;
   stats: { files: number; additions: number; deletions: number };
+  /** Every changed file, listed or not. */
+  files_total: number;
+  /** More files changed than `maxFiles`: only the first are listed. */
+  too_many_files: boolean;
 }
 
 const MAX_TEXT_BYTES = 1 << 20; // per side
@@ -221,6 +227,11 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
   for (const [a, b] of changed) pairs.push({ old: a, new: b, status: "modified" });
   pairs.sort((x, y) => ((x.new ?? x.old)!.path < (y.new ?? y.old)!.path ? -1 : 1));
 
+  const filesTotal = pairs.length;
+  const tooMany = opts.maxFiles !== undefined && pairs.length > opts.maxFiles;
+
+  if (tooMany) pairs.length = opts.maxFiles!;
+
   const files: DiffFile[] = pairs.map((p) => ({
     path: (p.new ?? p.old)!.path,
     old_path: p.status === "renamed" ? p.old!.path : undefined, // left out of the JSON unless renamed
@@ -318,7 +329,7 @@ export async function treeDiff(repo: ArtifactsRepo, fromTree: string, toTree: st
     stats.deletions += f.deletions ?? 0;
   }
 
-  return { files, truncated, stats };
+  return { files, truncated, stats, files_total: filesTotal, too_many_files: tooMany };
 }
 
 /** Every file that differs between two trees: its path and new blob (null when deleted). */
@@ -338,6 +349,24 @@ export async function changedFiles(repo: ArtifactsRepo, fromTree: string, toTree
   return [...out.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
 }
 
+/** A changed file in Files changed: its row, and its own unified patch (null when left out: binary, too large, past the budget). */
+export type ShownFile = Omit<DiffFile, "hunks"> & { patch: string | null };
+
+/** GET .../branches/{branch}/diff?patches=1: a branch's Files changed, by (main, head); it never changes for those two. */
+export interface BranchDiff {
+  base_branch: string;
+  /** Main's head the diff was taken against, and the branch's head. */
+  base: string;
+  head: string;
+  merge_base: string;
+  /** Some patches were left out for the byte budget. */
+  truncated: boolean;
+  too_many_files: boolean;
+  files_total: number;
+  stats: DiffResult["stats"];
+  files: ShownFile[];
+}
+
 /** A unified diff with git's headers, for `git apply` and Plannotator. */
 /** A diff as git's patch text, and how many files were left out of it. */
 export interface Patch {
@@ -350,45 +379,57 @@ export function toPatch(result: DiffResult, hunksOf: (f: DiffFile) => Hunk[] | u
   let omitted = 0;
 
   for (const f of result.files) {
-    if (f.patch_omitted === "budget" || f.patch_omitted === "too_large") {
-      omitted++;
-      continue;
-    }
+    const lines = fileLines(f, hunksOf(f) ?? []);
 
-    const oldPath = f.old_path ?? f.path;
-    out.push(`diff --git a/${oldPath} b/${f.path}`);
-
-    if (f.status === "added") out.push(`new file mode ${f.new_mode}`);
-    else if (f.status === "deleted") out.push(`deleted file mode ${f.old_mode}`);
-    else {
-      if (f.old_mode !== f.new_mode) out.push(`old mode ${f.old_mode}`, `new mode ${f.new_mode}`);
-
-      if (f.status === "renamed") out.push("similarity index 100%", `rename from ${oldPath}`, `rename to ${f.path}`);
-    }
-
-    const hunks = hunksOf(f) ?? [];
-
-    if (f.old_sha !== f.new_sha) {
-      const sameMode = f.status === "modified" && f.old_mode === f.new_mode;
-      out.push(`index ${f.old_sha ?? "0".repeat(40)}..${f.new_sha ?? "0".repeat(40)}${sameMode ? " " + f.new_mode : ""}`);
-    }
-
-    if (f.binary) {
-      out.push(`Binary files ${f.old_sha ? "a/" + oldPath : "/dev/null"} and ${f.new_sha ? "b/" + f.path : "/dev/null"} differ`);
-      continue;
-    }
-
-    if (!hunks.length) continue;
-    out.push(f.status === "added" ? "--- /dev/null" : `--- a/${oldPath}`);
-    out.push(f.status === "deleted" ? "+++ /dev/null" : `+++ b/${f.path}`);
-
-    for (const h of hunks) {
-      const o = h.old_lines === 1 ? `${h.old_start}` : `${h.old_start},${h.old_lines}`;
-      const n = h.new_lines === 1 ? `${h.new_start}` : `${h.new_start},${h.new_lines}`;
-      out.push(`@@ -${o} +${n} @@`);
-      out.push(...h.lines);
-    }
+    if (lines === null) omitted++;
+    else out.push(...lines);
   }
 
   return { text: out.length ? out.join("\n") + "\n" : "", omitted };
+}
+
+/** One file's part of the patch (git's headers and its hunks), or null when its patch was left out (too large, past the budget). */
+export function filePatch(f: DiffFile, hunks: Hunk[]): string | null {
+  const lines = fileLines(f, hunks);
+
+  return lines === null ? null : lines.join("\n") + "\n";
+}
+
+function fileLines(f: DiffFile, hunks: Hunk[]): string[] | null {
+  if (f.patch_omitted === "budget" || f.patch_omitted === "too_large") return null;
+  const out: string[] = [];
+  const oldPath = f.old_path ?? f.path;
+  out.push(`diff --git a/${oldPath} b/${f.path}`);
+
+  if (f.status === "added") out.push(`new file mode ${f.new_mode}`);
+  else if (f.status === "deleted") out.push(`deleted file mode ${f.old_mode}`);
+  else {
+    if (f.old_mode !== f.new_mode) out.push(`old mode ${f.old_mode}`, `new mode ${f.new_mode}`);
+
+    if (f.status === "renamed") out.push("similarity index 100%", `rename from ${oldPath}`, `rename to ${f.path}`);
+  }
+
+  if (f.old_sha !== f.new_sha) {
+    const sameMode = f.status === "modified" && f.old_mode === f.new_mode;
+    out.push(`index ${f.old_sha ?? "0".repeat(40)}..${f.new_sha ?? "0".repeat(40)}${sameMode ? " " + f.new_mode : ""}`);
+  }
+
+  if (f.binary) {
+    out.push(`Binary files ${f.old_sha ? "a/" + oldPath : "/dev/null"} and ${f.new_sha ? "b/" + f.path : "/dev/null"} differ`);
+
+    return out;
+  }
+
+  if (!hunks.length) return out;
+  out.push(f.status === "added" ? "--- /dev/null" : `--- a/${oldPath}`);
+  out.push(f.status === "deleted" ? "+++ /dev/null" : `+++ b/${f.path}`);
+
+  for (const h of hunks) {
+    const o = h.old_lines === 1 ? `${h.old_start}` : `${h.old_start},${h.old_lines}`;
+    const n = h.new_lines === 1 ? `${h.new_start}` : `${h.new_start},${h.new_lines}`;
+    out.push(`@@ -${o} +${n} @@`);
+    out.push(...h.lines);
+  }
+
+  return out;
 }

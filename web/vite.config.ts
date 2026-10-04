@@ -56,6 +56,8 @@ function sfFonts(): Plugin {
 const worker = process.env.PANDO_DEV_WORKER ?? "http://localhost:8871";
 
 export default defineConfig({
+  // The colour worker (Colour.tsx, @pierre/diffs) splits into chunks, which needs module workers.
+  worker: { format: "es" },
   plugins: [sfFonts(), tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), tailwindcss()],
   resolve: {
     // Plannotator's HTML viewer loads its bridge script as a file

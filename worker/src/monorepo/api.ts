@@ -9,7 +9,7 @@ import { ciRoutes } from "../ci/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept } from "./checks";
-import { toPatch, treeDiff } from "./diff";
+import { filePatch, toPatch, treeDiff, type BranchDiff, type ShownFile } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
 import type { BranchList } from "./views";
@@ -645,6 +645,14 @@ async function branchViews(
   const required = await requiredKept(c.env, c.get("info"), r);
   const ask = { names: names ?? undefined, state, limit: o.limit, cursor: o.cursor ?? null, required, graceMs: o.graceMs };
   let list: BranchList = await stub.branchRows(r.name, ask);
+
+  // A push Artifacts accepted was not recorded (C2): write what was missed from Artifacts' refs, then read again.
+  if (list.reconcile) {
+    const refs = await listRefs(c.env, r).catch(() => null);
+
+    if (refs && (await stub.reconcile(r.name, Object.fromEntries(refs)))) list = await stub.branchRows(r.name, ask);
+  }
+
   const due = list.due.slice(0, o.inline ?? INLINE_MAX);
 
   if (due.length && main) {
@@ -675,7 +683,7 @@ api.get("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const limit = Number(c.req.query("limit") ?? "100");
 
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) bad("limit is 1 to 500");
-  const { due: _due, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
+  const { due: _due, reconcile: _reconcile, ...list } = await branchViews(c, r, null, state, { limit, cursor: c.req.query("cursor") ?? null });
 
   return c.json(list);
 });
@@ -791,7 +799,65 @@ api.all("/v1/monorepos/:o/:m/repos/:r/branches/*", async (c) => {
   throw new HttpError(405, "method", "method not allowed");
 });
 
+/** Files changed lists at most this many files (owner limit), with its patches up to this many bytes in all. */
+const SHOWN_FILES_MAX = 1_000;
+
+const SHOWN_PATCH_BYTES = 2 << 20;
+
+/**
+ * Files changed (`?patches=1`): each file with its own unified patch, for the
+ * web's diff view. Main and the head come from the stored heads; the answer
+ * is kept by (main, head), since their merge base never changes, and read
+ * through the edge cache. ETag: the two shas.
+ */
+async function filesChanged(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  const stub = c.get("stub");
+  let [head, main] = await Promise.all([stub.refHead(r.name, branch), stub.refHead(r.name, r.default_branch)]);
+
+  if (!head || !main) {
+    const refs = branchesOf(await listRefs(c.env, r));
+    head ??= refs.get(branch) ?? null;
+    main ??= refs.get(r.default_branch) ?? null;
+  }
+
+  if (!head) throw new HttpError(404, "not_found", `no branch ${branch}`);
+
+  if (!main) throw new HttpError(409, "no_main", `${r.default_branch} does not exist yet`);
+  const tag = `${main}.${head}`;
+  const headers = { etag: `"${tag}"`, "cache-control": "private, no-cache" };
+
+  if (files.matchesEtag(c.req.header("if-none-match") ?? null, tag)) return new Response(null, { status: 304, headers });
+  const key = files.answerKey("diff", head, main);
+  const obj = objectsClient();
+  let answer = await obj.json<BranchDiff>(`/answer/${r.artifacts_name}/${key}`);
+
+  if (!answer) {
+    const [h, m] = [head, main];
+
+    answer = await withRepo(c.env, r.artifacts_name, async (repo): Promise<BranchDiff> => {
+      const read = commitReader(repo);
+      const { mergeBase } = await compareWith(read, m, h);
+
+      if (!mergeBase) throw new HttpError(409, "no_merge_base", `${branch} shares no history with ${r.default_branch}`);
+      const [from, to] = await Promise.all([read(mergeBase), read(h)]);
+      const d = await treeDiff(repo, from.tree, to.tree, { hunks: true, maxBytes: SHOWN_PATCH_BYTES, paths: [], maxFiles: SHOWN_FILES_MAX });
+
+      const shown = d.files.map(({ hunks, ...f }): ShownFile => ({ ...f, patch: f.patch_omitted ? null : filePatch(f, hunks ?? []) }));
+
+      return {
+        base_branch: r.default_branch, base: m, head: h, merge_base: mergeBase,
+        truncated: d.truncated, too_many_files: d.too_many_files, files_total: d.files_total, stats: d.stats, files: shown,
+      };
+    });
+
+    await files.storeAnswer(c.env, r.artifacts_name, key, answer);
+  }
+
+  return c.json(answer, 200, headers);
+}
+
 async function diff(c: C, r: RepoRecord, branch: string): Promise<Response> {
+  if (c.req.query("patches") === "1") return filesChanged(c, r, branch);
   const format = c.req.query("format") ?? "json";
 
   if (format !== "json" && format !== "patch") bad("format is json or patch");

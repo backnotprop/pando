@@ -29,6 +29,11 @@ export const Credential = Schema.Struct({
 
 export interface Credential extends Schema.Schema.Type<typeof Credential> {}
 
+/** GET /v1/user/credentials: the person's machines, sandboxes and browser sessions (Your machines). */
+export const CredentialList = Schema.Struct({ credentials: Schema.Array(Credential) });
+
+export interface CredentialList extends Schema.Schema.Type<typeof CredentialList> {}
+
 /** GET /v1/user: the user, and the credential that asked. */
 export const Me = User.pipe(Schema.fieldsAssign({ credential: Credential }));
 

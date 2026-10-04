@@ -325,6 +325,41 @@ try {
   check("git apply --check accepts the patch on the merge base", g.ok, g.ok ? "" : g.out.slice(-300));
   g = git(["diff", "--stat", `${r.headers.get("x-pando-merge-base")}`, "origin/" + B1], boDir);
 
+  // ── Files changed (?patches=1): each file with its own patch, binaries and large files listed without one ──
+  const FC = `${B1}-files`;
+  git(["checkout", "-qb", FC], boDir);
+  writeFileSync(join(boDir, "bin.dat"), Buffer.from([0, 1, 2, 3, 0, 255, 254, 0]));
+  write(boDir, "big.txt", "x".repeat(1_200_000) + "\n");
+  git(["add", "-A"], boDir);
+  git(["commit", "-qm", "a binary and a large file"], boDir);
+  check("bo pushes a branch with a binary and a large file", git(["push", "-q", "origin", FC], boDir, B).ok);
+  const fcPath = `/v1/monorepos/${O}/${M}/repos/${repoName}/branches/${encodeURIComponent(FC)}/diff?patches=1`;
+  r = await call("GET", fcPath, B);
+  const fc = r.json;
+  const fcTag = r.headers.get("etag");
+  const shown = Object.fromEntries((fc?.files ?? []).map((f) => [f.path, f]));
+  const fcHead = git(["rev-parse", "HEAD"], boDir).out.trim();
+  check(
+    "Files changed lists every file with its status, against main's head and the branch's head",
+    r.status === 200 && fc.head === fcHead && fc.files_total === 6 && fc.too_many_files === false && shown["src/a.txt"]?.status === "modified" && shown["src/new.txt"]?.status === "added" &&
+      shown["src/gone.txt"]?.status === "deleted" && shown["docs/guide/new-name.md"]?.status === "renamed",
+    `${r.status} ${(fc?.files ?? []).map((f) => `${f.path}:${f.status}`).join(", ")}`,
+  );
+  check(
+    "a binary and a file over 1 MiB are listed without a patch",
+    shown["bin.dat"]?.binary === true && shown["bin.dat"].patch === null && shown["bin.dat"].patch_omitted === "binary" && shown["big.txt"]?.patch === null && shown["big.txt"].patch_omitted === "too_large",
+    `${shown["bin.dat"]?.patch_omitted} ${shown["big.txt"]?.patch_omitted}`,
+  );
+  const fcPatch = join(work, "files-changed.patch");
+  writeFileSync(fcPatch, (fc?.files ?? []).map((f) => f.patch ?? "").join(""));
+  git(["fetch", "-q", "origin", FC], base, A);
+  git(["checkout", "-q", "--detach", fc?.merge_base ?? "HEAD"], base);
+  g = git(["apply", "--index", fcPatch], base);
+  const same = git(["diff", "--cached", "--quiet", fcHead, "--", "src", "docs"], base);
+  check("each file's patch is git's own format: applied on the merge base, it gives the branch's files exactly", g.ok && same.ok, g.ok ? (same.ok ? "" : "the result differs from the head") : g.out.slice(-300));
+  r = await request(URL_, "GET", fcPath, { secret: B, headers: { "if-none-match": fcTag ?? "" } });
+  check("asked again with its ETag (main and head unchanged): 304", r.status === 304, `${r.status}`);
+
   // ── File at a ref ──
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos/${repoName}/files/src/new.txt?ref=${enc}`, B);
   check("GET files/src/new.txt at the branch", r.status === 200 && r.text === "brand new\n");

@@ -417,6 +417,8 @@ try {
   check("typecheck passed: '#1 passed in 23 s'", (await statusOf("typecheck"))?.description === "#1 passed in 23 s");
   r = await call("GET", `${ciBase}/builds/${build1}`, B);
   let jobs = r.json?.jobs ?? [];
+  const jobEvent = ((await call("GET", `/v1/monorepos/${O}/${M}/events?since=0&limit=500&topics=kind:ci.job`, B)).json?.events ?? []).find((x) => x.row?.id === "job-ci-1");
+  check("a ci.job event carries its build's Pando id (row.build, as in .../ci/builds/{build})", jobEvent?.collection === "ci_jobs" && jobEvent.row.build === build1 && jobEvent.key === `${build1}/job-ci-1`, JSON.stringify(jobEvent?.row?.build));
   check("the build and its jobs: failed in 74 s; ci failed with exit status 1 as check ci; typecheck passed; no wait step",
     r.json?.state === "failed" && r.json.duration_s === 74 && jobs.length === 2 && jobs.find((j) => j.id === "job-ci-1")?.exit_status === 1 && jobs.find((j) => j.id === "job-ci-1")?.check === "ci" && jobs.find((j) => j.id === "job-tc-1")?.state === "passed");
   await send("job.started", JOB1("job-ci-1", "ci", "running", { started_at: iso(1000) }));
@@ -465,6 +467,7 @@ try {
   bkStub.logs["job-tc-1"] = "x".repeat(1.5 * 1024 * 1024) + tailText;
   const logCalls = (job) => bkStub.calls.filter((x) => x.endsWith(`/jobs/${job}/log`)).length;
   r = await call("GET", `${ciBase}/builds/${build1}/jobs/job-tc-1/log`, B);
+  const tcReadAt = Date.now();
   check("a job's log from Buildkite: its last 1 MiB, the end kept", r.status === 200 && r.json?.bytes === 1 << 20 && r.json.total_bytes === 1.5 * 1024 * 1024 + tailText.length && r.json.truncated === true && r.json.content.endsWith(tailText) && r.json.cached === false && r.json.complete === false);
   r = await call("GET", `${ciBase}/builds/${build1}/jobs/job-tc-1/log`, B);
   check("read again at once: from the cache (10 s while unsettled), one call to Buildkite", r.json?.cached === true && logCalls("job-tc-1") === 1 && /no-store/.test(r.headers.get("cache-control") ?? ""));
@@ -511,18 +514,48 @@ try {
   r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${M}/statuses/${head2}`, sent.env?.PANDO_STATUS_TOKEN, { state: "success", context: "rebuilt" });
   check("the rebuild's status token posts", r.status === 201 && r.json?.app === "buildkite");
 
+  // New build: a pipeline's build of a branch's head as Pando has it, started as a push delivery would.
+  r = await call("POST", `${ciBase}/pipelines/p/builds`, B, { branch: "feat" });
+  const newBuild = r.json?.build;
+  const asked = bkStub.created.at(-1) ?? {};
+  const nc = asked.env?.PANDO_STATUS_TOKEN ? claimsOf(asked.env.PANDO_STATUS_TOKEN) : {};
+  check(
+    "New build of feat: its head and its commit's title, fresh tokens, recorded at once",
+    r.status === 201 && newBuild?.sha === head2 && newBuild.branch === "feat" && newBuild.message === "second" && asked.commit === head2 && nc.s === head2 && nc.a === "buildkite" &&
+      /^art_v\d+_/.test(asked.env?.PANDO_READ_TOKEN ?? "") && asked.meta_data?.pando_repo === M && asked.meta_data.pando_rebuild_of === undefined,
+    `${r.status} ${newBuild?.sha?.slice(0, 7)} ${JSON.stringify(newBuild?.message)}`,
+  );
+  r = await call("POST", `${ciBase}/pipelines/p/builds`, B, { branch: "nope" });
+  check("New build of a branch Pando does not have: 404", r.status === 404);
+
+  // A build's page address names its pipeline and number (#101 here).
+  r = await call("GET", `${ciBase}/builds?pipeline=p&number=${newBuild?.number}`, B);
+  check("builds?pipeline=&number= finds that one build", r.status === 200 && r.json?.builds?.length === 1 && r.json.builds[0].id === newBuild?.id, `${r.json?.builds?.length}`);
+  r = await call("GET", `${ciBase}/builds?number=1`, B);
+  check("number without pipeline is refused (it is only unique within one)", r.status === 400);
+
   r = await call("DELETE", `${ciBase}/connections/${conn.id}`, B);
   check("a member cannot disconnect", r.status === 403);
   check("every call to Buildkite carried BUILDKITE_API_TOKEN", bkStub.calls.length > 0 && bkStub.badAuth === 0, `${bkStub.calls.length} calls`);
 
-  // Buildkite's rate limit: a 429 stops this connection's calls until its reset.
+  // Buildkite's rate limit: a 429 stops this connection's calls until its reset. Never a 5xx to a reader.
   bkStub.rateLimited = true;
   r = await call("GET", `${ciBase}/builds/${rebuilt?.id}/annotations`, B);
-  check("a 429 from Buildkite: 503 ci_rate_limited with retry_after_ms", r.status === 503 && r.json?.error?.code === "ci_rate_limited" && r.json.error.retry_after_ms >= 25_000);
+  check("a 429 from Buildkite, nothing read before: 429 ci_rate_limited, try again in N s (retry_after_ms)", r.status === 429 && r.json?.error?.code === "ci_rate_limited" && r.json.error.retry_after_ms >= 25_000 && /try again in \d+ s/.test(r.json.error.message), r.json?.error?.message);
   bkStub.rateLimited = false;
   const before = bkStub.calls.length;
   r = await call("GET", `${ciBase}/builds/${rebuilt?.id}/artifacts`, B);
-  check("then no call reaches Buildkite until the reset", r.status === 503 && r.json?.error?.code === "ci_rate_limited" && bkStub.calls.length === before);
+  check("then no call reaches Buildkite until the reset", r.status === 429 && r.json?.error?.code === "ci_rate_limited" && bkStub.calls.length === before);
+  // The running job's log copy from earlier has expired (10 s): held, a reader gets that last copy and when to ask again.
+  await new Promise((res) => setTimeout(res, Math.max(0, tcReadAt + 11_000 - Date.now())));
+  r = await call("GET", `${ciBase}/builds/${build1}/jobs/job-tc-1/log`, B);
+  check(
+    "held, a running job's expired log copy is still answered: 200, the last copy, complete false, retry_after_ms, no call",
+    r.status === 200 && r.json?.cached === true && r.json.complete === false && r.json.content.endsWith(tailText) && r.json.retry_after_ms > 0 && bkStub.calls.length === before && /no-store/.test(r.headers.get("cache-control") ?? ""),
+    `${r.status} retry_after_ms=${r.json?.retry_after_ms}`,
+  );
+  r = await call("GET", `${ciBase}/builds/${build1}/annotations`, B);
+  check("and the build's expired annotations copy the same way", r.status === 200 && r.json?.annotations?.[0]?.context === "test-summary" && r.json.retry_after_ms > 0 && bkStub.calls.length === before, `${r.status}`);
 
   r = await call("DELETE", `${ciBase}/connections/${conn.id}`, S);
   check("an owner disconnects", r.status === 204);

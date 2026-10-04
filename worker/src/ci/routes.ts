@@ -29,9 +29,10 @@ import { finishTiming, note, runTimed, startTiming } from "../timing";
 import type { ApiVars } from "../monorepo/api";
 import { requiredKept } from "../monorepo/checks";
 import { readToken } from "../monorepo/hooks";
-import { isSha } from "../monorepo/names";
+import { withRepo } from "../monorepo/artifacts";
+import { isSha, validBranchName } from "../monorepo/names";
 import { cachedRepo, monorepoStub } from "../monorepo/session";
-import type { Outcome } from "../monorepo/types";
+import type { Outcome, RepoRecord } from "../monorepo/types";
 import { pool } from "../monorepo/views";
 import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
 import {
@@ -106,7 +107,7 @@ interface BuildAuthor {
   email?: string;
 }
 
-/** Buildkite's create-build request (Rebuild). */
+/** Buildkite's create-build request (Rebuild, New build). */
 interface CreateBuild {
   commit: string;
   branch: string;
@@ -135,7 +136,7 @@ async function call(c: C, conn: CiRef["connection"], method: string, path: strin
   const permit = await stub.ciPermit(conn.id);
 
   if (!permit.ok) {
-    throw new HttpError(503, "ci_rate_limited", `holding to Buildkite's rate limit; try again in ${Math.ceil(permit.retry_after_ms / 1000)} s`, { retry_after_ms: permit.retry_after_ms });
+    throw new HttpError(429, "ci_rate_limited", `holding to Buildkite's rate limit; try again in ${Math.ceil(permit.retry_after_ms / 1000)} s`, { retry_after_ms: permit.retry_after_ms });
   }
 
   const headers = new Headers({ authorization: `Bearer ${token}`, accept: o.accept ?? "application/json", "user-agent": "Pando-CI/1" });
@@ -159,7 +160,11 @@ async function call(c: C, conn: CiRef["connection"], method: string, path: strin
   const text = (await res.text().catch(() => "")).slice(0, 300);
   const message = errorMessage(parseJson(text)) ?? text;
 
-  if (res.status === 429) throw new HttpError(503, "ci_rate_limited", "Buildkite's rate limit was reached; try again shortly", { retry_after_ms: wait ?? 60_000 });
+  if (res.status === 429) {
+    const after = wait ?? 60_000;
+
+    throw new HttpError(429, "ci_rate_limited", `Buildkite's rate limit was reached; try again in ${Math.ceil(after / 1000)} s`, { retry_after_ms: after });
+  }
 
   if (res.status === 401 || res.status === 403) {
     throw new HttpError(502, "ci_unauthorized", "Buildkite refused the token: BUILDKITE_API_TOKEN needs read_builds, read_build_logs, read_artifacts, read_pipelines and write_builds");
@@ -181,20 +186,24 @@ function cacheKey(c: C, ref: CiRef, what: string): string {
   return `ci/${c.get("m")}/${ref.connection.id}/${ref.build.external_id}/${what}`;
 }
 
-/** A cached detail, if complete or fresh enough. */
-async function fromCache(env: Env, key: string): Promise<{ text: string; meta: Record<string, string> } | null> {
+/**
+ * A cached detail. `fresh` when complete, or a running one younger than
+ * RUNNING_TTL_MS; an older running copy is still returned, to answer with
+ * when the service can't be asked (its rate limit).
+ */
+async function fromCache(env: Env, key: string): Promise<{ text: string; meta: Record<string, string>; fresh: boolean } | null> {
   const obj = await env.CACHE.get(key);
 
   if (!obj) return null;
   const meta = obj.customMetadata ?? {};
+  const fresh = meta.complete === "1" || Date.now() - Date.parse(meta.fetched_at ?? "") <= RUNNING_TTL_MS;
 
-  if (meta.complete !== "1" && Date.now() - Date.parse(meta.fetched_at ?? "") > RUNNING_TTL_MS) {
-    await obj.body.cancel();
+  return { text: await obj.text(), meta, fresh };
+}
 
-    return null;
-  }
-
-  return { text: await obj.text(), meta };
+/** When `cause` is the hold on the service's rate limit (Pando's permit or Buildkite's 429): the wait before asking again. Else null. */
+function heldFor(cause: unknown): number | null {
+  return cause instanceof HttpError && cause.code === "ci_rate_limited" ? (cause.extra.retry_after_ms ?? 60_000) : null;
 }
 
 async function toCache(env: Env, key: string, text: string, meta: Record<string, string>): Promise<void> {
@@ -252,6 +261,8 @@ interface Fetched<T> {
   complete: boolean;
   fetched_at: string;
   cached: boolean;
+  /** Set when this is the last copy because the service's rate limit is held: ask again after this long. */
+  retry_after_ms: number | null;
 }
 
 /**
@@ -263,19 +274,84 @@ async function listOf<T>(c: C, ref: CiRef, what: "annotations" | "artifacts", de
   const key = cacheKey(c, ref, `${what}.json`);
   const hit = await fromCache(c.env, key);
 
-  if (hit) return { list: decode(parseJson(hit.text)), truncated: hit.meta.truncated === "1", complete: hit.meta.complete === "1", fetched_at: hit.meta.fetched_at, cached: true };
-  const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/${what}?per_page=${PAGE_MAX}`);
+  const fromCopy = (h: NonNullable<typeof hit>, retryAfterMs: number | null): Fetched<T> => ({
+    list: decode(parseJson(h.text)), truncated: h.meta.truncated === "1", complete: h.meta.complete === "1", fetched_at: h.meta.fetched_at, cached: true, retry_after_ms: retryAfterMs,
+  });
+
+  if (hit?.fresh) return fromCopy(hit, null);
+  let res: Response;
+
+  try {
+    res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/${what}?per_page=${PAGE_MAX}`);
+  } catch (cause) {
+    const wait = heldFor(cause);
+
+    // The rate limit is held: the last copy, if any, says when to ask again.
+    if (hit && wait !== null) return fromCopy(hit, wait);
+    throw cause;
+  }
+
   const text = await res.text();
   const complete = settled(ref.build.finished_at);
   const fetched_at = new Date().toISOString();
   await toCache(c.env, key, text, { complete: complete ? "1" : "0", fetched_at, truncated: hasNext(res) ? "1" : "0" });
 
-  return { list: decode(parseJson(text)), truncated: hasNext(res), complete, fetched_at, cached: false };
+  return { list: decode(parseJson(text)), truncated: hasNext(res), complete, fetched_at, cached: false, retry_after_ms: null };
 }
 
 const annotationsOf = (c: C, ref: CiRef): Promise<Fetched<Annotation>> => listOf(c, ref, "annotations", decodeAnnotations);
 
 const artifactsOf = (c: C, ref: CiRef): Promise<Fetched<Artifact>> => listOf(c, ref, "artifacts", decodeArtifacts);
+
+/** What a build Pando starts is of: a commit on a branch, its message, and Pando's own meta data beyond the monorepo and repo. */
+interface BuildOf {
+  sha: string;
+  branch: string;
+  message: string;
+  meta: Record<string, string>;
+}
+
+/**
+ * Start a build on the service with fresh tokens (a read token for the repo,
+ * a status token for the commit), as a push delivery does, and record it.
+ * Answers the build as Pando now has it (null if the answer named none).
+ */
+async function startBuild(c: C, connection: CiRef["connection"], pipeline: string, r: RepoRecord, at: BuildOf) {
+  const m = c.get("m");
+  const full = c.get("full");
+  const origin = new URL(c.req.url).origin;
+  const read = await readToken(c.env, r.artifacts_name, "ci");
+
+  const status = c.env.PANDO_STATUS_SECRET
+    ? await mintStatusToken(c.env.PANDO_STATUS_SECRET, { m, r: r.name, s: at.sha, a: "buildkite", h: `ci:${connection.id}` })
+    : null;
+
+  const who = c.get("identity");
+  const author: BuildAuthor = { name: who.name ?? who.login };
+
+  if (who.email) author.email = who.email;
+
+  const res = await call(c, connection, "POST", `/pipelines/${p(pipeline)}/builds`, {
+    body: {
+      commit: at.sha,
+      branch: at.branch,
+      message: at.message,
+      author,
+      env: pandoBuildEnv({
+        clone_url: c.get("info").kind === "repo" ? `${origin}/${full}.git` : `${origin}/${full}/${r.name}.git`,
+        read_token: read.token,
+        status_url: `${origin}/v1/monorepos/${full}/repos/${r.name}/statuses/${at.sha}`,
+        status_token: status?.token ?? null,
+        monorepo: full, repo: r.name, branch: at.branch, head: at.sha, delivery: "", seq: null,
+      }),
+      meta_data: { pando_monorepo: m, pando_repo: r.name, ...at.meta },
+    },
+  });
+
+  const out = unwrap(await c.get("stub").ciIngestBuild(connection.id, await jsonOf(res)));
+
+  return out.build ? await c.get("stub").ciBuild(out.build) : null;
+}
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -307,9 +383,16 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const sha = c.req.query("sha");
 
     if (sha && !isSha(sha)) bad("sha must be a full 40-character sha");
+    const pipeline = c.req.query("pipeline");
+    const numberText = c.req.query("number");
+    const number = numberText === undefined ? undefined : Number(numberText);
+
+    // A build's page address names its pipeline and number (#1285): with one connection that is one build; two
+    // connections with the same pipeline slug can both answer, and `connection` narrows to one.
+    if (number !== undefined && (!pipeline || !Number.isSafeInteger(number) || number < 1)) bad("number: a build number (1 or more), with pipeline");
 
     return c.json(unwrap(await c.get("stub").ciBuilds({
-      repo: c.req.query("repo"), branch: c.req.query("branch"), sha: sha?.toLowerCase(), pipeline: c.req.query("pipeline"),
+      repo: c.req.query("repo"), branch: c.req.query("branch"), sha: sha?.toLowerCase(), pipeline, number,
       connection: c.req.query("connection"), state, limit, cursor: c.req.query("cursor") ?? null,
     })));
   });
@@ -328,13 +411,29 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const key = cacheKey(c, ref, `log/${job.external_id}`);
     const hit = await fromCache(c.env, key);
 
-    if (hit) {
-      const complete = hit.meta.complete === "1";
+    const fromCopy = (h: NonNullable<typeof hit>, retryAfterMs: number | null) => {
+      const complete = h.meta.complete === "1";
 
-      return c.json({ job: job.external_id, content: hit.text, bytes: Number(hit.meta.bytes), total_bytes: Number(hit.meta.total_bytes), truncated: hit.meta.truncated === "1", complete, fetched_at: hit.meta.fetched_at, cached: true }, 200, cacheHeader(complete));
+      return c.json(
+        { job: job.external_id, content: h.text, bytes: Number(h.meta.bytes), total_bytes: Number(h.meta.total_bytes), truncated: h.meta.truncated === "1", complete, fetched_at: h.meta.fetched_at, cached: true, retry_after_ms: retryAfterMs },
+        200,
+        cacheHeader(complete),
+      );
+    };
+
+    if (hit?.fresh) return fromCopy(hit, null);
+    let res: Response;
+
+    try {
+      res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(job.external_id)}/log`, { accept: "text/plain" });
+    } catch (cause) {
+      const wait = heldFor(cause);
+
+      // The rate limit is held: the last copy, if any, says when to ask again.
+      if (hit && wait !== null) return fromCopy(hit, wait);
+      throw cause;
     }
 
-    const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(job.external_id)}/log`, { accept: "text/plain" });
     const { bytes, total } = await tail(res, LOG_TAIL_BYTES);
     const content = new TextDecoder().decode(bytes);
     const complete = settled(job.finished_at);
@@ -342,19 +441,19 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const truncated = total > bytes.length;
     await toCache(c.env, key, content, { complete: complete ? "1" : "0", fetched_at, bytes: String(bytes.length), total_bytes: String(total), truncated: truncated ? "1" : "0" });
 
-    return c.json({ job: job.external_id, content, bytes: bytes.length, total_bytes: total, truncated, complete, fetched_at, cached: false }, 200, cacheHeader(complete));
+    return c.json({ job: job.external_id, content, bytes: bytes.length, total_bytes: total, truncated, complete, fetched_at, cached: false, retry_after_ms: null }, 200, cacheHeader(complete));
   });
 
   api.get(`${base}/builds/:build/annotations`, async (c) => {
     const a = await annotationsOf(c, await refOf(c));
 
-    return c.json({ annotations: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached }, 200, cacheHeader(a.complete));
+    return c.json({ annotations: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms }, 200, cacheHeader(a.complete));
   });
 
   api.get(`${base}/builds/:build/artifacts`, async (c) => {
     const a = await artifactsOf(c, await refOf(c));
 
-    return c.json({ artifacts: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached }, 200, cacheHeader(a.complete));
+    return c.json({ artifacts: a.list, truncated: a.truncated, complete: a.complete, fetched_at: a.fetched_at, cached: a.cached, retry_after_ms: a.retry_after_ms }, 200, cacheHeader(a.complete));
   });
 
   api.get(`${base}/builds/:build/artifacts/:artifact/download`, async (c) => {
@@ -416,39 +515,33 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const r = await cachedRepo(c.env, c.get("m"), b.repo);
 
     if (!r) throw new HttpError(404, "not_found", `no repo ${b.repo}`);
-    const m = c.get("m");
-    const full = c.get("full");
-    const origin = new URL(c.req.url).origin;
-    const read = await readToken(c.env, r.artifacts_name, "ci");
+    const branch = b.branch ?? r.default_branch;
+    const build = await startBuild(c, ref.connection, b.pipeline, r, { sha: b.sha, branch, message: b.message ?? `Rebuild of #${b.number}`, meta: { pando_rebuild_of: b.external_id } });
 
-    const status = c.env.PANDO_STATUS_SECRET
-      ? await mintStatusToken(c.env.PANDO_STATUS_SECRET, { m, r: b.repo, s: b.sha, a: "buildkite", h: `ci:${ref.connection.id}` })
-      : null;
+    return c.json({ build }, 201);
+  });
 
-    const who = c.get("identity");
-    const author: BuildAuthor = { name: who.name ?? who.login };
+  // New build: a pipeline's build of a branch's head as Pando has it (default: its repo's default branch), as a push delivery would start it.
+  api.post(`${base}/pipelines/:pipeline/builds`, async (c) => {
+    const stub = c.get("stub");
+    const pl = unwrap(await stub.ciPipeline(c.req.param("pipeline"), c.req.query("connection") ?? null));
 
-    if (who.email) author.email = who.email;
+    if (!pl.pipeline.repo) throw new HttpError(409, "no_repo", "this pipeline builds no repo of this monorepo (register it with a buildkite hook)");
+    const r = await cachedRepo(c.env, c.get("m"), pl.pipeline.repo);
 
-    const res = await call(c, ref.connection, "POST", `/pipelines/${p(b.pipeline)}/builds`, {
-      body: {
-        commit: b.sha,
-        branch: b.branch ?? r.default_branch,
-        message: b.message ?? `Rebuild of #${b.number}`,
-        author,
-        env: pandoBuildEnv({
-          clone_url: c.get("info").kind === "repo" ? `${origin}/${full}.git` : `${origin}/${full}/${b.repo}.git`,
-          read_token: read.token,
-          status_url: `${origin}/v1/monorepos/${full}/repos/${b.repo}/statuses/${b.sha}`,
-          status_token: status?.token ?? null,
-          monorepo: full, repo: b.repo, branch: b.branch ?? r.default_branch, head: b.sha, delivery: "", seq: null,
-        }),
-        meta_data: { pando_monorepo: m, pando_repo: b.repo, pando_rebuild_of: b.external_id },
-      },
-    });
+    if (!r) throw new HttpError(404, "not_found", `no repo ${pl.pipeline.repo}`);
+    // The body is optional: no body, or no branch, builds the repo's default branch.
+    const text = await c.req.text();
+    const sent = text.trim() ? parseJson(text) : {};
 
-    const out = unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await jsonOf(res)));
-    const build = out.build ? await c.get("stub").ciBuild(out.build) : null;
+    if (!isRecord(sent)) bad("the body must be a JSON object");
+    const branch = sent.branch === undefined ? r.default_branch : isText(sent.branch) && validBranchName(sent.branch) ? sent.branch : bad("branch: a branch name");
+    const sha = await stub.refHead(r.name, branch);
+
+    if (!sha) throw new HttpError(404, "not_found", `no branch ${branch} in ${r.name} (or it has no recorded head yet)`);
+    const commit = await withRepo(c.env, r.artifacts_name, (repo) => repo.readCommit(sha)).catch(() => null);
+    const title = commit?.message?.split("\n")[0] || `Build of ${branch}`;
+    const build = await startBuild(c, pl.connection, pl.pipeline.slug, r, { sha, branch, message: title, meta: {} });
 
     return c.json({ build }, 201);
   });

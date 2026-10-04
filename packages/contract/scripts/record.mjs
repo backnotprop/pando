@@ -17,6 +17,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -122,6 +123,73 @@ const name = `rec-${id}`;
 
 const full = `${login}/${name}`;
 
+/** The monorepo's name now: the rename near the end changes it, and the cleanup deletes by it. */
+let current = full;
+
+// A stand-in for Buildkite's REST API on this machine (an ephemeral port): the connection's api_url points here, so the
+// CI routes that read the service (configuration, log, annotations, artifacts, Rebuild, Cancel, Retry) answer for real.
+// The Worker sends its BUILDKITE_API_TOKEN here as a Bearer; it is never kept or printed.
+const bkPipeline = (slug) => ({
+  id: `pl-${slug}`, url: `https://api.buildkite.com/v2/organizations/o/pipelines/${slug}`, web_url: `https://buildkite.com/o/${slug}`,
+  name: slug, slug, repository: "https://example.invalid/web.git", default_branch: "main", visibility: "private",
+});
+
+const bkBuild = (slug, n, o) => ({
+  id: `bld-${slug}-${n}`, url: `https://api.buildkite.com/v2/organizations/o/pipelines/${slug}/builds/${n}`, web_url: `https://buildkite.com/o/${slug}/builds/${n}`,
+  number: n, state: o.state, blocked: false, message: o.message ?? "a build", commit: o.commit ?? "HEAD", branch: o.branch ?? "main", env: {}, source: "api",
+  creator: null, meta_data: o.meta_data ?? {}, created_at: new Date().toISOString(), scheduled_at: new Date().toISOString(), started_at: null, finished_at: null,
+});
+
+const bkJob = (id, key, state) => ({
+  id, type: "script", name: key, step_key: key, state, web_url: `https://buildkite.com/o/web/builds/1#${id}`, soft_failed: false, exit_status: null,
+  created_at: new Date().toISOString(), started_at: null, finished_at: null, retried: false,
+});
+
+const bkFixtures = {
+  configuration: "steps:\n  - label: lint\n    key: lint\n    command: npm run lint\n",
+  log: "$ npm run lint\n\n> lint\n> oxlint --deny-warnings\n\nFound 0 warnings and 0 errors.\n",
+  annotations: [{ id: "ann-1", context: "lint-summary", style: "success", body_html: "<p><strong>0</strong> findings</p>", created_at: "2026-10-04T00:00:00Z", updated_at: "2026-10-04T00:00:00Z" }],
+  artifacts: [{ id: "art-1", job_id: "job-lint-1", url: "x", download_url: "x", state: "finished", path: "reports/lint.txt", dirname: "reports", filename: "lint.txt", mime_type: "text/plain", file_size: 412, sha1sum: "0".repeat(40) }],
+};
+
+let bkNext = 2;
+
+const bk = createServer((req, res) => {
+  let raw = "";
+
+  req.on("data", (d) => (raw += d));
+  req.on("end", () => {
+    const u = new URL(req.url, "http://x");
+    const json = (code, v) => res.writeHead(code, { "content-type": "application/json", "ratelimit-remaining": "40", "ratelimit-reset": "20" }).end(JSON.stringify(v));
+    let m;
+
+    if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds$/.exec(u.pathname)) && req.method === "POST") {
+      const body = JSON.parse(raw);
+
+      return json(201, { ...bkBuild(m[1], bkNext++, { state: "scheduled", commit: body.commit, branch: body.branch, message: body.message, meta_data: body.meta_data }), pipeline: bkPipeline(m[1]) });
+    }
+
+    if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)\/builds\/(\d+)\/cancel$/.exec(u.pathname)) && req.method === "PUT") {
+      return json(200, { ...bkBuild(m[1], Number(m[2]), { state: "canceling" }), pipeline: bkPipeline(m[1]) });
+    }
+
+    if ((m = /\/builds\/\d+\/jobs\/([^/]+)\/retry$/.exec(u.pathname)) && req.method === "PUT") return json(200, bkJob(`${m[1]}-retry`, "lint", "scheduled"));
+
+    if (/\/builds\/\d+\/jobs\/[^/]+\/log$/.test(u.pathname)) return res.writeHead(200, { "content-type": "text/plain" }).end(bkFixtures.log);
+
+    if (/\/builds\/\d+\/annotations$/.test(u.pathname)) return json(200, bkFixtures.annotations);
+
+    if (/\/builds\/\d+\/artifacts$/.test(u.pathname)) return json(200, bkFixtures.artifacts);
+
+    if ((m = /^\/v2\/organizations\/o\/pipelines\/([^/]+)$/.exec(u.pathname))) return json(200, { ...bkPipeline(m[1]), configuration: bkFixtures.configuration });
+    json(404, { message: "Not Found" });
+  });
+});
+
+await new Promise((resolve) => bk.listen(0, "127.0.0.1", resolve));
+
+const bkApiUrl = `http://127.0.0.1:${bk.address().port}`;
+
 const sockets = [];
 
 let secret = null;
@@ -200,6 +268,12 @@ try {
 
   sockets.push(monorepoFeed);
 
+  // The row updates the web patches from: one kind:<kind> topic per row kind (ROW_KINDS in src/stream.ts).
+  const rowTopics = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection"].map((k) => `kind:${k}`).join(",");
+  const rowSocket = openSocket(`/v1/monorepos/${full}/events?topics=${rowTopics}`, secret);
+
+  sockets.push(rowSocket);
+
   // The meta layer's first upload (pando init): .pando/pando.toml requires ci/test for projects/web.
   const metaPath = `/v1/monorepos/${full}/meta`;
   const meta = openSocket(`${metaPath}/socket`, secret);
@@ -264,9 +338,13 @@ try {
   await call("POST", `${repoPath}/branches/feat%2Fready/reviews`, secret, { verdict: "approve", body: "Looks right.", comments: [{ path: "ready.txt", line: 1, body: "Good." }] });
 
   // A Buildkite build of feat/ready, in through its webhook (token header): the build row, and a check `lint` stamped app buildkite.
-  r = await call("POST", `/v1/monorepos/${full}/ci/connections`, secret, { service: "buildkite", organization: "o" });
+  r = await call("POST", `/v1/monorepos/${full}/ci/connections`, secret, { service: "buildkite", organization: "o", api_url: bkApiUrl });
 
   const webhookToken = r.json?.webhook_token;
+  const connectionId = r.json?.connection?.id;
+
+  // The token is shown in this answer once; the recording keeps its place, never its value.
+  record("ci-connected.json", "CiConnected", "POST .../ci/connections (the webhook token is replaced here)", r.status, { ...r.json, webhook_token: "<webhook-token>" });
   const hookPath = `/v1/integrations/buildkite/${r.json?.connection?.id}`;
 
   if (!webhookToken) throw new Error(`no ci connection: ${r.status}`);
@@ -414,7 +492,7 @@ try {
   record("meta-history-since.json", "MetaHistory", "GET .../meta/history?since=0", r.status, r.json);
   r = await call("GET", `${metaPath}/file?path=README.md`, secret);
   record("meta-file-headers.json", "MetaFileHeaders", "GET .../meta/file?path=README.md", r.status, { "x-pando-version": r.headers.get("x-pando-version"), "x-pando-sha": r.headers.get("x-pando-sha") });
-  // A monorepo's pages: the monorepo, repos, members, machines; branches, commits, reviews, checks, CI.
+  // A monorepo's pages: the monorepo, repos, members, machines; branches, commits, files changed, reviews, checks, CI.
   const base = `/v1/monorepos/${full}`;
 
   for (const [file, schema, route, path] of [
@@ -426,6 +504,7 @@ try {
     ["branches-open.json", "BranchList", "GET .../repos/{repo}/branches?state=open", `${repoPath}/branches?state=open`],
     ["branch.json", "Branch", "GET .../branches/{branch}", `${repoPath}/branches/feat%2Fready`],
     ["branch-commits.json", "BranchCommits", "GET .../branches/{branch}/commits", `${repoPath}/branches/feat%2Fready/commits`],
+    ["branch-diff.json", "BranchDiff", "GET .../branches/{branch}/diff?patches=1 (Files changed)", `${repoPath}/branches/feat%2Fready/diff?patches=1`],
     ["reviews.json", "ReviewList", "GET .../branches/{branch}/reviews", `${repoPath}/branches/feat%2Fready/reviews`],
     ["status.json", "Checks", "GET .../repos/{repo}/commits/{ref}/status", `${repoPath}/commits/${readyHead}/status`],
     ["ci-builds.json", "CiBuildList", "GET .../ci/builds?branch=", `${base}/ci/builds?branch=feat%2Fready`],
@@ -481,6 +560,74 @@ try {
   r = await call("GET", `${base}/ci/builds/${encodeURIComponent(buildId)}`, secret);
   record("ci-build.json", "CiBuildDetail", "GET .../ci/builds/{build} (with its jobs)", r.status, r.json);
 
+  // The CI tab, a pipeline's page, and a build's details read from the service (the stand-in above).
+  const buildPath = `${base}/ci/builds/${encodeURIComponent(buildId)}`;
+
+  for (const [file, schema, route, path] of [
+    ["ci.json", "CiOverview", "GET .../ci", `${base}/ci`],
+    ["ci-pipeline.json", "CiPipelinePage", "GET .../ci/pipelines/{pipeline}", `${base}/ci/pipelines/web`],
+    ["ci-job-log.json", "CiJobLog", "GET .../ci/builds/{build}/jobs/{job}/log", `${buildPath}/jobs/job-lint-1/log`],
+    ["ci-annotations.json", "CiAnnotationList", "GET .../ci/builds/{build}/annotations", `${buildPath}/annotations`],
+    ["ci-artifacts.json", "CiArtifactList", "GET .../ci/builds/{build}/artifacts", `${buildPath}/artifacts`],
+  ]) {
+    r = await call("GET", path, secret);
+    record(file, schema, route, r.status, r.json);
+  }
+
+  r = await call("POST", `${buildPath}/jobs/job-lint-1/retry`, secret, {});
+  record("ci-retried.json", "CiJobAnswer", "POST .../ci/builds/{build}/jobs/{job}/retry", r.status, r.json);
+  r = await call("POST", `${buildPath}/rebuild`, secret, {});
+  record("ci-rebuilt.json", "CiBuildAnswer", "POST .../ci/builds/{build}/rebuild", r.status, r.json);
+
+  const rebuilt = r.json?.build?.id;
+
+  if (!rebuilt) throw new Error(`no rebuild: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  r = await call("POST", `${base}/ci/builds/${encodeURIComponent(rebuilt)}/cancel`, secret, {});
+  record("ci-canceled.json", "CiBuildAnswer", "POST .../ci/builds/{build}/cancel (the rebuild, still scheduled)", r.status, r.json);
+
+  // New build of feat/ready, then the build page's lookup by pipeline and number.
+  r = await call("POST", `${base}/ci/pipelines/web/builds`, secret, { branch: "feat/ready" });
+  record("ci-started.json", "CiBuildAnswer", "POST .../ci/pipelines/{pipeline}/builds {branch} (New build)", r.status, r.json);
+
+  const startedNumber = r.json?.build?.number;
+
+  if (!startedNumber) throw new Error(`no new build: ${r.status} ${scrub(JSON.stringify(r.json))}`);
+  r = await call("GET", `${base}/ci/builds?pipeline=web&number=${startedNumber}`, secret);
+  record("ci-build-by-number.json", "CiBuildList", "GET .../ci/builds?pipeline=&number= (a build page's address)", r.status, r.json);
+
+  // Add pipeline: a buildkite hook on projects/web (its builds go to the stand-in).
+  r = await call("POST", `${repoPath}/hooks`, secret, { type: "buildkite", buildkite: { organization: "o", pipeline: "web", api_url: `${bkApiUrl}/v2/organizations/o/pipelines/web/builds` } });
+  record("hook.json", "Hook", "POST .../repos/{repo}/hooks {type: buildkite} (Add pipeline)", r.status, r.json);
+
+  // Members and Your machines: an invite waiting for ben's first sign-in, the invite list, the person's credentials.
+  r = await call("POST", `${base}/invites`, secret, { email: "ben@example.com", role: "member" });
+  record("invite.json", "InviteResult", "POST .../invites (no one has signed in with it yet: invited)", r.status, r.json);
+  r = await call("GET", `${base}/invites`, secret);
+  record("invites.json", "InviteList", "GET .../invites", r.status, r.json);
+  r = await call("GET", "/v1/user/credentials", secret);
+  record("credentials.json", "CredentialList", "GET /v1/user/credentials", r.status, r.json);
+
+  // A second member (added by login: an invite only adds at once someone who signed in through WorkOS), then removed. Ben's invite is revoked.
+  r = await call("POST", "/v1/users", BOOT, { login: `bo-${id}`, name: "Bo Diaz" });
+
+  if (r.status !== 201) throw new Error(`no second user: ${r.status}`);
+  r = await call("PUT", `${base}/members/bo-${id}`, secret, { role: "member" });
+
+  if (r.status !== 200) throw new Error(`bo not added: ${r.status}`);
+  r = await call("DELETE", `${base}/members/bo-${id}`, secret);
+  record("member-removed.json", "NoContent", "DELETE .../members/{login}", r.status, r.json);
+  r = await call("DELETE", `${base}/invites/${encodeURIComponent("ben@example.com")}`, secret);
+  record("invite-revoked.json", "NoContent", "DELETE .../invites/{email}", r.status, r.json);
+
+  // Your machines: a sandbox credential (its secret is in the answer only, never kept), revoked.
+  r = await call("POST", "/v1/user/credentials", secret, { name: "sandbox-1", kind: "sandbox" });
+
+  const sandbox = r.json?.id;
+
+  if (!sandbox) throw new Error(`no sandbox credential: ${r.status}`);
+  r = await call("DELETE", `/v1/user/credentials/${encodeURIComponent(sandbox)}`, secret);
+  record("credential-revoked.json", "NoContent", "DELETE /v1/user/credentials/{id}", r.status, r.json);
+
   // Restore: README.md saved again, then written back as it was, then again (unchanged).
   const first = meta.frames.find((f) => f.type === "accepted" && f.path === "README.md")?.version;
   const again = Buffer.from("# rec\n\nEdited.\n");
@@ -495,6 +642,35 @@ try {
   record("logout.json", "SignedOut", "POST /v1/logout (Accept: application/json, no session)", r.status, r.json);
   r = await call("GET", `${metaPath}/file?path=absent.md`, secret);
   record("error-404.json", "ErrorBody", "GET .../meta/file?path=absent.md", r.status, r.json);
+
+  r = await call("DELETE", `${base}/ci/connections/${encodeURIComponent(connectionId)}`, secret);
+  record("ci-disconnected.json", "NoContent", "DELETE .../ci/connections/{connection}", r.status, r.json);
+
+  // The row frames, one of each shape (kind, collection, op, full or partial), and a resync for a seq past the head.
+  const rowsBeyond = openSocket(`/v1/monorepos/${full}/events?topics=${rowTopics}&since=999999`, secret);
+
+  sockets.push(rowsBeyond);
+  await waitFor(() => rowsBeyond.frames.some((f) => f.type === "resync") && rowSocket.frames.some((f) => f.kind === "ci.connection" && f.op === "delete"), 10_000);
+
+  const rowFrames = [];
+  const rowKept = new Set();
+
+  for (const frame of [...rowSocket.frames, ...rowsBeyond.frames]) {
+    const key = frame.type === "event" ? `${frame.kind}|${frame.collection}|${frame.op}|${frame.partial}` : frame.type;
+
+    if (frame.type === "pong" || rowKept.has(key)) continue;
+
+    rowKept.add(key);
+    rowFrames.push(frame);
+  }
+
+  record("monorepo-event-frames.json", "MonorepoEventFrame[]", "GET /v1/monorepos/{owner}/{monorepo}/events?topics=kind:<row kinds>[&since=] (WebSocket)", 101, rowFrames);
+
+  // Settings: rename, last (the old name keeps working; the cleanup deletes by the new one).
+  r = await call("PATCH", base, secret, { name: `${name}-renamed` });
+  record("renamed.json", "MonorepoRenamed", "PATCH /v1/monorepos/{owner}/{monorepo} {name}", r.status, r.json);
+
+  if (r.status === 200) current = r.json.full_name;
   console.log(`recorded ${written.length} files for ${monorepoId}`);
 } catch (error) {
   failed = true;
@@ -503,14 +679,15 @@ try {
   for (const socket of sockets) socket.ws.close();
 
   if (made) {
-    const d = await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, secret);
+    const d = await call("DELETE", `/v1/monorepos/${current}?confirm=${current}`, secret);
 
-    console.log(`deleted ${full}: ${d.status}`);
+    console.log(`deleted ${current}: ${d.status}`);
 
     if (d.status >= 300) failed = true;
   }
 
   rmSync(work, { recursive: true, force: true });
+  bk.close();
 }
 
 process.exit(failed ? 1 : 0);

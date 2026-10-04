@@ -3,12 +3,12 @@
   "route": "GET /v1/monorepos/{owner}/{monorepo}",
   "status": 200,
   "body": {
-    "id": "m_fd500b7e2da1ea9f",
-    "owner": "rec-mut4cnpt",
-    "name": "rec-mut4cnpt",
-    "full_name": "rec-mut4cnpt/rec-mut4cnpt",
+    "id": "m_ee92532e4bf06a36",
+    "owner": "rec-mut7vro0",
+    "name": "rec-mut7vro0",
+    "full_name": "rec-mut7vro0/rec-mut7vro0",
     "kind": "monorepo",
-    "created_at": "2026-10-04T01:05:08.411Z",
+    "created_at": "2026-10-04T02:43:58.832Z",
     "role": "owner"
   }
 }

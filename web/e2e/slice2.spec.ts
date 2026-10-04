@@ -62,6 +62,28 @@ const face = (el: Locator) => el.evaluate((e) => getComputedStyle(e).fontFamily.
 
 const pitch = (rows: Locator) => rows.evaluateAll((els) => els.slice(0, 3).map((e) => e.getBoundingClientRect().top)).then(([a = 0, b = 0, c = 0]) => [b - a, c - b]);
 
+/** The same for the first three lines of one text node (the plain lines' code). */
+const textPitch = (code: Locator) =>
+  code.evaluate((el) => {
+    const node = el.firstChild;
+    const text = node?.textContent ?? "";
+    const range = document.createRange();
+    const tops: number[] = [];
+
+    for (let start = 0, i = 0; node && i < 3; i++) {
+      const end = text.indexOf("\n", start);
+
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      tops.push(range.getBoundingClientRect().top);
+      start = end + 1;
+    }
+
+    const [a = 0, b = 0, c = 0] = tops;
+
+    return [b - a, c - b];
+  });
+
 interface Made {
   machine: Machine | null;
 }
@@ -185,10 +207,11 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
       await expect(page.locator('[data-line] span[style*="--diffs-token-string"]').first()).toHaveText(/sage/);
       expect(await pitch(page.locator("[data-line]"))).toEqual([20, 20]);
       await page.goto(`${project}/blob/src/big.ts`);
-      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible();
-      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached();
+      // A cold read of 2.2 MiB through the tree, then the raw file, one after the other.
+      await expect(page.getByText("Over 1 MiB: shown without colour.")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("export const n79999 = 79999;")).toBeAttached({ timeout: 30_000 });
       await expect(page.locator("diffs-container")).toHaveCount(0);
-      expect(await pitch(page.locator("pre > span"))).toEqual([20, 20]);
+      expect(await textPitch(page.locator("main pre > span:last-child"))).toEqual([20, 20]);
       await page.goto(`${project}/blob/logo.png`);
       const image = page.getByRole("img", { name: "logo.png" });
 

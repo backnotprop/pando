@@ -4,7 +4,12 @@ A git platform for monorepos, built on Cloudflare Workers and Artifacts, for
 many agents working at once.
 
 Status: in development for Cloudflare's "Build the next-gen git platform"
-competition (October 2026). Run instructions arrive with the first build.
+competition (October 2026).
+
+To use Pando, start with the docs: install `pando`, sign in, clone a monorepo,
+and work on a branch (`site/docs/src/content/docs/get-started.mdx`, published
+as the docs site's Get started page). To work on Pando itself, see Developing
+below.
 
 Licence: Apache 2.0 (`LICENSE`). Pando builds on and credits other open-source
 work; see `REFERENCES.md`.
@@ -93,10 +98,29 @@ worker/test/live/run-e2e.sh --artifacts    # also the commits, on the namespace 
 
 ```sh
 cd cli && GIT_CONFIG_NOSYSTEM=1 go test ./...
+cd cli && go build -o ~/.local/bin/pando ./cmd/pando   # install it
 ```
 
 The FUSE mount is tested only inside a privileged Linux container
 (`cli/testbed/run.sh`, on Colima). Never mount FUSE on a Mac host.
+
+### Docs site
+
+`site/docs` is the docs site, built with Cloudflare's nimbus (Astro). It keeps
+its own install, like the Worker. The API reference is generated at build
+from `docs/contracts/api-v1.yaml`, and the home's What's new reads the
+newest changelog entry from the built `whats-new.json`.
+
+```sh
+cd site/docs && npm ci
+npm run dev       # a local server with reload
+npm run check     # build to dist/, then fail on any internal link that reaches no page
+```
+
+`PANDO_SF_FONTS=1` copies SF Pro Text in, as the web app's build does. The
+site deploys as the assets-only Worker `pando-docs` (`npm run deploy`). The
+app's `/docs` redirects to it: its address is `DOCS_URL` in
+`worker/wrangler.jsonc`.
 
 ### Rules for local runs
 

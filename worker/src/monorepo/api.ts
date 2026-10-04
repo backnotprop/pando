@@ -8,7 +8,7 @@ import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from 
 import { ciRoutes } from "../ci/routes";
 import { finishTiming, note, runTimed, startTiming, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
-import { combine, requiredKept } from "./checks";
+import { combine, requiredKept, type Required } from "./checks";
 import { filePatch, toPatch, treeDiff, type BranchDiff, type ShownFile } from "./diff";
 import { commitReader, compareWith } from "./graph";
 import * as views from "./views";
@@ -163,7 +163,7 @@ function rawTail(c: C): string {
   return new URL(c.req.url).pathname.split("/").slice(8).join("/");
 }
 
-function repoView(home: GitHome, r: RepoRecord, required?: string[]) {
+function repoView(home: GitHome, r: RepoRecord, required?: Required) {
   return {
     monorepo: home.full,
     name: r.name,
@@ -171,7 +171,9 @@ function repoView(home: GitHome, r: RepoRecord, required?: string[]) {
     description: r.description,
     default_branch: r.default_branch,
     clone_url: cloneUrl(home, r.name),
-    required_checks: required, // left out of the JSON when not asked for
+    // Left out of the JSON when not asked for; null with the reason while unknown.
+    required_checks: required?.list,
+    checks_unknown: required?.unknown,
     created_at: r.created_at,
     created_by: r.created_by,
   };

@@ -24,17 +24,24 @@ export const Status = Schema.Struct({
 
 export interface Status extends Schema.Schema.Type<typeof Status> {}
 
-/** `success` when the merge gate passes; `missing` when a required context has not reported. */
-export const ChecksState = Schema.Literals(["success", "pending", "failure", "error", "missing"]);
+/**
+ * `success` when the merge gate passes; `missing` when a required context has
+ * not reported; `unknown` while the required checks are (`checks_unknown`
+ * says why): an unforced merge is refused until they can be read.
+ */
+export const ChecksState = Schema.Literals(["success", "pending", "failure", "error", "missing", "unknown"]);
 
 /** GitHub's combined status, plus the required contexts and which are missing. */
 export const Checks = Schema.Struct({
   sha: Schema.NullOr(Sha),
   state: ChecksState,
-  required: Schema.Array(Schema.String),
+  /** Null while unknown: .pando/pando.toml could not be read, or does not parse. */
+  required: Schema.NullOr(Schema.Array(Schema.String)),
   missing: Schema.Array(Schema.String),
   /** The latest status per context. */
   statuses: Schema.Array(Status),
+  /** Why the required checks are unknown, in plain words ("pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force"); null otherwise. */
+  checks_unknown: Schema.NullOr(Schema.String),
 });
 
 export interface Checks extends Schema.Schema.Type<typeof Checks> {}

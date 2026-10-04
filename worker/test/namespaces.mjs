@@ -3,7 +3,8 @@
 //   PANDO_URL=http://localhost:8797 node test/namespaces.mjs      (wrangler dev)
 //
 // Two people own a monorepo of the same name; names match without case; the
-// short-name filter; reserved and taken logins; a rename keeps the old git
+// short-name filter; reserved and taken logins (`docs` among them, and /docs
+// redirecting to the docs site); a rename keeps the old git
 // URL and API path working; a new monorepo taking an old name says so; a
 // transfer; the git door's two shapes; a delete forgets the old names.
 // Real git, real Artifacts. Credentials never printed; git never reaches the
@@ -13,7 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeError, retryResetFetch } from "./errors.mjs";
-import { request } from "./http.mjs";
+import { request, send } from "./http.mjs";
 
 retryResetFetch();
 
@@ -65,10 +66,29 @@ try {
   r = await call("POST", "/v1/users", BOOT, { login: ana });
   check("a taken login is refused (namespace_taken)", r.status === 409 && r.json?.error?.code === "namespace_taken", `${r.status} ${r.json?.error?.code}`);
 
-  for (const login of ["v1", "login", "settings"]) {
+  for (const login of ["v1", "login", "settings", "docs"]) {
     r = await call("POST", "/v1/users", BOOT, { login });
     check(`the reserved name ${login} is refused as a login`, r.status === 400 && r.json?.error?.code === "reserved_name", `${r.status}`);
   }
+
+  // ── /docs is the docs site's (wrangler.jsonc DOCS_URL) ──
+  const to = async (path) => {
+    const res = await send(URL_, "GET", path, { redirect: "manual" });
+    await res.body?.cancel();
+
+    return `${res.status} ${res.headers.get("location")}`;
+  };
+
+  const docsBase = (await to("/docs")).replace(/^302 /, "");
+  const csp = (await send(URL_, "GET", "/")).headers.get("content-security-policy") ?? "";
+  check("/docs redirects (302) to the docs site", /^https?:\/\/[^/]+\/$/.test(docsBase), docsBase);
+  check(
+    "/docs/<path> keeps its path and query there, and never leaves the docs site",
+    (await to("/docs/")) === `302 ${docsBase}` && (await to("/docs/cli/?a=1")) === `302 ${docsBase}cli/?a=1` && (await to("/docs/https://example.com")) === `302 ${docsBase}https://example.com`,
+  );
+  check("the app's pages may fetch from the docs site (What's new)", csp.includes(`connect-src 'self' ${new URL(docsBase).origin}`), csp);
+  const up = await send(URL_, "GET", "/healthz");
+  check("the up check is readable from the docs site's Status page", up.headers.get("access-control-allow-origin") === "*" && (await up.text()) === "ok\n");
 
   r = await call("POST", "/v1/users", BOOT, { login: `x-${id}-` });
   check("a login ending in a hyphen is refused", r.status === 400, `${r.status}`);

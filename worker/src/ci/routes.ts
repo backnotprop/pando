@@ -363,7 +363,8 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const [o, repos] = await Promise.all([stub.ciOverview(), stub.listRepos()]);
     const info = c.get("info");
     const lists = await pool(repos, 4, (r) => requiredKept(c.env, info, r));
-    const required = new Map(repos.map((r, i) => [r.name, lists[i]]));
+    // A repo's list, null while unknown (pando.toml unreadable or broken).
+    const required = new Map(repos.map((r, i) => [r.name, lists[i].list]));
 
     return c.json({
       services: SERVICES,
@@ -498,7 +499,7 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     if (!Number.isInteger(limit) || limit < 1 || limit > BUILDS_PAGE_MAX) bad(`limit is 1 to ${BUILDS_PAGE_MAX}`);
     const page = unwrap(await stub.ciBuilds({ pipeline: slug, connection: pl.connection.id, limit, cursor: c.req.query("cursor") ?? null }));
     const repo = (await stub.listRepos()).find((r) => r.name === pl.pipeline.repo);
-    const required = repo ? await requiredKept(c.env, c.get("info"), repo) : [];
+    const required = repo ? (await requiredKept(c.env, c.get("info"), repo)).list : [];
 
     return c.json({
       pipeline: { ...pl.pipeline, required_checks: required, configuration, configuration_fetched_at: fetchedAt, configuration_error: error },

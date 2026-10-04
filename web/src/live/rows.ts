@@ -11,7 +11,7 @@ import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import type { MonorepoRef } from "../api/names";
-import { type CheckRuns, branchQuery, repoKey, reports } from "../api/projects";
+import { type CheckRuns, branchDiffQuery, branchQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
 import { keepOpen } from "./socket";
 
@@ -118,8 +118,9 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     case "branch.updated":
     case "branch.opened":
     case "merged":
-    case "push":
+    case "push": {
       if (f.collection !== "branches") break;
+      const before = qc.getQueryData(branchQuery(m, f.row.repo, f.row.name).queryKey)?.head;
 
       if (f.partial) {
         patchBranchFields(qc, m, f.row);
@@ -129,7 +130,12 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
         qc.setQueryData(branchQuery(m, repo, branch.name).queryKey, branch);
       }
 
+      // A new head: its Files changed is read again (a 304 by its ETag when the files did not move).
+      if (f.row.head !== before) void qc.invalidateQueries({ queryKey: branchDiffQuery(m, f.row.repo, f.row.name).queryKey, exact: true });
+
       break;
+    }
+
     case "status":
       // The branches at that commit follow as branch.updated, with their checks and gate.
       break;

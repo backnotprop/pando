@@ -4,10 +4,8 @@ info:
   version: "1"
   summary: The /v1 API of the Pando Worker.
   description: |
-    Owner: the server-git lane. Others ask pando-ops for changes.
-
     Shape:
-    - A monorepo is `owner/name`, like GitHub (NAMESPACES.md): the owner is
+    - A monorepo is `owner/name`, like GitHub: the owner is
       a namespace (a person's login; organizations later), the name is
       unique within its owner, and a permanent `id` keys everything stored.
       A rename or a transfer changes the label only; the old `owner/name`
@@ -25,8 +23,8 @@ info:
       monorepo holds repos. A plain git repo is a monorepo of kind `repo`
       holding exactly one repo, at path `.`, and no meta layer; it uses the
       same routes. The meta layer's routes
-      (`/v1/monorepos/{owner}/{monorepo}/meta/...`) are in `meta-sync.md`.
-    - A repo has a `path` (as in `formats.md`: `projects/web`, or `.` in a
+      (`/v1/monorepos/{owner}/{monorepo}/meta/...`) are not in this reference.
+    - A repo has a `path` (its folder from the root: `projects/web`, or `.` in a
       plain repo) and a `name`, its id in URLs: the path with each `/`
       turned into `-` (`projects-web`). A plain repo's name is the
       monorepo's name when it was made (a rename does not change it).
@@ -52,9 +50,17 @@ info:
     ambiguous. These names are internal: clients use `clone_url`.
 
     Required checks: the server reads `required_checks` from
-    `.pando/pando.toml` on main (`formats.md`, section 2). In a monorepo
+    `.pando/pando.toml` on main. In a monorepo
     that is the meta layer's main, table `[repos."<repo path>"]`; in a plain
-    repo, the repo's own main, table `[repos."."]`.
+    repo, the repo's own main, table `[repos."."]`. No main or no file means
+    no required checks. When Artifacts fails to read it, or it does not
+    parse, they are unknown, and only the merge fails closed: reads (the
+    repo, the branch list, a branch, a commit's status, CI) answer as usual
+    with the list null and `checks_unknown` saying why (for a bad file,
+    "pando.toml line N: <what is wrong>"), checks `state` is `unknown`; an
+    unforced merge is refused with 503 `checks_unknown` and that reason, a
+    forced one goes through as forced. Nothing is kept, so the next request
+    reads it again.
 
     Identity works like GitHub's. A person has a user account and belongs to
     monorepos as `owner` or `member`. A machine signs in once
@@ -175,12 +181,12 @@ tags:
       for a held push, else `Pando: <repo> couldn't take this push right
       now; push again`, never a bare HTTP 500.
 
-      Raw files (FILES.md section 3), GET or HEAD, beside the git door:
+      Raw files, GET or HEAD, beside the git door:
       `/{owner}/{monorepo}/projects/{project}/raw/{path}?ref=` for a
       monorepo's project (the repo at `projects/{project}`, named
       `projects-{project}`), `/{owner}/{name}/raw/{path}?ref=` for a plain
       repo, and `/{owner}/{monorepo}/raw/{path}?v=` for a monorepo's own
-      files (the meta layer; `v` is a meta layer version, meta-sync.md).
+      files (the meta layer; `v` is a meta layer version).
       Members only, by the session cookie or a Bearer credential. Served so
       nothing runs: `Content-Security-Policy: sandbox`, nosniff, images as
       images, everything else as `text/plain` (HTML and SVG included) or,
@@ -195,7 +201,7 @@ tags:
       hooks.
   - name: ci
     description: |
-      CI on one model for every service (RESEARCH-2026-10-03 section 6):
+      CI on one model for every service:
       a **service** (`buildkite` today), a **connection** (one account of it:
       a Buildkite organization), its **pipelines** (each builds one repo),
       **builds**, **jobs**, and each job's **check**. Pando runs no CI.
@@ -320,8 +326,8 @@ paths:
         `slow_down` (add 5 seconds to the interval). `access_denied`,
         `expired_token` and `invalid_grant` end the attempt. On success,
         `joined` lists the monorepos (`owner/name`) whose email invites were accepted, and
-        the CLI stores `credential.secret` where formats.md says
-        (`~/.pando/credentials/<host>`, mode 600).
+        the CLI stores `credential.secret` in
+        `~/.pando/credentials/<host>` (mode 600).
       tags: [users]
       security: []
       requestBody:
@@ -333,7 +339,7 @@ paths:
               required: [device_code, credential_name]
               properties:
                 device_code: { type: string }
-                credential_name: { type: string, description: "The machine name (formats.md, section 7)." }
+                credential_name: { type: string, description: "The machine name." }
                 kind: { type: string, enum: [machine, sandbox], default: machine }
       responses:
         "200":
@@ -561,7 +567,7 @@ paths:
       description: |
         The web home's log: what happened in every monorepo the person belongs
         to, newest first, each line with its `monorepo`. People, machines and
-        worktrees only: no agent field (owner ruling).
+        worktrees only: no agent field.
 
         Lines are the activity kinds: `push`, `branch.opened`,
         `branch.deleted`, `merged`, `review`, `status` (only when a check's
@@ -1088,7 +1094,7 @@ paths:
               properties:
                 path:
                   type: string
-                  description: The repo path from the root, for example `projects/web` (formats.md). Its `name` is the path with `/` turned into `-`.
+                  description: The repo path from the root, for example `projects/web`. Its `name` is the path with `/` turned into `-`.
                 description: { type: string }
       responses:
         "201":
@@ -1286,8 +1292,8 @@ paths:
       description: |
         The commits on the branch that are not on the default branch (the
         ones `ahead` counts), in git log's order: each commit before its
-        parents. `trailers` holds the who-made-it lines from formats.md,
-        section 6 (`Pando-Agent`, `Pando-Worktree`, `Pando-Machine`), read from
+        parents. `trailers` holds the who-made-it lines
+        (`Pando-Agent`, `Pando-Worktree`, `Pando-Machine`), read from
         the message's last paragraph.
       tags: [branches]
       parameters:
@@ -1497,7 +1503,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "503":
-          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries."
+          description: "`repo_busy`: the repo's write slots stayed taken for 120 s, or Artifacts stayed busy after 3 retries. `checks_unknown` (an unforced merge): .pando/pando.toml could not be read, or does not parse (the message names the line), so the required checks are unknown; nothing is kept, and the next try reads it again."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1513,7 +1519,7 @@ paths:
       - $ref: "#/components/parameters/repo"
     get:
       operationId: getTree
-      summary: A folder at any ref (FILES.md section 1)
+      summary: A folder at any ref
       description: |
         Folders first, then by name; 1,000 entries a page. Read by hash
         through the edge cache: a repeat view reaches no Artifacts call. A
@@ -1549,7 +1555,7 @@ paths:
       - $ref: "#/components/parameters/repo"
     get:
       operationId: getLastCommits
-      summary: The last commit that changed each entry of a folder (FILES.md section 2)
+      summary: The last commit that changed each entry of a folder
       description: |
         First parents (`git log -1 --first-parent -- <entry>`): on main, a
         change merged from a branch is the merge, with `merged_branch`. A
@@ -1592,7 +1598,7 @@ paths:
       - $ref: "#/components/parameters/repo"
     get:
       operationId: getHistory
-      summary: Commits that changed one path, newest first (FILES.md section 6)
+      summary: Commits that changed one path, newest first
       description: |
         `git log --first-parent -- <path>`, paged. A page may stop short of
         `limit` when its walk spent its budget (`complete_page: false`); ask
@@ -1959,7 +1965,7 @@ paths:
       - name: worktree_id
         in: path
         required: true
-        description: Made by the client (formats.md, `wt_` and 16 hex characters).
+        description: Made by the client, `wt_` and 16 hex characters.
         schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
     put:
       operationId: putWorktree
@@ -1976,7 +1982,7 @@ paths:
               properties:
                 repo: { type: string, description: "The repo path (`projects/web`, or `.`)." }
                 branch: { type: string }
-                path: { type: string, description: "The worktree path from the root (formats.md, section 1)." }
+                path: { type: string, description: "The worktree path from the root." }
                 machine: { type: string }
                 agent: { type: [string, "null"], description: "The agent working in it, if any (PANDO_AGENT)." }
                 kind: { type: string, enum: [fuse, sparse, fskit] }
@@ -2046,7 +2052,8 @@ paths:
                         repo: { type: string }
                         path: { type: string }
                         checks:
-                          type: array
+                          type: [array, "null"]
+                          description: Null while unknown (pando.toml unreadable or broken).
                           items: { type: string }
         "403": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/ci/connections:
@@ -2064,7 +2071,7 @@ paths:
         `X-Buildkite-Signature`; events `build.*` and `job.*`; the pipelines
         to send. One connection per organization per monorepo. REST calls
         use the Worker secret `BUILDKITE_API_TOKEN` at launch (the connection
-        says `token: worker_secret`); per-connection tokens come with C21.
+        says `token: worker_secret`); per-connection tokens are not built yet.
       tags: [ci]
       requestBody:
         required: true
@@ -2879,9 +2886,12 @@ components:
           type: string
           description: "The git door URL: `https://<host>/<owner>/<monorepo>/<name>.git`, or `https://<host>/<owner>/<name>.git` for a plain repo."
         required_checks:
-          type: array
-          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists.
+          type: [array, "null"]
+          description: Read from `.pando/pando.toml` on main when the repo is fetched one at a time (getRepo); left out of lists. Null while unknown.
           items: { type: string }
+        checks_unknown:
+          type: [string, "null"]
+          description: With required_checks, why they are unknown (pando.toml unreadable or broken); else null.
         created_at: { type: string, format: date-time }
         created_by: { type: string }
     Branch:
@@ -2972,8 +2982,8 @@ components:
         default_branch: { type: [string, "null"] }
         hook_id: { type: [string, "null"], description: "The buildkite hook that starts its builds on push, if any." }
         required_checks:
-          type: array
-          description: Its repo's required checks (from `.pando/pando.toml`).
+          type: [array, "null"]
+          description: Its repo's required checks (from `.pando/pando.toml`); null while unknown.
           items: { type: string }
         last_build:
           oneOf:
@@ -3064,17 +3074,21 @@ components:
         created_at: { type: string, format: date-time }
     Checks:
       type: object
-      required: [sha, state, required, statuses]
+      required: [sha, state, required, statuses, checks_unknown]
       description: GitHub's combined status, plus the required contexts and which are missing.
       properties:
         sha: { type: [string, "null"] }
         state:
           type: string
-          enum: [success, pending, failure, error, missing]
-          description: "`success` when the merge gate passes; `missing` when a required context has not reported."
+          enum: [success, pending, failure, error, missing, unknown]
+          description: "`success` when the merge gate passes; `missing` when a required context has not reported; `unknown` while the required checks are (an unforced merge is refused)."
         required:
-          type: array
+          type: [array, "null"]
+          description: Null while unknown.
           items: { type: string }
+        checks_unknown:
+          type: [string, "null"]
+          description: "Why the required checks are unknown, in plain words: \"Pando couldn't read this monorepo's required checks; try again\", or \"pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force\". Null otherwise."
         missing:
           type: array
           items: { type: string }

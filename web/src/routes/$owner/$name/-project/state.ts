@@ -1,6 +1,6 @@
 // A branch's one state, in words first (the prototype's order): merged,
-// conflicts with main, a check failed, a check running, no check reported,
-// then ready to merge.
+// conflicts with main, a check failed, a check running, the required checks
+// unknown, no check reported, then ready to merge.
 import type { Branch } from "@pando/contract";
 
 export type Tone = "ready" | "bad" | "wait" | "merged";
@@ -29,6 +29,9 @@ export function stateOf(b: Branch): BranchState {
   const running = b.checks.statuses.find((s) => s.state === "pending");
 
   if (running) return { tone: "wait", text: `${running.context} running`, app: running.app };
+
+  // pando.toml unreadable or broken: only a forced merge goes through.
+  if (b.checks.state === "unknown") return { tone: "wait", text: "checks unknown", app: null };
 
   if (b.checks.state === "missing") return { tone: "wait", text: "no ci yet", app: null };
 

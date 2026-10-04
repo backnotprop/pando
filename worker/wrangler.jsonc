@@ -18,7 +18,11 @@
   "vars": {
     // The WorkOS environment "Pando" (public in a device flow). A secret of
     // the same name, if set, takes its place.
-    "WORKOS_CLIENT_ID": "client_01M3ZW5WYKNDQZE358DYA7VHY5"
+    "WORKOS_CLIENT_ID": "client_01M3ZW5WYKNDQZE358DYA7VHY5",
+    // The docs site (site/docs, the Worker pando-docs): the app's /docs
+    // redirects here, and the home reads What's new from it. docs.<domain>
+    // once the domain is bought.
+    "DOCS_URL": "https://pando-docs.plannotator.workers.dev"
   },
   "observability": { "enabled": true },
   "artifacts": [

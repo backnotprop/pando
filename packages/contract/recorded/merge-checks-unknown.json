@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/merge (pando.toml broken: 503 checks_unknown)",
+  "status": 503,
+  "body": {
+    "error": {
+      "code": "checks_unknown",
+      "message": "pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force"
+    }
+  }
+}

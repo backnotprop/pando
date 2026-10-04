@@ -1,31 +1,38 @@
-// A branch's page is the pull request: its title, its commits (with
-// co-authors), its reviews, and on the right the Merge box, its checks (each
-// with its CI service's mark and a link to the run) and its worktree. Merge
-// lands exactly the head on screen (expected_head); a refusal is shown in the
-// box, in words.
+// A branch's page is the pull request: its title, then two tabs. Overview:
+// its commits (with co-authors), its reviews, and on the right the Merge box,
+// its checks (each with its CI service's mark and a link to the run) and its
+// worktree. Merge lands exactly the head on screen (expected_head); a refusal
+// is shown in the box, in words. Files changed: each file's diff, read only
+// (FilesChanged.tsx).
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Branch, Checks, Commit, Repo, Review, Status } from "@pando/contract";
-import { branchQuery, type CheckRun, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
+import { branchDiffQuery, branchQuery, type CheckRun, checkRunsQuery, commitsQuery, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
 import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
-import { ciBuildLink } from "../../../../ui/paths";
+import { branchLink, ciBuildLink } from "../../../../ui/paths";
+import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf } from "./state";
 
-export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string) {
+/** `files`: the Files changed tab waits for the diff; Overview fetches it alongside, for the tab's count. */
+export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean) {
+  const diff = qc.prefetchQuery(branchDiffQuery(m, repo.name, branch));
+
   await Promise.all([
     qc.ensureQueryData(branchQuery(m, repo.name, branch)),
     qc.ensureQueryData(commitsQuery(m, repo.name, branch)),
     qc.ensureQueryData(reviewsQuery(m, repo.name, branch)),
+    files ? diff : null,
   ]);
 }
 
@@ -123,7 +130,7 @@ function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch;
   const { monorepo, info } = useMonorepo();
   // Read from Pando's stored builds, not only when a status names a service: a job shows the moment it is queued.
   const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch.name, branch.head), refetchInterval: fallback(live) }).data?.runs;
-  const names = [...new Set([...checks.required, ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
+  const names = [...new Set([...(checks.required ?? []), ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
   const words = names.map((name) => checkWord(checks.statuses.find((x) => x.context === name), runs?.get(name)));
   const clock = useSeconds(words.includes("running"));
   const arrived = useArrivals(runs ? names.map((name, i) => ({ key: name, state: words[i] ?? "" })) : undefined);
@@ -267,6 +274,8 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
       <p key={line} className={`${big} text-bark-dim ${arrives}`}>
         {s.text === "no ci yet" ? (
           "No ci has reported"
+        ) : s.text === "checks unknown" ? (
+          "Required checks unknown"
         ) : s.text === "checking" ? (
           "Checking main"
         ) : (
@@ -327,19 +336,32 @@ function Worktree({ repo, branch }: { repo: Repo; branch: string }) {
   );
 }
 
-export function BranchPage({ repo, branch }: { repo: Repo; branch: string }) {
+/** The Files changed tab's body: the diff, or why there is none. */
+function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
+  const { monorepo } = useMonorepo();
+  const diff = useQuery(branchDiffQuery(monorepo, repo.name, branch));
+
+  if (diff.data) return <FilesChanged diff={diff.data} />;
+
+  return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
+}
+
+export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string; files: boolean }) {
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
 
-  // The branch's row, its checks and its jobs come live on the repo's rows; the record and its runs are read once more when the socket opens.
+  // The branch's row, its checks and its jobs come live on the repo's rows (a new head reads its diff again);
+  // the record, its runs and its diff are read once more when the socket opens.
   const live = useRows(monorepo, [`repo:${repo.name}`], () => {
     void qc.invalidateQueries({ queryKey: branchQuery(monorepo, repo.name, branch).queryKey, exact: true });
+    void qc.invalidateQueries({ queryKey: branchDiffQuery(monorepo, repo.name, branch).queryKey, exact: true });
     void qc.invalidateQueries({ queryKey: [...repoKey(monorepo, repo.name), "runs"] });
   });
 
   const b = useSuspenseQuery({ ...branchQuery(monorepo, repo.name, branch), refetchInterval: fallback(live) }).data;
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
+  const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.files_total;
   const n = b.state === "merged" ? commits.total : (b.ahead ?? commits.total);
 
   return (
@@ -352,24 +374,34 @@ export function BranchPage({ repo, branch }: { repo: Repo; branch: string }) {
           {b.behind ? `, ${b.behind} behind main` : ""}.
         </p>
       </div>
-      <div className="mt-8 grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
-        <section>
-          <SectionHead title="Commits" count={commits.commits.length} />
-          {commits.commits.length ? <Commits commits={commits.commits} /> : <Empty>No commits ahead of main.</Empty>}
-          <div className="mt-10">
-            <SectionHead title="Reviews" />
-            <Reviews reviews={reviews} />
-          </div>
-        </section>
-        <aside>
-          <MergeBox repo={repo} b={b} />
-          <div className="mt-10">
-            <SectionHead title="Checks" />
-            <CheckRows repo={repo} branch={b} checks={b.checks} live={live} />
-          </div>
-          <Worktree repo={repo} branch={branch} />
-        </aside>
-      </div>
+      <TabBar label="Branch">
+        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files} label="Overview" />
+        <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
+      </TabBar>
+      {files ? <FilesTab repo={repo} branch={branch} /> : <Overview repo={repo} b={b} commits={commits.commits} reviews={reviews} live={live} />}
     </>
+  );
+}
+
+function Overview({ repo, b, commits, reviews, live }: { repo: Repo; b: Branch; commits: readonly Commit[]; reviews: readonly Review[]; live: boolean }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
+      <section>
+        <SectionHead title="Commits" count={commits.length} />
+        {commits.length ? <Commits commits={commits} /> : <Empty>No commits ahead of main.</Empty>}
+        <div className="mt-10">
+          <SectionHead title="Reviews" />
+          <Reviews reviews={reviews} />
+        </div>
+      </section>
+      <aside>
+        <MergeBox repo={repo} b={b} />
+        <div className="mt-10">
+          <SectionHead title="Checks" />
+          <CheckRows repo={repo} branch={b} checks={b.checks} live={live} />
+        </div>
+        <Worktree repo={repo} branch={b.name} />
+      </aside>
+    </div>
   );
 }

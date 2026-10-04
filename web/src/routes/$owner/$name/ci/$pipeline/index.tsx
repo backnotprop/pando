@@ -69,7 +69,7 @@ function PipelinePage() {
             <p className="mt-1.5 flex items-center gap-2.5 overflow-hidden font-mono text-[13px] leading-4 whitespace-nowrap text-ash phone:flex-wrap phone:gap-y-0.5 phone:whitespace-normal">
               {p.repo_path ? <span>{p.repo_path}</span> : null}
               <span>{branch}</span>
-              {p.required_checks.map((c) => (
+              {(p.required_checks ?? []).map((c) => (
                 <span key={c}>
                   {ran.has(c) ? <ServiceMark service={p.service} /> : null}
                   {c}

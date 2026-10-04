@@ -1,7 +1,7 @@
 // Slice 2, end to end: a project's code on main and on a branch (the picker,
 // the ahead line, a file, its history), code in colour within the code view's
-// size limits, its branches, a branch's page with its
-// commits and co-authors, checks that Buildkite reports arriving live, a merge
+// size limits, a branch's Files changed taking a push live, its branches, a
+// branch's page with its commits and co-authors, checks that Buildkite reports arriving live, a merge
 // through the page, a branch left conflicting by that merge, and the
 // monorepo's Activity tab taking a push live. Real Worker, real git.
 import { expect, type Locator, test } from "@playwright/test";
@@ -29,8 +29,10 @@ export function shade(name: string): number {
 // 2.2 MiB, over the 1 MiB that is coloured: shown as plain text.
 const BIG = Array.from({ length: 80_000 }, (_, i) => `export const n${i} = ${i};\n`).join("");
 
-// A 1 by 1 PNG.
+// A 1 by 1 PNG, and different bytes of the same kind for a branch to change it to.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+const PNG2 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 
 /** The distance between the first three rows' tops. */
 const pitch = (rows: Locator) => rows.evaluateAll((els) => els.slice(0, 3).map((e) => e.getBoundingClientRect().top)).then(([a = 0, b = 0, c = 0]) => [b - a, c - b]);
@@ -163,6 +165,35 @@ test("slice 2: project code at a ref, branches, the pull request, checks, merge,
 
       await expect(image).toBeVisible();
       expect(await image.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
+    });
+
+    await test.step("Files changed: an edit, an add, a delete and a binary, each with its status; a push shows at once", async () => {
+      const m = machine();
+      const dir = m.commit("web", url, "files", { "src/colour.ts": COLOUR.replace("sage", "moss"), "src/files.ts": "export const files = 4;\n", "logo.png": PNG2 }, "Files changed");
+
+      m.git(dir, "rm", "-q", "README.md");
+      m.git(dir, "-c", "user.name=Web Lane", "-c", `user.email=${m.name}@pando.invalid`, "commit", "-qm", "No README");
+      m.push(dir, url, "files");
+      await page.goto(`${project}/branches/files`);
+      await page.getByRole("navigation", { name: "Branch" }).getByRole("link", { name: /Files changed/ }).click();
+      await expect(page).toHaveURL(`${project}/branches/files?tab=files`);
+      const files = page.getByRole("list", { name: "Files changed" });
+      const file = (path: string) => files.getByRole("listitem").filter({ hasText: path });
+
+      await expect(file("src/colour.ts")).toContainText("modified");
+      await expect(file("src/colour.ts").locator("[data-line]").filter({ hasText: "moss" })).toBeVisible();
+      await expect(file("src/files.ts")).toContainText("added");
+      await expect(file("README.md")).toContainText("deleted");
+      await expect(file("logo.png")).toContainText("modified");
+      await expect(file("logo.png")).toContainText("Binary file");
+      await expect(page.getByRole("link", { name: "Files changed 4" })).toBeVisible();
+      // On a phone the diff scrolls inside its box, never the page.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      m.push(m.commit("web", url, "files", { "src/live.ts": "export const live = true;\n" }, "Live"), url, "files");
+      await expect(file("src/live.ts")).toContainText("added", { timeout: 30_000 });
+      await expect(page.getByRole("link", { name: "Files changed 5" })).toBeVisible();
     });
 
     await test.step("the branches list and the branch's page: commits with co-authors", async () => {

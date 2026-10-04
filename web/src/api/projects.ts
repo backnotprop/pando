@@ -32,6 +32,14 @@ export const branchQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
 export const commitsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({ queryKey: [...repoKey(m, repo), "branch", branch, "commits"], queryFn: () => read(Routes.branchCommits(m.owner, m.name, repo, branch)) });
 
+/**
+ * Files changed: the branch's head against its merge base with main, each file
+ * with its patch. Read again when a row brings a new head (live/rows.ts); the
+ * browser revalidates it by its ETag (main and head), a 304 when nothing moved.
+ */
+export const branchDiffQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
+  queryOptions({ queryKey: [...repoKey(m, repo), "branch", branch, "diff"], queryFn: () => read(Routes.branchDiff(m.owner, m.name, repo, branch)) });
+
 export const reviewsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "branch", branch, "reviews"],

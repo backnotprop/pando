@@ -236,18 +236,33 @@ func (env *testEnv) bare(t *testing.T, name string) *machine {
 }
 
 type tlog struct {
-	t    *testing.T
-	mu   sync.Mutex
-	done bool
+	t     *testing.T
+	mu    sync.Mutex
+	done  bool
+	lines []string
 }
 
 func (w *tlog) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.lines = append(w.lines, string(p))
 	if !w.done {
 		w.t.Log(strings.TrimRight(string(p), "\n"))
 	}
 	return len(p), nil
+}
+
+// count is how many lines the engine logged that contain s.
+func (w *tlog) count(s string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := 0
+	for _, l := range w.lines {
+		if strings.Contains(l, s) {
+			n++
+		}
+	}
+	return n
 }
 
 type machine struct {
@@ -1133,6 +1148,91 @@ func TestE2ESyncOnceReportsWhatStayed(t *testing.T) {
 	waitContent(t, a, "plan.md", "the sandbox's fix\n")
 }
 
+// Git cannot hold a file and a folder of one name, so the server refuses the
+// second of the pair: a file named like a live folder, or a path inside a
+// live file. The machine that made it keeps it and says why
+// (CODE-VS-MODEL M5, the owner's choice, 2026-10-04).
+func TestE2EFileAndFolderOfOneName(t *testing.T) {
+	env := newEnv(t)
+	send, next := rawSocket(t, env.server, env.mono)
+	saveRaw := func(id, path string) serverMsg {
+		body := []byte(path + "\n")
+		send(saveMsg{Type: "save", ID: id, Path: path, SHA: gitSHA(body), Bytes: body})
+		return next("")
+	}
+	if m := saveRaw("f", env.p("notes")); m.Type != "accepted" {
+		t.Fatalf("a file notes: %+v", m)
+	}
+	if m := saveRaw("in", env.p("notes/a.md")); m.Type != "refused" || m.Reason != "file_folder" || m.Message != env.p("notes")+" is a file here" {
+		t.Errorf("a file inside the file notes: got %s %s %q, want refused file_folder", m.Type, m.Reason, m.Message)
+	}
+	if m := saveRaw("d", env.p("docs/x.md")); m.Type != "accepted" {
+		t.Fatalf("docs/x.md: %+v", m)
+	}
+	if m := saveRaw("like", env.p("docs")); m.Type != "refused" || m.Reason != "file_folder" || m.Message != env.p("docs")+" is a folder here" {
+		t.Errorf("a file named like the folder docs: got %s %s %q, want refused file_folder", m.Type, m.Reason, m.Message)
+	}
+
+	// Two machines: ana's file plans lands while ben, offline, makes a folder plans/.
+	p := newProxy(t, env.server)
+	a := env.machine(t, "ana")
+	b := env.machineAt(t, "ben", p.url())
+	a.write("warm.md", "warm\n")
+	waitContent(t, b, "warm.md", "warm\n")
+	p.cut()
+	a.write("plans", "ana's plans\n")
+	waitFor(t, "ana's file plans on the server", func() bool {
+		h, err := env.client().History(context.Background(), env.p("plans"), 1)
+		return err == nil && len(h.Versions) == 1
+	})
+	b.write("plans/q1.md", "ben's q1\n")
+	time.Sleep(300 * time.Millisecond)
+	p.restore()
+	waitFor(t, "ben's save refused, or on the server", func() bool {
+		h, _ := env.client().History(context.Background(), env.p("plans/q1.md"), 1)
+		return b.logw.count("refused") > 0 || (h != nil && len(h.Versions) > 0)
+	})
+	time.Sleep(500 * time.Millisecond)
+	if n := b.logw.count(env.p("plans") + " is a file here"); n == 0 {
+		t.Error("ben's sync does not say why plans/q1.md was refused")
+	}
+	if got, _ := b.read("plans/q1.md"); got != "ben's q1\n" {
+		t.Errorf("ben's plans/q1.md reads %q, want it kept on ben", got)
+	}
+	if h, err := env.client().History(context.Background(), env.p("plans/q1.md"), 1); err != nil || len(h.Versions) != 0 {
+		t.Errorf("plans/q1.md on the server: %+v %v, want none", h, err)
+	}
+}
+
+// Case-only twins (Notes.md beside notes.md) are allowed, as git and Linux
+// allow them. A Mac keeps one file for both, so pando sync there names the
+// pair in a one-line warning, once (the owner's choice, 2026-10-04).
+func TestE2ECaseOnlyTwins(t *testing.T) {
+	env := newEnv(t)
+	if !caseInsensitive(t.TempDir()) {
+		t.Skip("this file system tells Notes.md from notes.md: nothing to warn about")
+	}
+	send, next := rawSocket(t, env.server, env.mono)
+	for i, name := range []string{"Notes.md", "notes.md"} {
+		body := []byte("from a Linux machine: " + name + "\n")
+		send(saveMsg{Type: "save", ID: strconv.Itoa(i), Path: env.p(name), SHA: gitSHA(body), Bytes: body})
+		if m := next(""); m.Type != "accepted" {
+			t.Errorf("%s: got %s %s, want accepted", name, m.Type, m.Reason)
+		}
+	}
+	b := env.machine(t, "ben")
+	pair := env.p("Notes.md") + " and " + env.p("notes.md") + " differ only in case"
+	waitFor(t, "the warning on ben", func() bool { return b.logw.count(pair) > 0 })
+	b.write("later.md", "later\n")
+	waitFor(t, "a later save from ben", func() bool {
+		h, err := env.client().History(context.Background(), env.p("later.md"), 1)
+		return err == nil && len(h.Versions) == 1
+	})
+	if n := b.logw.count(pair); n != 1 {
+		t.Errorf("the warning came %d times, want once", n)
+	}
+}
+
 // ---- a TCP proxy that can be cut ----
 
 // The proxy can also stop the server's bytes on their way to the client:
@@ -1873,9 +1973,10 @@ func TestE2EApplyFromMainAndReferences(t *testing.T) {
 	}
 }
 
-// Many machines, each its own person, save inside one quiet window.
-// META_COMMIT_SHAPE=window: one commit, the last saver its author, the
-// others Co-authored-by. Default ("author"): one commit per person.
+// Many machines, each its own person, save inside one quiet window. The
+// default grouping ("window", the owner's choice, 2026-10-04): one commit,
+// the last saver its author, the others Co-authored-by.
+// META_COMMIT_GROUPING=author: one commit per person.
 func TestE2ECommitWindow(t *testing.T) {
 	env := artifactsEnv(t, "e2e-window-")
 	server, mono := env.server, env.mono
@@ -1883,7 +1984,7 @@ func TestE2ECommitWindow(t *testing.T) {
 	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
 	shape := os.Getenv("PANDO_META_TEST_SHAPE")
 	if shape == "" {
-		shape = "author"
+		shape = "window"
 	}
 	const n = 10
 	var ms []*machine
@@ -1981,5 +2082,75 @@ func TestE2ECommitCreditsFoldedSave(t *testing.T) {
 	}
 	if !strings.Contains(l[0].Message, "\nPando-Machine: ana\n") || !strings.Contains(l[0].Message, "\nPando-Machine: ben\n") {
 		t.Error("the commit does not name both machines")
+	}
+}
+
+// A file saved every 5 s never has 10 s of quiet, but it still reaches git:
+// at the latest 60 s after its first save not yet in git (the default of
+// META_COMMIT_MAX_WAIT_MS), plus the commit's own time (CODE-VS-MODEL M6).
+func TestE2ECommitsAFileSavedEvery5s(t *testing.T) {
+	env := artifactsEnv(t, "e2e-maxwait-")
+	server, mono := env.server, env.mono
+	metaRepo(t, server, mono, "create", nil)
+	t.Cleanup(func() { metaRepo(t, server, mono, "delete", nil) })
+	a := env.machine(t, "ana")
+	c := env.client()
+	ctx := context.Background()
+
+	committed := func() (int64, bool) {
+		h, err := c.History(ctx, env.p("loop.md"), 50)
+		if err != nil {
+			return 0, false
+		}
+		for _, v := range h.Versions {
+			if v.Commit != "" {
+				return v.Version, true
+			}
+		}
+		return 0, false
+	}
+	start := time.Now()
+	var took time.Duration
+	var version int64
+	for i := 1; time.Since(start) < 75*time.Second; i++ {
+		a.write("loop.md", fmt.Sprintf("save %d\n", i))
+		for next := start.Add(time.Duration(i) * 5 * time.Second); time.Now().Before(next); time.Sleep(250 * time.Millisecond) {
+			if v, ok := committed(); ok && took == 0 {
+				took, version = time.Since(start), v
+			}
+		}
+		if took != 0 {
+			break
+		}
+	}
+	if took == 0 {
+		t.Fatalf("saved every 5 s for 75 s: no version of loop.md reached git")
+	}
+	t.Logf("saved every 5 s: version %d reached git %s after the first save", version, took.Round(100*time.Millisecond))
+	if took < 50*time.Second || took > 66*time.Second {
+		t.Errorf("the first commit came %s after the first save, want about 62 s (60 s maximum wait, then the commit)", took.Round(time.Second))
+	}
+	want, err := c.File(ctx, env.p("loop.md"), version)
+	var r struct{ Content *string }
+	json.Unmarshal(metaRepo(t, server, mono, "read", map[string]string{"path": env.p("loop.md")}), &r)
+	if err != nil || r.Content == nil || *r.Content != string(want) {
+		t.Errorf("git has loop.md %v, want version %d's bytes %q (%v)", r.Content, version, want, err)
+	}
+
+	// The saves go on: the wait starts again at the first save after that
+	// commit, so 20 s more of saving makes no second commit.
+	for i := 0; i < 4; i++ {
+		a.write("loop.md", fmt.Sprintf("after the commit %d\n", i))
+		time.Sleep(5 * time.Second)
+	}
+	h, err := c.History(ctx, env.p("loop.md"), 50)
+	commits := map[string]bool{}
+	for _, v := range h.Versions {
+		if v.Commit != "" {
+			commits[v.Commit] = true
+		}
+	}
+	if err != nil || len(commits) != 1 || h.Versions[0].Commit != "" {
+		t.Errorf("after 20 s more of saving: %d commits, the newest version's %q; want still 1, the newest not committed (%v)", len(commits), h.Versions[0].Commit, err)
 	}
 }

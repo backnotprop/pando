@@ -198,7 +198,7 @@ function connectionOf(env: Env, s: MirrorSettings) {
 
 // ── Linking a proven installation ───────────────────────────────────────────
 
-async function link(env: Env, monorepoId: string, i: Installation, login: string, githubUser: number): Promise<void> {
+export async function linkInstallation(env: Env, monorepoId: string, i: Installation, login: string, githubUser: number): Promise<void> {
   const at = now();
   await env.ACCOUNTS_DB.batch([
     env.ACCOUNTS_DB.prepare(
@@ -381,7 +381,7 @@ export function mirrorRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): 
       repository_selection: r.repository_selection === "all" ? "all" : "selected", suspended: !!r.suspended_at,
     };
 
-    await link(c.env, c.get("m"), i, c.get("identity").login, 0);
+    await linkInstallation(c.env, c.get("m"), i, c.get("identity").login, 0);
 
     return c.json(await mirrorView(c));
   });
@@ -428,7 +428,7 @@ async function connectWith(env: Env, st: FlowState, token: string, url: URL, set
     return redirect(`${settings}?mirror=choose`, stateCookie(await sealState(env, { ...st, ids: installations.map((i) => i.id) })));
   }
 
-  await link(env, st.m, pick, st.login, user_id);
+  await linkInstallation(env, st.m, pick, st.login, user_id);
 
   return redirect(`${settings}?mirror=match`, stateCookie("", 0));
 }

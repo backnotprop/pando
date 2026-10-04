@@ -51,6 +51,10 @@ usage: pando <command> [args]
   pando ci build view | log | rebuild | cancel <build>            one build: its jobs, a job's log [--job j] [--follow]
   pando ci job retry <build> <job>                                run a job again
   pando ci run <pipeline> [--branch b]                            start a build of a branch (default: main)
+  pando mirror status [--json]                                    mirroring to GitHub: on or paused, one row per project [--monorepo <owner/name>]
+  pando mirror on | off [<project>]                               turn mirroring on or pause it, or one project's (owners)
+  pando mirror retry [<project>...]                               try again now, with the wait reset (owners)
+  pando mirror connect                                            set it up: opens the repository's Settings (GitHub needs a browser)
   pando credential create --name <sandbox> | list | revoke <id>   credentials that act as you
   pando hook list | create <url> | delete <id>                    a repo's web hooks [--repo <path>] (owners write)
   pando hook deliveries <id> | redeliver <delivery-id>            what a hook sent; send one again

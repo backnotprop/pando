@@ -10,7 +10,7 @@ import { HttpError } from "../http";
 import { isInteger, isRecord, isText, type Json, type JsonObject } from "../parse";
 import { RemoteError, tokenAuth, type Remote } from "./pipe";
 
-const local = (u: string | undefined): u is string => !!u && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(u.replace(/\/$/, ""));
+const local = (u: string | undefined): u is string => !!u && /^http:\/\/(127\.0\.0\.1|localhost):\d+(\/[\w-]+)?$/.test(u.replace(/\/$/, ""));
 
 export const apiBase = (env: Env) => (local(env.GITHUB_API_BASE) ? env.GITHUB_API_BASE.replace(/\/$/, "") : "https://api.github.com");
 
@@ -332,4 +332,20 @@ export async function createRepo(env: Env, token: string, account: { login: stri
 
     return found;
   }
+}
+
+/** One installation of this app, read with the app's JWT (tests link one without a browser). */
+export async function appInstallation(env: Env, id: number): Promise<Installation> {
+  const x = await rest(env, `/app/installations/${id}`, `Bearer ${await appJwt(env)}`);
+
+  if (!isRecord(x) || !isInteger(x.id) || !isRecord(x.account) || !isInteger(x.account.id) || !isText(x.account.login)) throw new RemoteError(502, "GitHub's installation answer was not understood");
+
+  return {
+    id: x.id,
+    account_id: x.account.id,
+    account_login: x.account.login,
+    account_type: x.account.type === "Organization" ? "Organization" : "User",
+    repository_selection: x.repository_selection === "all" ? "all" : "selected",
+    suspended: !!x.suspended_at,
+  };
 }

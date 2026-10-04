@@ -735,7 +735,10 @@ export class MonorepoObject extends DurableObject<Env> {
     return [...this.listRepos(), ...(meta ? [meta] : [])];
   }
 
-  mirrorState() {
+  async mirrorState() {
+    // The files outside projects/ have a repo record once asked for (it is made lazily).
+    if (this.info()?.kind === "monorepo" && !this.repoRow("meta")) await this.getRepo("meta");
+
     return { settings: this.mirror.settings(), targets: this.mirror.views(), repos: this.mirrorRepos(), pending: this.mirror.pending() };
   }
 

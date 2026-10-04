@@ -352,6 +352,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS applied (commit_sha TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS reserved (path TEXT NOT NULL, merge TEXT NOT NULL, PRIMARY KEY (path, merge));
+      CREATE TABLE IF NOT EXISTS credit_outbox (sha TEXT PRIMARY KEY, logins TEXT NOT NULL, at INTEGER NOT NULL);
     `);
   }
 
@@ -1159,6 +1160,34 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     }
   }
 
+  // ---- credits for the commits it makes (the profile's graph) ----
+  //
+  // Each commit's savers are written to credit_outbox in the commit's own
+  // step, and sent to the monorepo object, which queues one credit per person
+  // through its facts outbox (keyed by the commit, so a repeat counts once).
+  // A failed send waits for the alarm.
+
+  private async drainCredits(): Promise<void> {
+    const monorepo = this.kv("monorepo");
+
+    if (!monorepo || !this.env.MONOREPO) return;
+    const stub = this.env.MONOREPO.getByName(monorepo);
+
+    for (const r of this.sql.exec<{ sha: string; logins: string; at: number }>("SELECT sha, logins, at FROM credit_outbox ORDER BY at").toArray()) {
+      try {
+        // SAFETY: commitRows is the only writer of logins: JSON of a list of logins.
+        await stub.queueSavedCredit(r.sha, JSON.parse(r.logins) as string[], r.at);
+      } catch (err) {
+        console.error("meta credits not sent:", err instanceof Error ? err.message : String(err));
+        await this.alarmBy(Date.now() + OUTBOX_RETRY_MS[1]);
+
+        return;
+      }
+
+      this.sql.exec("DELETE FROM credit_outbox WHERE sha = ?", r.sha);
+    }
+  }
+
   /** Set the alarm for `at` unless one is set sooner (the commit timer and the outbox retries share it). */
   private async alarmBy(at: number): Promise<void> {
     const set = await this.ctx.storage.getAlarm();
@@ -1548,6 +1577,8 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   // set right away while more is due. Paths reserved by a merge wait.
   async alarm(): Promise<void> {
     if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM event_outbox").one().n > 0) await this.drain();
+
+    if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM credit_outbox").one().n > 0) await this.drainCredits();
     const writer = gitWriter(this.env);
 
     if (!writer || this.initializing()) return;
@@ -1636,6 +1667,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     // Nothing awaits from here on: mark versions committed, clear what is done.
     this.setKv("parent", sha);
     this.setKv("commit_error", null);
+    // The commit counts once for each person whose save it carries (their profile's graph), sent on after this step.
+    const savers = [...new Set(carried.flatMap((r) => (r.login ? [r.login] : [])))];
+
+    if (savers.length) {
+      this.sql.exec("INSERT OR IGNORE INTO credit_outbox (sha, logins, at) VALUES (?, ?, ?)", sha, JSON.stringify(savers), last.at);
+      this.ctx.waitUntil(this.drainCredits());
+    }
 
     const wait = this.maxWait();
 

@@ -1964,6 +1964,11 @@ export class MonorepoObject extends DurableObject<Env> {
     this.queueFacts(m);
   }
 
+  /** A commit of the shared files (the live layer's): one credit for each person whose save it carries, keyed by the commit. */
+  queueSavedCredit(sha: string, logins: string[], at: number): void {
+    for (const login of logins) this.queueFacts({ type: "credit_one", repo: "meta", login, kind: "commit", at: new Date(at).toISOString(), key: `s:${this.info()?.id}:${sha}` });
+  }
+
   private queueFacts(m: FactsRequest): void {
     // The outbox (facts-out.ts), drained at once by RPC.
     this.factsOut.add(m);

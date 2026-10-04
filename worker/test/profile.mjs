@@ -17,7 +17,8 @@
 // answer counts nothing twice; a co-author or author with no account counts
 // for nobody, an agent's line is ignored, and someone who can't open the
 // repository gets nothing; pushes alone count nothing, a branch opened counts
-// once; reviews; a merge of a branch longer than a page (1,200 commits)
+// once; reviews; the shared files' commits count once for each saver; a
+// merge of a branch longer than a page (1,200 commits)
 // counts every commit once; a repository arriving with history fills the right days
 // (merge commits and commits older than the window not counted); days follow
 // the viewer's time zone; one day's timeline; a viewer sees only work in
@@ -26,6 +27,7 @@
 // `contributed` frame live. Credentials are never printed; git never reaches
 // the keychain. It deletes every monorepo it made.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -308,6 +310,52 @@ try {
   check("two reviews by ramos: reviews +2; ana's push of a new branch: her branches +1", r.status === 201 && r3.status === 201 && reviewed && (await waitFor(async () => (await contributions(L.ana, "ana")).json?.kinds?.branch === 1)), JSON.stringify(reviewed?.kinds));
   check("and the review came live too", !!(await waitFor(() => live.frames.find((f) => f.type === "contributed" && f.kind === "review"), 5_000)));
 
+  // ── Shared files: the first upload's commit, then one commit for a window with two savers, each counted once ──
+  const sm = await call("POST", "/v1/monorepos", S.ramos, { name: `s-${id}` });
+  const sfull = sm.json?.monorepo?.full_name;
+
+  if (sm.status === 201) made.push([sfull, S.ramos]);
+  await call("PUT", `/v1/monorepos/${sfull}/members/${L.ana}`, S.ramos, { role: "member" });
+
+  const metaSocket = async (secret) => {
+    const m = { frames: [], ws: new WebSocket(`${WS_}/v1/monorepos/${sfull}/meta/socket`, { headers: { authorization: `Bearer ${secret}` } }) };
+
+    sockets.push(m);
+    m.ws.onmessage = (e) => e.data !== "pong" && m.frames.push(JSON.parse(e.data));
+    await waitFor(() => m.ws.readyState === WebSocket.OPEN, 10_000);
+    m.ws.send(JSON.stringify({ type: "hello", since: 0, machine: "test", client: "profile/1" }));
+    await waitFor(() => m.frames.some((f) => f.type === "caught_up" && f.more === false), 10_000);
+
+    return m;
+  };
+
+  const save = async (m, path, text) => {
+    const bytes = Buffer.from(text);
+    const sha = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+
+    m.ws.send(JSON.stringify({ type: "save", id: path, path, base_version: 0, sha, bytes: bytes.toString("base64") }));
+
+    return waitFor(() => m.frames.find((f) => f.id === path && f.type === "accepted"), 10_000);
+  };
+
+  const inShared = async (who) => countIn((await contributions(L[who], who)).json, "commit", sfull);
+  const rs = await metaSocket(S.ramos);
+  const as = await metaSocket(S.ana);
+
+  await call("POST", `/v1/monorepos/${sfull}/meta/init`, S.ramos, { action: "start" });
+  const init = await save(rs, "README.md", "shared\n");
+
+  await call("POST", `/v1/monorepos/${sfull}/meta/init`, S.ramos, { action: "done" });
+  const first = await waitFor(async () => (await inShared("ramos")) === 1, 30_000);
+  const savedA = await save(rs, "plans/a.md", "ramos's plan\n");
+  const savedB = await save(as, "plans/b.md", "ana's plan\n");
+  const windowed = await waitFor(async () => (await inShared("ramos")) === 2 && (await inShared("ana")) === 1, 45_000);
+  check(
+    "shared files: the first upload's commit counts for ramos; a 10-second window with ramos's and ana's saves is one commit, counted once for each",
+    sm.status === 201 && !!init && !!first && !!savedA && !!savedB && !!windowed,
+    `ramos ${await inShared("ramos")}, ana ${await inShared("ana")}`,
+  );
+
   // ── A merge longer than a page: counted in full, a page at a time ──
   const LONG = 1200;
   git(["checkout", "-q", "main"], pdir);
@@ -397,7 +445,7 @@ try {
   const wrong = [...expected].filter(([date, n]) => (byDay.get(date)?.commit ?? 0) < n);
   check("each on its own day (UTC)", wrong.length === 0, wrong.slice(0, 3).map(([d, n]) => `${d}: want ${n}, got ${byDay.get(d)?.commit}`).join("; "));
   r = await contributions(L.ana, "ana");
-  check("ana's commit there counts for no one: she is not in that repository", r.json?.kinds?.commit === 1, JSON.stringify(r.json?.kinds));
+  check("ana's commit there counts for no one: she is not in that repository", countIn(r.json, "commit", h.full) === 0 && countIn(r.json, "commit", p.full) === 1, JSON.stringify(r.json?.kinds));
 
   // ── Time zones: 02:30 UTC is the evening before in California ──
   const utcDay = new Date(tzAt).toISOString().slice(0, 10);
@@ -426,7 +474,7 @@ try {
   const own = (await contributions(L.ramos, "ramos")).json;
   check(
     "ana sees ramos's work in the repository she can open, and no word of the other",
-    asAna.status === 200 && countIn(asAna.json, "commit", p.full) === 4 + LONG && !asAna.text.includes(h.full) && asAna.json?.monorepos?.length === 1 && asAna.json.monorepos[0].full_name === p.full,
+    asAna.status === 200 && countIn(asAna.json, "commit", p.full) === 4 + LONG && !asAna.text.includes(h.full) && asAna.json?.monorepos?.map((m) => m.full_name).sort().join() === [p.full, sfull].sort().join(),
     `${asAna.status} ${JSON.stringify(asAna.json?.kinds)} ${JSON.stringify(asAna.json?.monorepos?.map((m) => m.full_name))}`,
   );
   check(

@@ -6,7 +6,8 @@
 // - "credit" without `from`: a repo's main arriving with its history;
 //   both walked back to the graph's window a page at a time, each page its own
 //   job (about 10 s per 1,000 commits against Artifacts);
-// - "credit_one": a branch opened or a review, for the person who did it.
+// - "credit_one": a branch opened or a review, for the person who did it; a
+//   commit of the shared files, for each person whose save it carries.
 // A commit counts once for its author and once for each Co-authored-by
 // person, matched by their one sign-in email (or Pando's
 // <login>@users.pando.invalid), if they can open the monorepo now. Merge
@@ -35,7 +36,8 @@ export type CreditMessage =
   // Commits that reached `repo`'s main: those of `to` not in `from` (a merge), or, with `from` null, its history.
   // `frontier` and `page`: where a walk longer than a page goes on.
   | { type: "credit"; monorepo: string; repo: string; from: string | null; to: string; frontier?: Frontier; page?: number }
-  | { type: "credit_one"; monorepo: string; repo: string; login: string; kind: "branch" | "review"; at: string; key: string };
+  // One count for one person: a branch opened, a review, or a commit of the shared files (the live layer's, by its savers' logins).
+  | { type: "credit_one"; monorepo: string; repo: string; login: string; kind: ContribKind; at: string; key: string };
 
 /** A walk's next page, as the monorepo object queues it. */
 export type NextPage = { type: "credit"; repo: string; from: string | null; to: string; frontier: Frontier; page: number };
@@ -95,8 +97,7 @@ async function apply(env: Env, info: ObjectInfo, key: string, credits: Map<strin
 /** Run a credit job (FactsDrain). Throws to be retried. */
 export async function runCredit(env: Env, r: RepoRecord, info: ObjectInfo, m: CreditMessage, queueNext: (next: NextPage) => Promise<void>): Promise<void> {
   if (m.type === "credit_one") {
-    const kind: ContribKind = m.kind;
-    await apply(env, info, m.key, new Map([[m.login, [{ hour: hourOf(Date.parse(m.at)), kind, n: 1 }]]]));
+    await apply(env, info, m.key, new Map([[m.login, [{ hour: hourOf(Math.min(Date.parse(m.at), Date.now())), kind: m.kind, n: 1 }]]]));
 
     return;
   }

@@ -9,7 +9,7 @@ import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
 import { parse as parseToml } from "smol-toml";
 import type { MonorepoObject } from "../monorepo/object";
-import type { StreamEvent } from "../monorepo/types";
+import type { KeyedEvent, StreamEvent } from "../monorepo/types";
 import { EVENT_STREAM } from "../monorepo/stream";
 import { isBusy, LEASE_MS, retryBusy } from "../monorepo/gate";
 import { addGate, timed } from "../timing";
@@ -17,7 +17,8 @@ import { isRecord, isText, isWholeNumber, parseJson, type Json, type JsonObject 
 
 // MONOREPO: the monorepo object, whose event stream gets meta.saved and
 // machine.connected / machine.disconnected (absent in the live lane's test Worker).
-export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject> };
+// META_TEST: tests only, "1" lets testOutbox fail, lose or crash the next sends.
+export type MetaEnv = CommitEnv & { MONOREPO?: DurableObjectNamespace<MonorepoObject>; META_TEST?: string };
 
 const QUIET_MS = 10_000; // commit a path after this much quiet
 
@@ -26,6 +27,10 @@ const TREE_LIMIT = 1000; // GET tree: files per page by default
 const TREE_MAX = 5000; // and at most
 
 const EVENTS_FLUSH_MS = 250; // meta events go to the monorepo's stream in one call per this much time
+
+const OUTBOX_BATCH = 100; // events per call to the monorepo object
+
+const OUTBOX_RETRY_MS = [1_000, 5_000, 30_000, 300_000]; // a failed send is tried again after these, then every 5 min
 
 export const META_DELETED = 4404; // WebSocket close code: the monorepo was deleted
 
@@ -81,6 +86,19 @@ type VersionRow = {
   lfs_oid: string | null; // a large file's SHA-256 when the version is its pointer
   lfs_size: number | null; // and the large file's own size
 };
+
+/** Tests only (META_TEST=1): what the next event sends do. */
+export interface MetaOutboxTest {
+  fail: number;
+  lose: number;
+  crash: boolean;
+}
+
+/** The outbox as it is: rows waiting and the failed tries in a row, with the test switches. */
+export interface MetaOutboxState extends MetaOutboxTest {
+  waiting: number;
+  tries: number;
+}
 
 interface Current {
   version: number;
@@ -257,6 +275,9 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     this.createSchema();
     this.migrate();
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+
+    // Events written before the object last stopped go out on this wake.
+    if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM event_outbox").one().n > 0) this.armDrain();
   }
 
   // Objects made before the lfs_* columns existed: add them, and fill them
@@ -308,6 +329,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       CREATE INDEX IF NOT EXISTS files_by_version ON files(version);
       CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, version INTEGER NOT NULL, due INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+      CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER, body TEXT NOT NULL);
     `);
   }
 
@@ -961,7 +983,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       this.emit({
         kind: "meta.saved", collection: "meta_files", key: n.path, op: n.deleted ? "delete" : "upsert",
         repo: "meta", actor: null, machine: n.machine, agent: n.agent, row: this.historyEntry(this.row(version)),
-      });
+      }, version);
     }
 
     return version;
@@ -995,35 +1017,120 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
   }
 
   // ---- the monorepo's event stream (A9) ----
+  //
+  // Each event is a row in event_outbox, written in the same step as the
+  // change it records (a save's version and its event commit together). A
+  // drain sends the rows in order, OUTBOX_BATCH per call, and deletes them
+  // once the monorepo object has them. A failed send is tried again on the
+  // alarm (OUTBOX_RETRY_MS); rows left when the object stopped go out on its
+  // next wake (any request, a socket message, or the commit alarm a save
+  // sets; presence events are whole snapshots, and a stop closes every socket,
+  // so the reconnects send fresh ones). The monorepo object publishes each (source, version) once, so a
+  // batch sent again after a lost answer doubles nothing: a meta.saved is
+  // keyed by its version, a presence event by its outbox row.
 
-  private outbox: StreamEvent[] = [];
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private sending: Promise<unknown> = Promise.resolve();
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  private sending: Promise<void> = Promise.resolve();
 
   /**
-   * Queue an event for the monorepo object's stream. Sent in order, in one
-   * call per FLUSH_MS (a burst of saves is one call), never awaited by the saver.
+   * Write an event to the outbox; a burst is sent in one call after
+   * EVENTS_FLUSH_MS, never awaited by the saver. While a failed send waits
+   * for its retry, new events wait with it.
    */
-  private emit(e: StreamEvent): void {
+  private emit(e: StreamEvent, version: number | null = null): void {
     if (!EVENT_STREAM || !this.env.MONOREPO) return;
-    this.outbox.push(e);
+    this.sql.exec("INSERT INTO event_outbox (version, body) VALUES (?, ?)", version, JSON.stringify(e));
 
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => this.flush(), EVENTS_FLUSH_MS);
+    if (this.kv("outbox_tries") === null) this.armDrain();
   }
 
-  private flush(): void {
-    this.flushTimer = null;
-    const batch = this.outbox;
-    this.outbox = [];
+  private armDrain(): void {
+    if (this.drainTimer) return;
+
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null;
+      this.ctx.waitUntil(this.drain());
+    }, EVENTS_FLUSH_MS);
+  }
+
+  /** Send the outbox; one drain at a time, so rows go out in order. */
+  private drain(): Promise<void> {
+    this.sending = this.sending
+      .then(() => this.drainNow())
+      .catch((err) => console.error("meta events: drain failed:", err instanceof Error ? err.message : String(err)));
+
+    return this.sending;
+  }
+
+  private async drainNow(): Promise<void> {
     const monorepo = this.kv("monorepo");
 
-    if (!batch.length || !monorepo || !this.env.MONOREPO) return;
+    if (!monorepo || !this.env.MONOREPO) return;
     const stub = this.env.MONOREPO.getByName(monorepo);
-    this.sending = this.sending
-      .then(() => stub.publishMany(batch))
-      .catch((err) => console.error("meta events not sent:", err instanceof Error ? err.message : String(err)));
-    this.ctx.waitUntil(this.sending);
+
+    for (;;) {
+      const rows = this.sql.exec<{ id: number; version: number | null; body: string }>("SELECT id, version, body FROM event_outbox ORDER BY id LIMIT ?", OUTBOX_BATCH).toArray();
+
+      if (!rows.length) return;
+      const batch = rows.map((r): KeyedEvent => (r.version === null ? { source: "meta.presence", version: r.id, event: JSON.parse(r.body) } : { source: "meta", version: r.version, event: JSON.parse(r.body) }));
+
+      this.testCrash();
+
+      try {
+        this.testFail();
+        await stub.publishMeta(batch);
+        this.testAfterSend();
+      } catch (err) {
+        const tries = intParam(this.kv("outbox_tries"), 0) + 1;
+        const wait = OUTBOX_RETRY_MS[Math.min(tries, OUTBOX_RETRY_MS.length) - 1];
+
+        this.setKv("outbox_tries", String(tries));
+        console.error(`meta events not sent (try ${tries}, again in ${wait} ms):`, err instanceof Error ? err.message : String(err));
+        await this.alarmBy(Date.now() + wait);
+
+        return;
+      }
+
+      this.sql.exec("DELETE FROM event_outbox WHERE id <= ?", rows[rows.length - 1].id);
+      this.setKv("outbox_tries", null);
+    }
+  }
+
+  /** Set the alarm for `at` unless one is set sooner (the commit timer and the outbox retries share it). */
+  private async alarmBy(at: number): Promise<void> {
+    const set = await this.ctx.storage.getAlarm();
+
+    if (set === null || set > at) await this.ctx.storage.setAlarm(at);
+  }
+
+  // ---- tests only (META_TEST=1) ----
+
+  private testSet: MetaOutboxTest = { fail: 0, lose: 0, crash: false };
+
+  /** Fail the next `fail` sends, lose the answer of the next `lose` (sent, then taken as failed), crash the object before the next send; and the outbox as it is. */
+  testOutbox(set: Partial<MetaOutboxTest> = {}): MetaOutboxState {
+    if (this.env.META_TEST === "1") this.testSet = { ...this.testSet, ...set };
+    const waiting = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM event_outbox").one().n;
+
+    return { waiting, tries: intParam(this.kv("outbox_tries"), 0), ...this.testSet };
+  }
+
+  private testCrash(): void {
+    if (this.env.META_TEST !== "1" || !this.testSet.crash) return;
+    this.testSet.crash = false;
+    this.ctx.abort("meta test: the object stops before its events are sent");
+  }
+
+  private testFail(): void {
+    if (this.env.META_TEST !== "1" || this.testSet.fail <= 0) return;
+    this.testSet.fail--;
+    throw new Error("meta test: the send failed");
+  }
+
+  private testAfterSend(): void {
+    if (this.env.META_TEST !== "1" || this.testSet.lose <= 0) return;
+    this.testSet.lose--;
+    throw new Error("meta test: the answer was lost");
   }
 
   private connectionRow(att: Attachment) {
@@ -1264,14 +1371,13 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
     const next = this.sql.exec<{ due: number | null }>("SELECT MIN(due) AS due FROM pending").one().due;
 
     if (next === null) return;
-    const set = await this.ctx.storage.getAlarm();
-
-    if (set === null || set > next) await this.ctx.storage.setAlarm(next);
+    await this.alarmBy(next);
   }
 
   // One commit per alarm, so each gets its own CPU budget; the next alarm is
   // set right away while more is due.
   async alarm(): Promise<void> {
+    if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM event_outbox").one().n > 0) await this.drain();
     const writer = gitWriter(this.env);
 
     if (!writer || this.initializing()) return;
@@ -1311,7 +1417,7 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
       this.setKv("commit_error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
       const retry = Math.min(intParam(this.kv("retry_ms"), RETRY_MIN_MS) * (this.kv("retry_ms") ? 2 : 1), RETRY_MAX_MS);
       this.setKv("retry_ms", String(retry));
-      await this.ctx.storage.setAlarm(Date.now() + retry);
+      await this.alarmBy(Date.now() + retry);
 
       return;
     }

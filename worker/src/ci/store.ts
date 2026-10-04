@@ -204,6 +204,19 @@ export interface CiOverview {
   pipelines: PipelineView[];
 }
 
+/** GET .../ci/builds's filters: each narrows the list; `number` goes with `pipeline`. */
+export interface BuildsQuery {
+  repo?: string;
+  branch?: string;
+  sha?: string;
+  pipeline?: string;
+  number?: number;
+  connection?: string;
+  state?: string;
+  limit: number;
+  cursor: string | null;
+}
+
 /** A page of builds, newest first. */
 export interface BuildsPage {
   builds: BuildView[];
@@ -765,7 +778,7 @@ export class CiStore {
   }
 
   /** Stored builds, newest first. */
-  builds(q: { repo?: string; branch?: string; sha?: string; pipeline?: string; connection?: string; state?: string; limit: number; cursor: string | null }): BuildsPage {
+  builds(q: BuildsQuery): BuildsPage {
     const limit = Math.min(Math.max(q.limit, 1), BUILDS_PAGE_MAX);
     const where: string[] = [];
     const args: SqlStorageValue[] = [];
@@ -775,6 +788,12 @@ export class CiStore {
         where.push(`${col} = ?`);
         args.push(v);
       }
+    }
+
+    // A build's number is unique within its pipeline on one connection; the route asks for the pipeline with it.
+    if (q.number !== undefined) {
+      where.push("number = ?");
+      args.push(q.number);
     }
 
     if (q.cursor) {

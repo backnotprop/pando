@@ -29,9 +29,10 @@ import { finishTiming, note, runTimed, startTiming } from "../timing";
 import type { ApiVars } from "../monorepo/api";
 import { requiredKept } from "../monorepo/checks";
 import { readToken } from "../monorepo/hooks";
-import { isSha } from "../monorepo/names";
+import { withRepo } from "../monorepo/artifacts";
+import { isSha, validBranchName } from "../monorepo/names";
 import { cachedRepo, monorepoStub } from "../monorepo/session";
-import type { Outcome } from "../monorepo/types";
+import type { Outcome, RepoRecord } from "../monorepo/types";
 import { pool } from "../monorepo/views";
 import { isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
 import {
@@ -106,7 +107,7 @@ interface BuildAuthor {
   email?: string;
 }
 
-/** Buildkite's create-build request (Rebuild). */
+/** Buildkite's create-build request (Rebuild, New build). */
 interface CreateBuild {
   commit: string;
   branch: string;
@@ -277,6 +278,56 @@ const annotationsOf = (c: C, ref: CiRef): Promise<Fetched<Annotation>> => listOf
 
 const artifactsOf = (c: C, ref: CiRef): Promise<Fetched<Artifact>> => listOf(c, ref, "artifacts", decodeArtifacts);
 
+/** What a build Pando starts is of: a commit on a branch, its message, and Pando's own meta data beyond the monorepo and repo. */
+interface BuildOf {
+  sha: string;
+  branch: string;
+  message: string;
+  meta: Record<string, string>;
+}
+
+/**
+ * Start a build on the service with fresh tokens (a read token for the repo,
+ * a status token for the commit), as a push delivery does, and record it.
+ * Answers the build as Pando now has it (null if the answer named none).
+ */
+async function startBuild(c: C, connection: CiRef["connection"], pipeline: string, r: RepoRecord, at: BuildOf) {
+  const m = c.get("m");
+  const full = c.get("full");
+  const origin = new URL(c.req.url).origin;
+  const read = await readToken(c.env, r.artifacts_name, "ci");
+
+  const status = c.env.PANDO_STATUS_SECRET
+    ? await mintStatusToken(c.env.PANDO_STATUS_SECRET, { m, r: r.name, s: at.sha, a: "buildkite", h: `ci:${connection.id}` })
+    : null;
+
+  const who = c.get("identity");
+  const author: BuildAuthor = { name: who.name ?? who.login };
+
+  if (who.email) author.email = who.email;
+
+  const res = await call(c, connection, "POST", `/pipelines/${p(pipeline)}/builds`, {
+    body: {
+      commit: at.sha,
+      branch: at.branch,
+      message: at.message,
+      author,
+      env: pandoBuildEnv({
+        clone_url: c.get("info").kind === "repo" ? `${origin}/${full}.git` : `${origin}/${full}/${r.name}.git`,
+        read_token: read.token,
+        status_url: `${origin}/v1/monorepos/${full}/repos/${r.name}/statuses/${at.sha}`,
+        status_token: status?.token ?? null,
+        monorepo: full, repo: r.name, branch: at.branch, head: at.sha, delivery: "", seq: null,
+      }),
+      meta_data: { pando_monorepo: m, pando_repo: r.name, ...at.meta },
+    },
+  });
+
+  const out = unwrap(await c.get("stub").ciIngestBuild(connection.id, await jsonOf(res)));
+
+  return out.build ? await c.get("stub").ciBuild(out.build) : null;
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void {
@@ -307,9 +358,16 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const sha = c.req.query("sha");
 
     if (sha && !isSha(sha)) bad("sha must be a full 40-character sha");
+    const pipeline = c.req.query("pipeline");
+    const numberText = c.req.query("number");
+    const number = numberText === undefined ? undefined : Number(numberText);
+
+    // A build's page address names its pipeline and number (#1285): with one connection that is one build; two
+    // connections with the same pipeline slug can both answer, and `connection` narrows to one.
+    if (number !== undefined && (!pipeline || !Number.isSafeInteger(number) || number < 1)) bad("number: a build number (1 or more), with pipeline");
 
     return c.json(unwrap(await c.get("stub").ciBuilds({
-      repo: c.req.query("repo"), branch: c.req.query("branch"), sha: sha?.toLowerCase(), pipeline: c.req.query("pipeline"),
+      repo: c.req.query("repo"), branch: c.req.query("branch"), sha: sha?.toLowerCase(), pipeline, number,
       connection: c.req.query("connection"), state, limit, cursor: c.req.query("cursor") ?? null,
     })));
   });
@@ -416,39 +474,33 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
     const r = await cachedRepo(c.env, c.get("m"), b.repo);
 
     if (!r) throw new HttpError(404, "not_found", `no repo ${b.repo}`);
-    const m = c.get("m");
-    const full = c.get("full");
-    const origin = new URL(c.req.url).origin;
-    const read = await readToken(c.env, r.artifacts_name, "ci");
+    const branch = b.branch ?? r.default_branch;
+    const build = await startBuild(c, ref.connection, b.pipeline, r, { sha: b.sha, branch, message: b.message ?? `Rebuild of #${b.number}`, meta: { pando_rebuild_of: b.external_id } });
 
-    const status = c.env.PANDO_STATUS_SECRET
-      ? await mintStatusToken(c.env.PANDO_STATUS_SECRET, { m, r: b.repo, s: b.sha, a: "buildkite", h: `ci:${ref.connection.id}` })
-      : null;
+    return c.json({ build }, 201);
+  });
 
-    const who = c.get("identity");
-    const author: BuildAuthor = { name: who.name ?? who.login };
+  // New build: a pipeline's build of a branch's head as Pando has it (default: its repo's default branch), as a push delivery would start it.
+  api.post(`${base}/pipelines/:pipeline/builds`, async (c) => {
+    const stub = c.get("stub");
+    const pl = unwrap(await stub.ciPipeline(c.req.param("pipeline"), c.req.query("connection") ?? null));
 
-    if (who.email) author.email = who.email;
+    if (!pl.pipeline.repo) throw new HttpError(409, "no_repo", "this pipeline builds no repo of this monorepo (register it with a buildkite hook)");
+    const r = await cachedRepo(c.env, c.get("m"), pl.pipeline.repo);
 
-    const res = await call(c, ref.connection, "POST", `/pipelines/${p(b.pipeline)}/builds`, {
-      body: {
-        commit: b.sha,
-        branch: b.branch ?? r.default_branch,
-        message: b.message ?? `Rebuild of #${b.number}`,
-        author,
-        env: pandoBuildEnv({
-          clone_url: c.get("info").kind === "repo" ? `${origin}/${full}.git` : `${origin}/${full}/${b.repo}.git`,
-          read_token: read.token,
-          status_url: `${origin}/v1/monorepos/${full}/repos/${b.repo}/statuses/${b.sha}`,
-          status_token: status?.token ?? null,
-          monorepo: full, repo: b.repo, branch: b.branch ?? r.default_branch, head: b.sha, delivery: "", seq: null,
-        }),
-        meta_data: { pando_monorepo: m, pando_repo: b.repo, pando_rebuild_of: b.external_id },
-      },
-    });
+    if (!r) throw new HttpError(404, "not_found", `no repo ${pl.pipeline.repo}`);
+    // The body is optional: no body, or no branch, builds the repo's default branch.
+    const text = await c.req.text();
+    const sent = text.trim() ? parseJson(text) : {};
 
-    const out = unwrap(await c.get("stub").ciIngestBuild(ref.connection.id, await jsonOf(res)));
-    const build = out.build ? await c.get("stub").ciBuild(out.build) : null;
+    if (!isRecord(sent)) bad("the body must be a JSON object");
+    const branch = sent.branch === undefined ? r.default_branch : isText(sent.branch) && validBranchName(sent.branch) ? sent.branch : bad("branch: a branch name");
+    const sha = await stub.refHead(r.name, branch);
+
+    if (!sha) throw new HttpError(404, "not_found", `no branch ${branch} in ${r.name} (or it has no recorded head yet)`);
+    const commit = await withRepo(c.env, r.artifacts_name, (repo) => repo.readCommit(sha)).catch(() => null);
+    const title = commit?.message?.split("\n")[0] || `Build of ${branch}`;
+    const build = await startBuild(c, pl.connection, pl.pipeline.slug, r, { sha, branch, message: title, meta: {} });
 
     return c.json({ build }, 201);
   });

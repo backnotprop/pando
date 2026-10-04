@@ -1,0 +1,15 @@
+{
+  "schema": "MonorepoRenamed",
+  "route": "PATCH /v1/monorepos/{owner}/{monorepo} {name}",
+  "status": 200,
+  "body": {
+    "id": "m_8afc371665c89aac",
+    "owner": "rec-mut6cqy2",
+    "name": "rec-mut6cqy2-renamed",
+    "full_name": "rec-mut6cqy2/rec-mut6cqy2-renamed",
+    "kind": "monorepo",
+    "created_at": "2026-10-04T02:01:11.817Z",
+    "role": "owner",
+    "replaced_alias": null
+  }
+}

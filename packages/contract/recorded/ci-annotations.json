@@ -1,0 +1,21 @@
+{
+  "schema": "CiAnnotationList",
+  "route": "GET .../ci/builds/{build}/annotations",
+  "status": 200,
+  "body": {
+    "annotations": [
+      {
+        "id": "ann-1",
+        "context": "lint-summary",
+        "style": "success",
+        "body_html": "<p><strong>0</strong> findings</p>",
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ],
+    "truncated": false,
+    "complete": false,
+    "fetched_at": "2026-10-04T02:01:45.026Z",
+    "cached": false
+  }
+}

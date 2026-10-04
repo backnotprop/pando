@@ -1,0 +1,6 @@
+{
+  "schema": "NoContent",
+  "route": "DELETE .../members/{login}",
+  "status": 204,
+  "body": null
+}

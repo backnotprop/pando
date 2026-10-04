@@ -16,7 +16,7 @@ import { since, useNow } from "../../../../ui/time";
 import { Older } from "../../../../ui/Older";
 import { useArrivals } from "../../../../ui/arrival";
 import { RepoHead, useMonorepo } from "../-frame/heads";
-import { stateOf, toneClass } from "./state";
+import { stateOf, toneClass, unknownWhy } from "./state";
 
 /** A plain repo's one repo (path `.`), for its pages at /{owner}/{name}. */
 export const plainRepo = async (qc: QueryClient, m: MonorepoRef) => (await qc.ensureQueryData(reposQuery(m))).find((r) => r.path === ".") ?? null;
@@ -48,7 +48,7 @@ export function StateWord({ b, mark = true, className = "" }: { b: Branch; mark?
   const s = stateOf(b);
 
   return (
-    <span className={`text-[13px] whitespace-nowrap ${toneClass[s.tone]} ${className}`}>
+    <span title={unknownWhy(b) ?? undefined} className={`text-[13px] whitespace-nowrap ${toneClass[s.tone]} ${className}`}>
       {mark && s.app === "buildkite" ? <CheckMark /> : null}
       {s.text}
     </span>

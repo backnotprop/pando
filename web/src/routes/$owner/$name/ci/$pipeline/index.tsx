@@ -8,7 +8,7 @@ import { ciBuildQuery, ciKey, ciPipelineQuery } from "../../../../../api/ci";
 import { CI_TOPICS, fallback, syncCi, useRows } from "../../../../../live/rows";
 import { monorepoQuery } from "../../../../../api/queries";
 import { button, CopyButton, Empty, lnk, Refusal, SectionHead } from "../../../../../ui/controls";
-import { tool } from "../../-code/FileView";
+import { BareCode, tool } from "../../-code/FileView";
 import { BuildList, ServiceMark, serviceName } from "../../-ci/parts";
 import { MonorepoHead, useMonorepo } from "../../-frame/heads";
 
@@ -85,14 +85,14 @@ function PipelinePage() {
           </div>
         </div>
         <div className="overflow-hidden rounded-[10px] border border-rootline">
-          <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pb-2.5">
+          <div className="flex min-h-11 items-center gap-2 border-y border-rule-faint py-1.5 pr-2.5 pl-4 phone:flex-wrap phone:pt-2.5 phone:pb-2.5">
             <span className="mr-auto text-[12.5px] leading-[15px] text-ash phone:basis-full">pipeline.yml</span>
             {p.configuration === null ? null : <CopyButton text={p.configuration} className={tool} />}
           </div>
           {p.configuration === null ? (
             <p className="px-[18px] py-3.5 text-[13.5px] text-ash">{p.configuration_error?.message ?? "Not read from the CI service yet."}</p>
           ) : (
-            <pre className="m-0 overflow-x-auto px-[18px] py-3.5 font-mono text-[12.5px] leading-[19px] whitespace-pre text-bark">{p.configuration}</pre>
+            <BareCode name="pipeline.yml" text={p.configuration} />
           )}
         </div>
         <div className="mt-10">

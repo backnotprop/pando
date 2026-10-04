@@ -59,8 +59,12 @@ export function describe(e: FeedEvent): Sentence {
       const app = d?.app ?? null;
       const took = d?.duration_s == null ? null : duration(d.duration_s);
 
+      // On a commit no branch is at (main's, or a deleted branch's): the branch the server names, else the commit itself.
+      const on = base.object ?? (d?.sha ? { text: d.sha.slice(0, 7), link: null } : null);
+
       return {
         ...base,
+        object: on,
         person: app ? null : e.actor,
         app,
         actor: d?.context ?? "check",

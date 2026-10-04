@@ -7,7 +7,8 @@
 // - the one worker that colours the code view and the diff off the main
 //   thread, made on first use (making it starts the worker; fences are
 //   coloured by Pierre's shared highlighter and need none);
-// - the code view's metrics, which the diff shares.
+// - the code view's metrics, which the diff shares, and the same without
+//   line numbers.
 import { registerCustomCSSVariableTheme } from "@pierre/diffs";
 import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
 import workerUrl from "@pierre/diffs/worker/worker.js?worker&url";
@@ -43,4 +44,13 @@ pre, code, [data-gutter], [data-content] { background: none; }
 [data-column-number] { box-sizing: border-box; padding: 0 18px 0 0; border-right: 0; }
 [data-line-number-content] { min-width: 0; }
 [data-line] { padding-inline: 0; }
+`;
+
+// The same without line numbers (-code/Lines.tsx Plain, the prototype's
+// .yaml, for a pipeline's configuration): 19px lines, 14px above and below,
+// no number column, 18px at the sides.
+export const BARE_LAYOUT = `${CODE_LAYOUT}
+:host { --diffs-line-height: 19px; --diffs-gap-block: 14px; }
+[data-file] { --diffs-grid-number-column-width: 0px; }
+[data-line] { padding-inline: 18px; }
 `;

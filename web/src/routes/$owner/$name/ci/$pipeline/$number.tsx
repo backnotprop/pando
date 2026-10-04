@@ -143,7 +143,7 @@ function Job({ b, job, opened, arrived }: { b: CiBuildDetail; job: CiJob; opened
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`grid min-h-[46px] w-full cursor-pointer grid-cols-[72px_minmax(0,1fr)_96px_20px] items-center gap-3.5 px-4 text-left text-[14px] leading-[normal] text-bark hover:bg-air ${arrived ? "arrived" : ""}`}
+        className={`grid min-h-[46px] w-full cursor-pointer grid-cols-[72px_minmax(0,1fr)_96px_20px] items-center gap-3.5 px-4 text-left text-[14px] leading-[normal] text-bark hover:bg-air focus-visible:bg-air ${arrived ? "arrived" : ""}`}
       >
         <BuildState state={job.state} />
         <span className="fox-cool min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -154,7 +154,7 @@ function Job({ b, job, opened, arrived }: { b: CiBuildDetail; job: CiJob; opened
         <Chevron className={`block size-3.5 text-ash ${open ? "" : "-rotate-90"}`} />
       </button>
       {open ? (
-        <div className="bg-air py-2.5 pr-4 pb-3.5 pl-[102px] phone:pl-4">
+        <div className="bg-air py-2.5 pr-4 pb-3.5 pl-[102px]">
           {job.exit_status !== null || failed ? (
             <p className="mb-2 flex items-center gap-3.5 font-mono text-[12px] leading-[15px] text-ash">
               <span>exit status {job.exit_status ?? 1}</span>

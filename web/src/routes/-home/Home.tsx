@@ -7,10 +7,11 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { MonorepoSummary } from "@pando/contract";
 import { activityQuery, monoreposQuery, needsQuery } from "../../api/queries";
+import { LARGE_REFETCH_MS, useLargeFeeds } from "../../live/feed";
 import { ActivityList } from "../../ui/activity";
 import { Avatar } from "../../ui/Avatar";
 import { Empty, SectionHead } from "../../ui/controls";
-import { Chevron } from "../../ui/Icons";
+import { Caret } from "../../ui/dropdown";
 import { MenuLink, MenuPopup } from "../../ui/menu";
 import { Page } from "../../ui/pages";
 import { monoLink } from "../../ui/paths";
@@ -81,7 +82,7 @@ function Filter({ lines, current }: { lines: readonly MonorepoSummary[]; current
         ) : (
           <span>All monorepos</span>
         )}
-        <Chevron className="block size-3.5" />
+        <Caret />
       </Menu.Trigger>
       <MenuPopup>
         <MenuLink link={{ to: "/" }} current={!current}>
@@ -106,7 +107,9 @@ export function Home({ inMonorepo, owner }: { inMonorepo: FullName | null; owner
   const mine = owner ? all.filter((m) => m.owner === owner) : all;
   const ownedHere = (full: string) => !owner || full.startsWith(`${owner}/`);
   const needs = (useQuery(needsQuery(inMonorepo)).data ?? []).filter((n) => ownedHere(n.monorepo));
-  const activity = useInfiniteQuery(activityQuery(inMonorepo));
+  // Large monorepos' lines come by their own sockets; past 5 of them, the log is read again each minute.
+  const beyond = useLargeFeeds(all);
+  const activity = useInfiniteQuery({ ...activityQuery(inMonorepo), refetchInterval: beyond ? LARGE_REFETCH_MS : false });
   const events = (activity.data?.pages ?? []).flatMap((p) => p.events).filter((e) => ownedHere(e.monorepo));
   const older = { more: activity.hasNextPage, loading: activity.isFetchingNextPage, load: () => void activity.fetchNextPage() };
 

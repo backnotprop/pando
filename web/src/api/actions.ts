@@ -53,4 +53,8 @@ export const retryJob = (m: MonorepoRef, build: string, job: string) => write(Ro
 /** A build of the branch's head, with fresh tokens. */
 export const newBuild = (m: MonorepoRef, pipeline: string, branch: string) => write(Routes.startCiBuild(m.owner, m.name, pipeline), { branch });
 
+/** A pipeline for a project: its Buildkite hook, so each push starts a build of it (owners). */
+export const addPipeline = (m: MonorepoRef, repo: RepoName, organization: string, pipeline: string) =>
+  write(Routes.addHook(m.owner, m.name, repo), { type: "buildkite", buildkite: { organization, pipeline } });
+
 export const disconnect = (m: MonorepoRef, connection: string) => remove(Routes.disconnectCi(m.owner, m.name, connection));

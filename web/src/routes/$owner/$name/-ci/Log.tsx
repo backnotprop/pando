@@ -1,8 +1,9 @@
 // A job's log as its terminal printed it, simply: Buildkite's timestamp
 // markers and every escape but colour taken out, bold and the eight basic
-// colours kept (in tones that sit right in every theme), and of a line a
-// progress bar redrew, its last state. While the job runs the log is read
-// again every few seconds, and stays at its end unless the person scrolled up.
+// colours kept (on the syntax palette, so they sit right in every theme),
+// and of a line a progress bar redrew, its last state. While the job runs
+// the log is read again every few seconds, and stays at its end unless the
+// person scrolled up.
 import { useLayoutEffect, useRef } from "react";
 
 const ESC = String.fromCharCode(27);
@@ -59,15 +60,18 @@ export function runsOf(log: string): Run[] {
   return runs;
 }
 
-// Red is Rust (failures); the others take the avatars' tones, so each theme keeps its contrast; black and white are the log's ash and bark.
+// Red is Rust (failures). The others take the code view's syntax tones
+// (theme.css), already set against Rust and Foxfire in every theme, so blue and
+// magenta never sit near a theme's violet Foxfire: green is sage, yellow sand,
+// blue and cyan slate, magenta wood; black and white are the log's ash and bark.
 const COLORS = [
   "text-ash",
   "text-rust",
-  "text-[oklch(var(--av-ink-l)_var(--av-ink-c)_155)]",
-  "text-[oklch(var(--av-ink-l)_var(--av-ink-c)_90)]",
-  "text-[oklch(var(--av-ink-l)_var(--av-ink-c)_250)]",
-  "text-[oklch(var(--av-ink-l)_var(--av-ink-c)_320)]",
-  "text-[oklch(var(--av-ink-l)_var(--av-ink-c)_200)]",
+  "text-(--diffs-token-string)",
+  "text-(--diffs-token-constant)",
+  "text-(--diffs-token-function)",
+  "text-(--diffs-token-keyword)",
+  "text-(--diffs-token-function)",
   "text-bark",
 ];
 

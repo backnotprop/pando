@@ -87,10 +87,12 @@ function Side({ s, repo, messages }: { s: AgentSession; repo: Repo | undefined; 
       <section>
         <SectionHead title="Sandbox" />
         <div className="grid gap-2.5">
-          <p className={row}>
-            <span className="text-ash">Workspace</span>
-            <span className="text-bark">{s.workspace === "mount" ? "the branch, mounted" : s.workspace === "clone" ? "a clone of the branch" : "not started"}</span>
-          </p>
+          {s.workspace ? (
+            <p className={row}>
+              <span className="text-ash">Workspace</span>
+              <span className="text-bark">{s.workspace === "mount" ? "the branch, mounted" : "a clone of the branch"}</span>
+            </p>
+          ) : null}
           <p className={row}>
             <span className="text-ash">Tokens in</span>
             <span className="text-bark">
@@ -170,7 +172,7 @@ export function AgentSessionPage({ n }: { n: number }) {
           <span className="text-ash">·</span>
           <span>Pi, {model}</span>
           <span className="text-ash">·</span>
-          <span title={s.created_at}>started {dayAndTime(s.created_at, clock).toLowerCase()}, last activity {ago(s.updated_at, clock)}</span>
+          <span title={s.created_at}>started {dayAndTime(s.created_at, clock, true)}, last activity {ago(s.updated_at, clock)}</span>
           {s.issue === null ? null : (
             <>
               <span className="text-ash">·</span>

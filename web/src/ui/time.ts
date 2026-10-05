@@ -63,11 +63,12 @@ export function ago(at: string | number, clock: number): string {
 
 const clockTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
-/** "Today, 14:20", "Yesterday, 17:48", "Oct 2, 09:15": when something started, as a list of them says it. */
-export function dayAndTime(at: string | number, clock: number): string {
+/** "Today, 14:20", "Yesterday, 17:48", "Oct 2, 09:15": when something started, as a list of them says it ("today, 14:20" mid-sentence). */
+export function dayAndTime(at: string | number, clock: number, midSentence = false): string {
   const ms = new Date(at).getTime();
   const days = Math.round((new Date(clock).setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / 86_400_000);
-  const when = days === 0 ? "Today" : days === 1 ? "Yesterday" : date.format(ms);
+  const day = days === 0 ? "Today" : days === 1 ? "Yesterday" : date.format(ms);
+  const when = midSentence && days <= 1 ? day.toLowerCase() : day;
 
   return `${when}, ${clockTime.format(ms)}`;
 }

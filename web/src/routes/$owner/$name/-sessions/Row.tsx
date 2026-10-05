@@ -22,7 +22,9 @@ export const sessionTable = (numbered = false) =>
     ? "grid w-fit max-w-full gap-x-6 grid-cols-[auto_16px_fit-content(300px)_auto_auto_auto_auto_auto] phone:w-full phone:gap-x-3 phone:grid-cols-[auto_16px_minmax(0,1fr)_auto]"
     : "grid w-fit max-w-full gap-x-6 grid-cols-[16px_fit-content(300px)_auto_auto_auto_auto_auto] phone:w-full phone:gap-x-3 phone:grid-cols-[16px_minmax(0,1fr)_auto]";
 
-const ROW = "relative col-span-full grid grid-cols-subgrid items-center min-h-[46px] border-t border-rule-faint px-1 text-[13.5px] text-bark-dim phone:gap-y-0.5 phone:py-2.5";
+// The row is one link stretched under its cells; the cells let a click through to it, and their own links (the branch,
+// the issue) sit above it.
+const ROW = "relative col-span-full grid grid-cols-subgrid items-center min-h-[46px] border-t border-rule-faint px-1 text-[13.5px] text-bark-dim phone:gap-y-0.5 phone:py-2.5 [&>span]:pointer-events-none [&_a]:pointer-events-auto";
 
 const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 

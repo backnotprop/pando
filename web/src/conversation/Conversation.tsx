@@ -5,13 +5,13 @@
 // its steps fold to one line each run (rules.ts), and open on a click to
 // their arguments and kept output. The agent's program and model show once
 // after each prompt; every time is on hover.
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Markdown } from "../routes/$owner/$name/-issues/Markdown";
 import { Avatar } from "../ui/Avatar";
 import { CheckIcon, Chevron } from "../ui/Icons";
 import { Leaf } from "../ui/Leaf";
 import { failedVerb, foldParts, presentVerb, type StepWords, stepWords } from "./rules";
-import type { ConversationItem, StepItem } from "./shape";
+import type { ConversationItem, PromptItem, StepItem } from "./shape";
 
 /** A kept output's lines shown before "Show all". */
 const OUT_LINES = 12;
@@ -163,9 +163,11 @@ function blocks(items: readonly ConversationItem[]): Block[] {
 
 /**
  * The conversation. `full` is the repository's owner/name, for its links;
- * `compact` is the assistant's panel (smaller type, no by-line).
+ * `compact` is the assistant's panel (smaller type, no by-line);
+ * `promptAction` draws a control in a prompt's head beside its time (a
+ * recorded session's "Remove turn"); agents pass none.
  */
-export function Conversation({ items, full, compact = false }: { items: readonly ConversationItem[]; full: string; compact?: boolean }) {
+export function Conversation({ items, full, compact = false, promptAction }: { items: readonly ConversationItem[]; full: string; compact?: boolean; promptAction?: (item: PromptItem) => ReactNode }) {
   // Rule 5: the agent's by-line once after each prompt.
   let byShown = false;
 
@@ -187,6 +189,7 @@ export function Conversation({ items, full, compact = false }: { items: readonly
                   <span className="text-[13px] text-bark">{it.who}</span>
                   {it.n ? <span className="text-bark-dim">Prompt {it.n}</span> : null}
                   <span className="ml-auto">{hhmm(it.at)}</span>
+                  {it.kind === "prompt" && promptAction ? promptAction(it) : null}
                 </p>
                 <div className={`whitespace-pre-wrap text-bark ${compact ? "text-[14px] leading-[21px]" : "text-[15px] leading-[23px]"} ${it.kind === "turn" ? "line-clamp-2 text-bark-dim" : ""}`}>{it.text}</div>
                 {it.kind === "prompt" && it.images ? <p className="text-[12.5px] text-ash">{it.images === 1 ? "Image" : `${it.images} images`}, not kept</p> : null}

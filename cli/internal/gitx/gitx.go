@@ -4,11 +4,13 @@ package gitx
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Error is a failed git command, with its stderr trimmed for display.
@@ -41,8 +43,31 @@ func (c Cmd) Run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// RunRaw runs git and returns stdout untouched.
+// RunRaw runs git and returns stdout untouched. A `git config` that finds
+// the config file locked is tried again for up to 2 s: the ArtifactFS daemon
+// writes a worktree's git config (core.worktree, core.fsmonitor) when it
+// mounts it, at the same moment pando writes its own keys, and git gives up
+// at once on a lock it does not hold. Seen in the cloud agents' sandbox
+// (pando worktree add while main's daemon runs), 2026-10-04.
 func (c Cmd) RunRaw(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := c.runOnce(ctx, args)
+	for try := 0; try < 40 && len(args) > 0 && args[0] == "config" && lockedConfig(err); try++ {
+		select {
+		case <-ctx.Done():
+			return out, err
+		case <-time.After(50 * time.Millisecond):
+		}
+		out, err = c.runOnce(ctx, args)
+	}
+	return out, err
+}
+
+func lockedConfig(err error) bool {
+	var ge *Error
+	return errors.As(err, &ge) && strings.Contains(ge.Stderr, "could not lock config file")
+}
+
+func (c Cmd) runOnce(ctx context.Context, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = c.Dir
 	cmd.Env = c.environ()

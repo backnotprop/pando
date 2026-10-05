@@ -33,6 +33,12 @@ start() {
     --port "$port" --inspector-port "$inspector" --ip 127.0.0.1 --persist-to "$state" >"$log" 2>&1 &
   for _ in $(seq 1 200); do
     grep -q "Ready on" "$log" && { echo "agents: ready on http://127.0.0.1:$port (log $log)"; return 0; }
+    # The remote bindings (Workers AI, Artifacts) could not reach Cloudflare: no use waiting.
+    if grep -q "Failed to start the remote proxy session" "$log"; then
+      echo "agents: wrangler could not reach Cloudflare for its remote bindings; see $log" >&2
+      stop
+      return 1
+    fi
     sleep 3
   done
   echo "agents: not ready; see $log" >&2

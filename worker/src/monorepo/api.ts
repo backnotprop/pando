@@ -9,6 +9,7 @@ import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from 
 import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
+import { agentRoutes } from "../agents/routes";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -1557,6 +1558,10 @@ mirrorRoutes(api);
 // ── Issues and labels (issues/routes.ts) ──
 
 issueRoutes(api);
+
+// ── Agent sessions (agents/routes.ts) ──
+
+agentRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/agents/{n}/messages (not the launcher)",
+  "status": 403,
+  "body": {
+    "error": {
+      "code": "not_launcher",
+      "message": "only agents-s2-muurol2p, who started it, can send it messages"
+    }
+  }
+}

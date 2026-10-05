@@ -1,0 +1,21 @@
+{
+  "schema": "AgentSession",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/agents/{n}/stop",
+  "status": 200,
+  "body": {
+    "number": 1,
+    "kind": "task",
+    "status": "stopped",
+    "reason": "stopped by agents-s2-muurol2p",
+    "repo": "agents-s2-muurol2p",
+    "branch": "agent/1",
+    "program": "pi",
+    "model": "scripted",
+    "issue": null,
+    "launched_by": "agents-s2-muurol2p",
+    "machine": "cloud-1",
+    "workspace": "mount",
+    "created_at": "2026-10-05T04:46:05.760Z",
+    "updated_at": "2026-10-05T04:46:15.902Z"
+  }
+}

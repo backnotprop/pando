@@ -84,6 +84,11 @@
       }
     ]
   },
+  // Cloudflare-run agents (agents/, the Worker pando-agents): the launch and
+  // the live session go to its AgentsApi entrypoint. pando-agents must be
+  // deployed before this Worker; where it is not running, agent routes answer
+  // that agents are not set up.
+  "services": [{ "binding": "AGENTS", "service": "pando-agents", "entrypoint": "AgentsApi" }],
   // Accounts (C8): users, credentials, monorepos, members, invites. The
   // primary is in ENAM; the owner turns on read replication in the dashboard
   // (D1 > pando-accounts-dev > Settings > Enable Read Replication).

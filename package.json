@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "lint": "oxlint --deny-warnings worker/src worker/test web packages site/docs/astro.config.ts site/docs/scripts site/docs/src"
+    "lint": "oxlint --deny-warnings worker/src worker/test agents/src agents/test web packages site/docs/astro.config.ts site/docs/scripts site/docs/src"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.86.0",

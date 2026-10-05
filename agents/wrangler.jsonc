@@ -1,0 +1,42 @@
+// pando-agents: Cloudflare-run agents for Pando (decisions/RULINGS.md,
+// "Cloudflare-run agents"). One Durable Object per agent session, its
+// container, and Workers AI. No public address: Pando's Worker (pando-dev)
+// calls the AgentsApi entrypoint over a service binding.
+//
+// Resources it needs on the account (pando-ops creates and deploys):
+//   - this Worker, pando-agents, deployed after pando-dev has its AGENTS binding
+//   - the container image below, pushed to the account's registry by wrangler deploy
+//   - Workers AI usage (a paid billing method: GLM-5.3 Flash requires one)
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pando-agents",
+  "main": "src/index.ts",
+  // 2026-10-01 or later: pending I/O (a wait on a run, a container command)
+  // keeps a session object running with no client connected.
+  "compatibility_date": "2026-10-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "ai": { "binding": "AI", "remote": true },
+  "durable_objects": {
+    "bindings": [{ "name": "SESSIONS", "class_name": "AgentSession" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentSession"] }],
+  "containers": [
+    {
+      "class_name": "AgentSession",
+      "scheduling_policy": "durable_object",
+      "images": {
+        // Built from projects/pando: pando from cli/, the ArtifactFS fork at a
+        // pinned commit (container/Dockerfile).
+        "workspace": { "dockerfile": "./container/Dockerfile", "build_context": ".." }
+      }
+    }
+  ],
+  "services": [
+    // The git door and the API, for the sandbox's gateway.
+    { "binding": "PANDO", "service": "pando-dev" },
+    // Each change of a session's state, to Pando's record (agent.updated events).
+    { "binding": "REPORTS", "service": "pando-dev", "entrypoint": "AgentReports" }
+  ]
+}

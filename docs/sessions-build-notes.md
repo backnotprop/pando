@@ -20,7 +20,7 @@ removed).
 | 2. Machine: capture | done, landed (main bdf147c) |
 | 3. Linking | done, landed with stage 2 (main bdf147c) |
 | 4. Web | built and tested except the session page's conversation, which waits for the shared component (cloud-agents b2551ed) to land on main |
-| 5. Docs, limits, recorded fixtures | not started |
+| 5. Docs, limits, recorded fixtures | docs and limits done; Claude Code and Codex fixtures wait for the owner's logins |
 
 ## Stage 0 findings (2026-10-05)
 

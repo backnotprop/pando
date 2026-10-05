@@ -214,7 +214,8 @@ export function Conversation({ items, full, compact = false, promptAction }: { i
                     {it.program}, {it.model} · {hhmm(it.at)}
                   </p>
                 ) : null}
-                <div className={`text-doc ${compact ? "text-[14px] leading-[22px]" : "text-[15px] leading-6"}`}>
+                {/* The viewer paints its own ground; the agent's words sit on the surface they are in (the page, the panel). */}
+                <div className={`text-doc [--background:transparent] [--color-background:transparent] ${compact ? "text-[14px] leading-[22px]" : "text-[15px] leading-6"}`}>
                   <Markdown text={it.text} full={full} />
                 </div>
               </div>

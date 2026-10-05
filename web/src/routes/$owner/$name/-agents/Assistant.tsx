@@ -117,7 +117,7 @@ function Head({ chat, chosen, choose, close }: { chat: AgentSession | undefined;
       <Leaf state={leafOfChat(chat)} size={28} />
       <div className="min-w-0 flex-1">
         <h2 className="text-[15px] font-semibold text-bark">Assistant</h2>
-        <p className="truncate text-[12.5px] text-ash">
+        <p className="text-[12.5px] text-ash">
           {monorepo.full}
           {chat ? ` · ${dayAndTime(chat.created_at, clock, true)}` : ""}
         </p>

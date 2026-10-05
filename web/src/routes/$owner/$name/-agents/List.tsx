@@ -1,39 +1,34 @@
 // The Agents tab (owner, 2026-10-04: "a new agents tab ... like github actions
 // but focused on cloudflare agent"; the mocks accepted 2026-10-05): one box
-// whose bar holds All, Working and Waiting with their counts, the Person and
-// Started-from menus and New agent; then a row per agent, newest first, and
-// More. Each row is only what is recorded: its number, what started it (an
-// issue by its own title, or a task), its branch, who started it and the
-// machine it acts as, its state in words, and its branch's facts now. Rows
-// come live on the `agents` topic.
+// whose bar holds All, Working and Waiting with their counts, Started by and
+// New agent; then a table, one row shape for every agent (owner, 2026-10-05):
+// the agent, its branch (named for the change), its issue's number (its title
+// and state on hover), who started it, its state in words and its last
+// activity, newest first, and More. Rows come live on the `agents` topic.
 import { type AgentSession, Login } from "@pando/contract";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { agentListQuery, agentsKey, type AgentFilters, checksWords } from "../../../../api/agents";
-import { membersQuery } from "../../../../api/queries";
+import { agentListQuery, agentsKey, type AgentFilters } from "../../../../api/agents";
+import { membersQuery, reposQuery } from "../../../../api/queries";
 import { fallback, useRows } from "../../../../live/rows";
 import { Avatar } from "../../../../ui/Avatar";
 import { button } from "../../../../ui/controls";
 import { Caret } from "../../../../ui/dropdown";
-import { Leaf, type LeafState } from "../../../../ui/Leaf";
-import { type AgentsSearch, agentsLink, issueLink } from "../../../../ui/paths";
-import { Ref } from "../../../../ui/Ref";
+import { Leaf } from "../../../../ui/Leaf";
+import { type AgentsSearch, agentsLink, branchLink } from "../../../../ui/paths";
+import { IssueRef, Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
-import { type PickOption, Picker } from "../-issues/Picker";
+import { useMe } from "../-issues/parts";
+import { Picker } from "../-issues/Picker";
 import { NewAgent } from "./NewAgent";
+import { leafOf, StateWords } from "./parts";
 
 const filterButton =
   "inline-flex h-7 cursor-pointer items-center gap-[5px] rounded-md px-2 text-[13px] text-bark-dim hover:text-bark data-popup-open:bg-pop-hi data-popup-open:text-bark";
-
-const KINDS: readonly PickOption[] = [
-  { id: "issue", text: "An issue" },
-  { id: "task", text: "A task" },
-  { id: "review", text: "A branch to review" },
-];
 
 /** The address's filters, checked. */
 export function filtersOf(s: AgentsSearch): AgentFilters {
@@ -50,87 +45,35 @@ export function filtersOf(s: AgentsSearch): AgentFilters {
   return f;
 }
 
-/** How a row's leaf looks. */
-interface LeafLook {
-  state: LeafState;
-  tone?: "quiet" | "rust";
-}
+/** The table's columns (owner, 2026-10-05): the leaf, the agent, its branch, its issue's number, who started it, its state, its last activity. */
+const COLUMNS = "grid grid-cols-[20px_84px_minmax(0,1.6fr)_48px_140px_minmax(0,1fr)_96px] items-center gap-4 px-4";
 
-/** The leaf for a row: its state, and its tone when it ended without merging. */
-function leafOf(s: AgentSession): LeafLook {
-  if (s.status === "working") return { state: "working" };
-
-  if (s.status === "failed") return { state: "idle", tone: "rust" };
-
-  if (s.status === "stopped") return { state: "idle", tone: "quiet" };
-
-  if (s.branch_facts?.state === "merged") return { state: "done" };
-
-  return s.awaiting_checks ? { state: "idle" } : { state: "needs" };
-}
-
-/** The second line: the state in words, then the branch as Pando knows it now. */
-function StateLine({ s, clock }: { s: AgentSession; clock: number }) {
-  const parts: ReactNode[] = [];
-  const f = s.branch_facts;
-
-  if (s.status === "working") parts.push(<span key="s" className="text-bark">Working</span>);
-  else if (s.status === "failed") parts.push(<span key="s" className="text-rust">Failed{s.reason ? `: ${s.reason}` : ""}</span>);
-  else if (s.status === "stopped") parts.push(<span key="s" className="text-bark">{s.reason ? `${s.reason.charAt(0).toUpperCase()}${s.reason.slice(1)}` : "Stopped"}</span>);
-  else if (f?.state === "merged") parts.push(<span key="s" className="text-bark">Merged into main</span>);
-  else if (s.awaiting_checks) parts.push(<span key="s" className="text-bark">Waiting for checks</span>, "merges when they pass");
-  else parts.push(<span key="s" className="text-bark">Waiting for {s.launched_by}</span>);
-
-  if (!f) parts.push("No branch yet");
-  else if (f.state === "merged") parts.push(f.merged_at ? ago(f.merged_at, clock) : "merged");
-  else {
-    if (!f.stale && f.ahead !== null) parts.push(`${f.ahead} commit${f.ahead === 1 ? "" : "s"} ahead of main`);
-
-    if (checksWords(f.checks)) parts.push(checksWords(f.checks));
-  }
-
-  return (
-    <p className="mt-1 min-w-0 overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-ash phone:whitespace-normal">
-      {parts.flatMap((p, i) => (i ? [" · ", p] : [p]))}
-    </p>
-  );
-}
-
-function Row({ s, full }: { s: AgentSession; full: string }) {
+function Row({ s, full, repoPath, me }: { s: AgentSession; full: string; repoPath: string; me: string | null }) {
   const clock = useNow();
   const l = leafOf(s);
 
   return (
-    <li data-agent={s.number} className="grid grid-cols-[22px_minmax(0,1fr)_auto] items-baseline gap-x-3 border-t border-rule-faint px-4 py-3 first:border-t-0 phone:grid-cols-[22px_minmax(0,1fr)] phone:px-3">
-      <span className="self-start pt-0.5">
-        <Leaf state={l.state} tone={l.tone} label={s.status} />
+    <li data-agent={s.number} className={`${COLUMNS} min-h-[46px] border-t border-rule-faint text-[13.5px] text-bark-dim phone:grid-cols-[20px_minmax(0,1fr)_auto] phone:gap-y-0.5 phone:px-3 phone:py-2.5`}>
+      <Leaf state={l.state} tone={l.tone} label={s.status} />
+      <span className="font-semibold whitespace-nowrap text-bark">Agent #{s.number}</span>
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap phone:col-span-2 phone:col-start-2 phone:row-start-2">
+        {s.branch ? (
+          <Ref kind="object" link={branchLink(full, repoPath, s.branch)} mono className="font-mono text-[12.5px]">
+            {s.branch}
+          </Ref>
+        ) : null}
       </span>
-      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[14px] leading-[21px] text-bark-dim">
-        <span className="text-ash">#{s.number}</span>
-        {s.kind === "issue" && s.issue !== null ? (
-          <>
-            <span className="font-semibold text-bark">
-              Issue{" "}
-              <Ref kind="object" link={issueLink(full, s.issue)}>
-                #{s.issue}
-              </Ref>
-            </span>
-            {s.issue_title ? <span>{s.issue_title}</span> : null}
-          </>
-        ) : (
-          <span className="font-semibold text-bark">{s.kind === "review" ? "Review" : "Task"}</span>
-        )}
-        <span aria-hidden="true">·</span>
-        <code className="font-mono text-[13px] break-all text-link">{s.branch}</code>
-        <span aria-hidden="true">·</span>
-        <Avatar name={s.launched_by} size={16} />
-        <span className="font-semibold text-bark">{s.launched_by}</span>
-        <span className="text-[12.5px]">on {s.machine}</span>
-      </p>
-      <span className="text-right text-[12.5px] whitespace-nowrap text-ash phone:col-start-2 phone:text-left">{s.status === "working" ? `started ${ago(s.created_at, clock)}` : ago(s.updated_at, clock)}</span>
-      <div className="col-start-2 col-end-4 min-w-0 phone:col-end-3">
-        <StateLine s={s} clock={clock} />
-      </div>
+      <span className="phone:hidden" title={s.issue !== null && s.issue_title ? `#${s.issue} ${s.issue_title}${s.issue_state ? ` (${s.issue_state})` : ""}` : undefined}>
+        {s.issue !== null ? <IssueRef full={full} number={s.issue} state={s.issue_state ?? "open"} /> : null}
+      </span>
+      <span className="flex min-w-0 items-center gap-[7px] text-bark phone:hidden">
+        <Avatar name={s.launched_by} size={18} />
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{s.launched_by}</span>
+      </span>
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap phone:col-start-2 phone:row-start-3">
+        <StateWords s={s} me={me} />
+      </span>
+      <span className="text-right text-[12.5px] whitespace-nowrap text-ash phone:col-start-3 phone:row-start-1">{ago(s.updated_at, clock)}</span>
     </li>
   );
 }
@@ -154,6 +97,9 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
   const f = filtersOf(search);
   const [launching, setLaunching] = useState(false);
   const members = useQuery(membersQuery(monorepo)).data ?? [];
+  const repos = useQuery(reposQuery(monorepo)).data ?? [];
+  const paths = new Map<string, string>(repos.map((r) => [r.name, r.path]));
+  const me = useMe();
   const live = useRows(monorepo, ["agents"], () => void qc.invalidateQueries({ queryKey: agentsKey(monorepo) }));
   const list = useInfiniteQuery({ ...agentListQuery(monorepo, f), refetchInterval: fallback(live) });
   const rows = list.data?.pages.flatMap((p) => p.sessions) ?? [];
@@ -185,8 +131,7 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
           </nav>
           <div className="ml-auto flex items-center gap-1">
             <span className="flex gap-1 phone:hidden">
-              <Picker label="Person" heading="Started by" trigger={<>Person<Caret /></>} triggerClass={`${filterButton} ${f.person ? "bg-pop-hi text-bark" : ""}`} findAt={8} options={people} selected={f.person ? [f.person] : []} onDone={(v) => go({ ...search, person: v[0] === f.person ? undefined : v[0] })} />
-              <Picker label="Started from" heading="Started from" trigger={<>Started from<Caret /></>} triggerClass={`${filterButton} ${f.kind ? "bg-pop-hi text-bark" : ""}`} options={KINDS} selected={f.kind ? [f.kind] : []} onDone={(v) => go({ ...search, kind: v[0] === f.kind ? undefined : v[0] })} />
+              <Picker label="Started by" heading="Started by" trigger={<>Started by<Caret /></>} triggerClass={`${filterButton} ${f.person ? "bg-pop-hi text-bark" : ""}`} findAt={8} options={people} selected={f.person ? [f.person] : []} onDone={(v) => go({ ...search, person: v[0] === f.person ? undefined : v[0] })} />
             </span>
             <button type="button" className={`${button("solid", 30)} ml-2`} onClick={() => setLaunching(true)}>
               New agent
@@ -194,11 +139,22 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
           </div>
         </div>
         {rows.length ? (
-          <ul aria-label="Agents">
-            {rows.map((s) => (
-              <Row key={s.number} s={s} full={full} />
-            ))}
-          </ul>
+          <>
+            <div aria-hidden="true" className={`${COLUMNS} h-[34px] border-t border-rule-faint text-[12px] text-ash phone:hidden`}>
+              <span />
+              <span>Agent</span>
+              <span>Branch</span>
+              <span>Issue</span>
+              <span>Started by</span>
+              <span>State</span>
+              <span className="text-right">Last activity</span>
+            </div>
+            <ul aria-label="Agents">
+              {rows.map((s) => (
+                <Row key={s.number} s={s} full={full} repoPath={paths.get(s.repo) ?? "."} me={me} />
+              ))}
+            </ul>
+          </>
         ) : list.isSuccess ? (
           <div className="grid justify-items-center gap-3.5 border-t border-rule-faint px-4 pt-14 pb-[60px] text-center text-[14px] text-bark-dim">
             <Leaf state="idle" size={32} />

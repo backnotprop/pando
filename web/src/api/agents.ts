@@ -39,15 +39,27 @@ export const workingCountQuery = (m: MonorepoRef) =>
     staleTime: 30_000,
   });
 
-/** The models a session may use, by id: GLM-5.3 Flash on Workers AI for now (the owner's choice, 2026-10-04). */
-export const MODELS = [{ id: "@cf/zai-org/glm-5.3-flash", name: "GLM-5.3 Flash" }] as const;
+/** The models a session may use here, as the server lists them (GLM-5.3 Flash on Workers AI first, the owner's choice). */
+export const agentModelsQuery = (m: MonorepoRef) =>
+  queryOptions({
+    queryKey: [...agentsKey(m), "models"],
+    queryFn: () => {
+      const route = Routes.agentModels(m.owner, m.name);
 
-/** What New agent sends: what to do, the project, a model, and an existing branch (else a new one, agent/<n>). */
+      return get(route.response, route.path).then((r) => r.models);
+    },
+    staleTime: 300_000,
+  });
+
+/** A branch name git and Pando take: git's characters, not main, no "..", no leading or trailing slash (the server's rule). */
+export const BRANCH_NAME = /^(?!main$)(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,200}$/;
+
+/** What New agent sends: what to do, the project, a model, and the branch named for the change (new or existing). */
 export interface Launch {
   prompt: string;
   repo: string;
   model: string;
-  branch: string | null;
+  branch: string;
 }
 
 /** A branch's checks in words, as a row or a picker shows them; "" when they are unknown. */
@@ -67,12 +79,25 @@ export function checksWords(state: Checks["state"]): string {
 }
 
 export function launchAgent(m: MonorepoRef, l: Launch): Promise<AgentSession> {
-  // `branch` only for an existing one: without it the server makes agent/<n>.
-  const body = new Map<string, string>([["prompt", l.prompt], ["repo", l.repo], ["model", l.model]]);
+  return write(Routes.launchAgent(m.owner, m.name), { prompt: l.prompt, repo: l.repo, model: l.model, branch: l.branch });
+}
 
-  if (l.branch) body.set("branch", l.branch);
+/** What Address with agent sends: the branch (prefilled from the issue), a model, and the project and words to add when given. */
+export interface Address {
+  branch: string;
+  model: string;
+  repo: string | null;
+  prompt: string;
+}
 
-  return write(Routes.launchAgent(m.owner, m.name), Object.fromEntries(body));
+export function addressIssue(m: MonorepoRef, n: number, a: Address): Promise<AgentSession> {
+  const body = new Map<string, string>([["branch", a.branch], ["model", a.model]]);
+
+  if (a.repo) body.set("repo", a.repo);
+
+  if (a.prompt) body.set("prompt", a.prompt);
+
+  return write(Routes.addressIssueWithAgent(m.owner, m.name, n), Object.fromEntries(body));
 }
 
 type ListData = InfiniteData<AgentSessionList, number>;

@@ -1,8 +1,8 @@
 // Agents, piece 1, end to end: the Agents tab and New agent. Ann signs in,
 // makes a repository and pushes main and a branch of her own. The tab is
-// empty; New agent on a new branch starts #1, whose row moves from Working to
-// Waiting for her with no reload; New agent on her existing branch starts #2
-// on it. The bar's counts and its filters follow; at phone width nothing
+// empty; New agent needs a branch name she types (a bad one is refused), and
+// #1 starts on it, its row moving from Working to Waiting for you with no
+// reload; a name that exists offers her existing branch, and #2 works on it. The bar's counts and its filters follow; at phone width nothing
 // scrolls sideways. Real Worker and pando-agents (a real container, the
 // scripted model), real D1, Artifacts and git, a real browser.
 import { expect, type Page, test } from "@playwright/test";
@@ -25,6 +25,13 @@ async function signIn(page: Page) {
 }
 
 const row = (page: Page, n: number) => page.locator(`li[data-agent="${n}"]`);
+
+/** What session n's last tool call answered (its transcript, read as the person). */
+async function lastTool(page: Page, full: string, n: number): Promise<string> {
+  const t = await (await page.request.get(`/v1/monorepos/${full}/agents/${n}/transcript`)).json();
+
+  return t.messages.filter((m: { role: string }) => m.role === "tool").at(-1)?.parts[0]?.text ?? "";
+}
 
 test("agents, piece 1: the Agents tab, New agent on a new and an existing branch, live rows, filters, a phone", async ({ page }) => {
   const errors: string[] = [];
@@ -51,43 +58,52 @@ test("agents, piece 1: the Agents tab, New agent on a new and an existing branch
     await expect(page.getByRole("link", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("No agents have run in this repository.")).toBeVisible();
 
-    // ── New agent, a new branch ──
+    // ── New agent, a new branch it must be given a name for ──
     await page.getByRole("button", { name: "New agent" }).click();
     const dialog = page.getByRole("dialog");
 
     await expect(dialog.getByRole("button", { name: "New branch" })).toHaveAttribute("aria-pressed", "true");
-    await expect(dialog.getByText("made off main as")).toBeVisible();
-    await dialog.getByRole("textbox").fill(["Leave a note.", tool("bash", { command: "echo note > note.md && git add note.md && git commit -qm 'A note' && git push -q origin HEAD 2>&1; echo pushed=$?" })].join("\n"));
+    await dialog.getByLabel("Model").selectOption({ label: "Scripted (tests)" });
+    await dialog.getByRole("textbox", { name: /what to do/i }).fill(["Leave a note.", tool("bash", { command: "git branch --show-current; echo note > note.md && git add note.md && git commit -qm 'A note' && git push -q origin HEAD 2>&1; echo pushed=$?" })].join("\n"));
+    // No name, no start: Pando never invents one.
+    await expect(dialog.getByRole("button", { name: "Start" })).toBeDisabled();
+    await dialog.getByLabel("New branch name").fill("leave a note");
+    await expect(dialog.getByText("Letters, digits and . _ / - only, not main.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Start" })).toBeDisabled();
+    await dialog.getByLabel("New branch name").fill("leave-a-note");
     await dialog.getByRole("button", { name: "Start" }).click();
     await expect(dialog).toBeHidden();
 
     const one = row(page, 1);
 
-    await expect(one).toContainText("#1");
-    await expect(one).toContainText("Task");
-    await expect(one).toContainText("agent/1");
-    await expect(one).toContainText(`${login}`);
-    await expect(one).toContainText("on cloud-1");
-    // Live: Working, then Waiting for Ann, with no reload (the agents topic).
-    await expect(one).toContainText(`Waiting for ${login}`, { timeout: 180_000 });
+    await expect(one).toContainText("Agent #1");
+    await expect(one).toContainText("leave-a-note");
+    await expect(one).toContainText(login);
+    // Live: Working, then waiting for her, with no reload (the agents topic).
+    await expect(one).toContainText("Waiting for you", { timeout: 180_000 });
+    let out = await lastTool(page, full, 1);
 
-    // ── New agent, her existing branch ──
+    expect(out).toContain("leave-a-note");
+    expect(out).toContain("pushed=0");
+
+    // ── A name that exists: use the existing branch ──
     await page.getByRole("button", { name: "New agent" }).click();
-    await dialog.getByRole("textbox").fill(["Finish it.", tool("bash", { command: "git branch --show-current; cat notes.md" })].join("\n"));
-    await dialog.getByRole("button", { name: "Existing branch" }).click();
+    await dialog.getByLabel("Model").selectOption({ label: "Scripted (tests)" });
+    await dialog.getByRole("textbox", { name: /what to do/i }).fill(["Finish it.", tool("bash", { command: "git branch --show-current; cat notes.md" })].join("\n"));
+    await dialog.getByLabel("New branch name").fill("half-done");
+    await expect(dialog.getByText("already exists.")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Start" })).toBeDisabled();
-    await dialog.getByLabel("Find a branch").fill("half");
-    await dialog.getByRole("button", { name: /^half-done/ }).click();
+    await dialog.getByRole("button", { name: "Use the existing branch" }).click();
+    await expect(dialog.getByRole("button", { name: "Existing branch" })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: /^half-done/ })).toHaveAttribute("aria-pressed", "true");
     await dialog.getByRole("button", { name: "Start" }).click();
     await expect(dialog).toBeHidden();
 
     const two = row(page, 2);
 
     await expect(two).toContainText("half-done");
-    await expect(two).toContainText(`Waiting for ${login}`, { timeout: 180_000 });
-    const sessions = await (await page.request.get(`/v1/monorepos/${full}/agents/2/transcript`)).json();
-    const out = sessions.messages.filter((m: { role: string }) => m.role === "tool").at(-1)?.parts[0]?.text ?? "";
-
+    await expect(two).toContainText("Waiting for you", { timeout: 180_000 });
+    out = await lastTool(page, full, 2);
     expect(out).toContain("half-done\nstarted by Ann");
 
     // ── The bar's counts and filters ──

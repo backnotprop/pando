@@ -1,17 +1,19 @@
 // New agent (owner, 2026-10-05: "branch should have an option to create a new
 // one ... maybe add ability to select existing"): what to do, the project and
-// the model, and the branch as a plain choice. New branch (the default) is
-// made off main as agent/<its number>; Existing branch picks one of the
-// project's open branches, which the agent works on as it is. It acts as the
-// person, through a credential made for it (cloud-<n>).
+// the model (as the server lists them), and the branch as a plain choice. New
+// branch (the default) needs a name the person types (owner, 2026-10-05: "a
+// new branch has to have a semantic name"); one that exists is offered as the
+// existing branch. Existing branch picks one of the project's open branches,
+// which the agent works on as it is. It acts as the person, through a
+// credential made for it (cloud-<n>).
 import { Dialog } from "@base-ui/react/dialog";
 import type { RepoName } from "@pando/contract";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { agentsKey, checksWords, launchAgent, MODELS } from "../../../../api/agents";
+import { agentModelsQuery, agentsKey, BRANCH_NAME, checksWords, launchAgent } from "../../../../api/agents";
 import { branchesQuery } from "../../../../api/projects";
 import { reposQuery } from "../../../../api/queries";
-import { button, Refusal } from "../../../../ui/controls";
+import { button, field, lnk, Refusal } from "../../../../ui/controls";
 import { Select } from "../../../../ui/dropdown";
 import { SearchIcon } from "../../../../ui/IssueIcons";
 import { Leaf } from "../../../../ui/Leaf";
@@ -64,19 +66,31 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
   const projects = info.kind === "monorepo" ? repos.filter((r) => r.path !== ".") : repos;
   const [prompt, setPrompt] = useState("");
   const [repo, setRepo] = useState<RepoName | null>(null);
-  const [model, setModel] = useState<string>(MODELS[0].id);
+  const models = useQuery(agentModelsQuery(monorepo)).data ?? [];
+  const [chosenModel, setModel] = useState<string | null>(null);
+  const model = chosenModel ?? models[0]?.id ?? null;
   const [existing, setExisting] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const chosenRepo = repo ?? projects[0]?.name ?? null;
+  // The project's open branches: a new name that is one of them is offered as the existing branch.
+  // SAFETY: with no project the query is disabled, so the empty name is never sent.
+  const openBranches = useInfiniteQuery({ ...branchesQuery(monorepo, chosenRepo ?? ("" as RepoName), "open"), enabled: chosenRepo !== null });
+  const taken = new Set((openBranches.data?.pages.flatMap((p) => p.branches) ?? []).map((b) => b.name));
+  const typed = name.trim();
+  const nameWrong = typed !== "" && !BRANCH_NAME.test(typed);
+  const nameTaken = typed !== "" && taken.has(typed);
+  const chosenBranch = existing ? branch : typed && !nameWrong && !nameTaken ? typed : null;
 
   const reset = () => {
     setPrompt("");
     setExisting(false);
     setBranch(null);
+    setName("");
   };
 
   const start = useMutation({
-    mutationFn: () => launchAgent(monorepo, { prompt: prompt.trim(), repo: chosenRepo ?? "", model, branch: existing ? branch : null }),
+    mutationFn: () => launchAgent(monorepo, { prompt: prompt.trim(), repo: chosenRepo ?? "", model: model ?? "", branch: chosenBranch ?? "" }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: agentsKey(monorepo) });
       reset();
@@ -84,7 +98,7 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
     },
   });
 
-  const ready = prompt.trim() && chosenRepo && (!existing || branch) && !start.isPending;
+  const ready = prompt.trim() && chosenRepo && model && chosenBranch && !start.isPending;
 
   return (
     <Dialog.Root
@@ -140,8 +154,8 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
               ) : null}
               <label className="grid gap-1.5 text-[13px]">
                 <span className="font-semibold text-bark">Model</span>
-                <Select label="Model" value={model} wide onChange={setModel}>
-                  {MODELS.map((x) => (
+                <Select label="Model" value={model ?? ""} wide onChange={setModel}>
+                  {models.map((x) => (
                     <option key={x.id} value={x.id}>
                       {x.name}
                     </option>
@@ -160,12 +174,36 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
                     Existing branch
                   </button>
                 </span>
-                {existing ? null : (
-                  <span className="text-ash">
-                    made off main as <code className="font-mono text-[12.5px] text-link">agent/</code> and the agent&apos;s number
-                  </span>
-                )}
               </div>
+              {existing ? null : (
+                <>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Name it for the change, e.g. theme-light-default"
+                    aria-label="New branch name"
+                    aria-invalid={nameWrong || nameTaken}
+                    className={`${field} h-[34px] font-mono text-[13px] placeholder:font-sans aria-invalid:border-rust-half`}
+                  />
+                  {nameTaken ? (
+                    <p className="text-[12.5px] text-bark-dim">
+                      <code className="font-mono">{typed}</code> already exists.{" "}
+                      <button
+                        type="button"
+                        className={lnk}
+                        onClick={() => {
+                          setBranch(typed);
+                          setExisting(true);
+                        }}
+                      >
+                        Use the existing branch
+                      </button>
+                    </p>
+                  ) : (
+                    <p className="text-[12.5px] text-ash">{nameWrong ? "Letters, digits and . _ / - only, not main." : "Required. It becomes the worktree folder on every machine."}</p>
+                  )}
+                </>
+              )}
               {existing && chosenRepo ? <BranchPick repo={chosenRepo} chosen={branch} onChoose={setBranch} /> : null}
             </div>
             <Refusal error={start.error} />

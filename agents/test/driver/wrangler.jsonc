@@ -1,0 +1,13 @@
+// The tests' way in to pando-agents under wrangler dev. Never deployed.
+// Run first, with pando-agents and Pando's Worker as the second and third -c:
+// POST /_agents/<method> calls the AgentsApi entrypoint with the JSON array
+// body as its arguments; everything else goes to Pando's Worker.
+{
+  "name": "pando-agents-test-driver",
+  "main": "index.ts",
+  "compatibility_date": "2026-10-04",
+  "services": [
+    { "binding": "AGENTS", "service": "pando-agents", "entrypoint": "AgentsApi" },
+    { "binding": "PANDO", "service": "pando-dev" }
+  ]
+}

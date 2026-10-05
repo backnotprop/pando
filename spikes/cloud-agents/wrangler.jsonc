@@ -1,0 +1,19 @@
+// Cloud-agents spike. Local wrangler dev only; never deployed.
+{
+  "name": "pando-cloud-agents-spike",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": { "bindings": [{ "name": "SessionAgent", "class_name": "SessionAgent" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SessionAgent"] }],
+  "containers": [
+    {
+      "class_name": "SessionAgent",
+      "scheduling_policy": "durable_object",
+      "images": { "git": { "dockerfile": "./Dockerfile" } }
+    }
+  ],
+  // The Pando Worker (worker/wrangler.jsonc, name pando-dev), run in the same
+  // wrangler dev process with a second -c.
+  "services": [{ "binding": "PANDO", "service": "pando-dev" }]
+}

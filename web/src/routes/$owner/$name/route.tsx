@@ -13,7 +13,7 @@ import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Lnk } from "../../../ui/controls";
 import { Page, Title } from "../../../ui/pages";
-import { blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { agentsLink, blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -54,6 +54,9 @@ function pathCrumbs(parts: string[], folder: (dir: string) => Crumb["link"], las
 function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   const [kind = "", ...parts] = rest;
   const repoPath = plain ? "." : `projects/${parts[0] ?? ""}`;
+
+  // agents / #9
+  if (kind === "agents" && parts[0]) return [{ label: "agents", link: agentsLink(full), wide: true }, { label: `#${parts[0]}` }];
 
   // issues / #34, issues / new
   if (kind === "issues" && parts[0]) return [{ label: "issues", link: issuesLink(full), wide: true }, { label: parts[0] === "new" ? "new" : `#${parts[0]}` }];

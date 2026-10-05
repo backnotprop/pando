@@ -8,6 +8,8 @@ import { fallback, useRows } from "../../../../live/rows";
 import { Leaf } from "../../../../ui/Leaf";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { Link } from "@tanstack/react-router";
+import { agentLink } from "../../../../ui/paths";
 import { useMe } from "../-issues/parts";
 import { Section } from "../-issues/Sidebar";
 import { leafOf, StateWords } from "./parts";
@@ -32,7 +34,9 @@ export function IssueAgents({ issue }: { issue: number }) {
           <div key={s.number} data-agent={s.number} className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-x-2">
             <Leaf state={l.state} tone={l.tone} size={16} label={s.status} />
             <span className="flex flex-wrap items-baseline gap-x-1.5">
-              <span className="font-semibold">Agent #{s.number}</span>
+              <Link {...agentLink(monorepo.full, s.number)} className="font-semibold hover:underline">
+              Agent #{s.number}
+            </Link>
               <StateWords s={s} me={me} />
             </span>
             <span className="col-start-2 text-[12.5px] text-ash">

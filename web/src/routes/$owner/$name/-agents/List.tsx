@@ -18,7 +18,7 @@ import { Avatar } from "../../../../ui/Avatar";
 import { button } from "../../../../ui/controls";
 import { Caret } from "../../../../ui/dropdown";
 import { Leaf } from "../../../../ui/Leaf";
-import { type AgentsSearch, agentsLink, branchLink, issueLink } from "../../../../ui/paths";
+import { agentLink, type AgentsSearch, agentsLink, branchLink, issueLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
@@ -63,7 +63,9 @@ function Row({ s, full, repoPath, me }: { s: AgentSession; full: string; repoPat
   return (
     <li data-agent={s.number} className={`${ROW} min-h-[46px] border-t border-rule-faint text-[13.5px] text-bark-dim phone:gap-y-0.5 phone:px-3 phone:py-2.5`}>
       <Leaf state={l.state} tone={l.tone} label={s.status} />
-      <span className="font-semibold whitespace-nowrap text-bark">Agent #{s.number}</span>
+      <Link {...agentLink(full, s.number)} className="font-semibold whitespace-nowrap text-bark hover:underline">
+        Agent #{s.number}
+      </Link>
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap phone:col-span-2 phone:col-start-2 phone:row-start-2">
         {s.branch ? (
           <Ref kind="object" link={branchLink(full, repoPath, s.branch)} mono className="font-mono text-[12.5px]">

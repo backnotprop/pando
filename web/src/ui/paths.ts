@@ -41,6 +41,9 @@ export const tabLink = (full: string, tab: "activity" | "machines" | "ci" | "mem
 /** The Agents tab, with its filters (only those set). */
 export const agentsLink = (full: string, search: AgentsSearch = {}) => linkOptions({ to: "/$owner/$name/agents", params: split(full), search });
 
+/** One agent session's page. */
+export const agentLink = (full: string, n: number) => linkOptions({ to: "/$owner/$name/agents/$n", params: { ...split(full), n: String(n) } });
+
 /** The address's filters on the Agents tab: plain strings, as the list reads them. */
 export interface AgentsSearch {
   status?: string;
@@ -140,6 +143,7 @@ export type AppLink =
   | ReturnType<typeof tabLink>
   | ReturnType<typeof issuesLink>
   | ReturnType<typeof agentsLink>
+  | ReturnType<typeof agentLink>
   | ReturnType<typeof issueLink>
   | ReturnType<typeof newIssueLink>
   | ReturnType<typeof ciPipelineLink>

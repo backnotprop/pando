@@ -14,6 +14,8 @@ import { button } from "../../../../ui/controls";
 import { Leaf } from "../../../../ui/Leaf";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { Link } from "@tanstack/react-router";
+import { agentLink } from "../../../../ui/paths";
 import { useMe } from "../-issues/parts";
 import { AgentDialog, fieldLabel, ModelField, useModel } from "./Dialog";
 import { leafOf, StateWords } from "./parts";
@@ -98,7 +100,9 @@ export function ReviewAgents({ repo, branch }: { repo: Repo; branch: string }) {
         return (
           <li key={s.number} data-agent={s.number} className="flex min-h-10 items-center gap-2 border-b border-rule-faint text-[13.5px]">
             <Leaf state={l.state} tone={l.tone} size={16} label={s.status} />
-            <span className="font-semibold">Agent #{s.number}</span>
+            <Link {...agentLink(monorepo.full, s.number)} className="font-semibold hover:underline">
+              Agent #{s.number}
+            </Link>
             <StateWords s={s} me={me} />
             <span className="ml-auto text-[12.5px] text-ash">
               {s.launched_by} on {s.machine} · started {ago(s.created_at, clock)}

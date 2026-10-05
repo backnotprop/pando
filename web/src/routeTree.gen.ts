@@ -26,6 +26,7 @@ import { Route as OrgsOrgIndexRouteImport } from './routes/orgs/$org/index'
 import { Route as OrgsOrgPeopleRouteImport } from './routes/orgs/$org/people'
 import { Route as OrgsOrgSettingsRouteImport } from './routes/orgs/$org/settings'
 import { Route as OwnerNameAgentsIndexRouteImport } from './routes/$owner/$name/agents/index'
+import { Route as OwnerNameAgentsNRouteImport } from './routes/$owner/$name/agents/$n'
 import { Route as OwnerNameBlobSplatRouteImport } from './routes/$owner/$name/blob/$'
 import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$name/branches/index'
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
@@ -128,6 +129,11 @@ const OrgsOrgSettingsRoute = OrgsOrgSettingsRouteImport.update({
 const OwnerNameAgentsIndexRoute = OwnerNameAgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
+const OwnerNameAgentsNRoute = OwnerNameAgentsNRouteImport.update({
+  id: '/agents/$n',
+  path: '/agents/$n',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
 const OwnerNameBlobSplatRoute = OwnerNameBlobSplatRouteImport.update({
@@ -248,6 +254,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/': typeof OwnerNameIndexRoute
   '/orgs/$org/': typeof OrgsOrgIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
+  '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -282,6 +289,7 @@ export interface FileRoutesByTo {
   '/orgs/$org/settings': typeof OrgsOrgSettingsRoute
   '/$owner/$name': typeof OwnerNameIndexRoute
   '/orgs/$org': typeof OrgsOrgIndexRoute
+  '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -320,6 +328,7 @@ export interface FileRoutesById {
   '/$owner/$name/': typeof OwnerNameIndexRoute
   '/orgs/$org/': typeof OrgsOrgIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
+  '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -359,6 +368,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/'
     | '/orgs/$org/'
     | '/$owner/$name/projects/$project'
+    | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -393,6 +403,7 @@ export interface FileRouteTypes {
     | '/orgs/$org/settings'
     | '/$owner/$name'
     | '/orgs/$org'
+    | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -430,6 +441,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/'
     | '/orgs/$org/'
     | '/$owner/$name/projects/$project'
+    | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -580,6 +592,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/$owner/$name/agents/'
       preLoaderRoute: typeof OwnerNameAgentsIndexRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
+    '/$owner/$name/agents/$n': {
+      id: '/$owner/$name/agents/$n'
+      path: '/agents/$n'
+      fullPath: '/$owner/$name/agents/$n'
+      preLoaderRoute: typeof OwnerNameAgentsNRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
     '/$owner/$name/blob/$': {
@@ -747,6 +766,7 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameSettingsRoute: typeof OwnerNameSettingsRoute
   OwnerNameIndexRoute: typeof OwnerNameIndexRoute
   OwnerNameProjectsProjectRouteRoute: typeof OwnerNameProjectsProjectRouteRouteWithChildren
+  OwnerNameAgentsNRoute: typeof OwnerNameAgentsNRoute
   OwnerNameBlobSplatRoute: typeof OwnerNameBlobSplatRoute
   OwnerNameBranchesSplatRoute: typeof OwnerNameBranchesSplatRoute
   OwnerNameHistorySplatRoute: typeof OwnerNameHistorySplatRoute
@@ -769,6 +789,7 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameIndexRoute: OwnerNameIndexRoute,
   OwnerNameProjectsProjectRouteRoute:
     OwnerNameProjectsProjectRouteRouteWithChildren,
+  OwnerNameAgentsNRoute: OwnerNameAgentsNRoute,
   OwnerNameBlobSplatRoute: OwnerNameBlobSplatRoute,
   OwnerNameBranchesSplatRoute: OwnerNameBranchesSplatRoute,
   OwnerNameHistorySplatRoute: OwnerNameHistorySplatRoute,

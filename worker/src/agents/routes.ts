@@ -7,7 +7,7 @@
 //   POST  /agents/{n}/stop            abort the run and stop the sandbox: its launcher or an owner
 //
 // Launching mints a sandbox credential for the person who pressed the button
-// (named cloud-<n>, the session's machine), records the session in the
+// (named cloud-<n>, the session's machine), limited to this one repository, records the session in the
 // monorepo object, and starts its Durable Object in pando-agents over the
 // AGENTS service binding. The agent acts as that person. Revoking the
 // credential (Machines) cuts the agent off at once.
@@ -100,7 +100,7 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
   const repo = input.repo === null ? (repos.length === 1 ? repos[0] : bad("repo: which project the agent works in")) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
   const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo.name, branch: input.branch, model: input.model, issue: input.issue }, identity));
   const secret = newToken();
-  const cred = await accounts(c.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox" });
+  const cred = await accounts(c.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox", monorepo_id: info.id });
 
   await c.get("stub").agentSetCredential(session.number, cred.id);
 

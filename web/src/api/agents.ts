@@ -100,6 +100,22 @@ export function addressIssue(m: MonorepoRef, n: number, a: Address): Promise<Age
   return write(Routes.addressIssueWithAgent(m.owner, m.name, n), Object.fromEntries(body));
 }
 
+/** What Review with agent sends: the branch and its project, a model, and words to add when given. */
+export interface ReviewAsk {
+  branch: string;
+  repo: string;
+  model: string;
+  prompt: string;
+}
+
+export function reviewBranch(m: MonorepoRef, r: ReviewAsk): Promise<AgentSession> {
+  const body = new Map<string, string>([["branch", r.branch], ["repo", r.repo], ["model", r.model]]);
+
+  if (r.prompt) body.set("prompt", r.prompt);
+
+  return write(Routes.reviewWithAgent(m.owner, m.name), Object.fromEntries(body));
+}
+
 type ListData = InfiniteData<AgentSessionList, number>;
 
 /**

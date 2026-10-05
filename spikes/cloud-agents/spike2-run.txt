@@ -67,3 +67,7 @@ Spike 4 (snapshot, local wrangler dev, 2026-10-04):
   run: echo kept > /workspace/note.txt   -> exit 0
   POST /s/snap1/snapshot                 -> {"size":124146531} (124 MB), container destroyed
   run: cat /workspace/note.txt (new container from the snapshot) -> kept
+
+Bundle sizes (wrangler deploy --dry-run, 2026-10-04):
+  spike agent Worker (agents 0.26.0 + pi-durable 1.0.2 + pi-ai 1.0.2): 3277.78 KiB, gzip 602.48 KiB
+  Pando Worker today (worker/):                                         1019.33 KiB, gzip 260.59 KiB

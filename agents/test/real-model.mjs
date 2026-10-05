@@ -5,6 +5,7 @@
 //
 //   agents/test/serve.sh start && node agents/test/real-model.mjs            a task
 //   node agents/test/real-model.mjs --issue                                   Address with agent on an issue
+//   node agents/test/real-model.mjs --chat                                    a question to the assistant
 //
 // It prints the transcript in short, the tokens Workers AI counted, and their
 // price at the list prices ($0.15 per million input, $0.03 cached, $0.50
@@ -14,6 +15,8 @@ import { call, check, done, makeRepo, say, scrub, sleep, untilClosed } from "./l
 
 const ISSUE = process.argv.includes("--issue");
 
+const CHAT = process.argv.includes("--chat");
+
 const t = await makeRepo("agents-real", {
   "README.md": "# Real model\n\nThis repository has two files. Its last line has a spelling mistake: recieve.\n",
   "AGENTS.md": "Keep changes small. Commit messages are one short line.\n",
@@ -22,7 +25,9 @@ const t = await makeRepo("agents-real", {
 try {
   let r;
 
-  if (ISSUE) {
+  if (CHAT) {
+    r = await call("POST", `/v1/monorepos/${t.full}/assistant`, t.secret, { prompt: "What spelling mistake does the README have, and what do the repository's agent notes ask for?" });
+  } else if (ISSUE) {
     r = await call("POST", `/v1/monorepos/${t.full}/issues`, t.secret, { title: "A spelling mistake in the README", body: "The README's last line misspells a common word." });
     r = await call("POST", `/v1/monorepos/${t.full}/issues/1/agent`, t.secret, {});
   } else {
@@ -64,7 +69,11 @@ try {
   say(`  ${usage.calls} model calls; ${usage.input} input tokens (${usage.cache_read} cached), ${usage.output} output; about $${dollars.toFixed(4)}`);
 
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/files/README.md`, t.secret);
-  check("main's README is fixed", /receive/.test(r.text) && !/recieve/.test(r.text), r.text);
+
+  if (CHAT) {
+    r = await call("GET", `/v1/monorepos/${t.full}/agents/1`, t.secret);
+    check("a question starts no sandbox", r.json?.workspace === null, JSON.stringify(r.json));
+  } else check("main's README is fixed", /receive/.test(r.text) && !/recieve/.test(r.text), r.text);
 
   if (ISSUE) {
     r = await untilClosed(t, 1);

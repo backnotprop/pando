@@ -51,17 +51,17 @@ export function filtersOf(s: AgentsSearch): AgentFilters {
  * its content's width (the branch at most 300 px), as the Sessions list does,
  * so no column leaves a wide blank; the last activity sits at the right.
  */
-const TABLE = "grid grid-cols-[20px_auto_fit-content(300px)_auto_auto_auto_minmax(80px,1fr)] phone:grid-cols-[20px_minmax(0,1fr)_auto]";
+const TABLE = "grid gap-x-6 phone:gap-x-3 grid-cols-[20px_auto_fit-content(300px)_auto_auto_auto_minmax(80px,1fr)] phone:grid-cols-[20px_minmax(0,1fr)_auto]";
 
 /** A row: the table's columns, through subgrid. */
-const ROW = "col-span-full grid grid-cols-subgrid items-center gap-x-6 px-4";
+const ROW = "col-span-full grid grid-cols-subgrid items-center px-4";
 
 function Row({ s, full, repoPath, me }: { s: AgentSession; full: string; repoPath: string; me: string | null }) {
   const clock = useNow();
   const l = leafOf(s);
 
   return (
-    <li data-agent={s.number} className={`${ROW} min-h-[46px] border-t border-rule-faint text-[13.5px] text-bark-dim phone:gap-x-3 phone:gap-y-0.5 phone:px-3 phone:py-2.5`}>
+    <li data-agent={s.number} className={`${ROW} min-h-[46px] border-t border-rule-faint text-[13.5px] text-bark-dim phone:gap-y-0.5 phone:px-3 phone:py-2.5`}>
       <Leaf state={l.state} tone={l.tone} label={s.status} />
       <span className="font-semibold whitespace-nowrap text-bark">Agent #{s.number}</span>
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap phone:col-span-2 phone:col-start-2 phone:row-start-2">

@@ -1,0 +1,12 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../sessions/{id}/pieces (not at the end: 409 with it)",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "not_at_end",
+      "message": "the session ends at 2003; send the piece that starts there",
+      "end": 2003
+    }
+  }
+}

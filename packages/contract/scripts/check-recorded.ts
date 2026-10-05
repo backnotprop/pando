@@ -73,6 +73,13 @@ import {
   LabelList,
   ReactionsAnswer,
   Timeline,
+  Session,
+  SessionAny,
+  BranchSessions,
+  SessionEntries,
+  SessionExclusions,
+  SessionList,
+  SessionMachines,
   MonorepoCreated,
   Org,
   OrgInviteResult,
@@ -170,6 +177,13 @@ const decoders = {
   LabelList: refuses(LabelList),
   ReactionsAnswer: refuses(ReactionsAnswer),
   Timeline: refuses(Timeline),
+  Session: refuses(Session),
+  SessionAny: refuses(SessionAny),
+  BranchSessions: refuses(BranchSessions),
+  SessionEntries: refuses(SessionEntries),
+  SessionList: refuses(SessionList),
+  SessionExclusions: refuses(SessionExclusions),
+  SessionMachines: refuses(SessionMachines),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

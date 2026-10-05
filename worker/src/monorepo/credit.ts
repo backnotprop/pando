@@ -22,6 +22,7 @@ import type { ContribKind, ContribRow } from "../feed/object";
 import { withRepo } from "./artifacts";
 import { commitReader, walkAhead, walkStart, type CommitInfo, type Frontier } from "./graph";
 import { validNamespace } from "./names";
+import { refOf, type SessionCommitRef } from "../sessions/commits";
 import type { ObjectInfo, RepoRecord } from "./types";
 
 /** How far back commits count: the graph's 53 weeks and a day. */
@@ -95,7 +96,7 @@ async function apply(env: Env, info: ObjectInfo, key: string, credits: Map<strin
 }
 
 /** Run a credit job (FactsDrain). Throws to be retried. */
-export async function runCredit(env: Env, r: RepoRecord, info: ObjectInfo, m: CreditMessage, queueNext: (next: NextPage) => Promise<void>): Promise<void> {
+export async function runCredit(env: Env, r: RepoRecord, info: ObjectInfo, m: CreditMessage, queueNext: (next: NextPage) => Promise<void>, onMain: (refs: SessionCommitRef[]) => Promise<void> = async () => {}): Promise<void> {
   if (m.type === "credit_one") {
     await apply(env, info, m.key, new Map([[m.login, [{ hour: hourOf(Math.min(Date.parse(m.at), Date.now())), kind: m.kind, n: 1 }]]]));
 
@@ -111,9 +112,21 @@ export async function runCredit(env: Env, r: RepoRecord, info: ObjectInfo, m: Cr
     const { commits: shas, next } = await walkAhead(read, m.frontier ?? walkStart(m.from, m.to), since, CREDIT_PAGE);
     const commits: CommitInfo[] = [];
 
-    for (const sha of shas) commits.push(await read(sha));
+    const named: SessionCommitRef[] = [];
+
+    for (const sha of shas) {
+      const c = await read(sha);
+      commits.push(c);
+      const ref = refOf(sha, c, 0);
+
+      if (ref) named.push(ref);
+    }
+
     const credits = await creditsOf(env, info.id, commits, since);
     await apply(env, info, key, credits);
+
+    // The agent sessions these commits name reached main with them (before the next page is queued, like the credits).
+    if (named.length) await onMain(named);
     note({ credit_commits: shas.length, credit_people: credits.size, credit_page: page });
 
     // A long walk goes on as its own job: credited first, so a retry of this one only queues the next again (its key dedupes it).

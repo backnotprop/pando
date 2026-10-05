@@ -9,6 +9,8 @@ import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from 
 import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
+import { sessionRoutes } from "../sessions/routes";
+import { sessionUserRoutes } from "../sessions/user-routes";
 import { agentRoutes } from "../agents/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
@@ -384,6 +386,8 @@ orgRoutes(users);
 
 profileRoutes(users);
 
+sessionUserRoutes(users);
+
 api.route("/", users);
 
 // Every route under one monorepo: members only.
@@ -515,6 +519,8 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
   // file pages' answers and walk checkpoints (files.ts, keyed by <id>--<repo>) in CACHE.
   const prefixes: [R2Bucket, string][] = [
     [c.env.BLOBS, `meta/${m}/`],
+    // Agent sessions' pieces (sessions/pieces.ts).
+    [c.env.BLOBS, `sessions/${m}/`],
     [c.env.CACHE, `ci/${m}/`],
     [c.env.CACHE, `answers/${m}--`],
     [c.env.CACHE, `partial/${m}--`],
@@ -1568,6 +1574,9 @@ mirrorRoutes(api);
 
 issueRoutes(api);
 
+// ── Recorded agent sessions, from people's machines (sessions/routes.ts) ──
+
+sessionRoutes(api);
 // ── Agent sessions (agents/routes.ts) ──
 
 agentRoutes(api);

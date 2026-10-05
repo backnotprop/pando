@@ -13,7 +13,9 @@ import (
 	"syscall"
 
 	"pando/internal/app"
+	"pando/internal/config"
 	"pando/internal/meta"
+	"pando/internal/session"
 )
 
 // metaCommands are the live lane's (internal/meta): they take the arguments
@@ -39,16 +41,25 @@ var metaCommands = map[string]func([]string) int{
 }
 
 // syncDaemon is pando sync, the one daemon of a monorepo: the live sync of
-// its files outside projects/, and its read-only mains following merges.
+// its files outside projects/, its read-only mains following merges, and
+// the agent sessions recorded on this machine (internal/session). Each runs
+// apart: a failure in reading sessions never stops the files syncing.
 func syncDaemon(args []string) int {
 	if !hasFlag(args, "once") {
 		dir, _ := os.Getwd()
 		if r := flagValue(args, "root"); r != "" {
 			dir = r
 		}
-		ctx, stop := context.WithCancel(context.Background())
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		app.StartFollower(ctx, dir)
+		session.Start(ctx, dir)
+		// A plain git repo has no shared files: it follows main and records sessions until stopped.
+		if root, err := config.FindRoot(dir); err == nil && root.Kind == config.KindRepo {
+			fmt.Fprintln(os.Stderr, "pando sync: a plain repo: following main and recording agent sessions")
+			<-ctx.Done()
+			return 0
+		}
 	}
 	return meta.CmdSync(args, meta.Hooks{References: app.ReferencesHook})
 }
@@ -107,6 +118,7 @@ var commands = []app.Command{
 	{Name: "machine", Usage: "machine list                                              machines that acted in the monorepo, and which are connected", Run: app.Machine},
 	{Name: "profile", Usage: "profile [<login>] [--json]                                a person's profile: their graph for the last year, by month", Run: app.Profile},
 	{Name: "activity", Usage: "activity [--monorepo <owner/name> | --all] [--limit n]    what happened, newest first", Run: app.Activity},
+	{Name: "session", Usage: app.SessionUsage, Run: app.Session},
 	{Name: "api", Usage: "api <path> [-X method] [-f k=v] [-F k=v] [--paginate]     any API call, signed as this machine (like gh api)", Run: app.API},
 }
 

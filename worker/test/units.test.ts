@@ -12,6 +12,7 @@ import { diffLines, type Hunk } from "../src/monorepo/linediff";
 import { coAuthorEmails } from "../src/monorepo/trailers";
 import type { StatusRecord } from "../src/monorepo/types";
 import { hasCode, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../src/parse";
+import { sessionIdFor } from "../src/sessions/ids";
 
 const dec = new TextDecoder();
 
@@ -702,5 +703,13 @@ describe("Co-authored-by trailers (the profile's credit)", () => {
 
   it("skips an empty email and counts an address once", () => {
     expect(coAuthorEmails(msg("t", "", "Co-authored-by: Nobody <>", "Co-authored-by: Ana <ana@example.com>", "Co-authored-by: A. <ANA@example.com>"))).toEqual(["ana@example.com"]);
+  });
+});
+
+// The same vectors are in cli/internal/session/session_test.go: the hook, pando sync and the Worker derive one id.
+describe("a session's id", () => {
+  it("is the same in Go and here", async () => {
+    expect(await sessionIdFor("codex", "019a0b1c-0000-7000-8000-000000000001")).toBe("s_2XDAN0ND9PZ9304DQBZ3FDWHKH");
+    expect(await sessionIdFor("claude-code", "3f1d2c4b-aaaa-bbbb-cccc-0123456789ab")).toBe("s_62XXQZZEZRSF4V9PFXHFN2JBQA");
   });
 });

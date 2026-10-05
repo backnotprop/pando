@@ -34,6 +34,8 @@ import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
+import type { SessionCommitRef } from "../sessions/commits";
+import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
 import { AGENTS_SCHEMA, AgentStore, type AgentInput } from "../agents/store";
 import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
@@ -359,6 +361,8 @@ export class MonorepoObject extends DurableObject<Env> {
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
   private issues: IssueStore;
+  /** Agent sessions (sessions/store.ts): the index; the pieces are in R2. */
+  private sessions: SessionStore;
   private agents: AgentStore;
   private mirror: MirrorOut;
 
@@ -389,6 +393,7 @@ export class MonorepoObject extends DurableObject<Env> {
       branchWord: (repo, branch) => this.branchWord(repo, branch),
       summaryChanged: () => this.feed.scheduleSummary(),
     });
+    this.sessions = new SessionStore(this.sql, { publish: (e) => this.publish(e) });
     this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
@@ -408,6 +413,8 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
 
     for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
+
+    for (const stmt of statements(SESSIONS_SCHEMA)) this.sql.exec(stmt);
 
     for (const stmt of statements(AGENTS_SCHEMA)) this.sql.exec(stmt);
 
@@ -1249,6 +1256,64 @@ export class MonorepoObject extends DurableObject<Env> {
 
   labelDelete(name: string, identity: Identity) {
     return this.guard(() => this.issues.deleteLabel(name, issueWho(identity)));
+  }
+
+  // ── Agent sessions (sessions/): the Worker parses and stores pieces in R2; these keep the index ──
+
+  sessionEnd(id: string, login: string | null) {
+    return this.guard(() => this.sessions.end(id, login));
+  }
+
+  sessionAppend(id: string, at: number, next: number, start: SessionStart, by: Sender, piece: PieceRecord) {
+    return this.guard(() => this.sessions.append(id, at, next, start, by, piece));
+  }
+
+  sessionGet(id: string) {
+    return this.guard(() => this.sessions.get(id));
+  }
+
+  sessionList(f: SessionFilters) {
+    return this.guard(() => this.sessions.list(f));
+  }
+
+  sessionSource(id: string) {
+    return this.guard(() => this.sessions.source(id));
+  }
+
+  sessionPieces(id: string, from: number, budget: number) {
+    return this.guard(() => this.sessions.pieces(id, from, budget));
+  }
+
+  sessionAllPieces(id: string) {
+    return this.guard(() => this.sessions.allPieces(id));
+  }
+
+  sessionRemovals(id: string) {
+    return this.guard(() => this.sessions.removals(id));
+  }
+
+  sessionDelete(id: string, login: string, owner: boolean) {
+    return this.guard(() => this.sessions.delete(id, login, owner));
+  }
+
+  sessionMayRemove(id: string, prompt: number, login: string, owner: boolean) {
+    return this.guard(() => this.sessions.mayRemove(id, prompt, login, owner));
+  }
+
+  sessionRemoveTurn(id: string, mark: TurnMark, rewritten: RewrittenPiece[], by: string) {
+    return this.guard(() => this.sessions.removeTurn(id, mark, rewritten, by));
+  }
+
+  sessionsOnMain(repo: string, refs: SessionCommitRef[]): void {
+    this.sessions.onMain(repo, refs);
+  }
+
+  sessionsOnBranch(repo: string, branch: string) {
+    return this.guard(() => this.sessions.branchSessions(repo, branch));
+  }
+
+  sessionReindex(id: string, read: PieceReread[]) {
+    return this.guard(() => this.sessions.reindex(id, read));
   }
 
   /** A merge's commits read late (facts job merge_refs): the issues they name get a merge_referenced item. */
@@ -2201,6 +2266,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
     // The branch's commit links, for this head and main only (as ahead and behind are).
     if (f.issue_refs) this.issues.setLinks({ repo, branch: name }, "commit", f.issue_refs, null);
+
+    // The agent sessions its own commits name (sessions/commits.ts).
+    if (f.session_commits) this.sessions.linkBranch(repo, name, f.session_commits);
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     this.publishBranchRow(repo, name, required);
 

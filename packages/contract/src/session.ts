@@ -85,3 +85,16 @@ export const SessionEntries = Schema.Struct({
   entries: Schema.Array(SessionEntry),
   next_cursor: Schema.NullOr(Count),
 });
+
+/** GET /v1/user/session-exclusions: what the person does not record (project null: the whole repository). */
+export const SessionExclusions = Schema.Struct({
+  exclusions: Schema.Array(Schema.Struct({ monorepo: Schema.String, monorepo_id: Schema.String, project: Schema.NullOr(Schema.String) })),
+});
+
+/** A session store a machine reads, and how it was found (default, environment, commit hook, paths add). */
+export const SessionStore = Schema.Struct({ program: SessionProgram, path: Schema.String, found: Schema.String });
+
+/** GET /v1/user/session-machines: each of the person's machines, as it last reported its recording. */
+export const SessionMachines = Schema.Struct({
+  machines: Schema.Array(Schema.Struct({ credential_id: Schema.String, machine: Schema.String, recording: Schema.Boolean, stores: Schema.Array(SessionStore), updated_at: Timestamp })),
+});

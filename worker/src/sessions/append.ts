@@ -15,6 +15,7 @@ import { sessionIdFor } from "./ids";
 import { parsePiece, PIECE_MAX } from "./parse";
 import { pieceKey, putPiece, scan } from "./pieces";
 import type { Sender, SessionStart, SessionView } from "./store";
+import { isExcluded } from "./user-routes";
 
 export interface PieceInput {
   session: string;
@@ -39,6 +40,8 @@ export async function appendPiece(env: Env, monorepoId: string, by: Sender, inpu
   if (!input.lines.endsWith("\n")) throw new HttpError(400, "bad_request", "a piece is whole lines, each ending with a newline");
 
   if (input.lines.length > PIECE_MAX) throw new HttpError(413, "piece_too_large", `a piece is at most ${PIECE_MAX} bytes of lines`);
+
+  if (await isExcluded(env.ACCOUNTS_DB, by.login, monorepoId, start.repo)) throw new HttpError(403, "sessions_excluded", `${by.login} does not record sessions here`);
   const stub = monorepoStub(env, monorepoId);
   const end = unwrap(await stub.sessionEnd(session, by.login));
 

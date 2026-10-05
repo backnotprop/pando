@@ -10,6 +10,7 @@ import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
+import { sessionUserRoutes } from "../sessions/user-routes";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -380,6 +381,8 @@ users.post("/v1/monorepos", async (c) => {
 orgRoutes(users);
 
 profileRoutes(users);
+
+sessionUserRoutes(users);
 
 api.route("/", users);
 

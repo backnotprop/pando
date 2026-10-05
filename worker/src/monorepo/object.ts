@@ -1203,7 +1203,7 @@ export class MonorepoObject extends DurableObject<Env> {
       const page = this.agents.list(f);
 
       for (const v of page.sessions) {
-        const b = this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
+        const b = v.branch === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
 
         v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
 

@@ -30,6 +30,9 @@ interface StoredStatus {
   at: string;
 }
 
+/** A branch name a person may give: git's characters, not main, no "..", no leading or trailing slash. */
+const BRANCH_NAME = /^(?!main$)(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,200}$/;
+
 export class AgentSession extends DurableObject<Env> {
   readonly registry = createRegistry();
   readonly #models = openModels(this.env);
@@ -179,29 +182,48 @@ export class AgentSession extends DurableObject<Env> {
   #installTools(spec: SessionSpec): void {
     const pub: PublicSpec = { ...spec, credential: { id: spec.credential.id, name: spec.credential.name } };
     const api = new PandoApi(this.env.PANDO, () => this.#spec());
-    const working = this.ctx.storage.kv.get<boolean>("chat.branch") === true;
+    // A chat works like a task once the person has named its branch.
+    const working = spec.branch !== "";
     const tools = toolsFor(spec.kind, pandoTools(api, () => this.#spec()), working, this.#startBranch());
 
     // Installing under the same name replaces the extension; Pi reads the registry at each model call.
     this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub, working), tag: false }], tools });
   }
 
-  /** The chat's start_branch: from its next step it has a task's tools on its own branch. */
+  /**
+   * The chat's start_branch(name) (owner, 2026-10-05: a person names the
+   * branch): it takes only a name the person wrote in their latest message,
+   * so the model can suggest one but never choose it. From its next step the
+   * chat has a task's tools on that branch (an existing one is used as it is).
+   */
   #startBranch(): ToolRegistration {
     return defineTool({
       name: "start_branch",
-      description: "Start making a change the person asked for: gives you a Linux sandbox on your own branch with bash, read, write and edit, and merge. Call it once, before your first change.",
-      parameters: Type.Object({}),
-      replay: "safe",
-      execute: async () => {
-        const spec = this.#spec();
+      description:
+        "Start making a change the person asked for, on a branch they named: gives you a Linux sandbox on it with bash, read, write and edit, and merge. The name must be one the person wrote in their latest message; if they have not named one, ask them (you may suggest a short name for the change) and wait.",
+      parameters: Type.Object({ name: Type.String({ description: "The branch name, exactly as the person wrote it" }) }),
+      execute: async ({ name }) => {
+        const said = await this.#lastPersonText();
 
-        this.ctx.storage.kv.put("chat.branch", true);
+        if (!BRANCH_NAME.test(name)) throw new Error(`"${name}" is not a branch name: letters, digits and . _ / -, not main`);
+
+        if (!said.split(/[\s`'",.;:!?()]+/).includes(name)) throw new Error(`The person has not named "${name}" in their latest message. Ask them for the branch's name, and wait for their answer.`);
+        const spec = { ...this.#spec(), branch: name };
+
+        this.ctx.storage.kv.put("spec", spec);
         this.#installTools(spec);
+        this.ctx.waitUntil(this.#report());
 
-        return { content: [{ type: "text", text: `Your branch is ${spec.branch}, made off main on your first command in the sandbox. Commit and push there, then merge it.` }] };
+        return { content: [{ type: "text", text: `Your branch is ${name}. Commit and push there, then merge it.` }] };
       },
     });
+  }
+
+  /** The text of the person's latest message in this conversation. */
+  async #lastPersonText(): Promise<string> {
+    const last = projectEntries(await this.harness.messages()).findLast((m) => m.role === "user");
+
+    return last?.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n") ?? "";
   }
 
   #gateway(): Fetcher {

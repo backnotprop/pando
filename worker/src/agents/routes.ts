@@ -3,7 +3,8 @@
 //   GET   /assistant, POST /assistant the caller's own chats with the repository assistant (assistant.ts)
 //   POST  /issues/{n}/agent           "Address with agent" (issue.ts)
 //   POST  /agents/review              "Review with agent" on a branch (review.ts)
-//   POST  /agents                     launch one: {prompt, repo?, branch?, model?}
+//   GET   /agents/models              the models a session may use
+//   POST  /agents                     launch one: {prompt, branch, repo?, model?}
 //   GET   /agents/{n}                 one session
 //   GET   /agents/{n}/transcript      its transcript, from its object in pando-agents
 //   GET   /agents/{n}/live            the live view's socket (Upgrade: websocket): the transcript as it grows
@@ -36,7 +37,7 @@ const LIST_DEFAULT = 30;
 
 const LIST_MAX = 100;
 
-const BRANCH = /^(?!main$)(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,200}$/;
+export const BRANCH = /^(?!main$)(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,200}$/;
 
 function unwrap<T>(o: Outcome<T>): T {
   if (o.ok) return o.value;
@@ -115,7 +116,7 @@ async function sessionOf(c: C, n: number): Promise<AgentView> {
 
 /** The session's state, recorded as failed with this reason. */
 async function failed(c: C, s: AgentView, reason: string): Promise<AgentView> {
-  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch, repo: s.repo, sandbox: "stopped", updated_at: now() })) ?? s;
+  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo, sandbox: "stopped", updated_at: now() })) ?? s;
 }
 
 export interface LaunchInput {
@@ -148,7 +149,7 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
     kind: input.kind,
     monorepo: { id: info.id, full: info.full_name, kind: info.kind },
     repo: { name: repo.name, path: repo.path },
-    branch: session.branch,
+    branch: session.branch ?? "",
     model: input.model,
     launcher: { login: identity.login, name: identity.name ?? identity.login, email: identity.email ?? `${identity.login}@users.pando.invalid` },
     credential: { id: cred.id, name: cred.name, secret },
@@ -179,7 +180,10 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
   api.post(base, async (c) => {
     const b = await bodyOf(c);
 
-    if (b.branch !== undefined && (!isText(b.branch) || !BRANCH.test(b.branch))) bad("branch: a branch name other than main");
+    // A person names the branch (owner, 2026-10-05): Pando never invents one for a task.
+    if (b.branch === undefined) throw new HttpError(400, "branch_required", "branch: name the branch for the change (an existing one is used as it is)");
+
+    if (!isText(b.branch) || !BRANCH.test(b.branch)) bad("branch: a branch name other than main");
 
     if (b.model !== undefined && !isText(b.model)) bad("model: a model id");
 
@@ -189,13 +193,16 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
       kind: "task",
       prompt: promptOf(b.prompt),
       repo: isText(b.repo) ? b.repo : null,
-      branch: isText(b.branch) ? b.branch : null,
+      branch: b.branch,
       model: isText(b.model) ? b.model : DEFAULT_MODEL,
       issue: null,
     };
 
     return c.json((await launch(c, input)) satisfies typeof Contract.AgentSession.Encoded, 201);
   });
+
+  // The models a session may use here (registered before /agents/:n).
+  api.get(`${base}/models`, async (c) => c.json({ models: await agentsOf(c).models() } satisfies typeof Contract.AgentModels.Encoded));
 
   api.get(one, async (c) => c.json((await sessionOf(c, numberOf(c))) satisfies typeof Contract.AgentSession.Encoded));
 

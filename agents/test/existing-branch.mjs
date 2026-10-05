@@ -38,7 +38,7 @@ try {
   check("its commit lands on top of the person's; nothing was reset", subjects.indexOf("The agent finishes it") < subjects.indexOf("A person's start") && subjects.includes(before), subjects.slice(0, 300));
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches`, t.secret);
   const names = (r.json?.branches ?? []).map((b) => b.name);
-  check("no new branch was made (no agent/1)", !names.includes("agent/1") && names.includes("feature/half-done"), names.join(", "));
+  check("no new branch was made", names.length === 1 && names[0] === "feature/half-done", names.join(", "));
 } catch (error) {
   check("the run reached its end", false, scrub(error.stack ?? error));
 } finally {

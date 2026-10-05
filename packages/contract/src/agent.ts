@@ -28,8 +28,8 @@ export const AgentSession = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
   /** The project it works in. */
   repo: RepoName,
-  /** Its branch, made off main when it was launched. */
-  branch: Schema.String,
+  /** Its branch, named by a person or from its issue; null for an assistant's chat until the person names one. */
+  branch: Schema.NullOr(Schema.String),
   /** The agent program: `pi` (Pi Durable). */
   program: Schema.String,
   /** The model's id, such as `@cf/zai-org/glm-5.3-flash`. */
@@ -66,6 +66,11 @@ export const AgentSession = Schema.Struct({
 });
 
 export interface AgentSession extends Schema.Schema.Type<typeof AgentSession> {}
+
+/** GET .../agents/models: the models a session may use here. */
+export const AgentModels = Schema.Struct({ models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) });
+
+export interface AgentModels extends Schema.Schema.Type<typeof AgentModels> {}
 
 /** GET .../agents: newest first; pass `next_before` back as `before` for the page after. */
 export const AgentSessionList = Schema.Struct({

@@ -39,13 +39,19 @@ try {
   const prompt = [
     "Fix the README typo and push.",
     tool("edit", { path: "README.md", edits: [{ oldText: "tpyo", newText: "typo" }] }),
-    tool("bash", { command: "git commit -qam 'Fix the README typo' && git push -q origin agent/1 2>&1; echo pushed=$?" }),
+    tool("bash", { command: "git commit -qam 'Fix the README typo' && git push -q origin fix-readme-typo 2>&1; echo pushed=$?" }),
   ].join("\n");
 
   let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted" });
+  record("error-400-branch-required.json", "ErrorBody", "POST /v1/monorepos/{owner}/{monorepo}/agents (no branch)", r.status, r.json);
+  check("a launch with no branch name is refused (400 branch_required): Pando never invents one", r.status === 400 && r.json?.error?.code === "branch_required", JSON.stringify(r.json));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents/models`, t.secret);
+  record("agent-models.json", "AgentModels", "GET /v1/monorepos/{owner}/{monorepo}/agents/models", r.status, r.json);
+  check("the models: GLM-5.3 Flash, and the scripted one on this test server", r.json?.models?.map((m) => m.id).join(",") === "@cf/zai-org/glm-5.3-flash,scripted", JSON.stringify(r.json));
+  r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted", branch: "fix-readme-typo" });
 
   record("agent-launched.json", "AgentSession", "POST /v1/monorepos/{owner}/{monorepo}/agents", r.status, r.json);
-  check("launch: 201, session #1 working on agent/1 as cloud-1, acting as the person", r.status === 201 && r.json?.number === 1 && r.json?.status === "working" && r.json?.branch === "agent/1" && r.json?.machine === "cloud-1" && r.json?.launched_by === t.login && r.json?.program === "pi", scrub(JSON.stringify(r.json)));
+  check("launch: 201, session #1 working on fix-readme-typo as cloud-1, acting as the person", r.status === 201 && r.json?.number === 1 && r.json?.status === "working" && r.json?.branch === "fix-readme-typo" && r.json?.machine === "cloud-1" && r.json?.launched_by === t.login && r.json?.program === "pi", scrub(JSON.stringify(r.json)));
 
   r = await untilSettled(t, 1);
   record("agent.json", "AgentSession", "GET /v1/monorepos/{owner}/{monorepo}/agents/{n}", r.status, r.json);
@@ -56,7 +62,7 @@ try {
   check("the transcript: the prompt, two tool calls and results, the answer", r.status === 200 && r.json.messages.length >= 6 && /pushed=0/.test(lastTool(r.json)), lastTool(r.json));
 
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches`, t.secret);
-  check("Pando lists agent/1", JSON.stringify(r.json).includes('"agent/1"'));
+  check("Pando lists fix-readme-typo", JSON.stringify(r.json).includes('"fix-readme-typo"'));
   r = await call("GET", `/v1/monorepos/${t.full}/machines`, t.secret);
   check("Machines shows cloud-1, a sandbox", /"cloud-1"/.test(JSON.stringify(r.json)) && /sandbox/.test(JSON.stringify(r.json)), scrub(JSON.stringify(r.json)).slice(0, 300));
   r = await call("GET", "/v1/user/credentials", t.secret);

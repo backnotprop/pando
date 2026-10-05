@@ -32,7 +32,7 @@ try {
     r = await call("POST", `/v1/monorepos/${t.full}/issues/1/agent`, t.secret, {});
   } else {
     const prompt = "README.md has a spelling mistake on its last line. Fix it, commit with a short message, push your branch, then merge it with the merge tool. Then say in one sentence what you did.";
-    r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt });
+    r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, branch: "fix-readme-spelling" });
   }
 
   check("launched with the default model", r.status === 201 && r.json?.model === "@cf/zai-org/glm-5.3-flash", scrub(JSON.stringify(r.json)));

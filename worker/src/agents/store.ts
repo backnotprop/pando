@@ -46,7 +46,8 @@ export interface AgentView {
   status: Status;
   reason: string | null;
   repo: string;
-  branch: string;
+  /** null: a chat before it names its branch. */
+  branch: string | null;
   program: string;
   model: string;
   issue: number | null;
@@ -95,7 +96,7 @@ export interface AgentFilters {
 export interface AgentInput {
   kind: SessionKind;
   repo: string;
-  /** null: agent/<number>. */
+  /** The branch it works on; null only for a chat, which names one later (start_branch). */
   branch: string | null;
   model: string;
   issue: number | null;
@@ -113,7 +114,7 @@ export function machineName(number: number): string {
 
 function view(r: AgentRow): AgentView {
   return {
-    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch, program: PROGRAM, model: r.model,
+    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch || null, program: PROGRAM, model: r.model,
     issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, awaiting_checks: r.awaiting_checks === 1,
     created_at: r.created_at, updated_at: r.updated_at,
   };
@@ -141,7 +142,7 @@ export class AgentStore {
   create(input: AgentInput, login: string): AgentView {
     const number = (this.sql.exec<{ n: number | null }>("SELECT MAX(number) AS n FROM agent_sessions").one().n ?? 0) + 1;
     const at = now();
-    const branch = input.branch ?? (input.kind === "chat" ? `assistant/${number}` : `agent/${number}`);
+    const branch = input.branch ?? "";
 
     this.sql.exec(
       "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)",
@@ -217,12 +218,12 @@ export class AgentStore {
     if (!r || state.updated_at < r.updated_at) return null;
 
     this.sql.exec(
-      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), updated_at = ? WHERE number = ?",
-      state.status, state.reason ?? null, state.workspace ?? null, state.updated_at, state.number,
+      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), branch = COALESCE(NULLIF(?, ''), branch), updated_at = ? WHERE number = ?",
+      state.status, state.reason ?? null, state.workspace ?? null, state.branch, state.updated_at, state.number,
     );
     const next = this.must(state.number);
 
-    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace) this.publish(next, null);
+    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace || next.branch !== r.branch) this.publish(next, null);
 
     return view(next);
   }

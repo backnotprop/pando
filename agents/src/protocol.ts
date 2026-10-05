@@ -20,6 +20,7 @@ export interface SessionSpec {
   monorepo: { id: string; full: string; kind: "repo" | "monorepo" };
   /** The project the agent works in: its name and folder ("." in a plain repository). */
   repo: { name: string; path: string };
+  /** The branch it works on; "" for a chat until the person names one (start_branch). */
   branch: string;
   /** The model's id, such as @cf/zai-org/glm-5.3-flash. */
   model: string;
@@ -80,6 +81,13 @@ export interface AgentsRpc {
   stop(monorepoId: string, number: number, reason: string): Promise<SessionState>;
   state(monorepoId: string, number: number): Promise<SessionState>;
   transcript(monorepoId: string, number: number): Promise<TranscriptMessage[]>;
+  /** The models a session may use here, by id and name. */
+  models(): ModelInfo[];
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
 }
 
 export interface ReportsRpc {

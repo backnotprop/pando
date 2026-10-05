@@ -12,14 +12,23 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 import { createAI } from "agents/models/pi-ai";
 import { contentText } from "./transcript";
 
-import { DEFAULT_MODEL } from "./protocol";
+import { DEFAULT_MODEL, type ModelInfo } from "./protocol";
 
 export { DEFAULT_MODEL };
 
 export const SCRIPTED_MODEL = "scripted";
 
-/** The model ids a session may name. */
-const WORKERS_AI_MODELS = new Set([DEFAULT_MODEL]);
+/** The models a session may name, with the names people see. */
+const WORKERS_AI_MODELS = new Map([[DEFAULT_MODEL, "GLM-5.3 Flash"]]);
+
+/** The models a session may use here: Workers AI's, and the scripted one on a test server. */
+export function listModels(env: ModelEnv): ModelInfo[] {
+  const out = [...WORKERS_AI_MODELS].map(([id, name]) => ({ id, name }));
+
+  if (scriptedEnabled(env)) out.push({ id: SCRIPTED_MODEL, name: "Scripted (tests)" });
+
+  return out;
+}
 
 export interface ModelEnv {
   AI: Ai;

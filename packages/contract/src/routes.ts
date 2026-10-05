@@ -2,7 +2,7 @@
 // GET, and the schema of its 200 body. Names are api-v1.yaml's operationIds.
 // Path segments are encoded here, so callers pass plain values; a branch's
 // `/` is sent as %2F.
-import { AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
+import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
@@ -605,7 +605,10 @@ export const listAgents = (owner: Login, name: MonorepoName, page: { before?: nu
   return { path: `${agentsBase(owner, name)}${query(params)}`, response: AgentSessionList };
 };
 
-/** POST .../agents {prompt, repo?, branch?, model?} (201): launch a session acting as the caller. */
+/** GET .../agents/models: the models a session may use here (a test server adds its scripted one). */
+export const agentModels = (owner: Login, name: MonorepoName) => ({ path: `${agentsBase(owner, name)}/models`, response: AgentModels });
+
+/** POST .../agents {prompt, branch, repo?, model?} (201): launch a session acting as the caller, on the branch named (an existing one is used as it is); 400 branch_required without one. */
 export const launchAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: agentsBase(owner, name), response: AgentSession }) as const;
 
 /**

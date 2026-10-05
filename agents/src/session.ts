@@ -16,6 +16,7 @@ import { Lifecycle } from "agents/lifecycle";
 import { ContainerEnv } from "./container-env";
 import type { Env } from "./env";
 import type { GatewayProps } from "./gateway";
+import { LiveSockets } from "./live";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
 import { PandoApi, pandoTools } from "./pando-tools";
 import { Sandbox, worktreeDir } from "./sandbox";
@@ -75,9 +76,11 @@ export class AgentSession extends DurableObject<Env> {
       ),
     defaults: { model: this.#models.model(DEFAULT_MODEL) },
   });
-  readonly lifecycle = Lifecycle.install(this).use(this.harness);
+  /** The live view's sockets (live.ts). */
+  readonly live = new LiveSockets(this.harness, () => this.ctx.getWebSockets());
+  readonly lifecycle = Lifecycle.install(this).use(this.live.capability()).use(this.harness);
 
-  /** Host startup, after Pi is open: follow runs that an eviction cut off. */
+  /** Host startup, after Pi is open: follow runs that an eviction cut off, and give live sockets a full frame. */
   async onStart(): Promise<void> {
     const spec = this.ctx.storage.kv.get<SessionSpec>("spec");
 
@@ -85,6 +88,7 @@ export class AgentSession extends DurableObject<Env> {
     this.#install(spec);
 
     for (const op of await this.harness.pending()) this.#follow(op.operationId);
+    await this.live.reattach();
   }
 
   // ── RPC, from the AgentsApi entrypoint ──

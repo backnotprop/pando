@@ -42,6 +42,18 @@ export class AgentsApi extends WorkerEntrypoint<Env> implements AgentsRpc {
     return this.#session(monorepoId, number).transcript();
   }
 
+  /**
+   * The live view's socket: /live/<monorepo id>/<n>, with Upgrade: websocket.
+   * Pando's Worker forwards it here after checking that the caller is a member.
+   */
+  async fetch(request: Request): Promise<Response> {
+    const m = /^\/live\/([^/]+)\/([1-9][0-9]{0,8})$/.exec(new URL(request.url).pathname);
+
+    if (!m || request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("not found\n", { status: 404 });
+
+    return this.#session(decodeURIComponent(m[1]), Number(m[2])).fetch(request);
+  }
+
   /** Waits until the session's runs settle. The tests' driver uses it. */
   settled(monorepoId: string, number: number): Promise<SessionState> {
     return this.#session(monorepoId, number).settled();

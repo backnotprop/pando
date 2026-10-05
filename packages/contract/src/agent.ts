@@ -83,6 +83,15 @@ export const AgentMessage = Schema.Struct({
 
 export interface AgentMessage extends Schema.Schema.Type<typeof AgentMessage> {}
 
+/**
+ * The live view's socket (GET .../agents/{n}/live, Upgrade: websocket): the transcript from message `from` on. The
+ * first frame starts at 0 with every message so far; each later one carries the messages after the last frame's.
+ * The session's state comes as agent.updated on the repository's event socket (topic agent:<n>).
+ */
+export const AgentLiveFrame = Schema.Struct({ type: Schema.tag("messages"), from: Count, messages: Schema.Array(AgentMessage) });
+
+export type AgentLiveFrame = typeof AgentLiveFrame.Type;
+
 /** GET .../agents/{n}/transcript: every message, oldest first. */
 export const AgentTranscript = Schema.Struct({ messages: Schema.Array(AgentMessage) });
 

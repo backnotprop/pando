@@ -607,6 +607,9 @@ export const getAgent = (owner: Login, name: MonorepoName, n: number) => ({ path
 /** GET .../agents/{n}/transcript. */
 export const agentTranscript = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}/transcript`, response: AgentTranscript });
 
+/** The live view's socket for session n (open it with `Upgrade: websocket`; frames are AgentLiveFrame). */
+export const agentLivePath = (owner: Login, name: MonorepoName, n: number): string => `${agentsBase(owner, name)}/${n}/live`;
+
 /** POST .../agents/{n}/messages {prompt}: a follow-up, from the person who launched it (403 `not_launcher` for others). */
 export const sendAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${agentsBase(owner, name)}/${n}/messages`, response: AgentSession }) as const;
 

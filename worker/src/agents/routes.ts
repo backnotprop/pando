@@ -4,6 +4,7 @@
 //   POST  /agents                     launch one: {prompt, repo?, branch?, model?}
 //   GET   /agents/{n}                 one session
 //   GET   /agents/{n}/transcript      its transcript, from its object in pando-agents
+//   GET   /agents/{n}/live            the live view's socket (Upgrade: websocket): the transcript as it grows
 //   POST  /agents/{n}/messages        {prompt}: a follow-up, from the person who launched it
 //   POST  /agents/{n}/stop            abort the run and stop the sandbox: its launcher or an owner
 //
@@ -176,6 +177,15 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     unwrap(await c.get("stub").agentGet(n));
 
     return c.json({ messages: await agentsOf(c).transcript(c.get("m"), n) } satisfies typeof Contract.AgentTranscript.Encoded);
+  });
+
+  api.get(`${one}/live`, async (c) => {
+    const n = numberOf(c);
+
+    if (c.req.header("upgrade")?.toLowerCase() !== "websocket") throw new HttpError(426, "upgrade_required", "open this with a WebSocket");
+    unwrap(await c.get("stub").agentGet(n));
+
+    return agentsOf(c).fetch(new Request(`http://pando-agents/live/${encodeURIComponent(c.get("m"))}/${n}`, c.req.raw));
   });
 
   api.post(`${one}/messages`, async (c) => {

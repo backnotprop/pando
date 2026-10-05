@@ -1759,6 +1759,22 @@ paths:
       tags: [agents]
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentTranscript" } } } }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/live:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: agentLive
+      summary: The live view's socket (Upgrade, websocket)
+      description: |
+        Frames are `{type: "messages", from, messages}`: the transcript from
+        message `from` on. The first starts at 0; later ones append. The
+        session's state comes as agent.updated on the event socket.
+      tags: [agents]
+      responses:
+        "101": { description: Switching to the WebSocket }
+        "426": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/agents/{n}/messages:
     parameters:
       - $ref: "#/components/parameters/owner"

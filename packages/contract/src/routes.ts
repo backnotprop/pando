@@ -579,15 +579,16 @@ export const mirrorConnectPath = (owner: Login, name: MonorepoName, purpose: "co
 
 const agentsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/agents`;
 
-/** The Agents tab's filters: a state, who started it, and what it started from. */
+/** The Agents tab's filters (a state, who started it, what it started from), or an issue's agents. */
 export interface AgentFilters {
+  issue?: number;
   status?: "working" | "waiting";
   person?: Login;
   kind?: "task" | "issue" | "review";
 }
 
 /** GET .../agents: newest first; `before` is a page's next_before; `issue` only the sessions addressing it. */
-export const listAgents = (owner: Login, name: MonorepoName, page: { before?: number; limit?: number; issue?: number } & AgentFilters = {}) => {
+export const listAgents = (owner: Login, name: MonorepoName, page: { before?: number; limit?: number } & AgentFilters = {}) => {
   const params = new URLSearchParams();
 
   if (page.issue !== undefined) params.set("issue", String(page.issue));

@@ -62,6 +62,7 @@ export interface AgentView {
   branch_facts?: BranchFacts | null;
   /** In a list: the title of the issue it addresses, as it reads now. */
   issue_title?: string | null;
+  issue_state?: "open" | "closed" | null;
 }
 
 /** What a list row shows of its branch: exact, from the branch's record. */
@@ -247,16 +248,20 @@ export class AgentStore {
     return this.sql.exec("SELECT 1 FROM agent_sessions WHERE repo = ? AND branch = ? AND awaiting_checks = 1 LIMIT 1", repo, branch).toArray().length > 0;
   }
 
-  /** The sessions waiting for (repo, branch)'s checks, no longer waiting: their numbers. */
+  /**
+   * The sessions waiting for (repo, branch)'s checks, no longer waiting: the
+   * numbers of those still running to tell. A stopped or failed one stops
+   * waiting but is not told: telling it would wake it (two agents can share
+   * a branch, and the person stopped this one).
+   */
   takeAwaiting(repo: string, branch: string): number[] {
-    const numbers = this.sql
-      .exec<{ number: number }>("UPDATE agent_sessions SET awaiting_checks = 0 WHERE repo = ? AND branch = ? AND awaiting_checks = 1 RETURNING number", repo, branch)
-      .toArray()
-      .map((r) => r.number);
+    const rows = this.sql
+      .exec<{ number: number; status: string }>("UPDATE agent_sessions SET awaiting_checks = 0 WHERE repo = ? AND branch = ? AND awaiting_checks = 1 RETURNING number, status", repo, branch)
+      .toArray();
 
-    for (const n of numbers) this.publish(this.must(n), null);
+    for (const r of rows) this.publish(this.must(r.number), null);
 
-    return numbers;
+    return rows.filter((r) => r.status === "working" || r.status === "waiting").map((r) => r.number);
   }
 
   private publish(r: AgentRow, actor: string | null): void {

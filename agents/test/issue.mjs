@@ -69,7 +69,7 @@ try {
   r = await call("GET", `/v1/monorepos/${t.full}/agents?issue=2`, t.secret);
   check("and none for another issue", r.json?.sessions?.length === 0);
 
-  // A second agent on the same issue gets its own branch.
+  // A second agent on the same issue works on the same branch; stopped, it is not told when the checks go green.
   r = await call("POST", `/v1/monorepos/${t.full}/issues/1/agent`, t.secret, { model: "scripted", prompt: "Look only." });
   check("a second agent on #1 works on the same branch, as it is", r.status === 201 && r.json?.branch === BRANCH, r.json?.branch);
   await untilSession(t, 2, (s) => s?.status !== "working");

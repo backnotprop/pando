@@ -44,7 +44,7 @@ try {
 
   // ── A change: the branch is named by the person, never by the model ──
   // The scripted model reads its calls from the message; this one's name is JSON-escaped, so the person's text does not say it.
-  r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: ["Add a line to the README and merge it.", String.raw`> start_branch {"name":"made-up-name"}`].join("\n") });
+  r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: ["Add a line to the README and merge it.", tool("start_branch", { name: "made-up-name" }).replace('"made', String.fromCharCode(34, 92) + "u006dade")].join("\n") });
   r = await untilSettled(t, 1);
   res = await toolsOf(t, 1);
   check("start_branch refuses a name the person did not write", res.at(-1)?.name === "start_branch" && res.at(-1)?.error === true && /has not named "made-up-name"/.test(res.at(-1)?.text ?? ""), res.at(-1)?.text);

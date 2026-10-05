@@ -80,7 +80,7 @@ try {
   r = await call("POST", `/v1/monorepos/${t.full}/repos/${t.name}/statuses/${head}`, t.secret, { state: "success", context: "ci/test" });
   check("ci/test is green on the branch head", r.status === 201 || r.status === 200, r.status);
   const merged = await untilMerged(t);
-  check("merge goes through Pando's normal route and closes #1", merged?.name === "merge" && !merged.error && /Merged agent\/1 into main \(merge commit [0-9a-f]{12}, closing #1\)/.test(merged.text), merged?.text);
+  check("merge goes through Pando's normal route and closes #1", merged?.name === "merge" && !merged.error && /Merged fix-readme into main \(merge commit [0-9a-f]{12}, closing #1\)/.test(merged.text), merged?.text);
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/fix-readme`, t.secret);
   check("fix-readme is merged, by the person, from cloud-1", r.json?.state === "merged" && r.json?.merged_by === t.login && r.json?.merged_machine === "cloud-1", scrub(JSON.stringify({ state: r.json?.state, by: r.json?.merged_by, machine: r.json?.merged_machine })));
   r = await untilClosed(t, 1);

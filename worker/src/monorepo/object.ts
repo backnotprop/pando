@@ -1304,6 +1304,10 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.sessions.removeTurn(id, mark, rewritten, by));
   }
 
+  sessionPersonCommits(login: string, since: string) {
+    return this.guard(() => this.sessions.personCommitsOnMain(login, since));
+  }
+
   sessionsOnMain(repo: string, refs: SessionCommitRef[]): void {
     this.sessions.onMain(repo, refs);
   }

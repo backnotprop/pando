@@ -55,6 +55,10 @@ export const Session = Schema.Struct({
   removed: Schema.Array(SessionRemoved),
   /** Its pushed commits, oldest first (at most 500): those whose message has its Pando-Session line. */
   commits: Schema.Array(SessionCommit),
+  /** The branch its row leads with: its earliest commit's branch, else where it ran (both null: the repository folder). */
+  lead: Schema.Struct({ repo: Schema.NullOr(RepoName), branch: Schema.NullOr(Schema.String) }),
+  /** Issues linked to that branch, lowest number first. */
+  issues: Schema.Array(Schema.Struct({ number: Count, title: Schema.String, state: Schema.String })),
 });
 
 export interface Session extends Schema.Schema.Type<typeof Session> {}
@@ -72,6 +76,8 @@ export const SessionAny = Schema.Union([Session, SessionDeleted]);
 
 export const SessionList = Schema.Struct({
   sessions: Schema.Array(Session),
+  /** For the same filters, in either state. */
+  counts: Schema.Struct({ active: Count, inactive: Count }),
   next_cursor: Schema.NullOr(Schema.String),
 });
 
@@ -121,3 +127,21 @@ export const SessionStore = Schema.Struct({ program: SessionProgram, path: Schem
 export const SessionMachines = Schema.Struct({
   machines: Schema.Array(Schema.Struct({ credential_id: Schema.String, machine: Schema.String, recording: Schema.Boolean, stores: Schema.Array(SessionStore), updated_at: Timestamp })),
 });
+
+/** GET .../sessions/{id}/files: the files its commits changed (at most its first 50 commits are read). */
+export const SessionFiles = Schema.Struct({
+  files: Schema.Array(Schema.Struct({ repo: RepoName, repo_path: Schema.String, path: Schema.String })),
+});
+
+/** GET /v1/users/{login}/sessions: a person's sessions in the repositories the viewer can open too, latest activity first. */
+export const PersonSessions = Schema.Struct({
+  sessions: Schema.Array(Schema.Struct({ monorepo: Schema.Struct({ id: Schema.String, full_name: Schema.String }), session: Session })),
+  total: Count,
+  next_cursor: Schema.NullOr(Schema.String),
+});
+
+/** One day's (or week's, from its Sunday) agent: the one behind most of the person's commits on main naming their sessions. */
+export const SessionMark = Schema.Struct({ date: Schema.String, program: SessionProgram, commits: Count });
+
+/** GET /v1/users/{login}/session-marks?tz=: the profile graph's agent marks, by day and by week, in the viewer's zone. */
+export const SessionMarks = Schema.Struct({ days: Schema.Array(SessionMark), weeks: Schema.Array(SessionMark) });

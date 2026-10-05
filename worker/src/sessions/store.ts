@@ -142,6 +142,9 @@ export interface SessionView {
   end: number;
   removed: RemovedTurn[];
   commits: SessionCommit[];
+  /** The branch its row leads with: the branch of its earliest commit, else where it ran (DETERMINISM.md row 23). */
+  lead: { repo: string | null; branch: string | null };
+  issues: SessionIssue[];
 }
 
 export interface DeletedView {
@@ -167,7 +170,16 @@ export interface PieceRow {
 
 export interface SessionPage {
   sessions: SessionView[];
+  /** For the same filters, either state. */
+  counts: { active: number; inactive: number };
   next_cursor: string | null;
+}
+
+/** An issue linked to the branch a session leads with (DETERMINISM.md row 26), lowest number first. */
+export interface SessionIssue {
+  number: number;
+  title: string;
+  state: string;
 }
 
 export interface PiecePage {
@@ -215,12 +227,24 @@ export interface PieceReread {
   redactions: number;
 }
 
+/** One commit on main naming a person's session, for the graph: when, which agent, which session. */
+export interface PersonCommit {
+  repo: string;
+  sha: string;
+  at: string;
+  /** Written only from a checked SessionStart (append). */
+  program: Program;
+  session: string;
+}
+
 export interface SessionFilters {
   person: string | null;
   program: string | null;
   repo: string | null;
   branch: string | null;
   state: "active" | "inactive" | null;
+  /** "yes": some commit reached main; "no": none did. */
+  main: "yes" | "no" | null;
   cursor: string | null;
   limit: number;
 }
@@ -376,6 +400,9 @@ export class SessionStore {
   private view(s: SessionRow): SessionView | DeletedView {
     if (s.deleted_at) return { id: s.id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at };
     const active = s.last_at !== null && Date.now() - Date.parse(s.last_at) < ACTIVE_MS;
+    const commits = this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r));
+    const first = commits.find((c) => c.branch !== null);
+    const lead = first ? { repo: first.repo, branch: first.branch } : { repo: s.repo, branch: s.branch };
 
     return {
       id: s.id,
@@ -398,8 +425,17 @@ export class SessionStore {
       bytes: s.bytes,
       end: s.end_cursor,
       removed: this.rows<{ prompt: number; by: string; at: string }>("SELECT prompt, by, at FROM session_removals WHERE session = ? ORDER BY prompt", s.id),
-      commits: this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r)),
+      commits,
+      lead,
+      issues: lead.repo && lead.branch ? this.issuesOf(lead.repo, lead.branch) : [],
     };
+  }
+
+  private issuesOf(repo: string, branch: string): SessionIssue[] {
+    return this.rows<SessionIssue & Row>(
+      "SELECT DISTINCT i.number, i.title, i.state FROM issue_links l JOIN issues i ON i.number = l.issue WHERE l.repo = ? AND l.branch = ? ORDER BY i.number",
+      repo, branch,
+    );
   }
 
   get(id: string): SessionView | DeletedView {
@@ -430,7 +466,13 @@ export class SessionStore {
       args.push(f.repo, f.repo);
     }
 
+    if (f.main !== null) where.push(`id ${f.main === "yes" ? "IN" : "NOT IN"} (SELECT session FROM session_commits WHERE on_main = 1)`);
     const since = new Date(Date.now() - ACTIVE_MS).toISOString();
+
+    const counts = this.row<{ active: number; inactive: number }>(
+      `SELECT COALESCE(SUM(last_at > ?), 0) AS active, COALESCE(SUM(last_at <= ?), 0) AS inactive FROM sessions WHERE ${where.join(" AND ")}`,
+      since, since, ...args,
+    )!;
 
     if (f.state === "active") {
       where.push("last_at > ?");
@@ -453,6 +495,7 @@ export class SessionStore {
     return {
       // SAFETY: deleted rows are excluded by the query, so every view is a SessionView.
       sessions: page.map((r) => this.view(r) as SessionView),
+      counts,
       next_cursor: rows.length > f.limit && last ? `${last.last_at}|${last.id}` : null,
     };
   }
@@ -710,6 +753,15 @@ export class SessionStore {
       });
 
     return { sessions, commits };
+  }
+
+  /** A person's commits on main that name their own sessions, since a time: the profile graph's agent marks. */
+  personCommitsOnMain(login: string, since: string): PersonCommit[] {
+    return this.rows<PersonCommit & Row>(
+      `SELECT c.repo, c.sha, MIN(c.committed_at) AS at, s.program, MIN(c.session) AS session FROM session_commits c JOIN sessions s ON s.id = c.session
+       WHERE s.person = ? AND s.deleted_at IS NULL AND c.on_main = 1 AND c.committed_at >= ? GROUP BY c.repo, c.sha, s.program`,
+      login, since,
+    );
   }
 
   private publish(kind: "session.started" | "session.updated", view: SessionView): void {

@@ -10,7 +10,7 @@ import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
-import { sessionUserRoutes } from "../sessions/user-routes";
+import { sessionPersonRoutes, sessionUserRoutes } from "../sessions/user-routes";
 import { agentRoutes } from "../agents/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
@@ -387,6 +387,8 @@ orgRoutes(users);
 profileRoutes(users);
 
 sessionUserRoutes(users);
+
+sessionPersonRoutes(users);
 
 api.route("/", users);
 

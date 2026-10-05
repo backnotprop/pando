@@ -10,6 +10,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useRef, useState } from "react";
 import { contributionDayQuery, contributionsQuery } from "../../api/profile";
 import { meQuery } from "../../api/queries";
+import { sessionMarksQuery } from "../../api/sessions";
 import { useLanded } from "../../live/contributed";
 import { Avatar } from "../../ui/Avatar";
 import { button, Empty, lnk, SectionHead } from "../../ui/controls";
@@ -18,7 +19,8 @@ import { Page } from "../../ui/pages";
 import { ownerLink } from "../../ui/paths";
 import { Ref } from "../../ui/Ref";
 import { Months, PeriodItems, RepoName } from "./Activity";
-import { Graph, longDay } from "./Graph";
+import { Graph, type GraphAgents, longDay } from "./Graph";
+import { ProfileSessions } from "../$owner/$name/-sessions/Person";
 import { count } from "./words";
 
 /** The repositories shown before "All N". */
@@ -171,6 +173,53 @@ function Day({ login, tz, day, onBack }: { login: Login; tz: number; day: string
   );
 }
 
+
+/** By week (the default) or By day, remembered in this browser as the theme is. */
+const VIEW_KEY = "pando-graph-agents";
+
+function useAgentsView(): ["week" | "day", (v: "week" | "day") => void] {
+  const [view, set] = useState<"week" | "day">(() => (localStorage.getItem(VIEW_KEY) === "day" ? "day" : "week"));
+
+  return [
+    view,
+    (v) => {
+      localStorage.setItem(VIEW_KEY, v);
+      set(v);
+    },
+  ];
+}
+
+/** The graph's two-button switch (as in Mirror setup): one Tab stop, the arrow keys switch. */
+function AgentsSwitch({ view, onChange }: { view: "week" | "day"; onChange: (v: "week" | "day") => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Show agents"
+      className="inline-flex gap-0.5 rounded-lg p-0.5 shadow-[inset_0_0_0_1px_var(--rootline)]"
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          onChange(view === "week" ? "day" : "week");
+        }
+      }}
+    >
+      {(["week", "day"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          role="radio"
+          aria-checked={view === v}
+          tabIndex={view === v ? 0 : -1}
+          onClick={() => onChange(v)}
+          className={`inline-flex h-7 items-center rounded-md px-3 text-[13px] whitespace-nowrap ${view === v ? "bg-loam text-bark shadow-[inset_0_0_0_1px_var(--rule-hi)]" : "text-ash hover:text-bark-dim"}`}
+        >
+          {v === "week" ? "By week" : "By day"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ProfilePage({ person, tz, day, onPick }: { person: Person; tz: number; day: string | null; onPick: (day: string | null) => void }) {
   const me = useQuery(meQuery).data;
   const own = me?.login === person.login;
@@ -178,6 +227,9 @@ export function ProfilePage({ person, tz, day, onPick }: { person: Person; tz: n
   // Your own work landing while the page is open: its day glows once (frames from before the page showed do not).
   const landed = useLanded();
   const seen = useRef(landed.n);
+  const [view, setView] = useAgentsView();
+  const marks = useQuery(sessionMarksQuery(person.login, tz)).data;
+  const agents: GraphAgents | null = marks && (marks.days.length || marks.weeks.length) ? { view, days: new Map(marks.days.map((d) => [d.date, d.program])), weeks: new Map(marks.weeks.map((w) => [w.date, w.program])) } : null;
 
   return (
     <Page crumbs={[{ label: person.login }]}>
@@ -186,9 +238,13 @@ export function ProfilePage({ person, tz, day, onPick }: { person: Person; tz: n
         <div className="min-w-0">
           <Repos c={c} />
           <section aria-label="Contributions" className="mt-10">
-            <h2 className="mb-3 text-[14px] leading-5 font-semibold">{count(c.total, "contribution", "contributions")} in the last year</h2>
-            <Graph c={c} picked={day} onPick={onPick} glow={own && landed.n > seen.current ? landed : null} />
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <h2 className="text-[14px] leading-5 font-semibold">{count(c.total, "contribution", "contributions")} in the last year</h2>
+              {agents ? <AgentsSwitch view={agents.view} onChange={setView} /> : null}
+            </div>
+            <Graph c={c} picked={day} onPick={onPick} glow={own && landed.n > seen.current ? landed : null} agents={agents} />
           </section>
+          <ProfileSessions login={person.login} />
           <section aria-label="Activity" className="mt-10">
             <SectionHead title="Activity" />
             {day ? <Day login={person.login} tz={tz} day={day} onBack={() => onPick(null)} /> : <Months months={c.months} tz={tz} />}

@@ -10,6 +10,7 @@ import { CiBuild, CiConnectionRow, CiJob } from "./ci.ts";
 import { Count, RepoName, Sha, Timestamp } from "./ids.ts";
 import { Machine } from "./repo.ts";
 import { IssueComment, IssueRow, Label, Reactions, TimelineItem } from "./issue.ts";
+import { Session, SessionDeleted } from "./session.ts";
 
 /** What every event frame carries: its place in the stream, its key, and who did it (null when no person did). */
 const envelope = {
@@ -168,6 +169,15 @@ export const MirrorEvent = Schema.Struct({
   op: Schema.Literal("upsert"),
 });
 
+/**
+ * A session started, grew (a piece appended, a turn removed, a reindex), or was deleted (`op: delete`, the row is its
+ * stub). Topics `sessions` and `session:<id>`, and `repo:<repo>` when it ran in a project.
+ */
+export const SessionEvent = Schema.Union([
+  Schema.Struct({ ...envelope, kind: Schema.Literals(["session.started", "session.updated"]), collection: Schema.Literal("sessions"), op: Schema.Literal("upsert"), row: Session }),
+  Schema.Struct({ ...envelope, kind: Schema.Literal("session.deleted"), collection: Schema.Literal("sessions"), op: Schema.Literal("delete"), row: SessionDeleted }),
+]);
+
 /** The row kinds the web subscribes to, each a `kind:<kind>` topic. */
 export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection", "mirror.updated"] as const;
 
@@ -184,6 +194,7 @@ export const MonorepoEventFrame = Schema.Union([
   IssueEvent,
   LabelEvent,
   MirrorEvent,
+  SessionEvent,
   /** The replay after `since` is done; keep the highest `seq` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), seq: Count }),
   /** More was missed than the stream replays: refetch what is on screen, then reconnect from `seq`. */

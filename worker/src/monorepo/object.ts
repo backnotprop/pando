@@ -34,6 +34,7 @@ import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
+import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
 import {
@@ -357,6 +358,8 @@ export class MonorepoObject extends DurableObject<Env> {
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
   private issues: IssueStore;
+  /** Agent sessions (sessions/store.ts): the index; the pieces are in R2. */
+  private sessions: SessionStore;
   private mirror: MirrorOut;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -386,6 +389,7 @@ export class MonorepoObject extends DurableObject<Env> {
       branchWord: (repo, branch) => this.branchWord(repo, branch),
       summaryChanged: () => this.feed.scheduleSummary(),
     });
+    this.sessions = new SessionStore(this.sql, { publish: (e) => this.publish(e) });
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
@@ -404,6 +408,8 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
 
     for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
+
+    for (const stmt of statements(SESSIONS_SCHEMA)) this.sql.exec(stmt);
     this.issues.seedLabels();
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
@@ -1207,6 +1213,56 @@ export class MonorepoObject extends DurableObject<Env> {
 
   labelDelete(name: string, identity: Identity) {
     return this.guard(() => this.issues.deleteLabel(name, issueWho(identity)));
+  }
+
+  // ── Agent sessions (sessions/): the Worker parses and stores pieces in R2; these keep the index ──
+
+  sessionEnd(id: string, login: string | null) {
+    return this.guard(() => this.sessions.end(id, login));
+  }
+
+  sessionAppend(id: string, at: number, next: number, start: SessionStart, by: Sender, piece: PieceRecord) {
+    return this.guard(() => this.sessions.append(id, at, next, start, by, piece));
+  }
+
+  sessionGet(id: string) {
+    return this.guard(() => this.sessions.get(id));
+  }
+
+  sessionList(f: SessionFilters) {
+    return this.guard(() => this.sessions.list(f));
+  }
+
+  sessionSource(id: string) {
+    return this.guard(() => this.sessions.source(id));
+  }
+
+  sessionPieces(id: string, from: number, budget: number) {
+    return this.guard(() => this.sessions.pieces(id, from, budget));
+  }
+
+  sessionAllPieces(id: string) {
+    return this.guard(() => this.sessions.allPieces(id));
+  }
+
+  sessionRemovals(id: string) {
+    return this.guard(() => this.sessions.removals(id));
+  }
+
+  sessionDelete(id: string, login: string, owner: boolean) {
+    return this.guard(() => this.sessions.delete(id, login, owner));
+  }
+
+  sessionMayRemove(id: string, prompt: number, login: string, owner: boolean) {
+    return this.guard(() => this.sessions.mayRemove(id, prompt, login, owner));
+  }
+
+  sessionRemoveTurn(id: string, mark: TurnMark, rewritten: RewrittenPiece[], by: string) {
+    return this.guard(() => this.sessions.removeTurn(id, mark, rewritten, by));
+  }
+
+  sessionReindex(id: string, read: PieceReread[]) {
+    return this.guard(() => this.sessions.reindex(id, read));
   }
 
   /** A merge's commits read late (facts job merge_refs): the issues they name get a merge_referenced item. */

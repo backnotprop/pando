@@ -9,6 +9,7 @@ import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from 
 import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
+import { sessionRoutes } from "../sessions/routes";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -511,6 +512,8 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
   // file pages' answers and walk checkpoints (files.ts, keyed by <id>--<repo>) in CACHE.
   const prefixes: [R2Bucket, string][] = [
     [c.env.BLOBS, `meta/${m}/`],
+    // Agent sessions' pieces (sessions/pieces.ts).
+    [c.env.BLOBS, `sessions/${m}/`],
     [c.env.CACHE, `ci/${m}/`],
     [c.env.CACHE, `answers/${m}--`],
     [c.env.CACHE, `partial/${m}--`],
@@ -1557,6 +1560,10 @@ mirrorRoutes(api);
 // ── Issues and labels (issues/routes.ts) ──
 
 issueRoutes(api);
+
+// ── Agent sessions (sessions/routes.ts) ──
+
+sessionRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

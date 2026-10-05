@@ -371,6 +371,23 @@ decisions relayed 2026-10-05.
   `WORKOS_API_KEY` values (any random ones; this worktree has them). The shots go to
   `research/design/pando-ui-2026-10-03/sessions/built/` with its INDEX.html.
 
+## Stage 5: docs, limits, fixtures
+
+- User docs: `site/docs/src/content/docs/sessions.mdx` (Agent sessions), a sessions part in `privacy.mdx` and
+  `limits.mdx`. The site builds and `nimbus-docs check` passes. `pando help` lists the session commands; `cli.mdx`
+  carries the same block.
+- Limits sent to pando-ops for the board: 8,000,000 bytes per piece; 64 KB per string and 200-character encoded runs
+  trimmed; one piece per session every 30 s (at once after a commit names it), folders looked at every 5 s; Active = a
+  record in the last 30 min; 250 newest commits of a branch read for Pando-Session; 500 commits listed per session,
+  files from its first 50; about 2 MB of lines per conversation page; 200 entries on a person's not-recorded list; 50
+  folders per machine report; 50 sessions per page of a person's sessions; repository name `sessions` reserved.
+- Fixtures: Pi 0.85.1 and OpenCode 2.0.22 sessions are recorded (`worker/test/sessions/fixtures/`). Claude Code and
+  Codex wait for the owner to log those agents into the fixture folders (`CLAUDE_CONFIG_DIR=$HOME/.pando-fixtures/claude
+  claude`, then /login; `CODEX_HOME=$HOME/.pando-fixtures/codex codex login`).
+- The existing web slices on this branch: 1, 2, 4, 5, 7 pass; 3 (a Buildkite job's log on the build page) and 6 (the
+  big push: Artifacts answers "internal error" or "Network connection lost") fail the same way on main 5a82dd1, run in
+  a temporary worktree on these ports. Not this branch's.
+
 ## Decisions taken here, and why
 
 - Sessions store under a prefix of the existing BLOBS bucket: no new

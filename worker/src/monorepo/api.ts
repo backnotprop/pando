@@ -12,6 +12,7 @@ import { issueRoutes } from "../issues/routes";
 import { agentRoutes } from "../agents/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
+import { assistantRoutes } from "../agents/assistant";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -1574,6 +1575,8 @@ agentRoutes(api);
 issueAgentRoutes(api);
 
 reviewAgentRoutes(api);
+
+assistantRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

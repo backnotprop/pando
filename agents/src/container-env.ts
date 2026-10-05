@@ -1,6 +1,9 @@
 // Pi Durable's ExecutionEnv over the session's container: the file system and
 // shell its read, write, edit and bash tools use. Each operation is one
 // command in the container; files move as raw bytes on stdin and stdout.
+// Pi builds an environment for every model call and tool call, so this one
+// starts the sandbox only when an operation needs it: a session that never
+// runs a sandbox tool never starts a container.
 
 import type { Context } from "@earendil-works/chord";
 import {
@@ -83,6 +86,7 @@ export class ContainerEnv implements ExecutionEnv {
 
   /** Runs a bash script with arguments ($1, $2 ...), optionally with bytes on stdin. */
   private async run(script: string, args: string[], context: Context, stdin?: Uint8Array): Promise<Ran> {
+    await this.sandbox.workspace();
     const options: ContainerExecOptions = { cwd: this.cwd, signal: context.abortSignal };
 
     if (stdin) options.stdin = "pipe";
@@ -274,6 +278,7 @@ export class ContainerEnv implements ExecutionEnv {
     const timed = timeout === undefined ? argv : ["timeout", "--kill-after=5", String(timeout), ...argv];
 
     try {
+      await this.sandbox.workspace();
       const proc = await this.sandbox.spawn(timed, { cwd: options?.cwd ?? this.cwd, env: options?.env, signal: context.abortSignal, stderr: "pipe" });
       const stderr = proc.stderr ? new Response(proc.stderr).text() : Promise.resolve("");
 

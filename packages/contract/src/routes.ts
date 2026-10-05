@@ -604,6 +604,15 @@ export const addressIssueWithAgent = (owner: Login, name: MonorepoName, n: numbe
 /** POST .../agents/review {branch, repo?, prompt?, model?} (201): "Review with agent" on a branch. */
 export const reviewWithAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${agentsBase(owner, name)}/review`, response: AgentSession }) as const;
 
+/** GET .../assistant: the caller's own chats with the repository assistant, newest first. */
+export const listChats = (owner: Login, name: MonorepoName, page: { before?: number } = {}) => ({
+  path: `${monorepoBase(owner, name)}/assistant${page.before === undefined ? "" : `?before=${page.before}`}`,
+  response: AgentSessionList,
+});
+
+/** POST .../assistant {prompt, repo?, model?} (201): a new chat. Follow-ups: sendAgent; its transcript and socket: agentTranscript, agentLivePath. */
+export const newChat = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${monorepoBase(owner, name)}/assistant`, response: AgentSession }) as const;
+
 /** GET .../agents/{n}. */
 export const getAgent = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}`, response: AgentSession });
 

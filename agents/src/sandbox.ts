@@ -57,6 +57,8 @@ export function worktreeDir(repoPath: string, branch: string): string {
 
 export class Sandbox {
   #ready: Promise<Workspace> | undefined;
+  /** Whether #ready has resolved: until then every caller waits on the one start in flight. */
+  #readyDone = false;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -79,13 +81,21 @@ export class Sandbox {
 
   /** Starts the container if needed and prepares the workspace, once per start. */
   workspace(): Promise<Workspace> {
-    if (this.#ready && this.running) return this.#ready;
+    // One start at a time: a caller during a start waits for it, and a
+    // finished start holds while the container runs.
+    if (this.#ready && (!this.#readyDone || this.running)) return this.#ready;
+    this.#readyDone = false;
     const ready = this.#start();
     this.#ready = ready;
-    // A start that failed is tried again by the next call.
-    ready.catch(() => {
-      if (this.#ready === ready) this.#ready = undefined;
-    });
+    ready.then(
+      () => {
+        if (this.#ready === ready) this.#readyDone = true;
+      },
+      () => {
+        // A start that failed is tried again by the next call.
+        if (this.#ready === ready) this.#ready = undefined;
+      },
+    );
 
     return ready;
   }
@@ -134,7 +144,12 @@ export class Sandbox {
       throw new Error(`the workspace did not start (exit ${out.exitCode}): ${(out.stderr || out.stdout).slice(-1500)}`);
     }
 
-    return { dir: line[1], kind: line[2] === "mount" ? "mount" : "clone", from };
+    const kind = line[2] === "mount" ? "mount" : "clone";
+
+    // A fallback is never silent: why the mount did not hold goes to the Worker's logs.
+    if (kind === "clone") console.warn(`workspace fell back to a clone: ${out.stderr.slice(-2000)}`);
+
+    return { dir: line[1], kind, from };
   }
 
   /** The newest snapshot, when the current image can restore it. */

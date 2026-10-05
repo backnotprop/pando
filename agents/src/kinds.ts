@@ -1,7 +1,9 @@
 // What each kind of session is told and given. A task or an issue changes
 // code on its own branch and merges it; a review reads someone's branch, may
 // run its tests, and posts one review, with no tool that writes a file,
-// comments elsewhere or merges.
+// comments elsewhere or merges. The assistant's chat answers from Pando's
+// read tools alone, with no sandbox, until the person asks for a change:
+// then start_branch gives it a task's tools on its own branch.
 
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
@@ -14,10 +16,22 @@ export type PublicSpec = Omit<SessionSpec, "credential"> & { credential: Omit<Se
 /** The Pando tools a review may not use. */
 const NOT_IN_A_REVIEW = new Set(["merge", "comment_issue"]);
 
-export function preamble(s: PublicSpec): string {
+/** The Pando tools a chat answers questions with. */
+const READING = new Set(["read_file", "list_files", "issue", "branch_diff"]);
+
+/** `working`: a chat that has started its branch is told and given what a task is. */
+export function preamble(s: PublicSpec, working = false): string {
   const dir = worktreeDir(s.repo.path, s.branch);
   const who = `for ${s.launcher.name} (${s.launcher.login}), who started you. You act as them.`;
   const sandbox = "The sandbox has no internet. It reaches only this repository, through git and the pando command.";
+
+  if (s.kind === "chat" && !working) {
+    return [
+      `You are the assistant of the repository ${s.monorepo.full} in Pando, a git platform, talking with ${s.launcher.name} (${s.launcher.login}). You act as them and see only what they can open.`,
+      "Answer questions about the repository with read_file, list_files, issue and branch_diff, which read it on the server. Name the files and lines you rely on.",
+      `If the person asks you to change something, call start_branch first: it gives you a Linux sandbox on branch ${s.branch} with bash, read, write and edit, where you commit, push and then merge.`,
+    ].join("\n");
+  }
 
   if (s.kind === "review") {
     return [
@@ -39,9 +53,11 @@ export function preamble(s: PublicSpec): string {
   ].join("\n");
 }
 
-/** The sandbox tools and the Pando tools a session of this kind gets. */
-export function toolsFor(kind: SessionSpec["kind"], pando: ToolRegistration[]): ToolRegistration[] {
+/** The sandbox tools and the Pando tools a session of this kind gets; `startBranch` is the chat's way to a task's tools. */
+export function toolsFor(kind: SessionSpec["kind"], pando: ToolRegistration[], working: boolean, startBranch: ToolRegistration): ToolRegistration[] {
   if (kind === "review") return [createReadTool(), createBashTool(), ...pando.filter((t) => !NOT_IN_A_REVIEW.has(t.name))];
+
+  if (kind === "chat" && !working) return [...pando.filter((t) => READING.has(t.name)), startBranch];
 
   return [createReadTool(), createBashTool(), createEditTool(), createWriteTool(), ...pando];
 }

@@ -9,7 +9,8 @@
 // secret (never inside the container), the transcript and the status.
 
 import { DurableObject } from "cloudflare:workers";
-import { createRegistry, Harness } from "@earendil-works/pi-durable";
+import { Type } from "@earendil-works/pi-ai";
+import { createRegistry, defineTool, Harness, type ToolRegistration } from "@earendil-works/pi-durable";
 import { PiHarness, type PiOperationResult } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { ContainerEnv } from "./container-env";
@@ -19,7 +20,7 @@ import { preamble, toolsFor, type PublicSpec } from "./kinds";
 import { LiveSockets } from "./live";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
 import { PandoApi, pandoTools } from "./pando-tools";
-import { Sandbox } from "./sandbox";
+import { Sandbox, worktreeDir } from "./sandbox";
 import type { SessionSpec, SessionState, Status, TranscriptMessage } from "./protocol";
 import { projectEntries } from "./transcript";
 
@@ -50,10 +51,11 @@ export class AgentSession extends DurableObject<Env> {
           registry: this.registry,
           // A model that is rate-limited gets about 30 s to recover: 1, 2, 4, 8, 16 s.
           settings: { retry: { enabled: true, maxRetries: 5, baseDelayMs: 1000 } },
-          env: async () => {
-            const ws = await this.sandbox.workspace();
+          // The sandbox starts on the first operation that needs it (container-env.ts).
+          env: () => {
+            const spec = this.#spec();
 
-            return new ContainerEnv(this.sandbox, `container:${this.ctx.id.toString()}`, ws.dir);
+            return new ContainerEnv(this.sandbox, `container:${this.ctx.id.toString()}`, worktreeDir(spec.repo.path, spec.branch));
           },
           onReport: (error) => console.warn("pi report", error),
         },
@@ -167,16 +169,39 @@ export class AgentSession extends DurableObject<Env> {
 
   #installed = false;
 
-  /** The system prompt and the tools; once per isolate. */
+  /** The system prompt and the tools; once per isolate, and again when a chat starts its branch. */
   #install(spec: SessionSpec): void {
     if (this.#installed) return;
     this.#installed = true;
+    this.#installTools(spec);
+  }
+
+  #installTools(spec: SessionSpec): void {
     const pub: PublicSpec = { ...spec, credential: { id: spec.credential.id, name: spec.credential.name } };
     const api = new PandoApi(this.env.PANDO, () => this.#spec());
+    const working = this.ctx.storage.kv.get<boolean>("chat.branch") === true;
+    const tools = toolsFor(spec.kind, pandoTools(api, () => this.#spec()), working, this.#startBranch());
 
-    const tools = toolsFor(spec.kind, pandoTools(api, () => this.#spec()));
+    // Installing under the same name replaces the extension; Pi reads the registry at each model call.
+    this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub, working), tag: false }], tools });
+  }
 
-    this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub), tag: false }], tools });
+  /** The chat's start_branch: from its next step it has a task's tools on its own branch. */
+  #startBranch(): ToolRegistration {
+    return defineTool({
+      name: "start_branch",
+      description: "Start making a change the person asked for: gives you a Linux sandbox on your own branch with bash, read, write and edit, and merge. Call it once, before your first change.",
+      parameters: Type.Object({}),
+      replay: "safe",
+      execute: async () => {
+        const spec = this.#spec();
+
+        this.ctx.storage.kv.put("chat.branch", true);
+        this.#installTools(spec);
+
+        return { content: [{ type: "text", text: `Your branch is ${spec.branch}, made off main on your first command in the sandbox. Commit and push there, then merge it.` }] };
+      },
+    });
   }
 
   #gateway(): Fetcher {

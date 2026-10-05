@@ -1,5 +1,6 @@
 // Agent session routes, members only, under /v1/monorepos/{owner}/{name}:
-//   GET   /agents                     the repository's sessions, newest first (?before, ?limit, ?issue)
+//   GET   /agents                     the repository's sessions, newest first (?before, ?limit, ?issue); not the assistant's chats
+//   GET   /assistant, POST /assistant the caller's own chats with the repository assistant (assistant.ts)
 //   POST  /issues/{n}/agent           "Address with agent" (issue.ts)
 //   POST  /agents/review              "Review with agent" on a branch (review.ts)
 //   POST  /agents                     launch one: {prompt, repo?, branch?, model?}
@@ -75,6 +76,15 @@ function agentsOf(c: C): NonNullable<Env["AGENTS"]> {
   if (!a) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
 
   return a;
+}
+
+/** Session n as the caller may see it: the assistant's chats are their person's alone (404 for anyone else). */
+async function sessionOf(c: C, n: number): Promise<AgentView> {
+  const s = unwrap(await c.get("stub").agentGet(n));
+
+  if (s.kind === "chat" && s.launched_by !== c.get("identity").login) throw new HttpError(404, "not_found", `no agent session ${n}`);
+
+  return s;
 }
 
 /** The session's state, recorded as failed with this reason. */
@@ -170,12 +180,12 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     return c.json((await launch(c, input)) satisfies typeof Contract.AgentSession.Encoded, 201);
   });
 
-  api.get(one, async (c) => c.json(unwrap(await c.get("stub").agentGet(numberOf(c))) satisfies typeof Contract.AgentSession.Encoded));
+  api.get(one, async (c) => c.json((await sessionOf(c, numberOf(c))) satisfies typeof Contract.AgentSession.Encoded));
 
   api.get(`${one}/transcript`, async (c) => {
     const n = numberOf(c);
 
-    unwrap(await c.get("stub").agentGet(n));
+    await sessionOf(c, n);
 
     return c.json({ messages: await agentsOf(c).transcript(c.get("m"), n) } satisfies typeof Contract.AgentTranscript.Encoded);
   });
@@ -184,14 +194,14 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     const n = numberOf(c);
 
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") throw new HttpError(426, "upgrade_required", "open this with a WebSocket");
-    unwrap(await c.get("stub").agentGet(n));
+    await sessionOf(c, n);
 
     return agentsOf(c).fetch(new Request(`http://pando-agents/live/${encodeURIComponent(c.get("m"))}/${n}`, c.req.raw));
   });
 
   api.post(`${one}/messages`, async (c) => {
     const n = numberOf(c);
-    const s = unwrap(await c.get("stub").agentGet(n));
+    const s = await sessionOf(c, n);
 
     if (s.launched_by !== c.get("identity").login) throw new HttpError(403, "not_launcher", `only ${s.launched_by}, who started it, can send it messages`);
     const prompt = promptOf((await bodyOf(c)).prompt);
@@ -202,7 +212,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
 
   api.post(`${one}/stop`, async (c) => {
     const n = numberOf(c);
-    const s = unwrap(await c.get("stub").agentGet(n));
+    const s = await sessionOf(c, n);
     const who = c.get("identity");
 
     if (s.launched_by !== who.login && who.role !== "owner") throw new HttpError(403, "not_launcher", `only ${s.launched_by}, who started it, or an owner can stop it`);

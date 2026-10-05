@@ -114,7 +114,7 @@ export class AgentStore {
   create(input: AgentInput, login: string): AgentView {
     const number = (this.sql.exec<{ n: number | null }>("SELECT MAX(number) AS n FROM agent_sessions").one().n ?? 0) + 1;
     const at = now();
-    const branch = input.branch ?? `agent/${number}`;
+    const branch = input.branch ?? (input.kind === "chat" ? `assistant/${number}` : `agent/${number}`);
 
     this.sql.exec(
       "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)",
@@ -137,14 +137,25 @@ export class AgentStore {
     return view(this.must(number));
   }
 
-  /** Newest first; `before` a number to page back; `issue` only the sessions addressing it. */
-  list(before: number | null, limit: number, issue: number | null): AgentPage {
-    const rows = this.sql
-      .exec<AgentRow & Record<string, SqlStorageValue>>(
-        "SELECT * FROM agent_sessions WHERE number < ? AND (? IS NULL OR issue = ?) ORDER BY number DESC LIMIT ?",
-        before ?? Number.MAX_SAFE_INTEGER, issue, issue, limit + 1,
-      )
-      .toArray();
+  /**
+   * Newest first; `before` a number to page back. The Agents tab's list
+   * (`chatsOf` null) leaves out the assistant's chats, optionally only the
+   * sessions addressing `issue`; `chatsOf` a login lists that person's chats.
+   */
+  list(before: number | null, limit: number, issue: number | null, chatsOf: string | null = null): AgentPage {
+    const from = before ?? Number.MAX_SAFE_INTEGER;
+
+    const rows = (
+      chatsOf === null
+        ? this.sql.exec<AgentRow & Record<string, SqlStorageValue>>(
+            "SELECT * FROM agent_sessions WHERE number < ? AND kind != 'chat' AND (? IS NULL OR issue = ?) ORDER BY number DESC LIMIT ?",
+            from, issue, issue, limit + 1,
+          )
+        : this.sql.exec<AgentRow & Record<string, SqlStorageValue>>(
+            "SELECT * FROM agent_sessions WHERE number < ? AND kind = 'chat' AND launched_by = ? ORDER BY number DESC LIMIT ?",
+            from, chatsOf, limit + 1,
+          )
+    ).toArray();
 
     const more = rows.length > limit;
     const page = rows.slice(0, limit);

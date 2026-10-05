@@ -1185,8 +1185,8 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.agents.get(number));
   }
 
-  agentList(before: number | null, limit: number, issue: number | null) {
-    return this.guard(() => this.agents.list(before, limit, issue));
+  agentList(before: number | null, limit: number, issue: number | null, chatsOf: string | null = null) {
+    return this.guard(() => this.agents.list(before, limit, issue, chatsOf));
   }
 
   agentReport(state: SessionState) {

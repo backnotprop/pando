@@ -1736,6 +1736,43 @@ paths:
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/assistant:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listChats
+      summary: The caller's own chats with the repository assistant, newest first
+      tags: [agents]
+      parameters:
+        - { name: before, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
+    post:
+      operationId: newChat
+      summary: A new chat with the repository assistant
+      description: |
+        One session (kind chat) per conversation, per person. It answers from
+        Pando's read tools with the caller's access and no sandbox; asked for
+        a change, it starts its own branch `assistant/<n>` and works as a task
+        does. A chat is its person's alone: not in GET .../agents, and 404 to
+        anyone else. Follow-ups, the transcript, the socket and Stop are the
+        agents routes'.
+      tags: [agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, maxLength: 65536 }
+                repo: { type: string }
+                model: { type: string }
+      responses:
+        "201": { description: Started, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
   /v1/monorepos/{owner}/{monorepo}/agents/review:
     parameters:
       - $ref: "#/components/parameters/owner"

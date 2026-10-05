@@ -5084,12 +5084,13 @@ components:
           items: { type: object, required: [sha, sessions, model], properties: { sha: { type: string }, sessions: { type: array, items: { type: integer } }, model: { type: [string, "null"] } } }
     SessionDeleted:
       type: object
-      required: [id, state, deleted_by, deleted_at]
+      required: [id, state, deleted_by, deleted_at, commits]
       properties:
         id: { type: string }
         state: { type: string, enum: [deleted] }
         deleted_by: { type: string }
         deleted_at: { type: string, format: date-time }
+        commits: { type: array, description: "The commits that name it; their lines stay in git.", items: { $ref: "#/components/schemas/SessionCommit" } }
     SessionList:
       type: object
       required: [sessions, next_cursor]

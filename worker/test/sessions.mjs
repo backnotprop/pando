@@ -277,7 +277,7 @@ try {
   check("ana deletes her own at once", r.status === 200 && r.json?.state === "deleted", `${r.status}`);
   r = await call("GET", piPath, B);
   record("session-deleted.json", "SessionAny", "GET .../sessions/{id} (deleted: its stub)", r.status, r.json);
-  check("what stays is who deleted it and when, nothing else", r.status === 200 && Object.keys(r.json ?? {}).sort().join() === "deleted_at,deleted_by,id,state", Object.keys(r.json ?? {}).join());
+  check("what stays is who deleted it and when, nothing else", r.status === 200 && Object.keys(r.json ?? {}).sort().join() === "commits,deleted_at,deleted_by,id,state", Object.keys(r.json ?? {}).join());
   r = await call("GET", `${piPath}/entries`, A);
   check("its conversation is gone (410)", r.status === 410, `${r.status}`);
   r = await piece(piPath, A, piStart, 0, cut, first);

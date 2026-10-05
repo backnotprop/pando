@@ -29,6 +29,8 @@ export const SessionCommit = Schema.Struct({
   model: Schema.NullOr(Schema.String),
 });
 
+export interface SessionCommit extends Schema.Schema.Type<typeof SessionCommit> {}
+
 /**
  * A recorded session. `state` is active while it has a record from the last 30 minutes. `repo` and `branch` are where
  * it ran (both null: the repository's own folder). `end` is where the next piece starts, in the sender's own cursor.
@@ -69,6 +71,8 @@ export const SessionDeleted = Schema.Struct({
   state: Schema.Literal("deleted"),
   deleted_by: Schema.String,
   deleted_at: Timestamp,
+  /** The commits that name it: their lines stay in git. */
+  commits: Schema.Array(SessionCommit),
 });
 
 /** GET .../sessions/{id}: a session, or its stub. */

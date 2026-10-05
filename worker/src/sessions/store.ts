@@ -152,6 +152,8 @@ export interface DeletedView {
   state: "deleted";
   deleted_by: string;
   deleted_at: string;
+  /** The commits that name it: git keeps their lines (no model: it went with the session). */
+  commits: SessionCommit[];
 }
 
 export interface PieceRow {
@@ -398,7 +400,7 @@ export class SessionStore {
   }
 
   private view(s: SessionRow): SessionView | DeletedView {
-    if (s.deleted_at) return { id: s.id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at };
+    if (s.deleted_at) return { id: s.id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at, commits: this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r)) };
     const active = s.last_at !== null && Date.now() - Date.parse(s.last_at) < ACTIVE_MS;
     const commits = this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r));
     const first = commits.find((c) => c.branch !== null);
@@ -553,7 +555,11 @@ export class SessionStore {
 
     if (!s) throw new HttpError(404, "not_found", `no session ${id}`);
 
-    if (s.deleted_at) return { id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at };
+    if (s.deleted_at) {
+      // SAFETY: view() answers a DeletedView for a row with deleted_at.
+      return this.view(s) as DeletedView;
+    }
+
     this.mayChange(s, login, owner);
     const t = now();
 
@@ -563,7 +569,7 @@ export class SessionStore {
        last_at = NULL, model = NULL, prompts = 0, tool_calls = 0, images = 0, redactions = 0, bytes = 0, deleted_by = ?, deleted_at = ? WHERE id = ?`,
       login, t, id,
     );
-    const view: DeletedView = { id, state: "deleted", deleted_by: login, deleted_at: t };
+    const view: DeletedView = { id, state: "deleted", deleted_by: login, deleted_at: t, commits: this.commitRows("c.session = ?", id).map((r) => this.commitOf(r)) };
     this.hooks.publish({ kind: "session.deleted", collection: "sessions", key: id, op: "delete", repo: s.repo, actor: login, machine: null, agent: null, row: view, topics: ["sessions", `session:${id}`] });
 
     return view;

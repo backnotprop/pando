@@ -175,6 +175,7 @@ test("agents: shots of the built screens for the owner's look", async ({ page, b
 
       await open(page, `/${FULL}/issues/2`, theme);
       await shot(page, `issue-${at}.png`, `An issue with Address with agent and its Agents block, ${at}`);
+
       // The issue's header buttons (Edit, New issue, Address with agent) are not shown on a phone.
       if (width === 1440) {
         await open(page, `/${FULL}/issues/3`, theme);

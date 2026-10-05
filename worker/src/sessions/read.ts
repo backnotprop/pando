@@ -208,3 +208,12 @@ export async function sessionFiles(env: Env, monorepoId: string, id: string): Pr
 
   return { files: [...out.values()].sort((a, b) => a.repo_path.localeCompare(b.repo_path) || a.path.localeCompare(b.path)) };
 }
+
+/** Delete many at once (Settings): the index first, then each session's pieces from R2. */
+export async function deleteSessions(env: Env, monorepoId: string, login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null): Promise<{ deleted: number }> {
+  const ids = unwrap(await monorepoStub(env, monorepoId).sessionDeleteMany(login, owner, everyone, repo, before));
+
+  for (const id of ids) await deletePrefix(env.BLOBS, piecePrefix(monorepoId, id));
+
+  return { deleted: ids.length };
+}

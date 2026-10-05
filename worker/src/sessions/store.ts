@@ -569,6 +569,37 @@ export class SessionStore {
     return view;
   }
 
+  /**
+   * Delete many at once (Settings): the caller's own, or with `everyone` (an owner only) everybody's, in one project
+   * (its repo's name; null: anywhere) whose last record is older than `before` (null: any age). Each as `delete` does.
+   */
+  deleteMany(login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null): string[] {
+    if (everyone && !owner) throw new HttpError(403, "owner_only", "only an owner can delete everyone's sessions");
+    const where = ["deleted_at IS NULL"];
+    const args: SqlStorageValue[] = [];
+
+    if (!everyone) {
+      where.push("person = ?");
+      args.push(login);
+    }
+
+    if (repo !== null) {
+      where.push("repo = ?");
+      args.push(repo);
+    }
+
+    if (before !== null) {
+      where.push("last_at < ?");
+      args.push(before);
+    }
+
+    const ids = this.rows<{ id: string }>(`SELECT id FROM sessions WHERE ${where.join(" AND ")}`, ...args).map((r) => r.id);
+
+    for (const id of ids) this.delete(id, login, owner);
+
+    return ids;
+  }
+
   /** Check a turn may be removed by this person; its prompt must exist and not be removed already. */
   mayRemove(id: string, prompt: number, login: string, owner: boolean): void {
     const s = this.session(id);

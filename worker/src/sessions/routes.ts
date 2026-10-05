@@ -6,6 +6,7 @@
 //   GET    /sessions/{id}/entries?from=       a page of its conversation, parsed on read
 //   GET    /sessions/{id}/files               the files its commits changed (each against its first parent)
 //   DELETE /sessions/{id}                     at once and for good: its person or an owner
+//   DELETE /sessions?repo=&older_than_days=&everyone=1   many at once: yours, or everyone's (owners)
 //   DELETE /sessions/{id}/prompts/{n}         remove prompt n's turn, leaving a mark: its person or an owner
 //   POST   /sessions/{id}/reindex             rebuild its numbers from the stored pieces
 import type { Context, Hono } from "hono";
@@ -17,7 +18,7 @@ import { isOneOf, isRecord, isText, parseJson, type Json } from "../parse";
 import { appendPiece, unwrap } from "./append";
 import { PROGRAMS, SESSION_ID_RE } from "./ids";
 import { pieceText } from "./pieces";
-import { deleteSession, readEntries, reindex, removeTurn, sessionFiles } from "./read";
+import { deleteSession, deleteSessions, readEntries, reindex, removeTurn, sessionFiles } from "./read";
 import { LIST_MAX, type SessionFilters, type SessionStart } from "./store";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
@@ -91,6 +92,17 @@ export function sessionRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>):
     const view = await appendPiece(c.env, c.get("m"), { login: who.login, machine: who.credential_name }, { session: id, at, next, start, lines });
 
     return c.json(view satisfies typeof Contract.Session.Encoded);
+  });
+
+  api.delete(base, async (c) => {
+    const who = c.get("identity");
+    const days = c.req.query("older_than_days");
+    const n = days === undefined ? null : Number(days);
+
+    if (n !== null && (!Number.isInteger(n) || n < 0 || n > 3650)) bad("older_than_days: 0 to 3650");
+    const before = n === null ? null : new Date(Date.now() - n * 86_400_000).toISOString();
+
+    return c.json((await deleteSessions(c.env, c.get("m"), who.login, who.role === "owner", c.req.query("everyone") === "1", c.req.query("repo") ?? null, before)) satisfies typeof Contract.SessionsDeleted.Encoded);
   });
 
   api.get(base, async (c) => c.json(unwrap(await c.get("stub").sessionList(filtersOf(c))) satisfies typeof Contract.SessionList.Encoded));

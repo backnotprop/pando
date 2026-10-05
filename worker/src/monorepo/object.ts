@@ -1292,6 +1292,10 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.sessions.removals(id));
   }
 
+  sessionDeleteMany(login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null) {
+    return this.guard(() => this.sessions.deleteMany(login, owner, everyone, repo, before));
+  }
+
   sessionDelete(id: string, login: string, owner: boolean) {
     return this.guard(() => this.sessions.delete(id, login, owner));
   }

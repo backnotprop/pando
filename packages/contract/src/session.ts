@@ -145,3 +145,6 @@ export const SessionMark = Schema.Struct({ date: Schema.String, program: Session
 
 /** GET /v1/users/{login}/session-marks?tz=: the profile graph's agent marks, by day and by week, in the viewer's zone. */
 export const SessionMarks = Schema.Struct({ days: Schema.Array(SessionMark), weeks: Schema.Array(SessionMark) });
+
+/** DELETE .../sessions?repo=&older_than_days=&everyone=1: how many were deleted, at once and for good. */
+export const SessionsDeleted = Schema.Struct({ deleted: Count });

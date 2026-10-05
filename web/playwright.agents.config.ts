@@ -12,7 +12,8 @@ const state = "../web/e2e/.state/wrangler-agents";
 
 export default defineConfig({
   testDir: "e2e",
-  testMatch: /\/e2e\/agents[^/]*\.spec\.ts$/,
+  // PANDO_AGENTS_SHOTS=1: the shots for the owner's look (e2e/shots-agents.spec.ts) instead of the tests.
+  testMatch: process.env.PANDO_AGENTS_SHOTS === "1" ? /\/e2e\/shots-agents\.spec\.ts$/ : /\/e2e\/agents[^/]*\.spec\.ts$/,
   timeout: 300_000,
   expect: { timeout: 30_000 },
   workers: 1,

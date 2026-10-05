@@ -7,7 +7,7 @@
       {
         "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
         "state": "active",
-        "person": "se-a-muvk5b0u",
+        "person": "se-a-muvmwuem",
         "machine": "ana-mbp",
         "program": "pi",
         "models": [
@@ -20,8 +20,8 @@
         "branch": "fix-login",
         "parent": null,
         "subagents": 0,
-        "started_at": "2026-10-05T18:01:46.244Z",
-        "last_at": "2026-10-06T13:09:54.338Z",
+        "started_at": "2026-10-05T19:19:10.099Z",
+        "last_at": "2026-10-06T14:27:18.193Z",
         "prompts": 4595,
         "tool_calls": 2297,
         "images": 0,
@@ -39,7 +39,7 @@
       {
         "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
         "state": "inactive",
-        "person": "se-b-muvk5b0u",
+        "person": "se-b-muvmwuem",
         "machine": "bo-mbp",
         "program": "opencode",
         "models": [
@@ -52,8 +52,8 @@
         "branch": null,
         "parent": null,
         "subagents": 0,
-        "started_at": "2026-10-05T17:17:49.011Z",
-        "last_at": "2026-10-05T17:17:55.070Z",
+        "started_at": "2026-10-05T18:35:12.890Z",
+        "last_at": "2026-10-05T18:35:18.949Z",
         "prompts": 2,
         "tool_calls": 2,
         "images": 0,

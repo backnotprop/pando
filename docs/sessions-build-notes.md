@@ -371,6 +371,16 @@ decisions relayed 2026-10-05.
   `WORKOS_API_KEY` values (any random ones; this worktree has them). The shots go to
   `research/design/pando-ui-2026-10-03/sessions/built/` with its INDEX.html.
 
+## A session's commits: order and model (pando-ops' gate, 2026-10-05)
+
+A gate run failed "the session lists its commits ... not on main yet" once: the Pi commit and the amended commit were
+made in the same second, and the list sorted by committer time then sha, so the random sha decided. And the session's
+own list showed the amended commit's model from its own session, while the branch showed none (the other session
+disagreed). Now `commitRows` (store.ts) holds both rules for every view: oldest first by committer time, then the
+branch's own order (`ord`, 0 the newest), then sha; and a commit's model only when every session naming it had the same
+one. sessions-cli.mjs makes the three commits in one second (GIT_COMMITTER_DATE) so the tie happens every run, and checks
+the order and that neither session's own list shows a model for the commit they disagree on.
+
 ## Stage 5: docs, limits, fixtures
 
 - User docs: `site/docs/src/content/docs/sessions.mdx` (Agent sessions), a sessions part in `privacy.mdx` and

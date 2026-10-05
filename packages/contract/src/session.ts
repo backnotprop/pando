@@ -18,7 +18,10 @@ export const SessionModel = Schema.Struct({ model: Schema.String, answers: Count
 /** A removed turn's mark: its prompt number, who removed it, when. */
 export const SessionRemoved = Schema.Struct({ prompt: Count, by: Schema.String, at: Timestamp });
 
-/** One of a session's commits: where it is, and the model in force in the session when it was committed (null: unknown). */
+/**
+ * One of a session's commits: where it is, and the model in force in the session when it was committed. Null when that
+ * is unknown, or when the sessions naming the commit disagree: the same in every view.
+ */
 export const SessionCommit = Schema.Struct({
   repo: RepoName,
   sha: Sha,
@@ -55,7 +58,10 @@ export const Session = Schema.Struct({
   bytes: Count,
   end: Count,
   removed: Schema.Array(SessionRemoved),
-  /** Its pushed commits, oldest first (at most 500): those whose message has its Pando-Session line. */
+  /**
+   * Its pushed commits (at most 500), those whose message has its Pando-Session line: oldest first by committer time;
+   * within one second, the branch's own order, then sha.
+   */
   commits: Schema.Array(SessionCommit),
   /** The branch its row leads with: its earliest commit's branch, else where it ran (both null: the repository folder). */
   lead: Schema.Struct({ repo: Schema.NullOr(RepoName), branch: Schema.NullOr(Schema.String) }),

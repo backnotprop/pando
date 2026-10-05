@@ -5,7 +5,7 @@
   "body": {
     "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
     "state": "active",
-    "person": "se-a-muvk5b0u",
+    "person": "se-a-muvmwuem",
     "machine": "ana-mbp",
     "program": "pi",
     "models": [
@@ -18,8 +18,8 @@
     "branch": "fix-login",
     "parent": null,
     "subagents": 0,
-    "started_at": "2026-10-05T18:01:46.244Z",
-    "last_at": "2026-10-05T18:01:54.338Z",
+    "started_at": "2026-10-05T19:19:10.099Z",
+    "last_at": "2026-10-05T19:19:18.193Z",
     "prompts": 2,
     "tool_calls": 1,
     "images": 0,

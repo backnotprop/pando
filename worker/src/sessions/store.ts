@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS session_commits (
   title TEXT NOT NULL, committed_at TEXT NOT NULL, on_main INTEGER NOT NULL DEFAULT 0, gone INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (session, repo, sha));
 CREATE INDEX IF NOT EXISTS session_commits_branch ON session_commits (repo, branch);
+CREATE INDEX IF NOT EXISTS session_commits_sha ON session_commits (repo, sha);
 CREATE TABLE IF NOT EXISTS session_removals (
   session TEXT NOT NULL, prompt INTEGER NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL,
   PRIMARY KEY (session, prompt))
@@ -295,6 +296,10 @@ export interface StoreHooks {
 function gone(id: string): never {
   throw new HttpError(410, "session_deleted", `session ${id} was deleted; nothing more is recorded for it`);
 }
+
+/** The model in force in a commit row's session at its commit's time, as SQL over the row's alias. */
+const modelAt = (alias: string) =>
+  `(SELECT m.model FROM session_model_changes m WHERE m.session = ${alias}.session AND m.at <= ${alias}.committed_at ORDER BY m.at DESC LIMIT 1)`;
 
 export class SessionStore {
   constructor(
@@ -690,12 +695,19 @@ export class SessionStore {
     return view;
   }
 
-  /** Commit rows with the model in force at each commit's time (DETERMINISM.md row 22): the last change at or before it. */
+  /**
+   * Commit rows, oldest first: by committer time, then (git's times are whole seconds) the branch's own order, then sha.
+   * Each with its model (DETERMINISM.md row 22): the model in force in its session when it was committed, the last change
+   * at or before it, and only when every session naming the commit had that same model. Sessions that disagree, or one
+   * whose model is not known (deleted, or none recorded yet), leave it with none, in every view.
+   */
   private commitRows(where: string, ...args: SqlStorageValue[]): CommitRow[] {
     return this.rows<CommitRow>(
       `SELECT c.session, c.repo, c.sha, c.line, c.branch, c.ord, c.title, c.committed_at, c.on_main,
-              (SELECT m.model FROM session_model_changes m WHERE m.session = c.session AND m.at <= c.committed_at ORDER BY m.at DESC LIMIT 1) AS model
-       FROM session_commits c WHERE ${where} AND (c.gone = 0 OR c.on_main = 1) ORDER BY c.committed_at, c.sha LIMIT 500`,
+              CASE WHEN EXISTS (SELECT 1 FROM session_commits o WHERE o.repo = c.repo AND o.sha = c.sha AND o.session != c.session
+                                AND (o.gone = 0 OR o.on_main = 1) AND ${modelAt("o")} IS NOT ${modelAt("c")})
+                   THEN NULL ELSE ${modelAt("c")} END AS model
+       FROM session_commits c WHERE ${where} AND (c.gone = 0 OR c.on_main = 1) ORDER BY c.committed_at, COALESCE(c.ord, -1) DESC, c.sha LIMIT 500`,
       ...args,
     );
   }
@@ -795,10 +807,9 @@ export class SessionStore {
       .sort((a, b) => (a[1][0].ord ?? 0) - (b[1][0].ord ?? 0))
       .map(([sha, list]) => {
         const lines = [...list].sort((a, b) => a.line - b.line);
-        const models = new Set(lines.map((r) => r.model));
 
-        // No model when its sessions disagree or one is not known: nothing shown rests on a guess.
-        return { sha, sessions: lines.map((r) => numbers.get(r.session) ?? 0), model: models.size === 1 ? lines[0].model : null };
+        // Every row of a commit carries the same model, none when its sessions disagree (commitRows).
+        return { sha, sessions: lines.map((r) => numbers.get(r.session) ?? 0), model: lines[0].model };
       });
 
     return { sessions, commits };

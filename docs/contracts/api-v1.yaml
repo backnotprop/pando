@@ -5052,7 +5052,7 @@ components:
           items: { type: object, required: [prompt, by, at], properties: { prompt: { type: integer }, by: { type: string }, at: { type: string, format: date-time } } }
         commits:
           type: array
-          description: Its pushed commits, oldest first, at most 500.
+          description: "Its pushed commits, oldest first by committer time; within one second, the branch's own order, then sha. At most 500."
           items: { $ref: "#/components/schemas/SessionCommit" }
     SessionCommit:
       type: object
@@ -5064,7 +5064,7 @@ components:
         title: { type: string }
         committed_at: { type: string, format: date-time }
         on_main: { type: boolean }
-        model: { type: [string, "null"], description: "The model in force in the session at the commit's time." }
+        model: { type: [string, "null"], description: "The model in force in the session at the commit's time; null when the sessions naming the commit disagree or one has none, the same in every view." }
     BranchSessions:
       type: object
       required: [sessions, commits]

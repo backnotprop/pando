@@ -362,15 +362,20 @@ sys.exit(os.waitstatus_to_exitcode(status))
   check("the machine reports recording on and the stores it reads", box?.recording === true && box.stores.some((s) => s.program === "pi" && s.found === "default") && box.stores.some((s) => s.program === "opencode"), JSON.stringify(box ?? {}).slice(0, 200));
 
   // ── Linking (stage 3): commits name sessions by their lines; pushed commits link, rewritten ones drop, merged ones reach main ──
-  const ocPlace = { OPENCODE_SESSION_ID: ocHead.id };
+  // The three commits share one second (git's times are whole seconds), so a session's list must order them by a rule
+  // (the branch's own order), never by arrival or sha.
+  const second = `@${Math.floor(Date.now() / 1000)} +0000`;
+  const sameSecond = { GIT_COMMITTER_DATE: second, GIT_AUTHOR_DATE: second };
+  const ocPlace = { OPENCODE_SESSION_ID: ocHead.id, ...sameSecond };
   write("c.txt", "pi\n");
   git(["add", "c.txt"], wt);
-  as("pi", { PI_SESSION_ID: piHead.id }, ["git", "commit", "-qm", "Placeholder: from the Pi session"], wt);
+  as("pi", { PI_SESSION_ID: piHead.id, ...sameSecond }, ["git", "commit", "-qm", "Placeholder: from the Pi session"], wt);
   const piOnly = git(["rev-parse", "HEAD"], wt).stdout.trim();
   write("d.txt", "both\n");
   git(["add", "d.txt"], wt);
-  as("pi", { PI_SESSION_ID: piHead.id }, ["git", "commit", "-qm", "Placeholder: from Pi, amended in OpenCode"], wt);
+  as("pi", { PI_SESSION_ID: piHead.id, ...sameSecond }, ["git", "commit", "-qm", "Placeholder: from Pi, amended in OpenCode"], wt);
   as("opencode", ocPlace, ["git", "commit", "-q", "--amend", "--no-edit"], wt);
+  check("the case: both commits in one second", git(["log", "-2", "--format=%ct"], wt).stdout.trim().split("\n").every((t, _, all) => t === all[0]), git(["log", "-2", "--format=%ct"], wt).stdout);
   check("a commit amended in a second session carries both lines, in order", lines().join() === [piId, ocId].join(), `${lines()}`);
   const push = (...extra) => git(["-c", `credential.helper=!'${bin}' credential`, "push", "-q", ...extra], wt);
   let pushed = push();
@@ -395,6 +400,9 @@ sys.exit(os.waitstatus_to_exitcode(status))
   check("the commit named by two sessions with different models: both numbers, no model (never a guess)", cBoth?.sessions.join() === [piOnBranch?.number, ocOnBranch?.number].join() && cBoth.model === null, JSON.stringify(cBoth));
   let pv = (await call("GET", `/v1/monorepos/${full}/sessions/${piId}`, S)).json;
   check("the session lists its commits with branch, title and model, not on main yet", pv?.commits?.length === 2 && pv.commits.every((c) => c.branch === "fix-login" && !c.on_main) && pv.commits[0].model === "gpt-5.5" && pv.commits[0].title === "Placeholder: from the Pi session", JSON.stringify(pv?.commits?.[0]));
+  check("in one second, a session's commits keep the branch's order: oldest first", pv?.commits?.map((c) => c.sha).join() === [piOnly, both].join(), pv?.commits?.map((c) => c.title).join(" | "));
+  const ocBefore = (await call("GET", `/v1/monorepos/${full}/sessions/${ocId}`, S)).json;
+  check("the commit two sessions disagree on shows no model in either session's own list, as on the branch", pv?.commits?.find((c) => c.sha === both)?.model === null && ocBefore?.commits?.find((c) => c.sha === both)?.model === null, JSON.stringify([pv?.commits?.find((c) => c.sha === both)?.model, ocBefore?.commits?.find((c) => c.sha === both)?.model]));
   r = await call("GET", `/v1/monorepos/${full}/sessions?repo=projects-app&branch=fix-login`, S);
   check("the branch's list holds the OpenCode session too: it ran in the repository folder, its commit is here", r.json?.sessions?.some((x) => x.id === ocId), `${r.json?.sessions?.length}`);
   // A rewrite: the last commit amended again and force-pushed; the old commit leaves the sessions.

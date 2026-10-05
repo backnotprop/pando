@@ -3,19 +3,33 @@
 // rarely. The server must run without the scripted model forced; launches
 // name no model, so they use the default.
 //
-//   agents/test/serve.sh start && node agents/test/real-model.mjs
+//   agents/test/serve.sh start && node agents/test/real-model.mjs            a task
+//   node agents/test/real-model.mjs --issue                                   Address with agent on an issue
 //
 // It prints the transcript in short, the tokens Workers AI counted, and their
 // price at the list prices ($0.15 per million input, $0.03 cached, $0.50
 // output, research/external/.../workers-ai/platform-pricing.md).
 
-import { call, check, done, makeRepo, say, scrub, sleep } from "./lib.mjs";
+import { call, check, done, makeRepo, say, scrub, sleep, untilClosed } from "./lib.mjs";
 
-const t = await makeRepo("agents-real", { "README.md": "# Real model\n\nThis repository has one file. Its last line has a spelling mistake: recieve.\n" });
+const ISSUE = process.argv.includes("--issue");
+
+const t = await makeRepo("agents-real", {
+  "README.md": "# Real model\n\nThis repository has two files. Its last line has a spelling mistake: recieve.\n",
+  "AGENTS.md": "Keep changes small. Commit messages are one short line.\n",
+});
 
 try {
-  const prompt = "README.md has a spelling mistake on its last line. Fix it, commit with a short message, push your branch, then merge it with the merge tool. Then say in one sentence what you did.";
-  let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt });
+  let r;
+
+  if (ISSUE) {
+    r = await call("POST", `/v1/monorepos/${t.full}/issues`, t.secret, { title: "A spelling mistake in the README", body: "The README's last line misspells a common word." });
+    r = await call("POST", `/v1/monorepos/${t.full}/issues/1/agent`, t.secret, {});
+  } else {
+    const prompt = "README.md has a spelling mistake on its last line. Fix it, commit with a short message, push your branch, then merge it with the merge tool. Then say in one sentence what you did.";
+    r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt });
+  }
+
   check("launched with the default model", r.status === 201 && r.json?.model === "@cf/zai-org/glm-5.3-flash", scrub(JSON.stringify(r.json)));
   const t0 = Date.now();
 
@@ -51,6 +65,14 @@ try {
 
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/files/README.md`, t.secret);
   check("main's README is fixed", /receive/.test(r.text) && !/recieve/.test(r.text), r.text);
+
+  if (ISSUE) {
+    r = await untilClosed(t, 1);
+    check("the issue is closed by the merge", r.json?.state === "closed", r.json?.state);
+    r = await call("GET", `/v1/monorepos/${t.full}/issues/1/timeline`, t.secret);
+    const report = r.json.items.find((x) => x.kind === "comment" && x.comment.machine === "cloud-1")?.comment.body;
+    check("the agent reported on the issue", !!report, report);
+  }
 } finally {
   const r = await call("DELETE", `/v1/monorepos/${t.full}?confirm=${t.full}`, t.secret);
   check(`cleanup: ${t.full} is deleted`, r.status === 204, r.status);

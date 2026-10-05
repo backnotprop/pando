@@ -1708,9 +1708,10 @@ paths:
       summary: Launch an agent session acting as the caller
       description: |
         Mints a sandbox credential for the caller named after the session
-        (`cloud-<n>`), records the session, and starts it with the prompt on a
-        new branch (`agent/<n>` unless `branch` names one). `repo` may be left
-        out in a plain repository. A session that cannot start is answered
+        (`cloud-<n>`), records the session, and starts it with the prompt on
+        the branch named: made off main when it is new, used as it is when it
+        exists. Pando never invents a name: without `branch`, 400
+        `branch_required`. `repo` may be left out in a plain repository. A session that cannot start is answered
         `failed` with its reason, and its credential is revoked.
       tags: [agents]
       requestBody:
@@ -1719,11 +1720,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [prompt]
+              required: [prompt, branch]
               properties:
                 prompt: { type: string, maxLength: 65536 }
                 repo: { type: string }
-                branch: { type: string }
+                branch: { type: string, description: "The branch's name, named for the change." }
                 model: { type: string, default: "@cf/zai-org/glm-5.3-flash" }
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
@@ -1738,8 +1739,9 @@ paths:
       operationId: addressIssueWithAgent
       summary: Address with agent
       description: |
-        Makes the branch `agent/<n>-<the title's words>` off main (a number
-        after it when that exists), titled as the issue and linked to it, so
+        Makes the branch `<n>-<the title's first words, up to 30 characters>`
+        (or `branch` when given) off main, or uses it as it is when it exists,
+        titled as the issue and linked to it, so
         merging it closes the issue; then launches a session acting as the
         caller, told the issue's title, body and comments and `prompt` when
         given. 409 `issue_closed` for a closed issue.
@@ -1753,6 +1755,7 @@ paths:
                 prompt: { type: string, maxLength: 65536 }
                 repo: { type: string }
                 model: { type: string }
+                branch: { type: string }
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "409": { $ref: "#/components/responses/Error" }
@@ -1821,6 +1824,20 @@ paths:
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/models:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: agentModels
+      summary: The models a session may use here
+      tags: [agents]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [models], properties: { models: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } } } }
   /v1/monorepos/{owner}/{monorepo}/agents/{n}:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -4989,7 +5006,7 @@ components:
         status: { type: string, enum: [working, waiting, failed, stopped] }
         reason: { type: [string, "null"] }
         repo: { type: string }
-        branch: { type: string }
+        branch: { type: [string, "null"], description: "Named by a person or from its issue; null for an assistant's chat until the person names one." }
         program: { type: string, description: "pi" }
         model: { type: string }
         issue: { type: [integer, "null"] }

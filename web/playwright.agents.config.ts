@@ -12,7 +12,7 @@ const state = "../web/e2e/.state/wrangler-agents";
 
 export default defineConfig({
   testDir: "e2e",
-  testMatch: /agents.*\.spec\.ts/,
+  testMatch: /\/e2e\/agents[^/]*\.spec\.ts$/,
   timeout: 300_000,
   expect: { timeout: 30_000 },
   workers: 1,

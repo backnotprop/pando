@@ -26,6 +26,12 @@ export const Route = createFileRoute("/settings/sessions")({
   component: SessionSettings,
 });
 
+/** Which of your sessions Delete sessions takes: a project (its repo's name), and an age. */
+interface DeleteWhich {
+  repo?: string;
+  olderThanDays?: number;
+}
+
 const AGES = [
   { days: undefined, label: "Any age" },
   { days: 7, label: "Older than 7 days" },
@@ -202,7 +208,7 @@ function DeleteSessions({ mine, me }: { mine: readonly MonorepoSummary[]; me: st
   const repos = useQuery({ ...reposQuery(ref), enabled: Boolean(picked && picked.kind === "monorepo") }).data ?? [];
   const repoName = repos.find((r) => r.path === project)?.name;
   const days = age ? Number(age) : undefined;
-  const which: { repo?: string; olderThanDays?: number } = {};
+  const which: DeleteWhich = {};
 
   if (repoName) which.repo = repoName;
 

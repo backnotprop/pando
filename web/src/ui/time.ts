@@ -61,6 +61,17 @@ export function ago(at: string | number, clock: number): string {
   return /\d (s|min|h|d|w)$/.test(t) ? `${t} ago` : t;
 }
 
+const clockTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** "Today, 14:20", "Yesterday, 17:48", "Oct 2, 09:15": when something started, as a list of them says it. */
+export function dayAndTime(at: string | number, clock: number): string {
+  const ms = new Date(at).getTime();
+  const days = Math.round((new Date(clock).setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / 86_400_000);
+  const when = days === 0 ? "Today" : days === 1 ? "Yesterday" : date.format(ms);
+
+  return `${when}, ${clockTime.format(ms)}`;
+}
+
 /** "Oct 3, 2026", for history's day groups. */
 export const day = (at: number) => dateYear.format(at);
 

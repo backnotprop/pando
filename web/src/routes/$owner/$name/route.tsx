@@ -5,6 +5,7 @@
 // (-frame/heads.tsx).
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, notFound, Outlet, redirect, useMatches } from "@tanstack/react-router";
+import { Assistant } from "./-agents/Assistant";
 import { useEffect, useState } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
@@ -140,7 +141,10 @@ function MonorepoFrame() {
           </p>
         </>
       ) : (
-        <Outlet />
+        <>
+          <Outlet />
+          <Assistant />
+        </>
       )}
     </Page>
   );

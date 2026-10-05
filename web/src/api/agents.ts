@@ -116,6 +116,37 @@ export function reviewBranch(m: MonorepoRef, r: ReviewAsk): Promise<AgentSession
   return write(Routes.reviewWithAgent(m.owner, m.name), Object.fromEntries(body));
 }
 
+/** The person's own chats with the assistant, newest first (its first page; the list is short). */
+export const chatsQuery = (m: MonorepoRef) =>
+  queryOptions({
+    queryKey: [...agentsKey(m), "chats"],
+    queryFn: () => {
+      const route = Routes.listChats(m.owner, m.name);
+
+      return get(route.response, route.path).then((r) => r.sessions);
+    },
+  });
+
+/** One session, as its page or the assistant's panel shows it. */
+export const agentQuery = (m: MonorepoRef, n: number) =>
+  queryOptions({
+    queryKey: [...agentsKey(m), "n", n],
+    queryFn: () => {
+      const route = Routes.getAgent(m.owner, m.name, n);
+
+      return get(route.response, route.path);
+    },
+  });
+
+/** A new chat with the assistant, starting with the person's first message. */
+export const newChat = (m: MonorepoRef, prompt: string): Promise<AgentSession> => write(Routes.newChat(m.owner, m.name), { prompt });
+
+/** A person's follow-up to a session (taken after the current step). */
+export const sendAgent = (m: MonorepoRef, n: number, prompt: string): Promise<AgentSession> => write(Routes.sendAgent(m.owner, m.name, n), { prompt });
+
+/** Stop a session: its run ends, its sandbox stops; the transcript stays. */
+export const stopAgent = (m: MonorepoRef, n: number): Promise<AgentSession> => write(Routes.stopAgent(m.owner, m.name, n), {});
+
 type ListData = InfiniteData<AgentSessionList, number>;
 
 /**

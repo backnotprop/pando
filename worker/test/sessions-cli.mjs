@@ -101,7 +101,7 @@ const bin = join(work, "pando");
 
 const pando = (args, o = {}) =>
   new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd: o.cwd ?? work, env: { ...process.env, ...SAFE, ...o.env } });
+    const child = spawn(o.exe ?? bin, args, { cwd: o.cwd ?? work, env: { ...process.env, ...SAFE, ...o.env } });
     const out = { status: null, stdout: "", stderr: "" };
     child.stdout.on("data", (d) => (out.stdout += d));
     child.stderr.on("data", (d) => (out.stderr += d));
@@ -162,6 +162,40 @@ try {
   check("the cli builds", built.status === 0, built.stderr?.slice(0, 200));
   let r = await pando(["login", "--server", URL_, "--with-credential"], { input: S + "\n" });
   check("pando login (piped: recording is not asked)", r.status === 0 && !/Record agent sessions/.test(r.stderr), said(r));
+  // At a terminal (a pty, from Python's pty module), login asks once; once answered, never again. The credential is
+  // typed only after pando turned echo off for it.
+  const PTY = `import os, pty, sys, select, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], sys.argv[1:])
+out, sent_secret, sent_answer = b"", False, False
+while True:
+    r, _, _ = select.select([fd], [], [], 20)
+    if not r: break
+    try: chunk = os.read(fd, 4096)
+    except OSError: break
+    if not chunk: break
+    out += chunk
+    if not sent_secret and b"(input hidden)" in out:
+        time.sleep(0.5)  # as a person: after pando turned echo off
+        os.write(fd, os.environ["PTY_SECRET"].encode() + b"\\n"); sent_secret = True
+    if not sent_answer and b"Record agent sessions" in out:
+        os.write(fd, os.environ["PTY_ANSWER"].encode() + b"\\n"); sent_answer = True
+_, status = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+sys.exit(os.waitstatus_to_exitcode(status))
+`;
+  const tty = { PANDO_HOME: join(work, "tty-home"), PTY_SECRET: S, PTY_ANSWER: "n" };
+  const term = () => pando(["-c", PTY, bin, "login", "--server", URL_, "--with-credential"], { env: tty, exe: "python3" });
+  let t = await term();
+  check("at a terminal, the first login asks whether to record", t.status === 0 && /Record agent sessions on this machine/.test(t.stdout), said(t));
+  check("the credential typed there is not echoed", !t.stdout.includes(S), "");
+  t = await term();
+  check("once answered (no), a later login at a terminal never asks again", t.status === 0 && /Signed in/.test(t.stdout) && !/Record agent sessions/.test(t.stdout), said(t));
+  check("the answer is kept: recording off", /record = false/.test(readFileSync(join(work, "tty-home", "sessions.toml"), "utf8")), "");
+
+  r = await pando(["login", "--server", URL_, "--with-credential"], { input: S + "\n" });
+  check("piped again (as an agent runs it): never asked", r.status === 0 && !/Record agent sessions/.test(r.stdout + r.stderr), said(r));
   r = await pando(["session", "status"]);
   check("recording is off until asked", r.status === 0 && /Recording: off \(never asked/.test(r.stdout), said(r));
   r = await pando(["session", "enable"]);

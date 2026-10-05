@@ -143,6 +143,12 @@ try {
   r = await call("GET", `/v1/monorepos?name=nothing-${id}`, B);
   check("?name= with no match is an empty list", r.status === 200 && r.json?.monorepos?.length === 0);
 
+  // ── reserved repository names: /{owner}/sessions is a person's sessions page ──
+  r = await call("POST", "/v1/monorepos", A, { name: "sessions" });
+  check("the reserved name sessions is refused as a repository", r.status === 400 && r.json?.error?.code === "reserved_name", `${r.status}`);
+  r = await call("PATCH", `/v1/monorepos/${ana}/${name}`, A, { name: "sessions" });
+  check("and as a rename", r.status === 400 && r.json?.error?.code === "reserved_name", `${r.status}`);
+
   // ── rename: the old name keeps working ──
   const renamed = `acme2-${id}`;
   r = await call("PATCH", `/v1/monorepos/${ana}/${name}`, B, { name: renamed });

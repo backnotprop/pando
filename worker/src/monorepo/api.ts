@@ -39,6 +39,7 @@ import {
   validMonorepoName,
   validNamespace,
   validRepoPath,
+  RESERVED_REPOSITORY_NAMES,
   ZERO,
 } from "./names";
 import type { MonorepoObject } from "./object";
@@ -329,6 +330,8 @@ users.post("/v1/monorepos", async (c) => {
   const name = isText(b.name) ? b.name.toLowerCase() : null;
 
   if (!validMonorepoName(name)) bad("name: letters, digits, '.', '_', '-'; starts with a letter or digit; no '--'; at most 39 characters");
+
+  if (RESERVED_REPOSITORY_NAMES.has(name)) throw new HttpError(400, "reserved_name", `${name} is reserved: /{owner}/${name} is one of Pando's own pages`);
   const kind = b.kind ?? "monorepo";
 
   if (kind !== "monorepo" && kind !== "repo") bad("kind is monorepo or repo");
@@ -473,6 +476,8 @@ api.patch("/v1/monorepos/:o/:m", async (c) => {
   const to = monorepoRef(b.owner === undefined ? info.owner : String(b.owner), b.name === undefined ? info.name : String(b.name));
 
   if (!to) bad("name: letters, digits, '.', '_', '-'; owner: a person's login or an organization");
+
+  if (to.name !== info.name && RESERVED_REPOSITORY_NAMES.has(to.name)) throw new HttpError(400, "reserved_name", `${to.name} is reserved: /{owner}/${to.name} is one of Pando's own pages`);
   // A transfer changes who has it through an org: everyone before and after gets a membership message.
   const moving = to.owner !== info.owner;
   const before = moving ? await acc.members(info.id) : [];

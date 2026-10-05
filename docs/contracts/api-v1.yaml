@@ -3872,7 +3872,7 @@ components:
     Name:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered."
+      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered. Reserved, because /{owner}/{name} would be one of Pando's own pages: sessions (a person's recorded agent sessions). Creating or renaming to one answers 400 `reserved_name`."
     Login:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"

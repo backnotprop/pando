@@ -1,20 +1,18 @@
 // The coding agents by their vendors' own marks (owner rulings, 2026-10-04; sources in marks/SOURCES.md), and their
 // names as a session row says them: "Claude Code, Opus 5.5 +1". Each mark is its unchanged SVG used as a mask, in
-// one colour: Claude's terracotta, the text colour for Codex and OpenCode; Pi is redrawn as its ten cells in its
-// own three colours, as Pi draws itself.
+// one colour: Claude's terracotta, the text colour for Codex. OpenCode's two shapes and Pi's ten cells are drawn from
+// their files as those draw them (OpenCode in the text colour, Pi in its own three colours).
 import claude from "./marks/claude.svg";
 import codex from "./marks/codex.svg";
 import custom from "./marks/customagent.svg";
-import opencode from "./marks/opencode.svg";
 
 export type Program = "claude-code" | "codex" | "pi" | "opencode";
 
 export const PROGRAM_NAME: Record<Program, string> = { "claude-code": "Claude Code", codex: "Codex", pi: "Pi", opencode: "OpenCode" };
 
-const MASK: Record<Exclude<Program, "pi">, { url: string; color: string }> = {
+const MASK: Record<"claude-code" | "codex", { url: string; color: string }> = {
   "claude-code": { url: claude, color: "#D97757" },
   codex: { url: codex, color: "currentColor" },
-  opencode: { url: opencode, color: "currentColor" },
 };
 
 /** Pi's cells on a 4 by 4 grid, by colour (pi-logo.ts). */
@@ -31,6 +29,17 @@ export function AgentMark({ program, size = 14, className = "" }: { program: Pro
     return (
       <svg role="img" aria-label={label} width={size} height={size} viewBox="0 0 4 4" className={`shrink-0 ${className}`}>
         {PI_CELLS.flatMap(([fill, cells]) => cells.map(([x, y]) => <rect key={`${x}${y}`} x={x} y={y} width={1} height={1} fill={fill} />))}
+      </svg>
+    );
+  }
+
+  // OpenCode's file draws through a mask of its own, which a CSS mask does not keep: its two shapes, drawn as the file
+  // draws them (marks/opencode.svg), in the text colour.
+  if (program === "opencode") {
+    return (
+      <svg role="img" aria-label={label} width={size} height={size} viewBox="0 0 240 300" fill="currentColor" className={`shrink-0 ${className}`}>
+        <path d="M180 240H60V120H180V240Z" opacity="0.25" />
+        <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" />
       </svg>
     );
   }

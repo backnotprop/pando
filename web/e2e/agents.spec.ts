@@ -106,6 +106,25 @@ test("agents, piece 1: the Agents tab, New agent on a new and an existing branch
     out = await lastTool(page, full, 2);
     expect(out).toContain("half-done\nstarted by Ann");
 
+    // ── A session's page: the conversation, live; the box for her; Stop ──
+    await row(page, 1).getByRole("link", { name: "Agent #1" }).click();
+    await expect(page).toHaveURL(`${BASE}/${full}/agents/1`);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("leave-a-note");
+    const log = page.getByRole("log", { name: "Conversation" });
+
+    await expect(log.locator("[data-prompt]").first()).toContainText("Leave a note.");
+    await log.getByRole("button", { name: /^Ran git branch --show-current/ }).click();
+    await expect(log).toContainText("pushed=0");
+    await page.getByRole("textbox", { name: "Message the agent" }).fill(["One more line.", tool("bash", { command: "echo second-run" })].join("\n"));
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(log.locator("[data-prompt]").last()).toContainText("One more line.", { timeout: 60_000 });
+    await expect(log.getByRole("button", { name: /^Ran echo second-run/ })).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+    await page.getByRole("button", { name: "Stop" }).click();
+    await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+    await expect(page.getByText("Stopped by", { exact: false }).first()).toBeVisible();
+    await page.goto(`${BASE}/${full}/agents`);
+
     // ── The bar's counts and filters ──
     const bar = page.getByRole("navigation", { name: "State" });
 

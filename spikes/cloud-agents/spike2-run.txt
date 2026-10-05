@@ -1,0 +1,64 @@
+PASS  bootstrap makes a person with a machine credential
+      201
+PASS  a plain repository
+      201 http://127.0.0.1:8863/cloudspike-muulid95/agents-muulid95.git
+PASS  main pushed from the Mac
+      remote: Processing objects: 100% (3/3)        
+      
+PASS  a sandbox credential named cloud-1
+      201
+PASS  the session holds the credential (in its Durable Object, not the sandbox)
+PASS  the agent clones through pando.internal, commits, and pushes a branch
+      2744 ms (first call includes the container start)
+      tool finished:
+      exit 0
+      remote: Processing objects: 100% (3/3)        
+      pushed=0
+      f666691 Fix the README typo
+      90bcdcd first
+      
+PASS  Pando lists the branch
+      {"default_branch":"main","default_head":"90bcdcdf73cf0ffdf130b40ea8cf34b3a69bb65c","branches":[{"name":"fix/12-readme-typo","head":"f6666915d653925be2301051b1dc9066e8dacf92","base":null,"author":"cloudspike-muulid95","title":null,"description":null,"ahead":null,"behind":null,"mergeable":"pending","c
+PASS  the Machines tab sees cloud-1
+      {"machines":[{"login":"cloudspike-muulid95","credential_id":"cred_a92f4fcd674715b6","name":"cloud-1","kind":"sandbox","connected":false,"connected_at":null,"last_activity":{"seq":3,"at":"2026-10-05T01:53:20.323Z","kind":"branch.opened","repo":"agents-muulid95","repo_path":".","branch":"fix/12-readme-typo","summary":{"head":"f6666915d653925be2301051b1dc9066e8dacf92","before":null,"commits":null,"he
+PASS  no credential anywhere in the sandbox's environment or git config
+      tool finished:
+      exit 0
+      0
+      end
+      
+PASS  the gateway refuses other repositories and the API; the sandbox has no internet
+      tool finished:
+      exit 0
+      fatal: unable to access 'http://pando.internal/someone-else/other.git/': The requested URL returned error: 403
+      403
+      000no-internet
+      
+PASS  a push to main is refused by Pando's door
+      tool finished:
+      exit 0
+       ! [remote rejected] HEAD -> main (main is protected; push a branch and merge it (pando merge))
+      error: failed to push some refs to 'http://pando.internal/cloudspike-muulid95/agents-muulid95.git'
+      rc=0
+      
+PASS  the container is destroyed
+PASS  recall: the model's context still holds the earlier prompts
+      I see 4 earlier prompts in my context: ["run: git clone -q http://pando.internal/cloudspike-muulid95/","run: cd /workspace/r && (env; git config --list; cat .git/co","run: git ls-remote http://pando.internal/someone-else/other.","run: cd /workspace/r && git push -q origin HEAD:main 2>&1 | "]
+PASS  recall: the workspace is restored by cloning the session's branch
+      707 ms (includes a fresh container start)
+      tool finished:
+      exit 0
+      f666691 Fix the README typo
+      90bcdcd first
+      1
+      
+PASS  after revoking cloud-1, the sandbox can no longer reach the repository
+      204
+      tool finished:
+      exit 0
+      fatal: could not read Username for 'http://pando.internal': terminal prompts disabled
+      
+PASS  cleanup: the repository agents-muulid95 (and its Artifacts repo) is deleted
+      204
+
+16 of 16 passed

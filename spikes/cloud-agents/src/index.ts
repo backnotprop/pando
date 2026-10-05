@@ -158,7 +158,7 @@ export class GitGateway extends WorkerEntrypoint<Env, { auth: string; monorepo: 
     const url = new URL(request.url);
     const { auth, monorepo } = this.ctx.props;
     const gitPath = /\/(info\/refs|git-upload-pack|git-receive-pack)$/.test(url.pathname);
-    if (url.hostname !== INTERNAL_HOST || !gitPath || !url.pathname.startsWith(`/${monorepo}/`)) {
+    if (url.hostname !== INTERNAL_HOST || !gitPath || !(url.pathname.startsWith(`/${monorepo}/`) || url.pathname.startsWith(`/${monorepo}.git/`))) {
       return new Response("refused by the session gateway\n", { status: 403 });
     }
     if (!this.env.PANDO) return new Response("no PANDO binding\n", { status: 502 });

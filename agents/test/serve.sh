@@ -2,7 +2,7 @@
 # Runs the agents' local server for the end-to-end suites: the test driver,
 # pando-agents and Pando's Worker in one wrangler dev, with its own state.
 #
-#   agents/test/serve.sh start | stop | restart
+#   agents/test/serve.sh start | start-alone | stop | restart
 #
 # Environment: AGENTS_PORT (8863), AGENTS_INSPECTOR (9363), AGENTS_STATE
 # (agents/.state), DOCKER_HOST (a Docker engine in a VM, for the containers
@@ -22,14 +22,19 @@ stop() {
   pkill -9 -f "$here/node_modules" 2>/dev/null || true
 }
 
+# start: the three together. start-alone: Pando's Worker by itself, without
+# pando-agents (as Pando's web e2e runs it), for absent.mjs.
 start() {
+  local configs=(-c test/driver/wrangler.jsonc -c wrangler.jsonc -c ../worker/wrangler.jsonc)
+
+  [ "${1:-}" = alone ] && configs=(-c ../worker/wrangler.jsonc)
   mkdir -p "$state"
   # The scripted model, for deterministic tests. Local only: .dev.vars is never deployed.
   grep -qs '^SCRIPTED_MODEL=1$' "$here/.dev.vars" || echo "SCRIPTED_MODEL=1" >> "$here/.dev.vars"
   (cd "$here/../worker" && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to "$state" >/dev/null)
   [ -d "$here/../web/dist" ] || { mkdir -p "$here/../web/dist" && echo '<!doctype html>' > "$here/../web/dist/index.html"; }
   cd "$here"
-  nohup "$here/node_modules/.bin/wrangler" dev -c test/driver/wrangler.jsonc -c wrangler.jsonc -c ../worker/wrangler.jsonc \
+  nohup "$here/node_modules/.bin/wrangler" dev "${configs[@]}" \
     --port "$port" --inspector-port "$inspector" --ip 127.0.0.1 --persist-to "$state" >"$log" 2>&1 &
   for _ in $(seq 1 200); do
     grep -q "Ready on" "$log" && { echo "agents: ready on http://127.0.0.1:$port (log $log)"; return 0; }
@@ -47,7 +52,8 @@ start() {
 
 case "${1:-}" in
   start) start ;;
+  start-alone) start alone ;;
   stop) stop ;;
   restart) stop; start ;;
-  *) echo "usage: $0 start | stop | restart" >&2; exit 2 ;;
+  *) echo "usage: $0 start | start-alone | stop | restart" >&2; exit 2 ;;
 esac

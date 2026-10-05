@@ -11,6 +11,7 @@
     "test:e2e": "node test/e2e.mjs"
   },
   "dependencies": {
+    "@letta-ai/trajectory": "0.4.3",
     "hono": "^4.13.12",
     "smol-toml": "^1.9.0"
   },

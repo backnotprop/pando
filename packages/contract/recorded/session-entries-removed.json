@@ -1,0 +1,58 @@
+{
+  "schema": "SessionEntries",
+  "route": "GET .../sessions/{id}/entries (a removed turn's mark)",
+  "status": 200,
+  "body": {
+    "entries": [
+      {
+        "id": "0.removed1",
+        "at": "2026-10-05T05:13:22.433Z",
+        "kind": "removed",
+        "text": null,
+        "prompt": 1,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": "se-a-muusno1y"
+      },
+      {
+        "prompt": 2,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-05T05:12:20.292Z",
+        "kind": "prompt",
+        "text": "Placeholder: reply with the single word ok.",
+        "id": "2003.0"
+      },
+      {
+        "prompt": null,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-05T05:12:21.660Z",
+        "kind": "answer",
+        "text": "ok",
+        "id": "2003.1"
+      },
+      {
+        "prompt": 3,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-05T05:12:20.292Z",
+        "kind": "prompt",
+        "text": "Placeholder with a token [pando:redacted]",
+        "id": "3663.0"
+      }
+    ],
+    "next_cursor": 3924
+  }
+}

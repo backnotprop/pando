@@ -1,0 +1,32 @@
+{
+  "schema": "Session",
+  "route": "POST .../sessions/{id}/pieces?at=&next= (gzip)",
+  "status": 200,
+  "body": {
+    "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+    "state": "active",
+    "person": "se-a-muusno1y",
+    "machine": "ana-mbp",
+    "program": "pi",
+    "models": [
+      {
+        "model": "gpt-5.5",
+        "answers": 3
+      }
+    ],
+    "repo": "projects-a",
+    "branch": "fix-login",
+    "parent": null,
+    "subagents": 0,
+    "started_at": "2026-10-05T05:12:13.566Z",
+    "last_at": "2026-10-05T05:12:21.660Z",
+    "prompts": 2,
+    "tool_calls": 1,
+    "images": 0,
+    "redactions": 0,
+    "bytes": 3663,
+    "end": 3663,
+    "removed": [],
+    "commits": []
+  }
+}

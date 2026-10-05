@@ -29,6 +29,20 @@ License. Source: https://github.com/shikijs/shiki
 The TextMate grammars it bundles carry their own licences, as Shiki ships
 them (https://github.com/shikijs/textmate-grammars-themes).
 
+This product bundles @letta-ai/trajectory 0.4.3, which reads coding agents'
+session files (Claude Code, Codex, Pi, OpenCode) into one record format in the
+Worker (worker/src/sessions/parse.ts), by Letta (letta-ai), licensed under
+the Apache License, Version 2.0 (its LICENSE names no other holder).
+Source: https://github.com/letta-ai/trajectory (version 0.4.3)
+
+The pando command line program includes betterleaks v1.8.1
+(https://github.com/betterleaks/betterleaks), copyright (c) 2026 Zachary
+Rice, licensed under the MIT License, to find secrets in agent sessions
+before they leave the machine (cli/internal/session/redact.go), and
+modernc.org/sqlite v1.56.0 (https://gitlab.com/cznic/sqlite), licensed under
+the BSD 3-Clause License, to read OpenCode's session database. Their own
+dependencies, listed in cli/go.mod, carry their own licences.
+
 The web app's Cloudflare theme (web/src/theme.css) takes its colour values
 from cloudflare-docs (https://github.com/cloudflare/cloudflare-docs,
 src/styles), copyright (c) 2021 Cloudflare, Inc., licensed under the MIT

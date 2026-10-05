@@ -252,6 +252,8 @@ export interface RefusalExtra {
   paths?: string[];
   /** A CI service's rate limit: when to try again. */
   retry_after_ms?: number;
+  /** 409 not_at_end: where the session ends, the cursor the sender resumes from (sessions/). */
+  end?: number;
   /** 409 edited: the issue or comment as it is now. */
   current?: IssueView | CommentView;
 }

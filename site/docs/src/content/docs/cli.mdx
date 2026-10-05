@@ -62,6 +62,11 @@ usage: pando <command> [args]
   pando machine list                                              machines that acted in the monorepo, and which are connected
   pando profile [<login>] [--json]                                a person's profile: their graph for the last year, by month
   pando activity [--monorepo <owner/name> | --all] [--limit n]    what happened, newest first
+  pando session enable | disable                                  record coding sessions on this machine, or stop
+  pando session status                                            what this machine records, from where, and what it skips
+  pando session paths [add <folder> --program <name> | remove <folder>]   where Claude Code, Codex, Pi or OpenCode keep sessions
+  pando session exclude | include [<owner/name>] [--project <path>]   a repository or project you do not record, on every machine
+  pando session delete <id> [--monorepo <owner/name>]             delete a session at once and for good
   pando api <path> [-X method] [-f k=v] [-F k=v] [--paginate]     any API call, signed as this machine (like gh api)
   pando sync [--once]                                             keep the monorepo's files outside projects/ live (the daemon)
   pando history <path> [--limit n] [--json]                       every saved version of a file outside projects/

@@ -26,6 +26,7 @@ import type { RepoRecord } from "./types";
 import { sendPushSummary } from "../feed/push";
 import { runReconcile } from "./reconcile";
 import { closingsIn, commitClosings } from "../issues/commits";
+import { sessionCommitsIn, type SessionCommitRef } from "../sessions/commits";
 import { runCredit, type CreditMessage } from "./credit";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
@@ -54,6 +55,8 @@ export interface Facts {
   conflict_paths: string[] | null;
   /** Issues the branch's own commits close, each with the newest commit naming it; null when they were not read. */
   issue_refs: { number: number; sha: string }[] | null;
+  /** The branch's own commits that name agent sessions, newest first; absent when they were not read. */
+  session_commits?: SessionCommitRef[];
 }
 
 export type FactsMessage = (
@@ -78,19 +81,25 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
     let ahead: number | null = null;
     let behind: number | null = null;
     let issueRefs: Facts["issue_refs"] = null;
+    let sessionCommits: SessionCommitRef[] | undefined;
 
     try {
       const c = await compareWith(rd, main, head);
       ({ mergeBase: base, ahead, behind } = c);
       // The walk cached each commit's message: reading the keywords costs no Artifacts call.
       issueRefs = await closingsIn(rd, c.aheadCommits, names);
+      sessionCommits = await sessionCommitsIn(rd, c.aheadCommits);
     } catch {
       /* too far apart: unknown */
     }
 
     const dry: DryRun = base ? await mergeableOf(env, r, main, head, ahead) : { mergeable: "unknown", conflict_paths: null };
 
-    return { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths, issue_refs: issueRefs };
+    const f: Facts = { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths, issue_refs: issueRefs };
+
+    if (sessionCommits) f.session_commits = sessionCommits;
+
+    return f;
   };
 
   return read ? go(read) : withRepo(env, r.artifacts_name, (repo) => go(commitReader(repo)));
@@ -154,7 +163,7 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
   if (m.type === "refs") return { computed: await runReconcile(env, stub, r, { all: true }), abandoned: false };
 
   if (m.type === "credit" || m.type === "credit_one") {
-    await runCredit(env, r, info, m, (next) => stub.queueCredit(next));
+    await runCredit(env, r, info, m, (next) => stub.queueCredit(next), (refs) => stub.sessionsOnMain(r.name, refs));
 
     return { computed: 0, abandoned: false };
   }

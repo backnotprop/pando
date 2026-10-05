@@ -63,14 +63,14 @@ test("agents, piece 4: the assistant's button, panel, chats and a live follow-up
     await expect(log.locator("[data-prompt]").first()).toContainText("What does src/app.js export?");
     await expect(log.getByRole("button", { name: /2 steps Listed src, Read src\/app\.js/ })).toBeVisible();
     await log.getByRole("button", { name: /2 steps/ }).click();
-    await log.getByRole("button", { name: /Read src\/app\.js/ }).click();
+    await log.getByRole("button", { name: /^Read src\/app\.js/ }).click();
     await expect(log).toContainText("export const answer = 42;");
 
     // A follow-up from the box, live.
     await panel.getByRole("textbox", { name: "Ask about this repository" }).fill(["And the README?", tool("read_file", { path: "README.md" })].join("\n"));
     await panel.getByRole("button", { name: "Send" }).click();
     await expect(log.locator("[data-prompt]").last()).toContainText("And the README?", { timeout: 60_000 });
-    await expect(log.getByRole("button", { name: /Read README\.md/ })).toBeVisible({ timeout: 120_000 });
+    await expect(log.getByRole("button", { name: /^Read README\.md/ })).toBeVisible({ timeout: 120_000 });
 
     // A chat is hers alone: the Agents tab does not list it.
     await page.goto(`${BASE}/${full}/agents`);

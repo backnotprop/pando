@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agents, call, check, done, git, makeRepo, scrub, say } from "./lib.mjs";
 
-const STATE = new URL("../.state/session-test.json", import.meta.url);
+const STATE = process.env.AGENTS_STATE ? `${process.env.AGENTS_STATE}/session-test.json` : new URL("../.state/session-test.json", import.meta.url);
 
 const after = process.argv.includes("--after-restart");
 

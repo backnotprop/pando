@@ -1736,6 +1736,34 @@ paths:
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/review:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: reviewWithAgent
+      summary: Review with agent
+      description: |
+        Launches a session (kind review) acting as the caller on an existing
+        branch: it reads the branch, may run its tests in its sandbox, and
+        posts one review (comment or request_changes, never approve). It has
+        no tool that writes a file, merges or comments on an issue.
+      tags: [agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [branch]
+              properties:
+                branch: { type: string }
+                repo: { type: string }
+                prompt: { type: string, maxLength: 65536 }
+                model: { type: string }
+      responses:
+        "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/agents/{n}:
     parameters:
       - $ref: "#/components/parameters/owner"

@@ -11,6 +11,7 @@ import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
 import { agentRoutes } from "../agents/routes";
 import { issueAgentRoutes } from "../agents/issue";
+import { reviewAgentRoutes } from "../agents/review";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -1571,6 +1572,8 @@ issueRoutes(api);
 agentRoutes(api);
 
 issueAgentRoutes(api);
+
+reviewAgentRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

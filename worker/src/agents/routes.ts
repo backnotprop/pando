@@ -1,6 +1,7 @@
 // Agent session routes, members only, under /v1/monorepos/{owner}/{name}:
 //   GET   /agents                     the repository's sessions, newest first (?before, ?limit, ?issue)
 //   POST  /issues/{n}/agent           "Address with agent" (issue.ts)
+//   POST  /agents/review              "Review with agent" on a branch (review.ts)
 //   POST  /agents                     launch one: {prompt, repo?, branch?, model?}
 //   GET   /agents/{n}                 one session
 //   GET   /agents/{n}/transcript      its transcript, from its object in pando-agents

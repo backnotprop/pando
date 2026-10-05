@@ -601,6 +601,9 @@ export const launchAgent = (owner: Login, name: MonorepoName) => ({ method: "POS
  */
 export const addressIssueWithAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${monorepoBase(owner, name)}/issues/${n}/agent`, response: AgentSession }) as const;
 
+/** POST .../agents/review {branch, repo?, prompt?, model?} (201): "Review with agent" on a branch. */
+export const reviewWithAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${agentsBase(owner, name)}/review`, response: AgentSession }) as const;
+
 /** GET .../agents/{n}. */
 export const getAgent = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}`, response: AgentSession });
 

@@ -143,7 +143,7 @@ try {
   const dollars = ((usage.input - usage.cache_read) * 0.15 + usage.cache_read * 0.03 + usage.output * 0.5) / 1e6;
   say(`model: ${usage.calls} calls; ${usage.input} input tokens (${usage.cache_read} cached), ${usage.output} output; about $${dollars.toFixed(4)}`);
   say(`first sandbox tool (${firstSandbox?.name ?? "none"}), container start and mount included: ${firstSandbox ? `${firstSandbox.ms} ms` : "n/a"}`);
-  say(`agent.updated states: ${frames.filter((x) => x.f.kind === "agent.updated").map((x) => `${x.f.row.status}${x.f.row.workspace ? `/${x.f.row.workspace}` : ""} +${Math.round((x.t - launchedAt) / 100) / 10}s`).join(", ")}`);
+  say(`agent.updated states: ${frames.flatMap((x) => (x.f.kind === "agent.updated" ? [`${x.f.row.status}${x.f.row.workspace ? `/${x.f.row.workspace}` : ""} +${Math.round((x.t - launchedAt) / 100) / 10}s`] : [])).join(", ")}`);
   r = await call("GET", `/v1/monorepos/${full}/repos/${name}/files/README.md`);
   say(`main's README fixed: ${/receive/.test(r.text) && !/recieve/.test(r.text)}`);
 } catch (error) {

@@ -1,0 +1,83 @@
+---
+title: Agent sessions
+description: Recording coding agents' sessions from your machine, and reading them in a repository.
+sidebar:
+  order: 6
+---
+
+An agent session is one conversation between you and a coding agent: your prompts, its answers and its tool calls. Pando records sessions of **Claude Code**, **Codex**, **Pi** and **OpenCode** (version 2) from your machine, links each one to the commits it made, and shows it to every member of the repository.
+
+## Turning it on
+
+`pando login` asks once, at a terminal, whether this machine records sessions. Your answer is kept; it never asks again, and a login run by an agent or a script never asks.
+
+```text
+pando session enable     record sessions on this machine
+pando session disable    stop; sessions already recorded stay until deleted
+pando session status     what this machine records, where it reads from, and what it skips
+```
+
+`pando sync` records them while it runs, apart from the shared files: a problem reading sessions never stops your files syncing.
+
+## What is recorded
+
+- **Only sessions inside a Pando folder** on this machine: a project's worktree, or the repository's own folder. A session anywhere else is never read past the folder it names.
+- **Only new lines.** `pando sync` reads what each agent wrote since last time and sends it. It keeps how far it got, never the session's text.
+- **Secrets are removed on your machine first:** the Pando credential, the values of environment variables whose names look secret, the values in `.env` and `.dev.vars` files in the repository folder and its worktrees, everything betterleaks' rules find, private keys, passwords in URLs, `NAME=value` pairs with a secret-looking name, and long random tokens. A removed value shows as **redacted**. If the check cannot run, nothing is sent. Pando checks again on the server for common token formats.
+- **Not kept:** the agent's reasoning, images ("Image, not kept"), and long encoded strings.
+
+## Where agents keep sessions
+
+| Agent | Usual place | Moved by |
+| --- | --- | --- |
+| Claude Code | `~/.claude/projects` | `CLAUDE_CONFIG_DIR` |
+| Codex | `~/.codex/sessions` | `CODEX_HOME` |
+| Pi | `~/.pi/agent/sessions` | `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR` |
+| OpenCode 2 | `~/.local/share/opencode/opencode.db` | `XDG_DATA_HOME`, `OPENCODE_DB` |
+
+Pando finds a moved folder when `pando sync` was started with that variable, when a commit is made in that agent's shell, or when you add it:
+
+```text
+pando session paths add ~/work/claude-b --program claude-code
+```
+
+## Commits and sessions
+
+A worktree's commit hook adds a `Pando-Session: s_…` line to each commit an agent makes, naming its session. It reads the session from the nearest agent above the commit, so an agent started inside another names its own session. No line is written when recording is off, while git replays commits (a rebase or a cherry-pick), or for a commit typed in a plain terminal. Nothing is matched by time.
+
+Once a commit is pushed, its session lists it; once it reaches main, the session says so. A commit's model is the model the session was using when it was committed. A commit named by two sessions with different models shows no model.
+
+## Reading sessions
+
+- **A repository's Sessions tab**, beside Issues: one line per session under each day, newest activity first, with its agent, branch, issue, model, person, commits and time. **Active** means something was recorded in the last 30 minutes.
+- **A session's page**: its conversation from the first prompt, its commits with their own checks, and the files in its commits.
+- **A branch**: each commit on its Overview shows its session's number, and its Sessions tab lists those sessions.
+- **Your profile**: your latest sessions, all of them at `/<login>/sessions`, and on the graph the agent behind most of each week's (or day's) commits on main.
+
+Every member of a repository sees every session in it. A person sees your sessions only in repositories they can open.
+
+## Not recording a place
+
+```text
+pando session exclude                              this whole repository, on every machine you sign in on
+pando session exclude --project projects/web       one project
+pando session include --project projects/web       record it again
+```
+
+A repository can also turn sessions off for everyone in `.pando/pando.toml`:
+
+```toml
+[sessions]
+record = false               # no sessions at all
+exclude = ["projects/web"]   # or not these projects
+```
+
+**Settings, Sessions** shows what each of your machines last reported, your list, the data folders found, and deletes sessions in bulk.
+
+## Deleting
+
+- **A session:** on its page, **Delete session**, or `pando session delete <id>`. It is gone for everyone at once, with no undo. Its commits keep their line, and their rows say who deleted the session and when.
+- **One turn:** **Remove turn** on a prompt. Its prompt, answers and tool calls are cut from the stored session; the prompt keeps its number, marked as removed.
+- **Many:** Settings, Sessions, by repository, project and age.
+
+Your own sessions are yours to delete; an owner of the repository can delete anyone's.

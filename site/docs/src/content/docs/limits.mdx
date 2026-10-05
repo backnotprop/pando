@@ -58,6 +58,18 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **Days follow the viewer's time zone at today's offset:** up to an hour off across a daylight-saving change, and half-hour zones are rounded to the hour.
 - **A repository's history and a merge are counted about 10 seconds per 1,000 commits,** in the background. A commit dated in the future counts on the day it landed.
 
+## Agent sessions
+
+- **A piece of a session is at most 8,000,000 bytes of lines,** sent one at a time: parsing a piece takes about five times its size in a Worker's 128 MB of memory. A longer backlog goes as several pieces. A single line over that size is kept as a note that it was not kept.
+- **A string in a session is cut at 64 KB,** and an encoded run of 200 characters or more (an image, a signature) is replaced by its length. A tool call's input and result show their first 2 KB.
+- **A session sends at most one piece every 30 seconds,** and at once after a commit names it; agents' folders are looked at every 5 seconds.
+- **A session is Active while it has a record from the last 30 minutes.** No agent records when a session ends.
+- **The newest 250 commits of a branch are read for `Pando-Session` lines;** a session lists at most 500 commits, and its files come from its first 50.
+- **A conversation is read about 2 MB of lines at a time;** **More** reads the next.
+- **Your own list of what is not recorded holds 200 entries;** a machine reports at most 50 folders.
+- **A person's sessions page reads 50 at a time,** across the repositories you both can open.
+- **A repository cannot be named `sessions`:** `/<login>/sessions` is a person's sessions.
+
 ## Hooks
 
 - **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.

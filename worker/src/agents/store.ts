@@ -274,13 +274,15 @@ export class AgentStore {
   }
 
   private publish(r: AgentRow, actor: string | null): void {
-    const topics = ["agents", `agent:${r.number}`];
+    // A chat is its person's alone: its updates go only to its own topic, and never carry its words.
+    const chat = r.kind === "chat";
+    const topics = chat ? [`agent:${r.number}`] : ["agents", `agent:${r.number}`];
 
     if (r.issue !== null) topics.push(`issue:${r.issue}`);
 
     this.host.publish({
       kind: "agent.updated", collection: "agents", key: String(r.number), op: "upsert", repo: r.repo,
-      actor, machine: actor ? null : r.machine, agent: null, number: r.number, row: view(r), topics,
+      actor, machine: actor ? null : r.machine, agent: null, number: r.number, row: { ...view(r), first_message: null }, topics,
     });
   }
 }

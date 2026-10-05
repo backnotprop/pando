@@ -202,7 +202,12 @@ function DeleteSessions({ mine, me }: { mine: readonly MonorepoSummary[]; me: st
   const repos = useQuery({ ...reposQuery(ref), enabled: Boolean(picked && picked.kind === "monorepo") }).data ?? [];
   const repoName = repos.find((r) => r.path === project)?.name;
   const days = age ? Number(age) : undefined;
-  const filters = { person: me, ...(repoName ? { repo: repoName } : {}), ...(days === undefined ? {} : { olderThanDays: days }), limit: 1 };
+  const which: { repo?: string; olderThanDays?: number } = {};
+
+  if (repoName) which.repo = repoName;
+
+  if (days !== undefined) which.olderThanDays = days;
+  const filters = { ...which, person: me, limit: 1 };
 
   const count = useQuery({
     queryKey: ["m", ref.owner, ref.name, "sessions", "count", filters],
@@ -216,7 +221,7 @@ function DeleteSessions({ mine, me }: { mine: readonly MonorepoSummary[]; me: st
 
   const go = async () => {
     try {
-      await deleteMany(ref, { ...(repoName ? { repo: repoName } : {}), ...(days === undefined ? {} : { olderThanDays: days }) });
+      await deleteMany(ref, which);
       await qc.invalidateQueries({ queryKey: ["m", ref.owner, ref.name, "sessions"] });
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));

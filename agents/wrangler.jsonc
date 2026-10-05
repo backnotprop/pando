@@ -35,6 +35,8 @@
   ],
   "services": [
     // The git door and the API, for the sandbox's gateway.
-    { "binding": "PANDO", "service": "pando-dev" }
+    { "binding": "PANDO", "service": "pando-dev" },
+    // Each change of a session's state, to Pando's record (agent.updated events).
+    { "binding": "REPORTS", "service": "pando-dev", "entrypoint": "AgentReports" }
   ]
 }

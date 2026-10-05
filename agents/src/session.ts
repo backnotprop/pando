@@ -18,37 +18,8 @@ import type { Env } from "./env";
 import type { GatewayProps } from "./gateway";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
 import { Sandbox, worktreeDir } from "./sandbox";
-import { projectEntries, type TranscriptMessage } from "./transcript";
-
-export interface SessionSpec {
-  /** Pando's id for the session. */
-  id: string;
-  monorepo: { id: string; full: string; kind: "repo" | "monorepo" };
-  /** The project the agent works in: its name and folder ("." in a plain repository). */
-  repo: { name: string; path: string };
-  branch: string;
-  model: string;
-  /** The person who launched it. The agent acts as them. */
-  launcher: { id: string; login: string; name: string; email: string };
-  /** The sandbox credential minted for this session. */
-  credential: { id: string; name: string; secret: string };
-}
-
-/** What can be known exactly about a session at a moment. */
-export type Status = "working" | "waiting" | "failed" | "stopped";
-
-export interface SessionState {
-  id: string;
-  status: Status;
-  /** Why it failed, in Pi's words, or what stopped it. */
-  reason?: string;
-  model: string;
-  branch: string;
-  repo: string;
-  workspace?: "mount" | "clone";
-  sandbox: "running" | "stopped";
-  updated_at: string;
-}
+import type { SessionSpec, SessionState, Status, TranscriptMessage } from "./protocol";
+import { projectEntries } from "./transcript";
 
 interface StoredStatus {
   status: Status;
@@ -131,16 +102,16 @@ export class AgentSession extends DurableObject<Env> {
   }
 
   /** A person's follow-up. It waits for the current run when one is going. */
-  async send(prompt: string, operationId?: string): Promise<SessionState> {
+  async send(prompt: string): Promise<SessionState> {
     await this.lifecycle.start();
     this.#spec();
-    await this.#submit(prompt, operationId);
+    await this.#submit(prompt);
 
     return this.state();
   }
 
   /** Stop: abort the run and stop the sandbox. The transcript stays. */
-  async stop(reason = "stopped by a person"): Promise<SessionState> {
+  async stop(reason: string): Promise<SessionState> {
     await this.lifecycle.start();
     this.#setStatus("stopped", reason);
     await this.harness.abort();
@@ -154,7 +125,7 @@ export class AgentSession extends DurableObject<Env> {
     const st = this.ctx.storage.kv.get<StoredStatus>("status") ?? { status: "working", at: new Date().toISOString() };
 
     const state: SessionState = {
-      id: spec.id,
+      number: spec.number,
       status: st.status,
       model: spec.model,
       branch: spec.branch,
@@ -254,10 +225,24 @@ export class AgentSession extends DurableObject<Env> {
     else this.#setStatus("failed", result.reason ?? "the run ended without an answer");
   }
 
+  /** Tells Pando's Worker the session's state; it keeps the newest. */
+  async #report(): Promise<void> {
+    const spec = this.ctx.storage.kv.get<SessionSpec>("spec");
+
+    if (!spec || !this.env.REPORTS) return;
+
+    try {
+      await this.env.REPORTS.report(spec.monorepo.id, await this.state());
+    } catch (error) {
+      console.warn("session report", String(error));
+    }
+  }
+
   #setStatus(status: Status, reason?: string): void {
     const stored: StoredStatus = { status, at: new Date().toISOString() };
 
     if (reason) stored.reason = reason;
     this.ctx.storage.kv.put("status", stored);
+    this.ctx.waitUntil(this.#report());
   }
 }

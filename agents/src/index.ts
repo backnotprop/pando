@@ -5,46 +5,46 @@
 
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "./env";
-import type { SessionSpec, SessionState } from "./session";
-import type { TranscriptMessage } from "./transcript";
+import type { AgentsRpc, SessionSpec, SessionState, TranscriptMessage } from "./protocol";
 
 export { AgentSession } from "./session";
 
 export { Gateway } from "./gateway";
 
 /** A session object's name: one per session, under its repository. */
-export function sessionName(monorepoId: string, sessionId: string): string {
-  return `${monorepoId}:${sessionId}`;
+export function sessionName(monorepoId: string, number: number): string {
+  return `${monorepoId}:${number}`;
 }
 
 /** What Pando's Worker calls. Every check of who may do what is Pando's. */
-export class AgentsApi extends WorkerEntrypoint<Env> {
-  #session(monorepoId: string, sessionId: string) {
-    return this.env.SESSIONS.getByName(sessionName(monorepoId, sessionId));
+export class AgentsApi extends WorkerEntrypoint<Env> implements AgentsRpc {
+  #session(monorepoId: string, number: number) {
+    return this.env.SESSIONS.getByName(sessionName(monorepoId, number));
   }
 
   start(spec: SessionSpec, prompt: string): Promise<SessionState> {
-    return this.#session(spec.monorepo.id, spec.id).start(spec, prompt);
+    return this.#session(spec.monorepo.id, spec.number).start(spec, prompt);
   }
 
-  send(monorepoId: string, sessionId: string, prompt: string, operationId?: string): Promise<SessionState> {
-    return this.#session(monorepoId, sessionId).send(prompt, operationId);
+  send(monorepoId: string, number: number, prompt: string): Promise<SessionState> {
+    return this.#session(monorepoId, number).send(prompt);
   }
 
-  stop(monorepoId: string, sessionId: string, reason?: string): Promise<SessionState> {
-    return this.#session(monorepoId, sessionId).stop(reason);
+  stop(monorepoId: string, number: number, reason: string): Promise<SessionState> {
+    return this.#session(monorepoId, number).stop(reason);
   }
 
-  state(monorepoId: string, sessionId: string): Promise<SessionState> {
-    return this.#session(monorepoId, sessionId).state();
+  state(monorepoId: string, number: number): Promise<SessionState> {
+    return this.#session(monorepoId, number).state();
   }
 
-  transcript(monorepoId: string, sessionId: string): Promise<TranscriptMessage[]> {
-    return this.#session(monorepoId, sessionId).transcript();
+  transcript(monorepoId: string, number: number): Promise<TranscriptMessage[]> {
+    return this.#session(monorepoId, number).transcript();
   }
 
-  settled(monorepoId: string, sessionId: string): Promise<SessionState> {
-    return this.#session(monorepoId, sessionId).settled();
+  /** Waits until the session's runs settle. The tests' driver uses it. */
+  settled(monorepoId: string, number: number): Promise<SessionState> {
+    return this.#session(monorepoId, number).settled();
   }
 }
 

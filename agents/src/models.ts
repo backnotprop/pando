@@ -12,7 +12,9 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 import { createAI } from "agents/models/pi-ai";
 import { contentText } from "./transcript";
 
-export const DEFAULT_MODEL = "@cf/zai-org/glm-5.3-flash";
+import { DEFAULT_MODEL } from "./protocol";
+
+export { DEFAULT_MODEL };
 
 export const SCRIPTED_MODEL = "scripted";
 

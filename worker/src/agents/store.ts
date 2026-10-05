@@ -1,0 +1,174 @@
+// Agent sessions launched from Pando, in the monorepo object's SQLite: what
+// the Agents tab lists. The run itself (its transcript, its sandbox) lives in
+// the session's Durable Object in pando-agents, which reports each change of
+// state here (reports.ts); every report is one agent.updated event on the
+// monorepo's stream (topics `agents`, `agent:<n>`, `repo:<repo>`, and
+// `issue:<n>` when it addresses one).
+
+import { HttpError, now } from "../http";
+import type { ObjectInfo, StreamEvent } from "../monorepo/types";
+import type { SessionKind, SessionState, Status } from "../../../agents/src/protocol";
+
+export const AGENTS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  number INTEGER PRIMARY KEY, kind TEXT NOT NULL, repo TEXT NOT NULL, branch TEXT NOT NULL, model TEXT NOT NULL,
+  issue INTEGER, launched_by TEXT NOT NULL, machine TEXT NOT NULL, credential_id TEXT,
+  status TEXT NOT NULL, reason TEXT, workspace TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS agent_sessions_issue ON agent_sessions (issue, number) WHERE issue IS NOT NULL;
+CREATE INDEX IF NOT EXISTS agent_sessions_branch ON agent_sessions (repo, branch, number)`;
+
+/** The agent program every launched session runs. */
+export const PROGRAM = "pi";
+
+interface AgentRow {
+  number: number;
+  kind: SessionKind;
+  repo: string;
+  branch: string;
+  model: string;
+  issue: number | null;
+  launched_by: string;
+  machine: string;
+  credential_id: string | null;
+  status: Status;
+  reason: string | null;
+  workspace: "mount" | "clone" | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A session as the API shows it (Contract.AgentSession). */
+export interface AgentView {
+  number: number;
+  kind: SessionKind;
+  status: Status;
+  reason: string | null;
+  repo: string;
+  branch: string;
+  program: string;
+  model: string;
+  issue: number | null;
+  launched_by: string;
+  machine: string;
+  workspace: "mount" | "clone" | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A page of sessions, newest first (Contract.AgentSessionList). */
+export interface AgentPage {
+  sessions: AgentView[];
+  next_before: number | null;
+}
+
+export interface AgentInput {
+  kind: SessionKind;
+  repo: string;
+  /** null: agent/<number>. */
+  branch: string | null;
+  model: string;
+  issue: number | null;
+}
+
+export interface AgentHost {
+  info(): ObjectInfo | null;
+  publish(e: StreamEvent): number;
+}
+
+/** A session's machine name: its credential's, as the Machines tab and comments show it. */
+export function machineName(number: number): string {
+  return `cloud-${number}`;
+}
+
+function view(r: AgentRow): AgentView {
+  return {
+    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch, program: PROGRAM, model: r.model,
+    issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, created_at: r.created_at, updated_at: r.updated_at,
+  };
+}
+
+export class AgentStore {
+  constructor(
+    private sql: SqlStorage,
+    private host: AgentHost,
+  ) {}
+
+  private row(number: number): AgentRow | null {
+    return this.sql.exec<AgentRow & Record<string, SqlStorageValue>>("SELECT * FROM agent_sessions WHERE number = ?", number).toArray()[0] ?? null;
+  }
+
+  private must(number: number): AgentRow {
+    const r = this.row(number);
+
+    if (!r) throw new HttpError(404, "not_found", `no agent session ${number}`);
+
+    return r;
+  }
+
+  /** Records a new session as working, numbered after the newest. */
+  create(input: AgentInput, login: string): AgentView {
+    const number = (this.sql.exec<{ n: number | null }>("SELECT MAX(number) AS n FROM agent_sessions").one().n ?? 0) + 1;
+    const at = now();
+    const branch = input.branch ?? `agent/${number}`;
+
+    this.sql.exec(
+      "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)",
+      number, input.kind, input.repo, branch, input.model, input.issue, login, machineName(number), at, at,
+    );
+    this.publish(this.must(number), login);
+
+    return view(this.must(number));
+  }
+
+  setCredential(number: number, credentialId: string): void {
+    this.sql.exec("UPDATE agent_sessions SET credential_id = ? WHERE number = ?", credentialId, number);
+  }
+
+  credentialOf(number: number): string | null {
+    return this.must(number).credential_id;
+  }
+
+  get(number: number): AgentView {
+    return view(this.must(number));
+  }
+
+  /** Newest first; `before` a number to page back. */
+  list(before: number | null, limit: number): AgentPage {
+    const rows = this.sql
+      .exec<AgentRow & Record<string, SqlStorageValue>>("SELECT * FROM agent_sessions WHERE number < ? ORDER BY number DESC LIMIT ?", before ?? Number.MAX_SAFE_INTEGER, limit + 1)
+      .toArray();
+
+    const more = rows.length > limit;
+    const page = rows.slice(0, limit);
+
+    return { sessions: page.map(view), next_before: more ? (page.at(-1)?.number ?? null) : null };
+  }
+
+  /** A session's state as its object reports it. A report older than the one kept changes nothing. */
+  report(state: SessionState): AgentView | null {
+    const r = this.row(state.number);
+
+    if (!r || state.updated_at < r.updated_at) return null;
+
+    this.sql.exec(
+      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), updated_at = ? WHERE number = ?",
+      state.status, state.reason ?? null, state.workspace ?? null, state.updated_at, state.number,
+    );
+    const next = this.must(state.number);
+
+    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace) this.publish(next, null);
+
+    return view(next);
+  }
+
+  private publish(r: AgentRow, actor: string | null): void {
+    const topics = ["agents", `agent:${r.number}`];
+
+    if (r.issue !== null) topics.push(`issue:${r.issue}`);
+
+    this.host.publish({
+      kind: "agent.updated", collection: "agents", key: String(r.number), op: "upsert", repo: r.repo,
+      actor, machine: actor ? null : r.machine, agent: null, number: r.number, row: view(r), topics,
+    });
+  }
+}

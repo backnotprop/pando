@@ -1,0 +1,21 @@
+{
+  "schema": "AgentSession",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/agents",
+  "status": 201,
+  "body": {
+    "number": 1,
+    "kind": "task",
+    "status": "working",
+    "reason": null,
+    "repo": "agents-s2-muur9tid",
+    "branch": "agent/1",
+    "program": "pi",
+    "model": "scripted",
+    "issue": null,
+    "launched_by": "agents-s2-muur9tid",
+    "machine": "cloud-1",
+    "workspace": null,
+    "created_at": "2026-10-05T04:34:36.092Z",
+    "updated_at": "2026-10-05T04:34:36.101Z"
+  }
+}

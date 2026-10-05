@@ -219,6 +219,16 @@ tags:
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.
+  - name: agents
+    description: |
+      Cloudflare-run agents: a session launched from Pando runs in its own
+      Durable Object in the Worker pando-agents, with a Linux sandbox whose
+      workspace is the session's branch. It acts as the person who launched
+      it, through a sandbox credential minted for it (`cloud-<n>`, the
+      session's machine); revoking that credential cuts it off. Its state is
+      only what is known exactly (working, waiting, failed, stopped), and
+      every change is an `agent.updated` event. Without pando-agents the
+      routes answer 503 `agents_unavailable`.
   - name: issues
     description: |
       Issues, as on GitHub: one list per monorepo, numbered `#1`, `#2`, ...
@@ -1659,6 +1669,97 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+  /v1/monorepos/{owner}/{monorepo}/agents:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listAgents
+      summary: The repository's agent sessions, newest first
+      tags: [agents]
+      parameters:
+        - { name: before, in: query, description: "A page's `next_before`.", schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
+    post:
+      operationId: launchAgent
+      summary: Launch an agent session acting as the caller
+      description: |
+        Mints a sandbox credential for the caller named after the session
+        (`cloud-<n>`), records the session, and starts it with the prompt on a
+        new branch (`agent/<n>` unless `branch` names one). `repo` may be left
+        out in a plain repository. A session that cannot start is answered
+        `failed` with its reason, and its credential is revoked.
+      tags: [agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, maxLength: 65536 }
+                repo: { type: string }
+                branch: { type: string }
+                model: { type: string, default: "@cf/zai-org/glm-5.3-flash" }
+      responses:
+        "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getAgent
+      summary: One agent session
+      tags: [agents]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/transcript:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: agentTranscript
+      summary: Its transcript, oldest first
+      tags: [agents]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentTranscript" } } } }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/messages:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: sendAgent
+      summary: A follow-up, from the person who launched it
+      description: Taken after the current run when one is going. 403 `not_launcher` for anyone else.
+      tags: [agents]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [prompt], properties: { prompt: { type: string } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/stop:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: stopAgent
+      summary: Abort the run and stop the sandbox (its launcher or an owner)
+      description: The transcript and the branch stay; a later message starts it again.
+      tags: [agents]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/labels:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -4526,6 +4627,37 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/TimelineItem" } }
         total: { type: integer }
         next_cursor: { type: [string, "null"] }
+    AgentSession:
+      type: object
+      description: packages/contract/src/agent.ts is the exact shape.
+      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, created_at, updated_at]
+      properties:
+        number: { type: integer }
+        kind: { type: string, enum: [task, issue, review, chat] }
+        status: { type: string, enum: [working, waiting, failed, stopped] }
+        reason: { type: [string, "null"] }
+        repo: { type: string }
+        branch: { type: string }
+        program: { type: string, description: "pi" }
+        model: { type: string }
+        issue: { type: [integer, "null"] }
+        launched_by: { type: string }
+        machine: { type: string, description: "The session's credential, cloud-<n>." }
+        workspace: { type: [string, "null"], enum: [mount, clone, null] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentSessionList:
+      type: object
+      required: [sessions, next_before]
+      properties:
+        sessions: { type: array, items: { $ref: "#/components/schemas/AgentSession" } }
+        next_before: { type: [integer, "null"] }
+    AgentTranscript:
+      type: object
+      required: [messages]
+      description: Messages with parts (text, thinking, tool-call, tool-result); packages/contract/src/agent.ts.
+      properties:
+        messages: { type: array, items: { type: object } }
     IssueList:
       type: object
       required: [issues, counts, next_cursor]

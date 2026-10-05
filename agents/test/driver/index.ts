@@ -1,7 +1,7 @@
 // The tests' way in to pando-agents (wrangler.jsonc beside this file).
 
 import type { AgentsApi } from "../../src/index";
-import type { SessionSpec } from "../../src/session";
+import type { SessionSpec } from "../../src/protocol";
 
 interface Env {
   AGENTS: Service<AgentsApi>;
@@ -13,7 +13,7 @@ interface Call {
   spec: SessionSpec;
   prompt: string;
   monorepo: string;
-  session: string;
+  session: number;
 }
 
 function dispatch(api: Service<AgentsApi>, method: string, c: Call) {
@@ -23,7 +23,7 @@ function dispatch(api: Service<AgentsApi>, method: string, c: Call) {
     case "send":
       return api.send(c.monorepo, c.session, c.prompt);
     case "stop":
-      return api.stop(c.monorepo, c.session);
+      return api.stop(c.monorepo, c.session, "stopped by a person");
     case "state":
       return api.state(c.monorepo, c.session);
     case "transcript":

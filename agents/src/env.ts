@@ -1,5 +1,6 @@
 // The pando-agents Worker's bindings (wrangler.jsonc).
 
+import type { ReportsRpc } from "./protocol";
 import type { AgentSession } from "./session";
 
 declare global {
@@ -19,6 +20,8 @@ export interface Env {
   AI: Ai;
   /** Pando's Worker: the git door and the API, for the sandbox's gateway. */
   PANDO: Fetcher;
+  /** Pando's Worker's AgentReports entrypoint: each change of a session's state. */
+  REPORTS?: Fetcher & ReportsRpc;
   /** "1" only under wrangler dev for the end-to-end tests (models.ts). */
   SCRIPTED_MODEL?: string;
 }

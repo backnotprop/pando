@@ -43,16 +43,18 @@ if (!after) {
     check("a sandbox credential for the session", r.status === 201, r.status);
 
     const spec = {
-      id: `s1-${Date.now().toString(36)}`,
+      number: 1,
+      kind: "task",
       monorepo: { id: t.monorepoId, full: t.full, kind: "repo" },
       repo: { name: t.name, path: "." },
       branch: "agent/1-readme",
       model: "scripted",
-      launcher: { id: t.login, login: t.login, name: "Agent Tester", email: "tester@pando.invalid" },
+      launcher: { login: t.login, name: "Agent Tester", email: "tester@pando.invalid" },
       credential: { id: r.json.id, name: "cloud-1", secret: r.json.secret },
+      issue: null,
     };
 
-    Object.assign(t, { sessionId: spec.id });
+    Object.assign(t, { sessionId: spec.number });
     writeFileSync(STATE, JSON.stringify({ ...t }));
 
     const prompt = [
@@ -67,11 +69,11 @@ if (!after) {
     let t0 = Date.now();
     let st = await agents("start", { spec, prompt });
     check("start: the session is working", st.status === "working", JSON.stringify(st));
-    st = await agents("settled", { monorepo: t.monorepoId, session: spec.id });
+    st = await agents("settled", { monorepo: t.monorepoId, session: spec.number });
     check("the run ends and waits for a person", st.status === "waiting", `${Date.now() - t0} ms, first run includes the container start\n${JSON.stringify(st)}`);
     check("the workspace is the branch, mounted through ArtifactFS", st.workspace === "mount", st.workspace);
 
-    let tr = await agents("transcript", { monorepo: t.monorepoId, session: spec.id });
+    let tr = await agents("transcript", { monorepo: t.monorepoId, session: spec.number });
     const results = tr.filter((m) => m.role === "tool").map((m) => m.parts[0]);
     say(`      tools: ${results.map((p) => `${p.name}${p.error ? " (error)" : ""}`).join(", ")}`);
     check("five tool calls, none failed", results.length === 5 && results.every((p) => !p.error), results.map((p) => p.text.slice(0, 200)).join("\n"));
@@ -88,12 +90,12 @@ if (!after) {
     const log = git(["log", "-1", "--format=%an <%ae>%n%(trailers:only)"], sh);
     check("the commit is authored as the person, with Pando's trailers", g.ok && /Agent Tester <tester@pando\.invalid>/.test(log.out) && /Pando-Machine: cloud-1/.test(log.out), log.out);
 
-    st = await agents("send", { monorepo: t.monorepoId, session: spec.id, prompt: [
+    st = await agents("send", { monorepo: t.monorepoId, session: spec.number, prompt: [
       "Check what the sandbox can reach.",
       tool("bash", { command: "curl -s -o /dev/null -w 'api=%{http_code}\\n' http://pando.internal/v1/user; git ls-remote http://pando.internal/someone/else.git 2>&1 | tail -1; curl -s -m 5 -o /dev/null https://example.com && echo internet || echo no-internet; (env; git config --list --show-origin) | grep -c 'pando_' || true" }),
     ].join("\n") });
-    st = await agents("settled", { monorepo: t.monorepoId, session: spec.id });
-    tr = await agents("transcript", { monorepo: t.monorepoId, session: spec.id });
+    st = await agents("settled", { monorepo: t.monorepoId, session: spec.number });
+    tr = await agents("transcript", { monorepo: t.monorepoId, session: spec.number });
     const reach = tr.filter((m) => m.role === "tool").at(-1)?.parts[0]?.text ?? "";
     check("the gateway refuses the API and other repositories; no internet; no credential inside", /api=403/.test(reach) && /403/.test(reach.split("\n")[1] ?? "") && /no-internet/.test(reach) && /\n0\n?$/.test(reach.trim() + "\n"), reach);
     writeFileSync(STATE, JSON.stringify({ ...t, prompts: 2 }));

@@ -4,24 +4,7 @@
 
 import type { AssistantMessage, ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
-
-export type Part =
-  | { type: "text"; text: string }
-  | { type: "thinking"; text: string }
-  /** arguments: the call's JSON, as the model wrote it. */
-  | { type: "tool-call"; id: string; name: string; arguments: string }
-  | { type: "tool-result"; id: string; name: string; text: string; error: boolean };
-
-export interface TranscriptMessage {
-  /** Pi's entry id. */
-  id: string;
-  role: "user" | "assistant" | "tool";
-  parts: Part[];
-  /** Unix milliseconds, as Pi recorded it. */
-  at: number;
-  stop_reason?: string;
-  error?: string;
-}
+import type { Part, TranscriptMessage } from "./protocol";
 
 /** The text of a user message's or a tool result's content. */
 export function contentText(content: string | (TextContent | ImageContent)[]): string {

@@ -18,7 +18,7 @@ import type { Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json } from "../parse";
 import type { IssueView, TimelineView } from "../issues/store";
 import { DEFAULT_MODEL } from "../../../agents/src/protocol";
-import { BRANCH, launch } from "./routes";
+import { agentsReachable, BRANCH, launch } from "./routes";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
 
@@ -108,6 +108,9 @@ export function issueAgentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }
     // The name the person gave, else the issue's. One that exists is used as it is (another agent's, or theirs);
     // a new one is made off main.
     const branch = isText(body.branch) ? body.branch : issueBranchName(issue.number, issue.title);
+
+    // Nothing is made (no branch, no link) when the agent could not start.
+    await agentsReachable(c);
 
     try {
       await createBranch(c, repo, branch, repo.default_branch, issue.title, `Addresses #${issue.number}.`);

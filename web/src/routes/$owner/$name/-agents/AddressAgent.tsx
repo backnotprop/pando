@@ -19,7 +19,7 @@ export function AddressAgent({ issue, open, onClose }: { issue: Issue; open: boo
   const qc = useQueryClient();
   const repos = useQuery(reposQuery(monorepo)).data ?? [];
   const projects = info.kind === "monorepo" ? repos.filter((r) => r.path !== "." && r.path !== "meta") : repos;
-  const pick = useModel();
+  const pick = useModel(open);
   const model = pick.model;
   const [repo, setRepo] = useState<RepoName | null>(null);
   const chosenRepo = repo ?? issue.project ?? (projects.length === 1 ? (projects[0]?.name ?? null) : null);

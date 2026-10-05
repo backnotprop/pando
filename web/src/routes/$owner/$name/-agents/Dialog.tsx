@@ -12,10 +12,10 @@ import { useMonorepo } from "../-frame/heads";
 
 export const fieldLabel = "grid gap-1.5 text-[13px]";
 
-/** The model chosen in a dialog: the person's pick, else the server's first. */
-export function useModel() {
+/** The model chosen in a dialog: the person's pick, else the server's first. Read only while the dialog is open. */
+export function useModel(open: boolean) {
   const { monorepo } = useMonorepo();
-  const models = useQuery(agentModelsQuery(monorepo)).data ?? [];
+  const models = useQuery({ ...agentModelsQuery(monorepo), enabled: open }).data ?? [];
   const [chosen, setModel] = useState<string | null>(null);
 
   return { model: chosen ?? models[0]?.id ?? null, models, setModel };

@@ -23,8 +23,8 @@ import { leafOf, StateWords } from "./parts";
 export function ReviewWithAgent({ repo, branch }: { repo: Repo; branch: string }) {
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
-  const pick = useModel();
   const [open, setOpen] = useState(false);
+  const pick = useModel(open);
   const [prompt, setPrompt] = useState("");
 
   const start = useMutation({

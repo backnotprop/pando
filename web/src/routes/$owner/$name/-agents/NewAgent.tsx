@@ -65,7 +65,7 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
   const projects = info.kind === "monorepo" ? repos.filter((r) => r.path !== ".") : repos;
   const [prompt, setPrompt] = useState("");
   const [repo, setRepo] = useState<RepoName | null>(null);
-  const pick = useModel();
+  const pick = useModel(open);
   const model = pick.model;
   const [existing, setExisting] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);

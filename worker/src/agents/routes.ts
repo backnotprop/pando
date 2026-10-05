@@ -26,7 +26,7 @@ import type { ApiVars } from "../monorepo/api";
 import { hashToken, newToken } from "../monorepo/session";
 import type { Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json, type JsonObject } from "../parse";
-import { DEFAULT_MODEL, type SessionKind, type SessionSpec } from "../../../agents/src/protocol";
+import { DEFAULT_MODEL, type SessionKind, type SessionSpec, WORKERS_AI_MODELS } from "../../../agents/src/protocol";
 import type { AgentFilters, AgentView } from "./store";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
@@ -71,12 +71,29 @@ function numberOf(c: C): number {
 }
 
 /** The pando-agents binding, or a plain 503 where it is not set up. */
-function agentsOf(c: C): NonNullable<Env["AGENTS"]> {
+/**
+ * A call to pando-agents. Only launching, a session's transcript and live
+ * socket, sending and stopping need it; every list and count is Pando's own.
+ * Unbound or unreachable, it is a clear refusal (503 agents_unavailable),
+ * never a 500.
+ */
+async function callAgents<T>(c: C, call: (agents: NonNullable<Env["AGENTS"]>) => T | Promise<T>): Promise<T> {
   const a = c.env.AGENTS;
 
   if (!a) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
 
-  return a;
+  try {
+    return await call(a);
+  } catch (error) {
+    console.error(`pando-agents: ${error instanceof Error ? error.message : String(error)}`);
+
+    throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents cannot be reached right now; try again in a moment");
+  }
+}
+
+/** Refuses a launch before anything is made when pando-agents cannot be reached (Address with agent makes a branch first). */
+export async function agentsReachable(c: C): Promise<void> {
+  await callAgents(c, (a) => a.models());
 }
 
 const NUMBER = /^[1-9][0-9]{0,8}$/;
@@ -141,7 +158,11 @@ export interface LaunchInput {
  * its object. Shared by POST /agents and the issue's "Address with agent".
  */
 export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
-  const agents = agentsOf(c);
+  const agents = c.env.AGENTS;
+
+  if (!agents) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
+
+  await agentsReachable(c);
   const info = c.get("info");
   const identity = c.get("identity");
   const repos = await c.get("stub").listRepos();
@@ -210,7 +231,12 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
   });
 
   // The models a session may use here (registered before /agents/:n).
-  api.get(`${base}/models`, async (c) => c.json({ models: await agentsOf(c).models() } satisfies typeof Contract.AgentModels.Encoded));
+  // The models a session may use here: pando-agents' list (a test server adds its scripted one), else the Workers AI ones Pando knows.
+  api.get(`${base}/models`, async (c) => {
+    const models = c.env.AGENTS ? await callAgents(c, (a) => a.models()).catch(() => WORKERS_AI_MODELS) : WORKERS_AI_MODELS;
+
+    return c.json({ models: [...models] } satisfies typeof Contract.AgentModels.Encoded);
+  });
 
   api.get(one, async (c) => c.json((await sessionOf(c, numberOf(c))) satisfies typeof Contract.AgentSession.Encoded));
 
@@ -219,7 +245,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
 
     await sessionOf(c, n);
 
-    return c.json({ messages: await agentsOf(c).transcript(c.get("m"), n) } satisfies typeof Contract.AgentTranscript.Encoded);
+    return c.json({ messages: await callAgents(c, (a) => a.transcript(c.get("m"), n)) } satisfies typeof Contract.AgentTranscript.Encoded);
   });
 
   api.get(`${one}/live`, async (c) => {
@@ -228,7 +254,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") throw new HttpError(426, "upgrade_required", "open this with a WebSocket");
     await sessionOf(c, n);
 
-    return agentsOf(c).fetch(new Request(`http://pando-agents/live/${encodeURIComponent(c.get("m"))}/${n}`, c.req.raw));
+    return callAgents(c, (a) => a.fetch(new Request(`http://pando-agents/live/${encodeURIComponent(c.get("m"))}/${n}`, c.req.raw)));
   });
 
   api.post(`${one}/messages`, async (c) => {
@@ -237,7 +263,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
 
     if (s.launched_by !== c.get("identity").login) throw new HttpError(403, "not_launcher", `only ${s.launched_by}, who started it, can send it messages`);
     const prompt = promptOf((await bodyOf(c)).prompt);
-    const state = await agentsOf(c).send(c.get("m"), n, prompt);
+    const state = await callAgents(c, (a) => a.send(c.get("m"), n, prompt));
 
     return c.json(((await c.get("stub").agentReport(state)) ?? s) satisfies typeof Contract.AgentSession.Encoded);
   });
@@ -248,7 +274,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     const who = c.get("identity");
 
     if (s.launched_by !== who.login && who.role !== "owner") throw new HttpError(403, "not_launcher", `only ${s.launched_by}, who started it, or an owner can stop it`);
-    const state = await agentsOf(c).stop(c.get("m"), n, `stopped by ${who.login}`);
+    const state = await callAgents(c, (a) => a.stop(c.get("m"), n, `stopped by ${who.login}`));
 
     return c.json(((await c.get("stub").agentReport(state)) ?? s) satisfies typeof Contract.AgentSession.Encoded);
   });

@@ -12,18 +12,18 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 import { createAI } from "agents/models/pi-ai";
 import { contentText } from "./transcript";
 
-import { DEFAULT_MODEL, type ModelInfo } from "./protocol";
+import { DEFAULT_MODEL, type ModelInfo, WORKERS_AI_MODELS } from "./protocol";
 
 export { DEFAULT_MODEL };
 
 export const SCRIPTED_MODEL = "scripted";
 
 /** The models a session may name, with the names people see. */
-const WORKERS_AI_MODELS = new Map([[DEFAULT_MODEL, "GLM-5.3 Flash"]]);
+const KNOWN = new Map(WORKERS_AI_MODELS.map((m) => [m.id, m.name]));
 
 /** The models a session may use here: Workers AI's, and the scripted one on a test server. */
 export function listModels(env: ModelEnv): ModelInfo[] {
-  const out = [...WORKERS_AI_MODELS].map(([id, name]) => ({ id, name }));
+  const out = [...WORKERS_AI_MODELS];
 
   if (scriptedEnabled(env)) out.push({ id: SCRIPTED_MODEL, name: "Scripted (tests)" });
 
@@ -41,7 +41,7 @@ export function scriptedEnabled(env: ModelEnv): boolean {
 
 /** Whether a session may use this model id here. */
 export function knownModel(env: ModelEnv, id: string): boolean {
-  return WORKERS_AI_MODELS.has(id) || (id === SCRIPTED_MODEL && scriptedEnabled(env));
+  return KNOWN.has(id) || (id === SCRIPTED_MODEL && scriptedEnabled(env));
 }
 
 /** The registry Pi looks models up in, and a function from model id to model. */

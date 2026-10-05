@@ -7,6 +7,9 @@
 /** The model a session uses unless it names another: GLM-5.3 Flash on Workers AI (the owner's choice, 2026-10-04). */
 export const DEFAULT_MODEL = "@cf/zai-org/glm-5.3-flash";
 
+/** The Workers AI models a session may name, with the names people see (Pando lists them even when pando-agents cannot be reached). */
+export const WORKERS_AI_MODELS: readonly ModelInfo[] = [{ id: DEFAULT_MODEL, name: "GLM-5.3 Flash" }];
+
 /** What started the session: a person's prompt, an issue, a branch to review, or the assistant's chat. */
 export type SessionKind = "task" | "issue" | "review" | "chat";
 

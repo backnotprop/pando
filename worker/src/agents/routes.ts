@@ -26,7 +26,7 @@ import { hashToken, newToken } from "../monorepo/session";
 import type { Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json, type JsonObject } from "../parse";
 import { DEFAULT_MODEL, type SessionKind, type SessionSpec } from "../../../agents/src/protocol";
-import type { AgentView } from "./store";
+import type { AgentFilters, AgentView } from "./store";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
 
@@ -76,6 +76,32 @@ function agentsOf(c: C): NonNullable<Env["AGENTS"]> {
   if (!a) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
 
   return a;
+}
+
+const NUMBER = /^[1-9][0-9]{0,8}$/;
+
+/** A list's filters from the address (?before, ?limit, ?issue, ?status, ?person, ?kind); `chatsOf` for the assistant's list. */
+export function filtersOf(c: C, chatsOf: string | null): AgentFilters {
+  const q = (k: string) => c.req.query(k);
+  const limit = Number(q("limit") ?? LIST_DEFAULT);
+
+  const num = (k: string) => {
+    const v = q(k);
+
+    if (v !== undefined && !NUMBER.test(v)) bad(`${k}: a number`);
+
+    return v === undefined ? null : Number(v);
+  };
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
+  const status = q("status") ?? null;
+
+  if (status !== null && status !== "working" && status !== "waiting") bad("status: working or waiting");
+  const kind = q("kind") ?? null;
+
+  if (kind !== null && kind !== "task" && kind !== "issue" && kind !== "review") bad("kind: task, issue or review");
+
+  return { before: num("before"), limit, issue: num("issue"), status, person: q("person") ?? null, kind, chatsOf };
 }
 
 /** Session n as the caller may see it: the assistant's chats are their person's alone (404 for anyone else). */
@@ -145,16 +171,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
   const one = `${base}/:n`;
 
   api.get(base, async (c) => {
-    const limit = Number(c.req.query("limit") ?? LIST_DEFAULT);
-    const before = c.req.query("before");
-    const issue = c.req.query("issue");
-
-    if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
-
-    if (before !== undefined && !/^[1-9][0-9]{0,8}$/.test(before)) bad("before: a session number");
-
-    if (issue !== undefined && !/^[1-9][0-9]{0,8}$/.test(issue)) bad("issue: an issue number");
-    const page = await c.get("stub").agentList(before === undefined ? null : Number(before), limit, issue === undefined ? null : Number(issue));
+    const page = await c.get("stub").agentList(filtersOf(c, null));
 
     return c.json(unwrap(page) satisfies typeof Contract.AgentSessionList.Encoded);
   });

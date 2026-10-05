@@ -71,6 +71,13 @@ try {
   r = await call("GET", `/v1/monorepos/${t.full}/agents`, b);
   record("agents.json", "AgentSessionList", "GET /v1/monorepos/{owner}/{monorepo}/agents", r.status, r.json);
   check("every member sees the repository's sessions", r.status === 200 && r.json.sessions.length === 1 && r.json.next_before === null);
+  check("the list counts by state, and carries the branch's facts", r.json?.counts?.all === 1 && r.json.counts.waiting === 1 && r.json.counts.working === 0 && r.json.sessions[0].branch_facts?.state === "open" && (r.json.sessions[0].branch_facts.stale || r.json.sessions[0].branch_facts.ahead === 1), JSON.stringify({ counts: r.json?.counts, facts: r.json?.sessions?.[0]?.branch_facts }));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?status=working`, b);
+  check("filtered by state: none working", r.json?.sessions?.length === 0 && r.json.counts.all === 1);
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?person=${t.login}-b`, b);
+  check("filtered by person: none started by the other member", r.json?.sessions?.length === 0 && r.json.counts.all === 0);
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?kind=task&status=waiting`, b);
+  check("filtered by what started it and state: the task", r.json?.sessions?.length === 1);
   r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, b, { prompt: "do something else" });
   record("error-403-agent.json", "ErrorBody", "POST /v1/monorepos/{owner}/{monorepo}/agents/{n}/messages (not the launcher)", r.status, r.json);
   check("only the person who launched it sends it messages (403 not_launcher)", r.status === 403 && r.json?.error?.code === "not_launcher", JSON.stringify(r.json));

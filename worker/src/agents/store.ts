@@ -6,7 +6,7 @@
 // `issue:<n>` when it addresses one).
 
 import { HttpError, now } from "../http";
-import type { ObjectInfo, StreamEvent } from "../monorepo/types";
+import type { Checks, ObjectInfo, StreamEvent } from "../monorepo/types";
 import type { SessionKind, SessionState, Status } from "../../../agents/src/protocol";
 
 export const AGENTS_SCHEMA = `
@@ -57,12 +57,37 @@ export interface AgentView {
   awaiting_checks: boolean;
   created_at: string;
   updated_at: string;
+  /** In a list: its branch as Pando knows it now; null while the branch is not made yet. */
+  branch_facts?: BranchFacts | null;
 }
 
-/** A page of sessions, newest first (Contract.AgentSessionList). */
+/** What a list row shows of its branch: exact, from the branch's record. */
+export interface BranchFacts {
+  state: "open" | "merged";
+  ahead: number | null;
+  /** True while `ahead` is not for the current main and head (computed off the request). */
+  stale: boolean;
+  merged_at: string | null;
+  checks: Checks["state"];
+}
+
+/** A page of sessions, newest first, and the counts for the same filters (Contract.AgentSessionList). */
 export interface AgentPage {
   sessions: AgentView[];
   next_before: number | null;
+  counts: { all: number; working: number; waiting: number };
+}
+
+/** What GET .../agents and GET .../assistant filter by; null: any. */
+export interface AgentFilters {
+  before: number | null;
+  limit: number;
+  issue: number | null;
+  status: "working" | "waiting" | null;
+  person: string | null;
+  kind: "task" | "issue" | "review" | null;
+  /** A login: that person's chats (GET .../assistant); null: the Agents tab (no chats). */
+  chatsOf: string | null;
 }
 
 export interface AgentInput {
@@ -139,29 +164,49 @@ export class AgentStore {
 
   /**
    * Newest first; `before` a number to page back. The Agents tab's list
-   * (`chatsOf` null) leaves out the assistant's chats, optionally only the
-   * sessions addressing `issue`; `chatsOf` a login lists that person's chats.
+   * (`chatsOf` null) leaves out the assistant's chats; `chatsOf` a login lists
+   * that person's chats instead. The counts are for the same filters in
+   * every state (the bar's "All 9 · Working 2 · Waiting 2").
    */
-  list(before: number | null, limit: number, issue: number | null, chatsOf: string | null = null): AgentPage {
-    const from = before ?? Number.MAX_SAFE_INTEGER;
+  list(f: AgentFilters): AgentPage {
+    const where: string[] = [];
+    const args: SqlStorageValue[] = [];
 
-    const rows = (
-      chatsOf === null
-        ? this.sql.exec<AgentRow & Record<string, SqlStorageValue>>(
-            "SELECT * FROM agent_sessions WHERE number < ? AND kind != 'chat' AND (? IS NULL OR issue = ?) ORDER BY number DESC LIMIT ?",
-            from, issue, issue, limit + 1,
-          )
-        : this.sql.exec<AgentRow & Record<string, SqlStorageValue>>(
-            "SELECT * FROM agent_sessions WHERE number < ? AND kind = 'chat' AND launched_by = ? ORDER BY number DESC LIMIT ?",
-            from, chatsOf, limit + 1,
-          )
-    ).toArray();
+    const add = (sql: string, ...v: SqlStorageValue[]) => {
+      where.push(sql);
+      args.push(...v);
+    };
 
-    const more = rows.length > limit;
-    const page = rows.slice(0, limit);
+    if (f.chatsOf === null) add("kind != 'chat'");
+    else add("kind = 'chat' AND launched_by = ?", f.chatsOf);
 
-    return { sessions: page.map(view), next_before: more ? (page.at(-1)?.number ?? null) : null };
+    if (f.issue !== null) add("issue = ?", f.issue);
+
+    if (f.person !== null) add("launched_by = ?", f.person);
+
+    if (f.kind !== null) add("kind = ?", f.kind);
+    const counted = where.join(" AND ");
+    const counts = { all: 0, working: 0, waiting: 0 };
+
+    for (const r of this.sql.exec<{ status: Status; n: number }>(`SELECT status, COUNT(*) AS n FROM agent_sessions WHERE ${counted} GROUP BY status`, ...args)) {
+      counts.all += r.n;
+
+      if (r.status === "working" || r.status === "waiting") counts[r.status] += r.n;
+    }
+
+    if (f.status !== null) add("status = ?", f.status);
+    add("number < ?", f.before ?? Number.MAX_SAFE_INTEGER);
+
+    const rows = this.sql
+      .exec<AgentRow & Record<string, SqlStorageValue>>(`SELECT * FROM agent_sessions WHERE ${where.join(" AND ")} ORDER BY number DESC LIMIT ?`, ...args, f.limit + 1)
+      .toArray();
+
+    const more = rows.length > f.limit;
+    const page = rows.slice(0, f.limit);
+
+    return { sessions: page.map(view), next_before: more ? (page.at(-1)?.number ?? null) : null, counts };
   }
+
 
   /** A session's state as its object reports it. A report older than the one kept changes nothing. */
   report(state: SessionState): AgentView | null {

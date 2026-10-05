@@ -1697,6 +1697,9 @@ paths:
       parameters:
         - { name: before, in: query, description: "A page's `next_before`.", schema: { type: integer } }
         - { name: issue, in: query, description: "Only the sessions addressing this issue.", schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string, enum: [working, waiting] } }
+        - { name: person, in: query, description: "Who started it (a login).", schema: { type: string } }
+        - { name: kind, in: query, description: "What it started from.", schema: { type: string, enum: [task, issue, review] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
@@ -4994,14 +4997,22 @@ components:
         machine: { type: string, description: "The session's credential, cloud-<n>." }
         workspace: { type: [string, "null"], enum: [mount, clone, null] }
         awaiting_checks: { type: boolean, description: "Its merge waits for required checks still running; Pando tells it when they are green." }
+        branch_facts:
+          type: [object, "null"]
+          description: In a list only. Its branch now (state, ahead, merged_at, checks); null while the branch is not made yet.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AgentSessionList:
       type: object
-      required: [sessions, next_before]
+      required: [sessions, next_before, counts]
       properties:
         sessions: { type: array, items: { $ref: "#/components/schemas/AgentSession" } }
         next_before: { type: [integer, "null"] }
+        counts:
+          type: object
+          description: For the same filters, in every state.
+          properties: { all: { type: integer }, working: { type: integer }, waiting: { type: integer } }
+          required: [all, working, waiting]
     AgentTranscript:
       type: object
       required: [messages]

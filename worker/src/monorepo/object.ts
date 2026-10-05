@@ -36,7 +36,7 @@ import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
-import { AGENTS_SCHEMA, AgentStore, type AgentInput } from "../agents/store";
+import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput } from "../agents/store";
 import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
@@ -1192,8 +1192,19 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.agents.get(number));
   }
 
-  agentList(before: number | null, limit: number, issue: number | null, chatsOf: string | null = null) {
-    return this.guard(() => this.agents.list(before, limit, issue, chatsOf));
+  /** A page of sessions, each with its branch's facts now (state, commits ahead, merge, checks). */
+  agentList(f: AgentFilters) {
+    return this.guard(() => {
+      const page = this.agents.list(f);
+
+      for (const v of page.sessions) {
+        const b = this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
+
+        v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
+      }
+
+      return page;
+    });
   }
 
   agentReport(state: SessionState) {

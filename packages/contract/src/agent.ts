@@ -46,6 +46,21 @@ export const AgentSession = Schema.Struct({
   awaiting_checks: Schema.Boolean,
   created_at: Timestamp,
   updated_at: Timestamp,
+  /** In a list (GET .../agents, .../assistant): its branch as Pando knows it now; null while the branch is not made yet. */
+  branch_facts: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        state: Schema.Literals(["open", "merged"]),
+        /** Commits on the branch not on main; 0 once merged; null while not computed. */
+        ahead: Schema.NullOr(Count),
+        /** True while `ahead` is not yet for the current main and head (computed off the request): show no count. */
+        stale: Schema.Boolean,
+        merged_at: Schema.NullOr(Timestamp),
+        /** The branch head's combined checks (Checks.state). */
+        checks: Schema.Literals(["success", "pending", "failure", "error", "missing", "unknown"]),
+      }),
+    ),
+  ),
 });
 
 export interface AgentSession extends Schema.Schema.Type<typeof AgentSession> {}
@@ -54,6 +69,8 @@ export interface AgentSession extends Schema.Schema.Type<typeof AgentSession> {}
 export const AgentSessionList = Schema.Struct({
   sessions: Schema.Array(AgentSession),
   next_before: Schema.NullOr(Count),
+  /** For the same filters, in every state: all of them, working now, waiting (for a person or for checks). */
+  counts: Schema.Struct({ all: Count, working: Count, waiting: Count }),
 });
 
 export interface AgentSessionList extends Schema.Schema.Type<typeof AgentSessionList> {}

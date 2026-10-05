@@ -1,0 +1,19 @@
+{
+  "schema": "SessionFiles",
+  "route": "GET .../sessions/{id}/files",
+  "status": 200,
+  "body": {
+    "files": [
+      {
+        "repo": "projects-app",
+        "repo_path": "projects/app",
+        "path": "c.txt"
+      },
+      {
+        "repo": "projects-app",
+        "repo_path": "projects/app",
+        "path": "d.txt"
+      }
+    ]
+  }
+}

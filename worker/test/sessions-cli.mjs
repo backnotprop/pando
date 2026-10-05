@@ -416,6 +416,15 @@ sys.exit(os.waitstatus_to_exitcode(status))
   });
 
   check("its commits reached main, and the session says so, branch kept", !!landed && landed.commits.every((c) => c.branch === "fix-login"), JSON.stringify(landed?.commits?.map((c) => [c.branch, c.on_main])));
+  r = await call("GET", `/v1/monorepos/${full}/sessions/${piId}/files`, S);
+  record("session-files.json", "SessionFiles", "GET .../sessions/{id}/files", r);
+  check("the files in its commits, read from git", r.json?.files?.map((f) => f.path).sort().join() === "c.txt,d.txt", JSON.stringify(r.json));
+  r = await call("GET", `/v1/users/${LOGIN}/sessions`, S);
+  record("person-sessions.json", "PersonSessions", "GET /v1/users/{login}/sessions", r);
+  check("a person's sessions across the repositories both can open", r.json?.sessions?.some((x) => x.session.id === piId && x.monorepo.full_name === full), `${r.json?.sessions?.length}`);
+  r = await call("GET", `/v1/users/${LOGIN}/session-marks?tz=0`, S);
+  record("session-marks.json", "SessionMarks", "GET /v1/users/{login}/session-marks?tz=0", r);
+  check("the graph's agent for today: Pi, behind both commits on main", r.json?.days?.at(-1)?.program === "pi" && r.json.days.at(-1).commits === 2, JSON.stringify(r.json?.days));
   ob = await onBranch(() => true);
   check("the merged branch keeps its numbered sessions", ob?.sessions.find((x) => x.id === piId)?.number === piOnBranch?.number, "");
 
@@ -475,6 +484,9 @@ sys.exit(os.waitstatus_to_exitcode(status))
   await sleep(3000);
   r = await call("GET", `/v1/monorepos/${full}/sessions/${piId}`, S);
   check("lines written after the delete are not sent: it stays deleted", r.json?.state === "deleted", JSON.stringify(r.json));
+  r = await call("DELETE", `/v1/monorepos/${full}/sessions?older_than_days=0`, S);
+  record("sessions-deleted.json", "SessionsDeleted", "DELETE .../sessions?older_than_days=0", r);
+  check("delete many: every one of the person's sessions here, at once", r.status === 200 && r.json?.deleted >= 1 && (await call("GET", `/v1/monorepos/${full}/sessions`, S)).json?.sessions?.length === 0, JSON.stringify(r.json));
   const state = JSON.parse(readFileSync(stateFile, "utf8"));
   check("the machine keeps numbers, never text", JSON.stringify(state).length < 4000 && !JSON.stringify(state).includes("Placeholder"), "");
 } catch (err) {

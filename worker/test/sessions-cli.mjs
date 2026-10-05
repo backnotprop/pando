@@ -164,6 +164,7 @@ try {
   check("pando login (piped: recording is not asked)", r.status === 0 && !/Record agent sessions/.test(r.stderr), said(r));
   // At a terminal (a pty, from Python's pty module), login asks once; once answered, never again. The credential is
   // typed only after pando turned echo off for it.
+
   const PTY = `import os, pty, sys, select, time
 pid, fd = pty.fork()
 if pid == 0:
@@ -185,6 +186,7 @@ _, status = os.waitpid(pid, 0)
 sys.stdout.write(out.decode(errors="replace"))
 sys.exit(os.waitstatus_to_exitcode(status))
 `;
+
   const tty = { PANDO_HOME: join(work, "tty-home"), PTY_SECRET: S, PTY_ANSWER: "n" };
   const term = () => pando(["-c", PTY, bin, "login", "--server", URL_, "--with-credential"], { env: tty, exe: "python3" });
   let t = await term();

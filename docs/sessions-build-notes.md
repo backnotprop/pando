@@ -16,8 +16,8 @@ removed).
 | Stage | State |
 | --- | --- |
 | 0. Prove three things | done, accepted by pando-ops 2026-10-05 |
-| 1. Server: store and read | done, reported; waiting for the gate. Claude Code and Codex fixtures wait on the owner's fixture logins |
-| 2. Machine: capture | not started |
+| 1. Server: store and read | done, reported 2026-10-05. Claude Code and Codex fixtures wait on the owner's fixture logins |
+| 2. Machine: capture | done, reported; waiting for the gate (and for cloud-agents to land, then a merge of main) |
 | 3. Linking | not started |
 | 4. Web | waits for the owner's approval of the final screens |
 | 5. Docs, limits, recorded fixtures | not started |
@@ -205,6 +205,93 @@ them.
   folder kept for fixtures (asked of pando-ops 2026-10-05):
   `CLAUDE_CONFIG_DIR=$HOME/.pando-fixtures/claude claude` then /login;
   `CODEX_HOME=$HOME/.pando-fixtures/codex codex login`.
+
+## Stage 2: the machine (capture)
+
+Code: `cli/internal/session/` (id, stores, find, tail, opencode, trim, redact,
+state, run, trailer), `cli/internal/app/session.go` (`pando session`, the
+login question, the hidden `pando session trailer` the hook calls),
+`cli/internal/server/sessions.go` (the client calls), `cmd/pando/main.go`
+(`pando sync` starts the recorder beside the shared files), the hook in
+`cli/internal/worktree/hook.go`, `[sessions]` in `config.Settings`. Server:
+`worker/migrations/0008_sessions.sql` and `worker/src/sessions/user-routes.ts`.
+
+- **Two jobs apart.** `session.Start` runs its own goroutine with its own
+  recover; every error is logged as `pando sync (sessions): ...` and the pass
+  is tried again. The shared files' engine never sees it. A plain git repo,
+  where `pando sync` used to exit at once ("no shared files"), now keeps
+  running: it follows main and records sessions.
+- **Where sessions are found:** defaults (`~/.claude/projects`,
+  `~/.codex/sessions` and `archived_sessions`, `~/.pi/agent/sessions`,
+  `~/.local/share/opencode/opencode.db`), the same moved by `pando sync`'s own
+  environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`,
+  `PI_CODING_AGENT_SESSION_DIR`, `OPENCODE_DB`, `XDG_DATA_HOME`), what the
+  commit hook saw in an agent's shell (`~/.pando/session-stores`), and
+  `pando session paths add <folder> --program <name>` (`~/.pando/sessions.toml`).
+- **Only sessions in this Pando folder:** a file's header (Claude Code
+  `cwd`/`sessionId`; Codex `session_meta`; Pi `session`) decides, and a file
+  elsewhere is never opened again (`skip` in the state). Claude Code's project
+  directories are filtered by name first, so other projects' files are never
+  opened at all.
+- **Tailing:** whole lines from the byte offset the server's end is at, up to
+  8 MB of trimmed lines a piece; a partial last line waits. A line alone over
+  8 MB becomes a marker line. Lines that are all reasoning are read and not
+  sent; an empty piece still moves the end (the server accepts it). On 409 the
+  machine takes the server's end; with no state at all it asks the server
+  for the end first. A file shorter than what was sent, or whose first line
+  changed, stops being recorded (`pando session status` counts them).
+- **OpenCode V2:** read-only, `session_v2` must exist; settled rows by
+  `seq`, stopping at the first unsettled one; the first piece starts with the
+  session's own row.
+- **Trim and redact, per string:** opaque strings and `data:` URLs become
+  `[opaque N]`, strings are cut at 64 KB, reasoning blocks and Codex reasoning
+  lines are dropped. Redaction: exact values (the Pando credential, secret-named
+  environment variables, `.env*` and `.dev.vars*` values in the folder and its
+  worktrees), betterleaks v1.8.1's default rules, then Pando's own (private
+  keys, URL passwords, `NAME=value` with a secret-looking name, long mixed
+  tokens over 4.5 bits a character). If betterleaks cannot load, nothing is
+  sent.
+- **Cadence:** stores are looked at every 5 s; a session sends at most one
+  piece per 30 s, except right after a commit names it (the hook writes
+  `.pando/local/session-nudge`). A backlog goes piece after piece at once.
+  `PANDO_SESSIONS_EVERY` shortens both, for tests.
+- **Exclusions:** the person's own list on the server (D1
+  `session_exclusions`, `pando session exclude|include [<owner/name>]
+  [--project <path>]`), read every 5 minutes and cached for the hook in
+  `~/.pando/session-exclusions.json`; the repository's `[sessions]` table in
+  `.pando/pando.toml` (`record = false`, `exclude = [...]`). The server also
+  refuses an upload for a place in the person's list (403
+  `sessions_excluded`).
+- **What the machine tells the server** (rows 12 and 13): `PUT
+  /v1/user/session-machine` with recording on or off and the stores it reads,
+  when either changes; `GET /v1/user/session-machines` lists them for Settings.
+- **The hook:** `pando session trailer` walks the parent processes to the
+  nearest agent program (`ps -axww` on a Mac, `/proc` on Linux; node, bun,
+  deno and shell scripts read by the script they run) and uses only that
+  agent's own variable. No line when recording is off, during a rebase or a
+  cherry-pick, when the place is excluded, or when the nearest agent set no
+  variable. Added with `addIfDifferent`. The hook finds pando through `git
+  config pando.bin` (set only when the program installing it is named pando,
+  so a test binary is never called), else `PATH`.
+- `pando login` asks once, only at a terminal, default no.
+- Binary: 11.4 MB to 31.6 MB (betterleaks about 14.6 MB, as measured before
+  the decision; pure-Go SQLite the rest). NOTICE credits both.
+
+### Stage 2 tests
+
+- `worker/test/sessions-cli.mjs`, 36 checks: the real `pando` binary, `pando
+  sync`, a real worktree and its hook, stand-in agent programs (shell scripts
+  named `codex` and `claude`), a Pi session file and an OpenCode V2 database
+  under the test's own HOME, every agent data variable cleared. Run on the
+  plain server: `PANDO_URL=http://localhost:8869 node test/sessions-cli.mjs`.
+  It writes `session-machines.json` and `session-exclusions.json` recordings.
+- Go unit tests, `cli/internal/session/session_test.go`: the id vectors
+  (also in `worker/test/units.test.ts`), the offset protocol, trim, the
+  trailer rule, the agent table, redaction, exclusions.
+- A real run, done once (2026-10-05): real Codex 0.160.0 started from inside
+  this Claude Code session, committing through Pando's hook in a throwaway
+  repo with a scratch PANDO_HOME: the line named Codex's own thread, not the
+  outer Claude Code session.
 
 ## Decisions taken here, and why
 

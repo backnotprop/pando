@@ -35,7 +35,8 @@ func TrailerFor(gitDir string, getenv func(string) string, nearest string, recor
 	return ID(nearest, v)
 }
 
-// AgentOf names the agent a command line runs, or "": the program, or for node, bun and deno the script they run.
+// AgentOf names the agent a command line runs, or "": the program, or the script node, bun, deno or a shell runs
+// (an agent installed as a wrapper script).
 func AgentOf(args string) string {
 	f := strings.Fields(args)
 	if len(f) == 0 {
@@ -43,8 +44,8 @@ func AgentOf(args string) string {
 	}
 	script := f[0]
 	switch strings.TrimSuffix(filepath.Base(f[0]), ".exe") {
-	case "node", "bun", "deno":
-		if len(f) < 2 {
+	case "node", "bun", "deno", "sh", "bash", "zsh", "dash":
+		if len(f) < 2 || strings.HasPrefix(f[1], "-") {
 			return ""
 		}
 		script = f[1]

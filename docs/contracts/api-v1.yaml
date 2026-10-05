@@ -1749,6 +1749,65 @@ paths:
         "204": { description: Deleted. }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/user/session-exclusions:
+    get:
+      operationId: getSessionExclusions
+      summary: The repositories and projects you do not record, on every machine you sign in on
+      tags: [sessions]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionExclusions" }
+    put:
+      operationId: setSessionExclusions
+      summary: Replace that list (at most 200)
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [exclusions]
+              properties:
+                exclusions:
+                  type: array
+                  items: { type: object, required: [monorepo], properties: { monorepo: { type: string, description: "owner/name" }, project: { type: [string, "null"], description: "A project's path; null: the whole repository." } } }
+      responses:
+        "204": { description: Saved. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/user/session-machine:
+    put:
+      operationId: reportSessionMachine
+      summary: This machine (the calling credential) says whether it records sessions and which stores it reads
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recording, stores]
+              properties:
+                recording: { type: boolean }
+                stores: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/SessionStore" } }
+      responses:
+        "204": { description: Saved. }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/user/session-machines:
+    get:
+      operationId: listSessionMachines
+      summary: Each of your machines, as it last reported its recording (Settings)
+      tags: [sessions]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMachines" }
   /v1/monorepos/{owner}/{monorepo}/sessions:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -4758,3 +4817,32 @@ components:
       properties:
         entries: { type: array, items: { $ref: "#/components/schemas/SessionEntry" } }
         next_cursor: { type: [integer, "null"] }
+    SessionExclusions:
+      type: object
+      required: [exclusions]
+      properties:
+        exclusions:
+          type: array
+          items: { type: object, required: [monorepo, monorepo_id, project], properties: { monorepo: { type: string }, monorepo_id: { type: string }, project: { type: [string, "null"] } } }
+    SessionStore:
+      type: object
+      required: [program, path, found]
+      properties:
+        program: { type: string, enum: [claude-code, codex, pi, opencode] }
+        path: { type: string }
+        found: { type: string, description: "default, environment, commit hook or paths add" }
+    SessionMachines:
+      type: object
+      required: [machines]
+      properties:
+        machines:
+          type: array
+          items:
+            type: object
+            required: [credential_id, machine, recording, stores, updated_at]
+            properties:
+              credential_id: { type: string }
+              machine: { type: string }
+              recording: { type: boolean }
+              stores: { type: array, items: { $ref: "#/components/schemas/SessionStore" } }
+              updated_at: { type: string, format: date-time }

@@ -72,7 +72,9 @@ import {
   Session,
   SessionAny,
   SessionEntries,
+  SessionExclusions,
   SessionList,
+  SessionMachines,
   MonorepoCreated,
   Org,
   OrgInviteResult,
@@ -170,6 +172,8 @@ const decoders = {
   SessionAny: refuses(SessionAny),
   SessionEntries: refuses(SessionEntries),
   SessionList: refuses(SessionList),
+  SessionExclusions: refuses(SessionExclusions),
+  SessionMachines: refuses(SessionMachines),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

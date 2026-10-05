@@ -1,0 +1,14 @@
+{
+  "schema": "SessionExclusions",
+  "route": "GET /v1/user/session-exclusions",
+  "status": 200,
+  "body": {
+    "exclusions": [
+      {
+        "monorepo": "scli-muusd8qk/scli-muusd8qk",
+        "monorepo_id": "m_c8b3cfc9e9b2763f",
+        "project": "projects/app"
+      }
+    ]
+  }
+}

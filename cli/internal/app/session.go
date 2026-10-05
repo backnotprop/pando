@@ -14,10 +14,10 @@ import (
 )
 
 // SessionUsage is the help line for `pando session`.
-const SessionUsage = `session enable | disable                              record agent sessions on this machine, or stop
+const SessionUsage = `session enable | disable                                  record coding sessions on this machine, or stop
   pando session status                                            what this machine records, from where, and what it skips
-  pando session paths [add <folder> --agent <name> | remove <folder>]   where agents keep sessions, beyond the usual places
-  pando session exclude | include <owner/name> [--project <path>]   a repository or project you do not record, on every machine
+  pando session paths [add <folder> --program <name> | remove <folder>]   where Claude Code, Codex, Pi or OpenCode keep sessions
+  pando session exclude | include [<owner/name>] [--project <path>]   a repository or project you do not record, on every machine
   pando session delete <id> [--monorepo <owner/name>]             delete a session at once and for good`
 
 // Session is `pando session`.
@@ -162,7 +162,7 @@ func sessionPaths(e *Env, args []string) error {
 		return nil
 	}
 	fs := flags("session paths")
-	agent := fs.String("agent", "", "claude-code, codex, pi or opencode")
+	program := fs.String("program", "", "claude-code, codex, pi or opencode")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
@@ -173,12 +173,12 @@ func sessionPaths(e *Env, args []string) error {
 	path := e.abs(pos[0])
 	switch args[0] {
 	case "add":
-		program := *agent
+		program := *program
 		if program == "" && strings.HasSuffix(path, ".db") {
 			program = session.OpenCode
 		}
 		if !isProgram(program) {
-			return UsageError{"which agent keeps sessions there? add --agent claude-code, codex, pi or opencode"}
+			return UsageError{"which program keeps sessions there? add --program claude-code, codex, pi or opencode"}
 		}
 		if _, err := os.Stat(path); err != nil {
 			return err
@@ -208,7 +208,7 @@ func sessionPaths(e *Env, args []string) error {
 		s.Paths = kept
 		return s.Save()
 	default:
-		return UsageError{"pando session paths [add <folder> --agent <name> | remove <folder>]"}
+		return UsageError{"pando session paths [add <folder> --program <name> | remove <folder>]"}
 	}
 	return nil
 }

@@ -104,6 +104,14 @@ export class SessionAgent extends Agent<Env> {
     return { running: this.ctx.container?.running ?? false };
   }
 
+  async snapshot() {
+    const c = await this.sandbox();
+    const snap = await c.snapshotContainer({ name: "workspace" });
+    this.ctx.storage.kv.put("snapshot", snap);
+    await c.destroy();
+    return { id: (snap as { id?: string }).id, size: (snap as { size?: number }).size };
+  }
+
   async destroyContainer() {
     const c = this.ctx.container;
     if (c?.running) await c.destroy();
@@ -116,7 +124,8 @@ export class SessionAgent extends Agent<Env> {
     const c = this.ctx.container;
     if (!c) throw new Error("no container binding");
     if (!c.running) {
-      c.start({ image: c.images.git, entrypoint: ["sleep", "infinity"], enableInternet: false });
+      const snap = this.ctx.storage.kv.get<ContainerSnapshot>("snapshot");
+      c.start({ ...(snap ? { containerSnapshot: snap } : { image: c.images.git }), entrypoint: ["sleep", "infinity"], enableInternet: false });
       await c.setInactivityTimeout(10 * 60 * 1000);
     }
     const auth = this.ctx.storage.kv.get<string>("auth");
@@ -172,7 +181,7 @@ export class GitGateway extends WorkerEntrypoint<Env, { auth: string; monorepo: 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const m = /^\/s\/([a-z0-9-]{1,63})\/(ask|transcript|raw|setup|container|destroy)$/.exec(url.pathname);
+    const m = /^\/s\/([a-z0-9-]{1,63})\/(ask|transcript|raw|setup|container|destroy|snapshot)$/.exec(url.pathname);
     // Everything else goes to the Pando Worker, so one port serves both.
     if (!m) return env.PANDO ? env.PANDO.fetch(request) : new Response("not found\n", { status: 404 });
     const [, name, action] = m;
@@ -190,6 +199,12 @@ export default {
       }
       case "container":
         return Response.json(await agent.containerState());
+      case "snapshot":
+        try {
+          return Response.json(await agent.snapshot());
+        } catch (e) {
+          return Response.json({ error: String(e) }, { status: 500 });
+        }
       case "destroy":
         return Response.json(await agent.destroyContainer());
     }

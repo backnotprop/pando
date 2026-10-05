@@ -62,3 +62,8 @@ PASS  cleanup: the repository agents-muulid95 (and its Artifacts repo) is delete
       204
 
 16 of 16 passed
+
+Spike 4 (snapshot, local wrangler dev, 2026-10-04):
+  run: echo kept > /workspace/note.txt   -> exit 0
+  POST /s/snap1/snapshot                 -> {"size":124146531} (124 MB), container destroyed
+  run: cat /workspace/note.txt (new container from the snapshot) -> kept

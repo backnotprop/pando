@@ -61,6 +61,8 @@ export interface TranscriptMessage {
   at: number;
   stop_reason?: string;
   error?: string;
+  /** An answer's tokens, as the model's provider counted them: input (cache reads included), cache reads, output. */
+  usage?: { input: number; cache_read: number; output: number };
 }
 
 export interface AgentsRpc {

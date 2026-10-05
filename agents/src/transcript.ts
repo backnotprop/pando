@@ -31,7 +31,10 @@ function project(message: Message, id: string): TranscriptMessage | undefined {
     case "user":
       return { id, role: "user", parts: [{ type: "text", text: contentText(message.content) }], at: message.timestamp };
     case "assistant": {
-      const m: TranscriptMessage = { id, role: "assistant", parts: assistantParts(message.content), at: message.timestamp, stop_reason: message.stopReason };
+      const m: TranscriptMessage = {
+        id, role: "assistant", parts: assistantParts(message.content), at: message.timestamp, stop_reason: message.stopReason,
+        usage: { input: message.usage.input + message.usage.cacheRead, cache_read: message.usage.cacheRead, output: message.usage.output },
+      };
 
       if (message.errorMessage !== undefined) m.error = message.errorMessage;
 

@@ -75,6 +75,8 @@ export const AgentMessage = Schema.Struct({
   at: Schema.Number,
   stop_reason: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
+  /** An answer's tokens as the model's provider counted them: input (cache reads included), cache reads, output. */
+  usage: Schema.optionalKey(Schema.Struct({ input: Count, cache_read: Count, output: Count })),
 });
 
 export interface AgentMessage extends Schema.Schema.Type<typeof AgentMessage> {}

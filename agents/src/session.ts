@@ -17,6 +17,7 @@ import { ContainerEnv } from "./container-env";
 import type { Env } from "./env";
 import type { GatewayProps } from "./gateway";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
+import { PandoApi, pandoTools } from "./pando-tools";
 import { Sandbox, worktreeDir } from "./sandbox";
 import type { SessionSpec, SessionState, Status, TranscriptMessage } from "./protocol";
 import { projectEntries } from "./transcript";
@@ -37,6 +38,8 @@ function preamble(s: PublicSpec): string {
     `Your working folder is ${dir}: branch ${s.branch} of ${s.repo.name}, a Linux sandbox. Use bash, read, write and edit there.`,
     `Commit with git as you go and push the branch after each working step (git push origin ${s.branch}). Main is protected: never push to it.`,
     "The sandbox has no internet. It reaches only this repository, through git and the pando command.",
+    "Pando's own tools reach the repository on the server: read_file, list_files, issue, branch_diff, comment_issue, post_review, merge.",
+    `When your work is done and pushed, merge ${s.branch} with the merge tool. Pando merges only when the required checks are green; if it refuses, say why and stop.`,
   ].join("\n");
 }
 
@@ -176,7 +179,9 @@ export class AgentSession extends DurableObject<Env> {
     if (this.#installed) return;
     this.#installed = true;
     const pub: PublicSpec = { ...spec, credential: { id: spec.credential.id, name: spec.credential.name } };
-    this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub), tag: false }], tools: [] });
+    const api = new PandoApi(this.env.PANDO, () => this.#spec());
+
+    this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub), tag: false }], tools: pandoTools(api, () => this.#spec()) });
     this.registry.install(CodingTools);
   }
 

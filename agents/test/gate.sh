@@ -7,7 +7,7 @@
 # engine in a VM, for the containers and FUSE; never FUSE on the Mac), runs
 # the local server on PORT, INSPECTOR and STATE (defaults 8863, 9363,
 # agents/.state), then session.mjs, the same session after a full restart,
-# and launch.mjs. Afterwards it stops the server, stops Colima only if it
+# launch.mjs and tools.mjs. Afterwards it stops the server, stops Colima only if it
 # started it, and puts the Docker context back. One line per suite; exit 1
 # when any failed. Logs: $STATE/gate-*.log and $STATE/wrangler.log.
 set -uo pipefail
@@ -55,4 +55,5 @@ else
   failed=1
 fi
 suite "launch (stage 2)" launch node "$here/test/launch.mjs"
+suite "tools (stage 3)" tools node "$here/test/tools.mjs"
 exit "$failed"

@@ -9,17 +9,17 @@
         "kind": "task",
         "status": "waiting",
         "reason": null,
-        "repo": "agents-s2-muus6ok4",
+        "repo": "agents-s2-muusrqzk",
         "branch": "agent/1",
         "program": "pi",
         "model": "scripted",
         "issue": null,
-        "launched_by": "agents-s2-muus6ok4",
+        "launched_by": "agents-s2-muusrqzk",
         "machine": "cloud-1",
         "workspace": "mount",
         "awaiting_checks": false,
-        "created_at": "2026-10-05T05:00:09.222Z",
-        "updated_at": "2026-10-05T05:00:16.521Z"
+        "created_at": "2026-10-05T05:16:33.357Z",
+        "updated_at": "2026-10-05T05:16:42.630Z"
       }
     ],
     "next_before": null

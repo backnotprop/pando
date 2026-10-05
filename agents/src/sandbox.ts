@@ -42,7 +42,7 @@ export interface ExecResult {
   stderr: string;
 }
 
-interface SavedSnapshot {
+export interface SavedSnapshot {
   snapshot: ContainerSnapshot;
   /** A snapshot restores only into the image it was taken from. */
   image: string;
@@ -92,20 +92,37 @@ export class Sandbox {
 
   async #start(): Promise<Workspace> {
     const c = this.container;
-    let from: Workspace["from"] = "running";
 
-    if (!c.running) {
-      const image = c.images.workspace;
-      const saved = this.ctx.storage.kv.get<SavedSnapshot>("sandbox.snapshot");
-      const usable = saved && saved.image === image ? saved : undefined;
-      c.start({
-        ...(usable ? { containerSnapshot: usable.snapshot } : { image }),
-        entrypoint: ["sleep", "infinity"],
-        enableInternet: false,
-        instance: "standard-1",
-      });
-      from = usable ? "snapshot" : "nothing";
+    if (c.running) return this.#prepare("running");
+    const saved = this.restorable();
+
+    if (saved) {
+      try {
+        this.#boot(saved.snapshot);
+
+        return await this.#prepare("snapshot");
+      } catch (error) {
+        // Past its 30 days, or its files did not come back: start from the branch instead.
+        console.warn("snapshot restore", String(error));
+        this.ctx.storage.kv.delete("sandbox.snapshot");
+        await this.destroy();
+      }
     }
+
+    this.#boot(null);
+
+    return this.#prepare("nothing");
+  }
+
+  #boot(snapshot: ContainerSnapshot | null): void {
+    const image = this.container.images.workspace;
+    const from = snapshot ? { containerSnapshot: snapshot } : { image };
+
+    this.container.start({ ...from, entrypoint: ["sleep", "infinity"], enableInternet: false, instance: "standard-1" });
+  }
+
+  async #prepare(from: Workspace["from"]): Promise<Workspace> {
+    const c = this.container;
 
     await c.setInactivityTimeout(IDLE_MS);
     await c.interceptOutboundHttp(INTERNAL_HOST, this.gateway());
@@ -119,6 +136,14 @@ export class Sandbox {
 
     return { dir: line[1], kind: line[2] === "mount" ? "mount" : "clone", from };
   }
+
+  /** The newest snapshot, when the current image can restore it. */
+  restorable(): SavedSnapshot | undefined {
+    const saved = this.ctx.storage.kv.get<SavedSnapshot>("sandbox.snapshot");
+
+    return saved && saved.image === this.container.images.workspace ? saved : undefined;
+  }
+
 
   /** The environment every command in the container gets. */
   env() {

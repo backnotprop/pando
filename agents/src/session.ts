@@ -112,7 +112,9 @@ export class AgentSession extends DurableObject<Env> {
   async send(prompt: string): Promise<SessionState> {
     await this.lifecycle.start();
     this.#spec();
-    await this.#submit(prompt);
+    const note = this.#restoreNote();
+
+    await this.#submit(note ? `${note}\n\n${prompt}` : prompt);
 
     return this.state();
   }
@@ -122,6 +124,8 @@ export class AgentSession extends DurableObject<Env> {
     await this.lifecycle.start();
     this.#setStatus("stopped", reason);
     await this.harness.abort();
+    // Its files are kept for a later message: unpushed work included.
+    await this.#saveSandbox();
     await this.sandbox.destroy();
 
     return this.state();
@@ -228,10 +232,37 @@ export class AgentSession extends DurableObject<Env> {
       const ws = await this.sandbox.workspace().catch(() => undefined);
 
       if (ws) this.ctx.storage.kv.put("workspace", ws.kind);
+      await this.#saveSandbox();
     }
 
     if (result.status === "done") this.#setStatus("waiting");
     else this.#setStatus("failed", result.reason ?? "the run ended without an answer");
+  }
+
+  /** A snapshot of the sandbox's files, for the next start; the sandbox keeps running. */
+  async #saveSandbox(): Promise<void> {
+    if (!this.sandbox.running) return;
+
+    try {
+      await this.sandbox.snapshot();
+    } catch (error) {
+      console.warn("snapshot", String(error));
+    }
+  }
+
+  /**
+   * One line for the agent when its sandbox stopped since its last run: how
+   * its workspace comes back on its next command. Exact: a snapshot the
+   * image can restore, or else the branch as pushed.
+   */
+  #restoreNote(): string | null {
+    if (this.sandbox.running || !this.ctx.storage.kv.get("workspace")) return null;
+    const spec = this.#spec();
+    const saved = this.sandbox.restorable();
+
+    return saved
+      ? `[Pando] Your sandbox stopped since your last message. On your next command it comes back from a snapshot of its files taken at ${saved.at}: the files as they were, unpushed changes included. No processes are running.`
+      : `[Pando] Your sandbox stopped since your last message. On your next command it is made again from branch ${spec.branch} as pushed: changes that were not pushed are gone, and no processes are running.`;
   }
 
   /** Tells Pando's Worker the session's state; it keeps the newest. */

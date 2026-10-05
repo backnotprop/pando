@@ -5,6 +5,7 @@
 import { HttpError, now } from "../http";
 import type { StreamEvent } from "../monorepo/types";
 import type { Program } from "./ids";
+import type { SessionCommitRef } from "./commits";
 import type { PieceFacts } from "./parse";
 
 type Row = Record<string, SqlStorageValue>;
@@ -34,6 +35,11 @@ CREATE TABLE IF NOT EXISTS session_piece_models (
   PRIMARY KEY (session, piece, model));
 CREATE TABLE IF NOT EXISTS session_model_changes (session TEXT NOT NULL, piece INTEGER NOT NULL, at TEXT NOT NULL, model TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS session_model_changes_at ON session_model_changes (session, at);
+CREATE TABLE IF NOT EXISTS session_commits (
+  session TEXT NOT NULL, repo TEXT NOT NULL, sha TEXT NOT NULL, line INTEGER NOT NULL, branch TEXT, ord INTEGER,
+  title TEXT NOT NULL, committed_at TEXT NOT NULL, on_main INTEGER NOT NULL DEFAULT 0, gone INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session, repo, sha));
+CREATE INDEX IF NOT EXISTS session_commits_branch ON session_commits (repo, branch);
 CREATE TABLE IF NOT EXISTS session_removals (
   session TEXT NOT NULL, prompt INTEGER NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL,
   PRIMARY KEY (session, prompt))
@@ -83,6 +89,38 @@ export interface RemovedTurn {
   at: string;
 }
 
+/** One commit of a session: where it is, and the model in force in the session when it was committed. */
+export interface SessionCommit {
+  repo: string;
+  sha: string;
+  branch: string | null;
+  title: string;
+  committed_at: string;
+  on_main: boolean;
+  model: string | null;
+}
+
+/** A session on a branch, numbered by its earliest commit there (null: no commit there yet). */
+export interface BranchSession {
+  number: number | null;
+  id: string;
+  /** Null: a commit names a session this repository has no record of. */
+  session: SessionView | DeletedView | null;
+  commits: SessionCommit[];
+}
+
+/** A commit on the branch with the numbers of the sessions it names, in its lines' order; its model when they agree. */
+export interface BranchCommit {
+  sha: string;
+  sessions: number[];
+  model: string | null;
+}
+
+export interface BranchSessions {
+  sessions: BranchSession[];
+  commits: BranchCommit[];
+}
+
 export interface SessionView {
   id: string;
   state: "active" | "inactive";
@@ -103,6 +141,7 @@ export interface SessionView {
   bytes: number;
   end: number;
   removed: RemovedTurn[];
+  commits: SessionCommit[];
 }
 
 export interface DeletedView {
@@ -184,6 +223,19 @@ export interface SessionFilters {
   state: "active" | "inactive" | null;
   cursor: string | null;
   limit: number;
+}
+
+interface CommitRow extends Row {
+  session: string;
+  repo: string;
+  sha: string;
+  line: number;
+  branch: string | null;
+  ord: number | null;
+  title: string;
+  committed_at: string;
+  on_main: number;
+  model: string | null;
 }
 
 interface SessionRow extends Row {
@@ -346,6 +398,7 @@ export class SessionStore {
       bytes: s.bytes,
       end: s.end_cursor,
       removed: this.rows<{ prompt: number; by: string; at: string }>("SELECT prompt, by, at FROM session_removals WHERE session = ? ORDER BY prompt", s.id),
+      commits: this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r)),
     };
   }
 
@@ -362,10 +415,19 @@ export class SessionStore {
     const where = ["deleted_at IS NULL", "last_at IS NOT NULL"];
     const args: SqlStorageValue[] = [];
 
-    for (const [col, v] of [["person", f.person], ["program", f.program], ["repo", f.repo], ["branch", f.branch]] as const) {
+    for (const [col, v] of [["person", f.person], ["program", f.program]] as const) {
       if (v === null) continue;
       where.push(`${col} = ?`);
       args.push(v);
+    }
+
+    // Where it ran, or where its commits are (DETERMINISM.md row 23).
+    if (f.repo !== null && f.branch !== null) {
+      where.push("((repo = ? AND branch = ?) OR id IN (SELECT session FROM session_commits WHERE repo = ? AND branch = ? AND (gone = 0 OR on_main = 1)))");
+      args.push(f.repo, f.branch, f.repo, f.branch);
+    } else if (f.repo !== null) {
+      where.push("(repo = ? OR id IN (SELECT session FROM session_commits WHERE repo = ?))");
+      args.push(f.repo, f.repo);
     }
 
     const since = new Date(Date.now() - ACTIVE_MS).toISOString();
@@ -534,6 +596,120 @@ export class SessionStore {
     this.publish("session.updated", view);
 
     return view;
+  }
+
+  /** Commit rows with the model in force at each commit's time (DETERMINISM.md row 22): the last change at or before it. */
+  private commitRows(where: string, ...args: SqlStorageValue[]): CommitRow[] {
+    return this.rows<CommitRow>(
+      `SELECT c.session, c.repo, c.sha, c.line, c.branch, c.ord, c.title, c.committed_at, c.on_main,
+              (SELECT m.model FROM session_model_changes m WHERE m.session = c.session AND m.at <= c.committed_at ORDER BY m.at DESC LIMIT 1) AS model
+       FROM session_commits c WHERE ${where} AND (c.gone = 0 OR c.on_main = 1) ORDER BY c.committed_at, c.sha LIMIT 500`,
+      ...args,
+    );
+  }
+
+  private commitOf(r: CommitRow): SessionCommit {
+    return { repo: r.repo, sha: r.sha, branch: r.branch, title: r.title, committed_at: r.committed_at, on_main: r.on_main === 1, model: r.model };
+  }
+
+  /**
+   * A branch's own commits, as its facts just read them: each session line kept, rows of commits no longer on the branch
+   * marked gone (a rewrite) unless they reached main. Sessions whose commits changed are published.
+   */
+  linkBranch(repo: string, branch: string, refs: SessionCommitRef[]): void {
+    const key = (session: string, sha: string) => `${session} ${sha}`;
+    const before = new Set(this.rows<{ session: string; sha: string }>("SELECT session, sha FROM session_commits WHERE repo = ? AND branch = ? AND gone = 0", repo, branch).map((r) => key(r.session, r.sha)));
+    const after = new Set(refs.flatMap((r) => r.sessions.map((s) => key(s, r.sha))));
+    this.sql.exec("UPDATE session_commits SET gone = 1 WHERE repo = ? AND branch = ? AND on_main = 0", repo, branch);
+
+    for (const r of refs) {
+      for (const [line, session] of r.sessions.entries()) {
+        this.sql.exec(
+          `INSERT INTO session_commits (session, repo, sha, line, branch, ord, title, committed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (session, repo, sha) DO UPDATE SET branch = excluded.branch, ord = excluded.ord, line = excluded.line, gone = 0`,
+          session, repo, r.sha, line, branch, r.ord, r.title, r.committed_at,
+        );
+      }
+    }
+
+    const changed = new Set([...before, ...after].flatMap((k) => (before.has(k) !== after.has(k) ? [k.split(" ")[0]] : [])));
+    this.publishChanged(changed);
+  }
+
+  /** Commits that reached main: their sessions' rows say so, made if the branch's facts never saw them. */
+  onMain(repo: string, refs: SessionCommitRef[]): void {
+    const changed = new Set<string>();
+
+    for (const r of refs) {
+      for (const [line, session] of r.sessions.entries()) {
+        const had = this.row<{ on_main: number }>("SELECT on_main FROM session_commits WHERE session = ? AND repo = ? AND sha = ?", session, repo, r.sha);
+
+        if (had?.on_main === 1) continue;
+        this.sql.exec(
+          `INSERT INTO session_commits (session, repo, sha, line, title, committed_at, on_main) VALUES (?, ?, ?, ?, ?, ?, 1)
+           ON CONFLICT (session, repo, sha) DO UPDATE SET on_main = 1, gone = 0`,
+          session, repo, r.sha, line, r.title, r.committed_at,
+        );
+        changed.add(session);
+      }
+    }
+
+    this.publishChanged(changed);
+  }
+
+  private publishChanged(ids: Set<string>): void {
+    for (const id of ids) {
+      const s = this.session(id);
+
+      if (s && !s.deleted_at) this.publish("session.updated", this.totals(id));
+    }
+  }
+
+  /**
+   * A branch's sessions: those its commits name, numbered 1, 2, 3 by their earliest commit in branch order (DETERMINISM.md
+   * row 28), then those that ran in its worktree with no commit there yet. And each commit's session numbers.
+   */
+  branchSessions(repo: string, branch: string): BranchSessions {
+    const rows = this.commitRows("c.repo = ? AND c.branch = ?", repo, branch);
+    const bySession = new Map<string, CommitRow[]>();
+
+    for (const r of rows) bySession.set(r.session, [...(bySession.get(r.session) ?? []), r]);
+    const oldest = (list: CommitRow[]) => Math.max(...list.map((r) => r.ord ?? -1));
+    const ordered = [...bySession].sort((a, b) => oldest(b[1]) - oldest(a[1]) || a[0].localeCompare(b[0]));
+    const numbers = new Map(ordered.map(([id], i) => [id, i + 1]));
+
+    const viewOf = (id: string) => {
+      const s = this.session(id);
+
+      return s ? this.view(s) : null;
+    };
+
+    const sessions: BranchSession[] = ordered.map(([id, list]) => ({
+      number: numbers.get(id) ?? null,
+      id,
+      session: viewOf(id),
+      commits: [...list].sort((a, b) => (b.ord ?? -1) - (a.ord ?? -1)).map((r) => this.commitOf(r)),
+    }));
+
+    for (const s of this.rows<SessionRow>("SELECT * FROM sessions WHERE repo = ? AND branch = ? AND deleted_at IS NULL AND last_at IS NOT NULL ORDER BY last_at DESC", repo, branch)) {
+      if (!numbers.has(s.id)) sessions.push({ number: null, id: s.id, session: this.view(s), commits: [] });
+    }
+
+    const byCommit = new Map<string, CommitRow[]>();
+
+    for (const r of rows) byCommit.set(r.sha, [...(byCommit.get(r.sha) ?? []), r]);
+
+    const commits: BranchCommit[] = [...byCommit]
+      .sort((a, b) => (a[1][0].ord ?? 0) - (b[1][0].ord ?? 0))
+      .map(([sha, list]) => {
+        const lines = [...list].sort((a, b) => a.line - b.line);
+        const models = new Set(lines.map((r) => r.model));
+
+        // No model when its sessions disagree or one is not known: nothing shown rests on a guess.
+        return { sha, sessions: lines.map((r) => numbers.get(r.session) ?? 0), model: models.size === 1 ? lines[0].model : null };
+      });
+
+    return { sessions, commits };
   }
 
   private publish(kind: "session.started" | "session.updated", view: SessionView): void {

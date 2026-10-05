@@ -18,7 +18,7 @@ removed).
 | 0. Prove three things | done, accepted by pando-ops 2026-10-05 |
 | 1. Server: store and read | done, reported 2026-10-05. Claude Code and Codex fixtures wait on the owner's fixture logins |
 | 2. Machine: capture | done, reported; waiting for the gate (and for cloud-agents to land, then a merge of main) |
-| 3. Linking | not started |
+| 3. Linking | done, reported; waiting for the gate |
 | 4. Web | waits for the owner's approval of the final screens |
 | 5. Docs, limits, recorded fixtures | not started |
 
@@ -292,6 +292,52 @@ login question, the hidden `pando session trailer` the hook calls),
   this Claude Code session, committing through Pando's hook in a throwaway
   repo with a scratch PANDO_HOME: the line named Codex's own thread, not the
   outer Claude Code session.
+
+## Stage 3: linking
+
+Code: `worker/src/sessions/commits.ts`, `sessionLines` in `ids.ts` (every
+`Pando-Session:` line anywhere in a message, in order), `CommitInfo.sessions`
+in `monorepo/graph.ts` (read from the whole message, before the 4 KB cut),
+`Facts.session_commits` in `monorepo/facts.ts`, the credit job's `onMain` in
+`monorepo/credit.ts`, and in the store `session_commits`, `linkBranch`,
+`onMain`, `branchSessions`.
+
+- **At push:** the branch facts job already walks the branch's own commits
+  (ahead of main, at most 250, the same owner limit as issue keywords) with
+  their messages cached; it now also lists those with session lines, newest
+  first. The object keeps them per (session, repo, sha), with the branch and
+  the commit's place in branch order. Commits no longer on the branch (a
+  rewrite, a force push) are marked gone, unless they reached main. Unpushed
+  commits never count.
+- **Reached main:** the contribution credit job walks every commit a merge
+  brings to main; those with session lines are marked `on_main` (made, with no
+  branch, if the facts never saw them). Order does not matter: a facts sweep
+  that runs after the merge marks the branch's rows gone, and `on_main` keeps
+  them.
+- **Model for a commit** (DETERMINISM row 22, the rule's fallback form): the
+  last change of the session's answering model at or before the commit's
+  committer time (both times from the same machine's clock). A commit named by
+  sessions whose models differ shows no model. The call-matching first form
+  (row 21) is not built: it is MATCH, and in force-at-time it gives the same
+  answer except when the model changed within a turn.
+- **A branch's sessions** (`GET .../sessions/on-branch?repo=&branch=`):
+  numbered 1, 2, 3 by their earliest commit in branch order (row 28); a line
+  naming a session this repository has no record of keeps its number with
+  `session: null`; a deleted one shows its stub; sessions in the worktree with
+  no commit there follow with no number. Its `commits` give the Overview each
+  commit's numbers in line order.
+- `GET .../sessions?repo=&branch=` matches where a session ran or where its
+  commits are (row 23). The session view carries `commits` (oldest first, at
+  most 500) with branch, title, time, `on_main` and model.
+- Not built: `Commit.trailers.sessions` on the branch commits route; the web
+  maps sha to numbers from `on-branch`, so the branch contract (which the
+  cloud-agents lane also changes) is left alone.
+
+Tests: `worker/test/sessions-cli.mjs` now 54 checks (the stage 3 part: a
+stand-in `pi` and `opencode` commit, push, numbering, the model per commit
+and its ambiguity, a force-pushed rewrite, the merge reaching main). The
+issues (40), events (68) and profile (39) suites pass against these changes;
+profile needs `--var WORKOS_API_BASE:http://127.0.0.1:8870` on my ports.
 
 ## Decisions taken here, and why
 

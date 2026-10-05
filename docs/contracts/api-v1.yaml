@@ -1831,6 +1831,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionList" }
         "400": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/on-branch:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: getBranchSessions
+      summary: A branch's sessions, numbered 1, 2, 3 by their earliest commit there, and each commit's session numbers
+      description: |
+        A commit links to a session by a `Pando-Session:` line anywhere in
+        its message, read from the branch's own commits (at most 250) with its
+        facts after each push, and from the commits that reach main. A
+        rewritten commit drops out. A commit's model is the one in force in
+        the session at its commit time, and null when its sessions disagree.
+        Sessions that ran in the branch's worktree with no commit there yet
+        follow, with no number.
+      tags: [sessions]
+      parameters:
+        - { name: repo, in: query, required: true, schema: { type: string } }
+        - { name: branch, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BranchSessions" }
   /v1/monorepos/{owner}/{monorepo}/sessions/{id}:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -4757,7 +4782,7 @@ components:
     Session:
       type: object
       description: "No title: who, which agent and model, where, when. Active while it has a record from the last 30 minutes."
-      required: [id, state, person, machine, program, models, repo, branch, parent, subagents, started_at, last_at, prompts, tool_calls, images, redactions, bytes, end, removed]
+      required: [id, state, person, machine, program, models, repo, branch, parent, subagents, started_at, last_at, prompts, tool_calls, images, redactions, bytes, end, removed, commits]
       properties:
         id: { type: string }
         state: { type: string, enum: [active, inactive] }
@@ -4783,6 +4808,38 @@ components:
         removed:
           type: array
           items: { type: object, required: [prompt, by, at], properties: { prompt: { type: integer }, by: { type: string }, at: { type: string, format: date-time } } }
+        commits:
+          type: array
+          description: Its pushed commits, oldest first, at most 500.
+          items: { $ref: "#/components/schemas/SessionCommit" }
+    SessionCommit:
+      type: object
+      required: [repo, sha, branch, title, committed_at, on_main, model]
+      properties:
+        repo: { type: string }
+        sha: { type: string }
+        branch: { type: [string, "null"] }
+        title: { type: string }
+        committed_at: { type: string, format: date-time }
+        on_main: { type: boolean }
+        model: { type: [string, "null"], description: "The model in force in the session at the commit's time." }
+    BranchSessions:
+      type: object
+      required: [sessions, commits]
+      properties:
+        sessions:
+          type: array
+          items:
+            type: object
+            required: [number, id, session, commits]
+            properties:
+              number: { type: [integer, "null"] }
+              id: { type: string }
+              session: { description: "The session, its deleted stub, or null when no record of it is here." }
+              commits: { type: array, items: { $ref: "#/components/schemas/SessionCommit" } }
+        commits:
+          type: array
+          items: { type: object, required: [sha, sessions, model], properties: { sha: { type: string }, sessions: { type: array, items: { type: integer } }, model: { type: [string, "null"] } } }
     SessionDeleted:
       type: object
       required: [id, state, deleted_by, deleted_at]

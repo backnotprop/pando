@@ -34,6 +34,7 @@ import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
+import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
@@ -1261,6 +1262,14 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.sessions.removeTurn(id, mark, rewritten, by));
   }
 
+  sessionsOnMain(repo: string, refs: SessionCommitRef[]): void {
+    this.sessions.onMain(repo, refs);
+  }
+
+  sessionsOnBranch(repo: string, branch: string) {
+    return this.guard(() => this.sessions.branchSessions(repo, branch));
+  }
+
   sessionReindex(id: string, read: PieceReread[]) {
     return this.guard(() => this.sessions.reindex(id, read));
   }
@@ -2191,6 +2200,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
     // The branch's commit links, for this head and main only (as ahead and behind are).
     if (f.issue_refs) this.issues.setLinks({ repo, branch: name }, "commit", f.issue_refs, null);
+
+    // The agent sessions its own commits name (sessions/commits.ts).
+    if (f.session_commits) this.sessions.linkBranch(repo, name, f.session_commits);
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     this.publishBranchRow(repo, name, required);
 

@@ -1,6 +1,7 @@
 // Agent session routes (members only), under /v1/monorepos/{owner}/{name}:
 //   POST   /sessions/{id}/pieces?at=&next=   append whole lines at the session's end (header Pando-Session; gzip optional)
 //   GET    /sessions                          by last activity (?person ?agent ?repo ?branch ?state ?cursor ?limit)
+//   GET    /sessions/on-branch?repo=&branch=  a branch's sessions, numbered by their earliest commit there, and its commits' numbers
 //   GET    /sessions/{id}                     one session (its `end` is where the next piece starts)
 //   GET    /sessions/{id}/entries?from=       a page of its conversation, parsed on read
 //   DELETE /sessions/{id}                     at once and for good: its person or an owner
@@ -89,6 +90,14 @@ export function sessionRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>):
   });
 
   api.get(base, async (c) => c.json(unwrap(await c.get("stub").sessionList(filtersOf(c))) satisfies typeof Contract.SessionList.Encoded));
+
+  // Before /sessions/:id, which would take "on-branch" for an id.
+  api.get(`${base}/on-branch`, async (c) => {
+    const repo = c.req.query("repo") ?? bad("repo: the repo's name");
+    const branch = c.req.query("branch") ?? bad("branch: its name");
+
+    return c.json(unwrap(await c.get("stub").sessionsOnBranch(repo, branch)) satisfies typeof Contract.BranchSessions.Encoded);
+  });
 
   api.get(one, async (c) => c.json(unwrap(await c.get("stub").sessionGet(idOf(c))) satisfies typeof Contract.SessionAny.Encoded));
 

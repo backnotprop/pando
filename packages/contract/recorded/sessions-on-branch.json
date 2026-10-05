@@ -1,0 +1,257 @@
+{
+  "schema": "BranchSessions",
+  "route": "GET .../sessions/on-branch?repo=&branch=",
+  "status": 200,
+  "body": {
+    "sessions": [
+      {
+        "number": 1,
+        "id": "s_2YMMZXF0MDJDXTF1H3YGK5ZKY3",
+        "session": null,
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "ee3a2d91b313bb0fc001f7dee7ca1137b6af9978",
+            "branch": "fix-login",
+            "title": "from codex",
+            "committed_at": "2026-10-05T05:12:55.000Z",
+            "on_main": false,
+            "model": null
+          }
+        ]
+      },
+      {
+        "number": 2,
+        "id": "s_2WESYT1CSW3HRVF5NJ5S3HKXTP",
+        "session": null,
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "2e9b898529025bfb8e271aa09fc162c335e58990",
+            "branch": "fix-login",
+            "title": "from claude",
+            "committed_at": "2026-10-05T05:12:56.000Z",
+            "on_main": false,
+            "model": null
+          }
+        ]
+      },
+      {
+        "number": 3,
+        "id": "s_4W7YM0QNCQNATC28Q4RG8HKAG0",
+        "session": null,
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "2e9b898529025bfb8e271aa09fc162c335e58990",
+            "branch": "fix-login",
+            "title": "from claude",
+            "committed_at": "2026-10-05T05:12:56.000Z",
+            "on_main": false,
+            "model": null
+          }
+        ]
+      },
+      {
+        "number": 4,
+        "id": "s_606ESSPBENYYVFTS25KG7C23X9",
+        "session": null,
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "541406cf39b4fb5bd14a6463782c01998b1662ef",
+            "branch": "fix-login",
+            "title": "nested",
+            "committed_at": "2026-10-05T05:12:56.000Z",
+            "on_main": false,
+            "model": null
+          }
+        ]
+      },
+      {
+        "number": 5,
+        "id": "s_7223XZT7FPRB1M7KNDD2B1Z7YX",
+        "session": null,
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "cd19351a5a27c0960272f8eec08bee92d4ec00df",
+            "branch": "fix-login",
+            "title": "moved folder",
+            "committed_at": "2026-10-05T05:12:56.000Z",
+            "on_main": false,
+            "model": null
+          }
+        ]
+      },
+      {
+        "number": 6,
+        "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+        "session": {
+          "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+          "state": "active",
+          "person": "scli-muusmxby",
+          "machine": "scli-box",
+          "program": "pi",
+          "models": [
+            {
+              "model": "gpt-5.5",
+              "answers": 3
+            }
+          ],
+          "repo": "projects-app",
+          "branch": "fix-login",
+          "parent": null,
+          "subagents": 0,
+          "started_at": "2026-10-05T05:11:48.934Z",
+          "last_at": "2026-10-05T05:11:57.028Z",
+          "prompts": 2,
+          "tool_calls": 1,
+          "images": 0,
+          "redactions": 2,
+          "bytes": 3689,
+          "end": 3717,
+          "removed": [],
+          "commits": [
+            {
+              "repo": "projects-app",
+              "sha": "384aad175def20c697a32dfa5e9039f499a3d0e7",
+              "branch": "fix-login",
+              "title": "Placeholder: from the Pi session",
+              "committed_at": "2026-10-05T05:12:58.000Z",
+              "on_main": false,
+              "model": "gpt-5.5"
+            },
+            {
+              "repo": "projects-app",
+              "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+              "branch": "fix-login",
+              "title": "Placeholder: from Pi, amended in OpenCode",
+              "committed_at": "2026-10-05T05:12:58.000Z",
+              "on_main": false,
+              "model": "gpt-5.5"
+            }
+          ]
+        },
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "384aad175def20c697a32dfa5e9039f499a3d0e7",
+            "branch": "fix-login",
+            "title": "Placeholder: from the Pi session",
+            "committed_at": "2026-10-05T05:12:58.000Z",
+            "on_main": false,
+            "model": "gpt-5.5"
+          },
+          {
+            "repo": "projects-app",
+            "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+            "branch": "fix-login",
+            "title": "Placeholder: from Pi, amended in OpenCode",
+            "committed_at": "2026-10-05T05:12:58.000Z",
+            "on_main": false,
+            "model": "gpt-5.5"
+          }
+        ]
+      },
+      {
+        "number": 7,
+        "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+        "session": {
+          "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+          "state": "active",
+          "person": "scli-muusmxby",
+          "machine": "scli-box",
+          "program": "opencode",
+          "models": [
+            {
+              "model": "big-pickle",
+              "answers": 5
+            }
+          ],
+          "repo": null,
+          "branch": null,
+          "parent": null,
+          "subagents": 0,
+          "started_at": "2026-10-05T05:10:50.972Z",
+          "last_at": "2026-10-05T05:12:57.053Z",
+          "prompts": 2,
+          "tool_calls": 2,
+          "images": 0,
+          "redactions": 1,
+          "bytes": 4531,
+          "end": 40,
+          "removed": [],
+          "commits": [
+            {
+              "repo": "projects-app",
+              "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+              "branch": "fix-login",
+              "title": "Placeholder: from Pi, amended in OpenCode",
+              "committed_at": "2026-10-05T05:12:58.000Z",
+              "on_main": false,
+              "model": "big-pickle"
+            }
+          ]
+        },
+        "commits": [
+          {
+            "repo": "projects-app",
+            "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+            "branch": "fix-login",
+            "title": "Placeholder: from Pi, amended in OpenCode",
+            "committed_at": "2026-10-05T05:12:58.000Z",
+            "on_main": false,
+            "model": "big-pickle"
+          }
+        ]
+      }
+    ],
+    "commits": [
+      {
+        "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+        "sessions": [
+          6,
+          7
+        ],
+        "model": null
+      },
+      {
+        "sha": "384aad175def20c697a32dfa5e9039f499a3d0e7",
+        "sessions": [
+          6
+        ],
+        "model": "gpt-5.5"
+      },
+      {
+        "sha": "cd19351a5a27c0960272f8eec08bee92d4ec00df",
+        "sessions": [
+          5
+        ],
+        "model": null
+      },
+      {
+        "sha": "541406cf39b4fb5bd14a6463782c01998b1662ef",
+        "sessions": [
+          4
+        ],
+        "model": null
+      },
+      {
+        "sha": "2e9b898529025bfb8e271aa09fc162c335e58990",
+        "sessions": [
+          3,
+          2
+        ],
+        "model": null
+      },
+      {
+        "sha": "ee3a2d91b313bb0fc001f7dee7ca1137b6af9978",
+        "sessions": [
+          1
+        ],
+        "model": null
+      }
+    ]
+  }
+}

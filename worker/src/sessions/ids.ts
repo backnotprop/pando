@@ -32,3 +32,13 @@ export async function sessionIdFor(program: Program, agentId: string): Promise<s
 
   return `s_${base32(digest.slice(0, 16))}`;
 }
+
+const LINE_RE = /^Pando-Session:[ \t]*(s_[0-9A-HJKMNP-TV-Z]{26})[ \t]*$/gm;
+
+/**
+ * Every Pando-Session line in a commit message, anywhere in it and in order, each once: a squash puts the first
+ * commit's lines in the body, and an amend by a second session adds its own (DETERMINISM.md rows 16 and 28).
+ */
+export function sessionLines(message: string): string[] {
+  return [...new Set([...message.replace(/\r\n?/g, "\n").matchAll(LINE_RE)].map((m) => m[1]))];
+}

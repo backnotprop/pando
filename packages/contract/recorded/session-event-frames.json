@@ -6,19 +6,19 @@
     {
       "type": "event",
       "seq": 1,
-      "at": "2026-10-05T04:38:42.318Z",
+      "at": "2026-10-05T05:13:21.672Z",
       "kind": "session.started",
       "collection": "sessions",
       "key": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
       "op": "upsert",
       "repo": "projects-a",
-      "actor": "se-a-muurf3fm",
+      "actor": "se-a-muusno1y",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
         "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
         "state": "active",
-        "person": "se-a-muurf3fm",
+        "person": "se-a-muusno1y",
         "machine": "ana-mbp",
         "program": "pi",
         "models": [
@@ -31,33 +31,34 @@
         "branch": "fix-login",
         "parent": null,
         "subagents": 0,
-        "started_at": "2026-10-05T04:37:34.212Z",
-        "last_at": "2026-10-05T04:37:36.661Z",
+        "started_at": "2026-10-05T05:12:13.566Z",
+        "last_at": "2026-10-05T05:12:16.015Z",
         "prompts": 1,
         "tool_calls": 1,
         "images": 0,
         "redactions": 0,
         "bytes": 2003,
         "end": 2003,
-        "removed": []
+        "removed": [],
+        "commits": []
       }
     },
     {
       "type": "event",
       "seq": 2,
-      "at": "2026-10-05T04:38:42.334Z",
+      "at": "2026-10-05T05:13:21.688Z",
       "kind": "session.updated",
       "collection": "sessions",
       "key": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
       "op": "upsert",
       "repo": "projects-a",
-      "actor": "se-a-muurf3fm",
+      "actor": "se-a-muusno1y",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
         "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
         "state": "active",
-        "person": "se-a-muurf3fm",
+        "person": "se-a-muusno1y",
         "machine": "ana-mbp",
         "program": "pi",
         "models": [
@@ -70,34 +71,35 @@
         "branch": "fix-login",
         "parent": null,
         "subagents": 0,
-        "started_at": "2026-10-05T04:37:34.212Z",
-        "last_at": "2026-10-05T04:37:42.306Z",
+        "started_at": "2026-10-05T05:12:13.566Z",
+        "last_at": "2026-10-05T05:12:21.660Z",
         "prompts": 2,
         "tool_calls": 1,
         "images": 0,
         "redactions": 0,
         "bytes": 3663,
         "end": 3663,
-        "removed": []
+        "removed": [],
+        "commits": []
       }
     },
     {
       "type": "event",
       "seq": 8,
-      "at": "2026-10-05T04:38:43.918Z",
+      "at": "2026-10-05T05:13:23.198Z",
       "kind": "session.deleted",
       "collection": "sessions",
       "key": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
       "op": "delete",
       "repo": null,
-      "actor": "se-a-muurf3fm",
+      "actor": "se-a-muusno1y",
       "machine": null,
       "agent": null,
       "row": {
         "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
         "state": "deleted",
-        "deleted_by": "se-a-muurf3fm",
-        "deleted_at": "2026-10-05T04:38:43.918Z"
+        "deleted_by": "se-a-muusno1y",
+        "deleted_at": "2026-10-05T05:13:23.198Z"
       }
     }
   ]

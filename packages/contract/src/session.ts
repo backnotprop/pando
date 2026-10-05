@@ -2,7 +2,7 @@
 // and stored as sent. No titles and nothing written by a model: a session is who, which agent and model, where, when.
 import * as Schema from "effect/Schema";
 
-import { Count, RepoName, Timestamp } from "./ids.ts";
+import { Count, RepoName, Sha, Timestamp } from "./ids.ts";
 
 /** `s_` and 26 Crockford base32 characters, derived from the agent and its own session id. */
 export const SessionId = Schema.String.check(Schema.isPattern(/^s_[0-9A-HJKMNP-TV-Z]{26}$/)).pipe(Schema.brand("SessionId"));
@@ -17,6 +17,17 @@ export const SessionModel = Schema.Struct({ model: Schema.String, answers: Count
 
 /** A removed turn's mark: its prompt number, who removed it, when. */
 export const SessionRemoved = Schema.Struct({ prompt: Count, by: Schema.String, at: Timestamp });
+
+/** One of a session's commits: where it is, and the model in force in the session when it was committed (null: unknown). */
+export const SessionCommit = Schema.Struct({
+  repo: RepoName,
+  sha: Sha,
+  branch: Schema.NullOr(Schema.String),
+  title: Schema.String,
+  committed_at: Timestamp,
+  on_main: Schema.Boolean,
+  model: Schema.NullOr(Schema.String),
+});
 
 /**
  * A recorded session. `state` is active while it has a record from the last 30 minutes. `repo` and `branch` are where
@@ -42,6 +53,8 @@ export const Session = Schema.Struct({
   bytes: Count,
   end: Count,
   removed: Schema.Array(SessionRemoved),
+  /** Its pushed commits, oldest first (at most 500): those whose message has its Pando-Session line. */
+  commits: Schema.Array(SessionCommit),
 });
 
 export interface Session extends Schema.Schema.Type<typeof Session> {}
@@ -84,6 +97,16 @@ export const SessionEntry = Schema.Struct({
 export const SessionEntries = Schema.Struct({
   entries: Schema.Array(SessionEntry),
   next_cursor: Schema.NullOr(Count),
+});
+
+/**
+ * GET .../sessions/on-branch?repo=&branch=: the sessions a branch's commits name, numbered 1, 2, 3 by their earliest
+ * commit in branch order, then those that ran in its worktree with no commit there (number null); and each commit
+ * (newest first) with the numbers of its session lines, and its model only when they all agree.
+ */
+export const BranchSessions = Schema.Struct({
+  sessions: Schema.Array(Schema.Struct({ number: Schema.NullOr(Count), id: SessionId, session: Schema.NullOr(SessionAny), commits: Schema.Array(SessionCommit) })),
+  commits: Schema.Array(Schema.Struct({ sha: Sha, sessions: Schema.Array(Count), model: Schema.NullOr(Schema.String) })),
 });
 
 /** GET /v1/user/session-exclusions: what the person does not record (project null: the whole repository). */

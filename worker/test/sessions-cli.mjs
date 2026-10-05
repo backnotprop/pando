@@ -118,7 +118,7 @@ const agents = join(work, "agents");
 
 mkdirSync(agents);
 
-for (const name of ["codex", "claude"]) {
+for (const name of ["codex", "claude", "pi", "opencode"]) {
   writeFileSync(join(agents, name), '#!/bin/sh\n"$@"\n');
   chmodSync(join(agents, name), 0o755);
 }
@@ -360,6 +360,64 @@ sys.exit(os.waitstatus_to_exitcode(status))
   record("session-machines.json", "SessionMachines", "GET /v1/user/session-machines", r);
   const box = r.json?.machines?.find((m) => m.machine === "scli-box");
   check("the machine reports recording on and the stores it reads", box?.recording === true && box.stores.some((s) => s.program === "pi" && s.found === "default") && box.stores.some((s) => s.program === "opencode"), JSON.stringify(box ?? {}).slice(0, 200));
+
+  // ── Linking (stage 3): commits name sessions by their lines; pushed commits link, rewritten ones drop, merged ones reach main ──
+  const ocPlace = { OPENCODE_SESSION_ID: ocHead.id };
+  write("c.txt", "pi\n");
+  git(["add", "c.txt"], wt);
+  as("pi", { PI_SESSION_ID: piHead.id }, ["git", "commit", "-qm", "Placeholder: from the Pi session"], wt);
+  const piOnly = git(["rev-parse", "HEAD"], wt).stdout.trim();
+  write("d.txt", "both\n");
+  git(["add", "d.txt"], wt);
+  as("pi", { PI_SESSION_ID: piHead.id }, ["git", "commit", "-qm", "Placeholder: from Pi, amended in OpenCode"], wt);
+  as("opencode", ocPlace, ["git", "commit", "-q", "--amend", "--no-edit"], wt);
+  check("a commit amended in a second session carries both lines, in order", lines().join() === [piId, ocId].join(), `${lines()}`);
+  const push = (...extra) => git(["-c", `credential.helper=!'${bin}' credential`, "push", "-q", ...extra], wt);
+  let pushed = push();
+  check("the worktree's commits are pushed", pushed.status === 0, scrub(pushed.stderr));
+  const both = git(["rev-parse", "HEAD"], wt).stdout.trim();
+
+  const onBranch = (pred) => waitFor(async () => {
+    const v = (await call("GET", `/v1/monorepos/${full}/sessions/on-branch?repo=projects-app&branch=fix-login`, S)).json;
+
+    return v && pred(v) ? v : null;
+  });
+
+  let ob = await onBranch((v) => v.commits.some((c) => c.sha === both));
+  record("sessions-on-branch.json", "BranchSessions", "GET .../sessions/on-branch?repo=&branch=", { status: 200, json: ob });
+  const piOnBranch = ob?.sessions.find((x) => x.id === piId);
+  const ocOnBranch = ob?.sessions.find((x) => x.id === ocId);
+  check("the branch's sessions are numbered 1, 2, 3 ... by their earliest commit there", !!ob && ob.sessions.filter((x) => x.number !== null).map((x) => x.number).join() === ob.sessions.filter((x) => x.number !== null).map((_, i) => i + 1).join() && piOnBranch?.number < ocOnBranch?.number, ob?.sessions.map((x) => `${x.number}:${x.session ? "recorded" : "none"}`).join(" "));
+  check("a line naming a session with no record here still gets its number, with no session", ob?.sessions.some((x) => x.number !== null && x.session === null), "");
+  const cPi = ob?.commits.find((c) => c.sha === piOnly);
+  const cBoth = ob?.commits.find((c) => c.sha === both);
+  check("a commit from one session: its number and the model in force when it was committed", cPi?.sessions.join() === String(piOnBranch?.number) && cPi.model === "gpt-5.5", JSON.stringify(cPi));
+  check("the commit named by two sessions with different models: both numbers, no model (never a guess)", cBoth?.sessions.join() === [piOnBranch?.number, ocOnBranch?.number].join() && cBoth.model === null, JSON.stringify(cBoth));
+  let pv = (await call("GET", `/v1/monorepos/${full}/sessions/${piId}`, S)).json;
+  check("the session lists its commits with branch, title and model, not on main yet", pv?.commits?.length === 2 && pv.commits.every((c) => c.branch === "fix-login" && !c.on_main) && pv.commits[0].model === "gpt-5.5" && pv.commits[0].title === "Placeholder: from the Pi session", JSON.stringify(pv?.commits?.[0]));
+  r = await call("GET", `/v1/monorepos/${full}/sessions?repo=projects-app&branch=fix-login`, S);
+  check("the branch's list holds the OpenCode session too: it ran in the repository folder, its commit is here", r.json?.sessions?.some((x) => x.id === ocId), `${r.json?.sessions?.length}`);
+  // A rewrite: the last commit amended again and force-pushed; the old commit leaves the sessions.
+  as("pi", { PI_SESSION_ID: piHead.id }, ["git", "commit", "-q", "--amend", "-m", "Placeholder: rewritten", "-m", `Pando-Session: ${piId}`], wt);
+  const rewritten = git(["rev-parse", "HEAD"], wt).stdout.trim();
+  pushed = push("--force");
+  ob = await onBranch((v) => v.commits.some((c) => c.sha === rewritten));
+  pv = (await call("GET", `/v1/monorepos/${full}/sessions/${piId}`, S)).json;
+  check("after a force push, the rewritten commit replaces the old one", !!ob && !ob.commits.some((c) => c.sha === both) && pv?.commits?.map((c) => c.sha).join() === [piOnly, rewritten].join(), `${pushed.status} ${pv?.commits?.map((c) => c.sha.slice(0, 7))}`);
+  const ocv = (await call("GET", `/v1/monorepos/${full}/sessions/${ocId}`, S)).json;
+  check("and the session whose line it lost has no commit left", ocv?.commits?.length === 0, `${ocv?.commits?.length}`);
+  r = await pando(["merge", "--force"], { cwd: wt });
+  check("pando merge lands the branch", r.status === 0, said(r));
+
+  const landed = await waitFor(async () => {
+    const v = (await call("GET", `/v1/monorepos/${full}/sessions/${piId}`, S)).json;
+
+    return v?.commits?.length === 2 && v.commits.every((c) => c.on_main) ? v : null;
+  });
+
+  check("its commits reached main, and the session says so, branch kept", !!landed && landed.commits.every((c) => c.branch === "fix-login"), JSON.stringify(landed?.commits?.map((c) => [c.branch, c.on_main])));
+  ob = await onBranch(() => true);
+  check("the merged branch keeps its numbered sessions", ob?.sessions.find((x) => x.id === piId)?.number === piOnBranch?.number, "");
 
   // A failure in session reading never stops the shared files: a broken state file stops sessions, not the sync.
   const stateFile = join(mono, ".pando", "local", "sessions.json");

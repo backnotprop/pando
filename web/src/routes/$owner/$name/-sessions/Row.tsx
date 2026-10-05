@@ -7,7 +7,7 @@
 import type { Session } from "@pando/contract";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { AgentMark, agentAndModel } from "../../../../ui/AgentMark";
+import { AgentMark, agentAndModel, modelName } from "../../../../ui/AgentMark";
 import { Avatar } from "../../../../ui/Avatar";
 import { branchLink, issueLink, sessionLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
@@ -97,7 +97,10 @@ function Lead({ s, at }: { s: Session; at: RowWhere }) {
   );
 }
 
-export function SessionRow({ s, at, who, number }: { s: Session; at: RowWhere; who: ReactNode; number?: number | null }) {
+/** "Opus 5.5 +1": the model alone (the mark names the agent), for a phone's second line. */
+const modelOnly = (models: Session["models"]) => (models[0] ? `${modelName(models[0].model)}${models.length > 1 ? ` +${models.length - 1}` : ""}` : null);
+
+export function SessionRow({ s, at, who, whoText, number }: { s: Session; at: RowWhere; who: ReactNode; whoText?: string; number?: number | null }) {
   const issue = s.issues[0];
   const more = s.issues.length - 1;
 
@@ -122,6 +125,10 @@ export function SessionRow({ s, at, who, number }: { s: Session; at: RowWhere; w
       <span className="whitespace-nowrap phone:hidden">{commitsText(s.commits)}</span>
       <span className="text-right text-[13px] whitespace-nowrap tabular-nums">
         <When s={s} />
+      </span>
+      {/* A phone: the rest on one quiet line under the branch. */}
+      <span className="hidden min-w-0 overflow-hidden text-[12.5px] text-ellipsis whitespace-nowrap text-ash phone:col-span-2 phone:col-start-2 phone:block">
+        {[issue ? `#${issue.number}` : null, modelOnly(s.models), whoText ?? s.person, commitsText(s.commits)].filter((x) => x).join(" · ")}
       </span>
     </li>
   );

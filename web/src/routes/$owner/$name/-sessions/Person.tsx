@@ -47,7 +47,7 @@ function Rows({ login, f, limit, more }: { login: Login; f: PersonSessionsSearch
             <GroupHead title={g.day} count={`${g.rows.length} session${g.rows.length === 1 ? "" : "s"}`} />
             <ul aria-label={g.day} className="col-span-full grid grid-cols-subgrid">
               {g.rows.map((r) => (
-                <SessionRow key={r.session.id} s={r.session} at={{ full: r.monorepo.full_name, paths: new Map() }} who={<span className="overflow-hidden text-ellipsis">{r.monorepo.full_name}</span>} />
+                <SessionRow key={r.session.id} s={r.session} at={{ full: r.monorepo.full_name, paths: new Map() }} who={<span className="overflow-hidden text-ellipsis">{r.monorepo.full_name}</span>} whoText={r.monorepo.full_name} />
               ))}
             </ul>
           </section>

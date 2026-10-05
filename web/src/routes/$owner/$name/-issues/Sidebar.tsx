@@ -17,13 +17,14 @@ import { branchLink, ownerLink, repoLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { IssueAgents } from "../-agents/IssueAgents";
 import { type PickOption, Picker } from "./Picker";
 import { LabelChip, useMe } from "./parts";
 
 const heading = "flex w-full cursor-pointer items-center justify-between text-[13px] leading-[18px] font-semibold text-bark-dim hover:text-bark data-popup-open:text-bark phone:font-normal phone:text-ash";
 
 /** A section: its heading (the picker's trigger when there is one) and its value. */
-function Section({ title, picker, children, wide = false }: { title: string; picker?: (trigger: ReactNode) => ReactNode; children: ReactNode; wide?: boolean }) {
+export function Section({ title, picker, children, wide = false }: { title: string; picker?: (trigger: ReactNode) => ReactNode; children: ReactNode; wide?: boolean }) {
   const trigger = (
     <>
       {title}
@@ -238,6 +239,7 @@ export function IssueSidebar({ issue, onChange, onLinks }: { issue: Issue; onCha
   return (
     <>
       <FactSections facts={{ assignees: issue.assignees, labels: issue.labels, project: issue.project, projectPath: issue.project_path }} onChange={onChange} />
+      <IssueAgents issue={issue.number} />
       <Development issue={issue} onLinks={onLinks} />
       <Section title="Participants" wide>
         <span className="flex flex-wrap gap-1.5" aria-label="Participants">

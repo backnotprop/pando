@@ -34,6 +34,9 @@ try {
   check("Review with agent: 201, kind review, on feature", r.status === 201 && r.json?.kind === "review" && r.json?.branch === "feature" && r.json?.machine === "cloud-1", scrub(JSON.stringify(r.json)));
   r = await untilSettled(t, 1);
   check("the run ends, waiting", r.json?.status === "waiting", JSON.stringify(r.json));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?repo=${t.name}&branch=feature&kind=review`, t.secret);
+  const other = await call("GET", `/v1/monorepos/${t.full}/agents?repo=${t.name}&branch=main`, t.secret);
+  check("the branch's sessions: GET .../agents?repo=&branch=", r.json?.sessions?.length === 1 && r.json.sessions[0].number === 1 && other.json?.sessions?.length === 0, JSON.stringify({ on: r.json?.sessions?.length, main: other.json?.sessions?.length }));
 
   const tr = (await call("GET", `/v1/monorepos/${t.full}/agents/1/transcript`, t.secret)).json.messages;
   const told = tr.find((m) => m.role === "user")?.parts[0]?.text ?? "";

@@ -582,6 +582,9 @@ const agentsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase
 /** The Agents tab's filters (a state, who started it, what it started from), or an issue's agents. */
 export interface AgentFilters {
   issue?: number;
+  /** With branch: the sessions on that project's branch. */
+  repo?: string;
+  branch?: string;
   status?: "working" | "waiting";
   person?: Login;
   kind?: "task" | "issue" | "review";
@@ -592,6 +595,10 @@ export const listAgents = (owner: Login, name: MonorepoName, page: { before?: nu
   const params = new URLSearchParams();
 
   if (page.issue !== undefined) params.set("issue", String(page.issue));
+
+  if (page.repo !== undefined) params.set("repo", page.repo);
+
+  if (page.branch !== undefined) params.set("branch", page.branch);
 
   if (page.status !== undefined) params.set("status", page.status);
 

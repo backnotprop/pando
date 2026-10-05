@@ -87,6 +87,8 @@ export interface AgentFilters {
   before: number | null;
   limit: number;
   issue: number | null;
+  /** A project's branch: the sessions on it (a branch page's reviews). */
+  branch: { repo: string; name: string } | null;
   status: "working" | "waiting" | null;
   person: string | null;
   kind: "task" | "issue" | "review" | null;
@@ -185,6 +187,8 @@ export class AgentStore {
     else add("kind = 'chat' AND launched_by = ?", f.chatsOf);
 
     if (f.issue !== null) add("issue = ?", f.issue);
+
+    if (f.branch !== null) add("repo = ? AND branch = ?", f.branch.repo, f.branch.name);
 
     if (f.person !== null) add("launched_by = ?", f.person);
 

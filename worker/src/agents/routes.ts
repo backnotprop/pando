@@ -102,7 +102,12 @@ export function filtersOf(c: C, chatsOf: string | null): AgentFilters {
 
   if (kind !== null && kind !== "task" && kind !== "issue" && kind !== "review") bad("kind: task, issue or review");
 
-  return { before: num("before"), limit, issue: num("issue"), status, person: q("person") ?? null, kind, chatsOf };
+  const repo = q("repo");
+  const branch = q("branch");
+
+  if ((repo === undefined) !== (branch === undefined)) bad("repo and branch: both, or neither");
+
+  return { before: num("before"), limit, issue: num("issue"), branch: repo && branch ? { repo, name: branch } : null, status, person: q("person") ?? null, kind, chatsOf };
 }
 
 /** Session n as the caller may see it: the assistant's chats are their person's alone (404 for anyone else). */

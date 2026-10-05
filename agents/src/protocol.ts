@@ -65,6 +65,12 @@ export interface TranscriptMessage {
   usage?: { input: number; cache_read: number; output: number };
 }
 
+/**
+ * The live view's frames (GET .../agents/{n}/live): the transcript from
+ * message `from` on. The first frame starts at 0; later ones append.
+ */
+export type LiveFrame = { type: "messages"; from: number; messages: TranscriptMessage[] };
+
 export interface AgentsRpc {
   /** Starts the session with its first prompt; starting it again changes nothing. */
   start(spec: SessionSpec, prompt: string): Promise<SessionState>;

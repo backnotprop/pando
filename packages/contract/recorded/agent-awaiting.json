@@ -1,0 +1,22 @@
+{
+  "schema": "AgentSession",
+  "route": "GET /v1/monorepos/{owner}/{monorepo}/agents/{n} (its merge waits for checks)",
+  "status": 200,
+  "body": {
+    "number": 1,
+    "kind": "issue",
+    "status": "waiting",
+    "reason": null,
+    "repo": "agents-s4-muutp1o6",
+    "branch": "agent/1-the-readme-has-a-typo",
+    "program": "pi",
+    "model": "scripted",
+    "issue": 1,
+    "launched_by": "agents-s4-muutp1o6",
+    "machine": "cloud-1",
+    "workspace": "mount",
+    "awaiting_checks": true,
+    "created_at": "2026-10-05T05:42:27.888Z",
+    "updated_at": "2026-10-05T05:42:37.895Z"
+  }
+}

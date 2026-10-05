@@ -9,13 +9,15 @@
 // secret (never inside the container), the transcript and the status.
 
 import { DurableObject } from "cloudflare:workers";
-import { createRegistry, Harness } from "@earendil-works/pi-durable";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { Type } from "@earendil-works/pi-ai";
+import { createRegistry, defineTool, Harness, type ToolRegistration } from "@earendil-works/pi-durable";
 import { PiHarness, type PiOperationResult } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { ContainerEnv } from "./container-env";
 import type { Env } from "./env";
 import type { GatewayProps } from "./gateway";
+import { preamble, toolsFor, type PublicSpec } from "./kinds";
+import { LiveSockets } from "./live";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
 import { PandoApi, pandoTools } from "./pando-tools";
 import { Sandbox, worktreeDir } from "./sandbox";
@@ -26,21 +28,6 @@ interface StoredStatus {
   status: Status;
   reason?: string;
   at: string;
-}
-
-type PublicSpec = Omit<SessionSpec, "credential"> & { credential: Omit<SessionSpec["credential"], "secret"> };
-
-function preamble(s: PublicSpec): string {
-  const dir = worktreeDir(s.repo.path, s.branch);
-
-  return [
-    `You are a coding agent working in Pando, a git platform, on the repository ${s.monorepo.full}, for ${s.launcher.name} (${s.launcher.login}), who started you. You act as them.`,
-    `Your working folder is ${dir}: branch ${s.branch} of ${s.repo.name}, a Linux sandbox. Use bash, read, write and edit there.`,
-    `Commit with git as you go and push the branch after each working step (git push origin ${s.branch}). Main is protected: never push to it.`,
-    "The sandbox has no internet. It reaches only this repository, through git and the pando command.",
-    "Pando's own tools reach the repository on the server: read_file, list_files, issue, branch_diff, comment_issue, post_review, merge.",
-    `When your work is done and pushed, merge ${s.branch} with the merge tool. Pando merges only when the required checks are green; if it refuses, say why and stop.`,
-  ].join("\n");
 }
 
 export class AgentSession extends DurableObject<Env> {
@@ -64,10 +51,11 @@ export class AgentSession extends DurableObject<Env> {
           registry: this.registry,
           // A model that is rate-limited gets about 30 s to recover: 1, 2, 4, 8, 16 s.
           settings: { retry: { enabled: true, maxRetries: 5, baseDelayMs: 1000 } },
-          env: async () => {
-            const ws = await this.sandbox.workspace();
+          // The sandbox starts on the first operation that needs it (container-env.ts).
+          env: () => {
+            const spec = this.#spec();
 
-            return new ContainerEnv(this.sandbox, `container:${this.ctx.id.toString()}`, ws.dir);
+            return new ContainerEnv(this.sandbox, `container:${this.ctx.id.toString()}`, worktreeDir(spec.repo.path, spec.branch));
           },
           onReport: (error) => console.warn("pi report", error),
         },
@@ -75,9 +63,11 @@ export class AgentSession extends DurableObject<Env> {
       ),
     defaults: { model: this.#models.model(DEFAULT_MODEL) },
   });
-  readonly lifecycle = Lifecycle.install(this).use(this.harness);
+  /** The live view's sockets (live.ts). */
+  readonly live = new LiveSockets(this.harness, () => this.ctx.getWebSockets());
+  readonly lifecycle = Lifecycle.install(this).use(this.live.capability()).use(this.harness);
 
-  /** Host startup, after Pi is open: follow runs that an eviction cut off. */
+  /** Host startup, after Pi is open: follow runs that an eviction cut off, and give live sockets a full frame. */
   async onStart(): Promise<void> {
     const spec = this.ctx.storage.kv.get<SessionSpec>("spec");
 
@@ -85,6 +75,7 @@ export class AgentSession extends DurableObject<Env> {
     this.#install(spec);
 
     for (const op of await this.harness.pending()) this.#follow(op.operationId);
+    await this.live.reattach();
   }
 
   // ── RPC, from the AgentsApi entrypoint ──
@@ -108,7 +99,9 @@ export class AgentSession extends DurableObject<Env> {
   async send(prompt: string): Promise<SessionState> {
     await this.lifecycle.start();
     this.#spec();
-    await this.#submit(prompt);
+    const note = this.#restoreNote();
+
+    await this.#submit(note ? `${note}\n\n${prompt}` : prompt);
 
     return this.state();
   }
@@ -118,6 +111,8 @@ export class AgentSession extends DurableObject<Env> {
     await this.lifecycle.start();
     this.#setStatus("stopped", reason);
     await this.harness.abort();
+    // Its files are kept for a later message: unpushed work included.
+    await this.#saveSandbox();
     await this.sandbox.destroy();
 
     return this.state();
@@ -174,15 +169,39 @@ export class AgentSession extends DurableObject<Env> {
 
   #installed = false;
 
-  /** The system prompt and the tools; once per isolate. */
+  /** The system prompt and the tools; once per isolate, and again when a chat starts its branch. */
   #install(spec: SessionSpec): void {
     if (this.#installed) return;
     this.#installed = true;
+    this.#installTools(spec);
+  }
+
+  #installTools(spec: SessionSpec): void {
     const pub: PublicSpec = { ...spec, credential: { id: spec.credential.id, name: spec.credential.name } };
     const api = new PandoApi(this.env.PANDO, () => this.#spec());
+    const working = this.ctx.storage.kv.get<boolean>("chat.branch") === true;
+    const tools = toolsFor(spec.kind, pandoTools(api, () => this.#spec()), working, this.#startBranch());
 
-    this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub), tag: false }], tools: pandoTools(api, () => this.#spec()) });
-    this.registry.install(CodingTools);
+    // Installing under the same name replaces the extension; Pi reads the registry at each model call.
+    this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub, working), tag: false }], tools });
+  }
+
+  /** The chat's start_branch: from its next step it has a task's tools on its own branch. */
+  #startBranch(): ToolRegistration {
+    return defineTool({
+      name: "start_branch",
+      description: "Start making a change the person asked for: gives you a Linux sandbox on your own branch with bash, read, write and edit, and merge. Call it once, before your first change.",
+      parameters: Type.Object({}),
+      replay: "safe",
+      execute: async () => {
+        const spec = this.#spec();
+
+        this.ctx.storage.kv.put("chat.branch", true);
+        this.#installTools(spec);
+
+        return { content: [{ type: "text", text: `Your branch is ${spec.branch}, made off main on your first command in the sandbox. Commit and push there, then merge it.` }] };
+      },
+    });
   }
 
   #gateway(): Fetcher {
@@ -224,10 +243,37 @@ export class AgentSession extends DurableObject<Env> {
       const ws = await this.sandbox.workspace().catch(() => undefined);
 
       if (ws) this.ctx.storage.kv.put("workspace", ws.kind);
+      await this.#saveSandbox();
     }
 
     if (result.status === "done") this.#setStatus("waiting");
     else this.#setStatus("failed", result.reason ?? "the run ended without an answer");
+  }
+
+  /** A snapshot of the sandbox's files, for the next start; the sandbox keeps running. */
+  async #saveSandbox(): Promise<void> {
+    if (!this.sandbox.running) return;
+
+    try {
+      await this.sandbox.snapshot();
+    } catch (error) {
+      console.warn("snapshot", String(error));
+    }
+  }
+
+  /**
+   * One line for the agent when its sandbox stopped since its last run: how
+   * its workspace comes back on its next command. Exact: a snapshot the
+   * image can restore, or else the branch as pushed.
+   */
+  #restoreNote(): string | null {
+    if (this.sandbox.running || !this.ctx.storage.kv.get("workspace")) return null;
+    const spec = this.#spec();
+    const saved = this.sandbox.restorable();
+
+    return saved
+      ? `[Pando] Your sandbox stopped since your last message. On your next command it comes back from a snapshot of its files taken at ${saved.at}: the files as they were, unpushed changes included. No processes are running.`
+      : `[Pando] Your sandbox stopped since your last message. On your next command it is made again from branch ${spec.branch} as pushed: changes that were not pushed are gone, and no processes are running.`;
   }
 
   /** Tells Pando's Worker the session's state; it keeps the newest. */

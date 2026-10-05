@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { agents, call, check, done, git, makeRepo, scrub, say } from "./lib.mjs";
+import { agents, call, check, done, git, makeRepo, say, scrub, tool } from "./lib.mjs";
 
 const STATE = process.env.AGENTS_STATE ? `${process.env.AGENTS_STATE}/session-test.json` : new URL("../.state/session-test.json", import.meta.url);
 
@@ -26,8 +26,6 @@ const lastText = (transcript) => {
 
   return m?.parts.filter((p) => p.type === "text").map((p) => p.text).join("") ?? "";
 };
-
-const tool = (name, args) => `> ${name} ${JSON.stringify(args)}`;
 
 async function cleanup(t) {
   await agents("stop", { monorepo: t.monorepoId, session: t.sessionId }).catch(() => {});

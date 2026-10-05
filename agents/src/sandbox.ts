@@ -42,7 +42,7 @@ export interface ExecResult {
   stderr: string;
 }
 
-interface SavedSnapshot {
+export interface SavedSnapshot {
   snapshot: ContainerSnapshot;
   /** A snapshot restores only into the image it was taken from. */
   image: string;
@@ -57,6 +57,8 @@ export function worktreeDir(repoPath: string, branch: string): string {
 
 export class Sandbox {
   #ready: Promise<Workspace> | undefined;
+  /** Whether #ready has resolved: until then every caller waits on the one start in flight. */
+  #readyDone = false;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -79,33 +81,58 @@ export class Sandbox {
 
   /** Starts the container if needed and prepares the workspace, once per start. */
   workspace(): Promise<Workspace> {
-    if (this.#ready && this.running) return this.#ready;
+    // One start at a time: a caller during a start waits for it, and a
+    // finished start holds while the container runs.
+    if (this.#ready && (!this.#readyDone || this.running)) return this.#ready;
+    this.#readyDone = false;
     const ready = this.#start();
     this.#ready = ready;
-    // A start that failed is tried again by the next call.
-    ready.catch(() => {
-      if (this.#ready === ready) this.#ready = undefined;
-    });
+    ready.then(
+      () => {
+        if (this.#ready === ready) this.#readyDone = true;
+      },
+      () => {
+        // A start that failed is tried again by the next call.
+        if (this.#ready === ready) this.#ready = undefined;
+      },
+    );
 
     return ready;
   }
 
   async #start(): Promise<Workspace> {
     const c = this.container;
-    let from: Workspace["from"] = "running";
 
-    if (!c.running) {
-      const image = c.images.workspace;
-      const saved = this.ctx.storage.kv.get<SavedSnapshot>("sandbox.snapshot");
-      const usable = saved && saved.image === image ? saved : undefined;
-      c.start({
-        ...(usable ? { containerSnapshot: usable.snapshot } : { image }),
-        entrypoint: ["sleep", "infinity"],
-        enableInternet: false,
-        instance: "standard-1",
-      });
-      from = usable ? "snapshot" : "nothing";
+    if (c.running) return this.#prepare("running");
+    const saved = this.restorable();
+
+    if (saved) {
+      try {
+        this.#boot(saved.snapshot);
+
+        return await this.#prepare("snapshot");
+      } catch (error) {
+        // Past its 30 days, or its files did not come back: start from the branch instead.
+        console.warn("snapshot restore", String(error));
+        this.ctx.storage.kv.delete("sandbox.snapshot");
+        await this.destroy();
+      }
     }
+
+    this.#boot(null);
+
+    return this.#prepare("nothing");
+  }
+
+  #boot(snapshot: ContainerSnapshot | null): void {
+    const image = this.container.images.workspace;
+    const from = snapshot ? { containerSnapshot: snapshot } : { image };
+
+    this.container.start({ ...from, entrypoint: ["sleep", "infinity"], enableInternet: false, instance: "standard-1" });
+  }
+
+  async #prepare(from: Workspace["from"]): Promise<Workspace> {
+    const c = this.container;
 
     await c.setInactivityTimeout(IDLE_MS);
     await c.interceptOutboundHttp(INTERNAL_HOST, this.gateway());
@@ -117,8 +144,21 @@ export class Sandbox {
       throw new Error(`the workspace did not start (exit ${out.exitCode}): ${(out.stderr || out.stdout).slice(-1500)}`);
     }
 
-    return { dir: line[1], kind: line[2] === "mount" ? "mount" : "clone", from };
+    const kind = line[2] === "mount" ? "mount" : "clone";
+
+    // A fallback is never silent: why the mount did not hold goes to the Worker's logs.
+    if (kind === "clone") console.warn(`workspace fell back to a clone: ${out.stderr.slice(-2000)}`);
+
+    return { dir: line[1], kind, from };
   }
+
+  /** The newest snapshot, when the current image can restore it. */
+  restorable(): SavedSnapshot | undefined {
+    const saved = this.ctx.storage.kv.get<SavedSnapshot>("sandbox.snapshot");
+
+    return saved && saved.image === this.container.images.workspace ? saved : undefined;
+  }
+
 
   /** The environment every command in the container gets. */
   env() {

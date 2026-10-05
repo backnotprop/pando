@@ -9,16 +9,17 @@
         "kind": "task",
         "status": "waiting",
         "reason": null,
-        "repo": "agents-s2-muurol2p",
+        "repo": "agents-s2-muutnndv",
         "branch": "agent/1",
         "program": "pi",
         "model": "scripted",
         "issue": null,
-        "launched_by": "agents-s2-muurol2p",
+        "launched_by": "agents-s2-muutnndv",
         "machine": "cloud-1",
         "workspace": "mount",
-        "created_at": "2026-10-05T04:46:05.760Z",
-        "updated_at": "2026-10-05T04:46:15.147Z"
+        "awaiting_checks": false,
+        "created_at": "2026-10-05T05:41:21.565Z",
+        "updated_at": "2026-10-05T05:41:30.987Z"
       }
     ],
     "next_before": null

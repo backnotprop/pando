@@ -9,31 +9,12 @@
 //   agents/test/serve.sh start && node agents/test/launch.mjs
 
 import { writeFileSync } from "node:fs";
-import { BASE, BOOT, call, check, done, makeRepo, say, scrub } from "./lib.mjs";
+import { BASE, BOOT, call, check, done, makeRepo, say, scrub, sleep, tool, untilSettled } from "./lib.mjs";
 
 const OUT = new URL("../../packages/contract/recorded/", import.meta.url);
 
 function record(file, schema, route, status, body) {
   writeFileSync(new URL(file, OUT), `${scrub(JSON.stringify({ schema, route, status, body }, null, 2))}\n`);
-}
-
-const tool = (name, args) => `> ${name} ${JSON.stringify(args)}`;
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Polls a session until its status is one of these. */
-async function until(t, n, statuses, ms = 180_000) {
-  const end = Date.now() + ms;
-  let r;
-
-  while (Date.now() < end) {
-    r = await call("GET", `/v1/monorepos/${t.full}/agents/${n}`, t.secret);
-
-    if (statuses.includes(r.json?.status)) return r;
-    await sleep(500);
-  }
-
-  return r;
 }
 
 const lastTool = (tr) => tr.messages.filter((m) => m.role === "tool").at(-1)?.parts[0]?.text ?? "";
@@ -66,7 +47,7 @@ try {
   record("agent-launched.json", "AgentSession", "POST /v1/monorepos/{owner}/{monorepo}/agents", r.status, r.json);
   check("launch: 201, session #1 working on agent/1 as cloud-1, acting as the person", r.status === 201 && r.json?.number === 1 && r.json?.status === "working" && r.json?.branch === "agent/1" && r.json?.machine === "cloud-1" && r.json?.launched_by === t.login && r.json?.program === "pi", scrub(JSON.stringify(r.json)));
 
-  r = await until(t, 1, ["waiting", "failed"]);
+  r = await untilSettled(t, 1);
   record("agent.json", "AgentSession", "GET /v1/monorepos/{owner}/{monorepo}/agents/{n}", r.status, r.json);
   check("its object reports the run's end: waiting, workspace mount", r.json?.status === "waiting" && r.json?.workspace === "mount", JSON.stringify(r.json));
 
@@ -101,7 +82,7 @@ try {
   // ── A follow-up, then Stop ──
   r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: tool("bash", { command: "git log --oneline -1" }) });
   check("a follow-up from the launcher: working again", r.status === 200 && r.json?.status === "working", JSON.stringify(r.json));
-  r = await until(t, 1, ["waiting", "failed"]);
+  r = await untilSettled(t, 1);
   check("and waiting after it", r.json?.status === "waiting");
   r = await call("POST", `/v1/monorepos/${t.full}/agents/1/stop`, t.secret);
   record("agent-stopped.json", "AgentSession", "POST /v1/monorepos/{owner}/{monorepo}/agents/{n}/stop", r.status, r.json);
@@ -112,7 +93,7 @@ try {
   check("revoke cloud-1", r.status === 204, r.status);
   await sleep(16_000); // auth answers are cached per isolate for 15 s
   r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: tool("bash", { command: "git ls-remote origin 2>&1 | tail -1" }) });
-  r = await until(t, 1, ["waiting", "failed"]);
+  r = await untilSettled(t, 1);
   const after = lastTool((await call("GET", `/v1/monorepos/${t.full}/agents/1/transcript`, t.secret)).json);
   check("after the revoke, the sandbox can no longer reach the repository", /401|could not read Username|Authentication/i.test(after), after);
 

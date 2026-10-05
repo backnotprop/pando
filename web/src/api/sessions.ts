@@ -89,11 +89,14 @@ export async function deleteMany(m: MonorepoRef, f: { repo?: string; olderThanDa
   await remove(Routes.deleteSessions(m.owner, m.name, f));
 }
 
-export const personSessionsQuery = (login: Login, limit: number) =>
+/** A person's sessions; `f` holds the page's filters (state, agent, main, and `repository` as owner/name). */
+export const personSessionsQuery = (login: Login, limit: number, f: { state?: string; agent?: string; main?: string; repository?: string }) =>
   infiniteQueryOptions({
-    queryKey: ["u", login, "sessions", limit],
+    queryKey: ["u", login, "sessions", limit, f],
     queryFn: ({ pageParam }) => {
-      const route = Routes.personSessions(login, pageParam ? { cursor: pageParam, limit } : { limit });
+      const { repository, ...rest } = f;
+      const asked = repository ? { ...rest, monorepo: repository, limit } : { ...rest, limit };
+      const route = Routes.personSessions(login, pageParam ? { ...asked, cursor: pageParam } : asked);
 
       return get(route.response, route.path);
     },

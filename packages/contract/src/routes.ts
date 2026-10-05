@@ -698,8 +698,12 @@ export const deleteSessions = (owner: Login, name: MonorepoName, f: { repo?: str
 };
 
 /** GET /v1/users/{login}/sessions: a person's sessions in the repositories you both can open. */
-export const personSessions = (login: Login, page: { cursor?: string; limit?: number } = {}) => {
+export const personSessions = (login: Login, page: { cursor?: string; limit?: number; state?: string; agent?: string; main?: string; monorepo?: string } = {}) => {
   const params = new URLSearchParams();
+
+  for (const [k, v] of [["state", page.state], ["agent", page.agent], ["main", page.main], ["monorepo", page.monorepo]] as const) {
+    if (v !== undefined) params.set(k, v);
+  }
 
   if (page.cursor !== undefined) params.set("cursor", page.cursor);
 

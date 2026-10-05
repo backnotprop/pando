@@ -137,9 +137,19 @@ export function sessionPersonRoutes(users: UserApp): void {
 
     if (!Number.isInteger(limit) || limit < 1 || limit > PERSON_PAGE_MAX) bad(`limit: 1 to ${PERSON_PAGE_MAX}`);
     const cursor = c.req.query("cursor") ?? null;
+    const q = (k: string) => c.req.query(k) ?? null;
+    const state = q("state");
+    const main = q("main");
+
+    if (state !== null && state !== "active" && state !== "inactive") bad("state: active or inactive");
+
+    if (main !== null && main !== "yes" && main !== "no") bad("main: yes or no");
+    const only = q("monorepo");
 
     const pages = await Promise.all(
-      shared.map(async (m) => ({ m, page: unwrap(await monorepoStub(c.env, m.id).sessionList({ person: login, program: null, repo: null, branch: null, state: null, main: null, cursor, limit })) })),
+      shared
+        .filter((m) => only === null || m.full_name === only)
+        .map(async (m) => ({ m, page: unwrap(await monorepoStub(c.env, m.id).sessionList({ person: login, program: q("agent"), repo: null, branch: null, state, main, cursor, limit })) })),
     );
 
     const all = pages
@@ -149,9 +159,9 @@ export function sessionPersonRoutes(users: UserApp): void {
     const page = all.slice(0, limit);
     const last = page.at(-1)?.session;
     const more = all.length > limit || pages.some((p) => p.page.next_cursor !== null);
-    const total = pages.reduce((n, p) => n + p.page.counts.active + p.page.counts.inactive, 0);
+    const counts = { active: pages.reduce((n, p) => n + p.page.counts.active, 0), inactive: pages.reduce((n, p) => n + p.page.counts.inactive, 0) };
 
-    return c.json({ sessions: page, total, next_cursor: more && last ? `${last.last_at}|${last.id}` : null } satisfies typeof Contract.PersonSessions.Encoded);
+    return c.json({ sessions: page, counts, repositories: shared.map((m) => m.full_name), next_cursor: more && last ? `${last.last_at}|${last.id}` : null } satisfies typeof Contract.PersonSessions.Encoded);
   });
 
   users.get("/v1/users/:login/session-marks", async (c) => {

@@ -136,7 +136,10 @@ export const SessionFiles = Schema.Struct({
 /** GET /v1/users/{login}/sessions: a person's sessions in the repositories the viewer can open too, latest activity first. */
 export const PersonSessions = Schema.Struct({
   sessions: Schema.Array(Schema.Struct({ monorepo: Schema.Struct({ id: Schema.String, full_name: Schema.String }), session: Session })),
-  total: Count,
+  /** For the same filters, in either state. */
+  counts: Schema.Struct({ active: Count, inactive: Count }),
+  /** The repositories searched: those you both can open. */
+  repositories: Schema.Array(Schema.String),
   next_cursor: Schema.NullOr(Schema.String),
 });
 

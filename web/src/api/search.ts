@@ -51,3 +51,25 @@ export const issuesSearch = Schema.toStandardSchemaV1(
 
 /** New issue: `?project=projects-pando` fills its Project. */
 export const newIssueSearch = Schema.toStandardSchemaV1(Schema.Struct({ project: Schema.optionalKey(Schema.String) }));
+
+/** The Sessions tab: its filters, kept in the address. */
+export const sessionsSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    state: Schema.optionalKey(Schema.String),
+    person: Schema.optionalKey(Schema.String),
+    agent: Schema.optionalKey(Schema.String),
+    branch: Schema.optionalKey(Schema.String),
+    main: Schema.optionalKey(Schema.String),
+    group: Schema.optionalKey(Schema.String),
+  }),
+);
+
+/** A person's sessions page: its filters. */
+export const personSessionsSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    state: Schema.optionalKey(Schema.String),
+    agent: Schema.optionalKey(Schema.String),
+    main: Schema.optionalKey(Schema.String),
+    repository: Schema.optionalKey(Schema.String),
+  }),
+);

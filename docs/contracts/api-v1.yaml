@@ -4999,7 +4999,7 @@ components:
     AgentSession:
       type: object
       description: packages/contract/src/agent.ts is the exact shape.
-      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, awaiting_checks, created_at, updated_at]
+      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, awaiting_checks, first_message, created_at, updated_at]
       properties:
         number: { type: integer }
         kind: { type: string, enum: [task, issue, review, chat] }

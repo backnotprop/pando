@@ -93,10 +93,11 @@ export class SessionAgent extends Agent<Env> {
     return JSON.stringify(await this.harness.messages());
   }
 
-  async setup(auth: string, monorepoPath: string) {
+  async setup(auth: string, monorepoPath: string, image = "git") {
     // In the product this is the credential minted for the session at launch.
     this.ctx.storage.kv.put("auth", auth);
     this.ctx.storage.kv.put("monorepo", monorepoPath);
+    this.ctx.storage.kv.put("image", image);
     return { ok: true };
   }
 
@@ -112,6 +113,11 @@ export class SessionAgent extends Agent<Env> {
     return { id: (snap as { id?: string }).id, size: (snap as { size?: number }).size };
   }
 
+  async forgetSnapshot() {
+    this.ctx.storage.kv.delete("snapshot");
+    return { ok: true };
+  }
+
   async destroyContainer() {
     const c = this.ctx.container;
     if (c?.running) await c.destroy();
@@ -125,7 +131,8 @@ export class SessionAgent extends Agent<Env> {
     if (!c) throw new Error("no container binding");
     if (!c.running) {
       const snap = this.ctx.storage.kv.get<ContainerSnapshot>("snapshot");
-      c.start({ ...(snap ? { containerSnapshot: snap } : { image: c.images.git }), entrypoint: ["sleep", "infinity"], enableInternet: false });
+      const image = this.ctx.storage.kv.get<string>("image") === "mount" ? c.images.mount : c.images.git;
+      c.start({ ...(snap ? { containerSnapshot: snap } : { image }), entrypoint: ["sleep", "infinity"], enableInternet: false });
       await c.setInactivityTimeout(10 * 60 * 1000);
     }
     const auth = this.ctx.storage.kv.get<string>("auth");
@@ -148,7 +155,10 @@ export class SessionAgent extends Agent<Env> {
     tool.execute = async ({ command }) => {
       const c = await this.sandbox();
       const proc = await c.exec(["timeout", "--kill-after=5", "120", "bash", "-lc", command], {
-        env: { GIT_TERMINAL_PROMPT: "0", HOME: "/root" },
+        // pando talks to http://pando.internal with a placeholder token; the
+        // gateway replaces the Authorization header with the real credential.
+        env: { GIT_TERMINAL_PROMPT: "0", HOME: "/root", PANDO_SERVER: `http://${INTERNAL_HOST}`, PANDO_TOKEN: "sandbox", PANDO_MACHINE: "cloud-1",
+          GIT_AUTHOR_NAME: "Spike", GIT_AUTHOR_EMAIL: "spike@pando.invalid", GIT_COMMITTER_NAME: "Spike", GIT_COMMITTER_EMAIL: "spike@pando.invalid" },
       });
       const out = await proc.output();
       const dec = new TextDecoder();
@@ -167,21 +177,29 @@ export class GitGateway extends WorkerEntrypoint<Env, { auth: string; monorepo: 
     const url = new URL(request.url);
     const { auth, monorepo } = this.ctx.props;
     const gitPath = /\/(info\/refs|git-upload-pack|git-receive-pack)$/.test(url.pathname);
-    if (url.hostname !== INTERNAL_HOST || !gitPath || !(url.pathname.startsWith(`/${monorepo}/`) || url.pathname.startsWith(`/${monorepo}.git/`))) {
+    const gitOk = gitPath && (url.pathname.startsWith(`/${monorepo}/`) || url.pathname.startsWith(`/${monorepo}.git/`));
+    // Stage 0: pando clone and pando worktree add read the monorepo's API
+    // (GET) and make the branch and report the worktree (POST).
+    const api = `/v1/monorepos/${monorepo}`;
+    const under = url.pathname === api || url.pathname.startsWith(`${api}/`);
+    const tail = url.pathname.slice(api.length);
+    const apiOk = under && (request.method === "GET" || (request.method === "POST" && /^\/repos\/[^/]+\/branches$/.test(tail)) || (request.method === "PUT" && /^\/worktrees\/[^/]+$/.test(tail)));
+    if (url.hostname !== INTERNAL_HOST || !(gitOk || apiOk)) {
       return new Response("refused by the session gateway\n", { status: 403 });
     }
     if (!this.env.PANDO) return new Response("no PANDO binding\n", { status: 502 });
     const headers = new Headers(request.headers);
     headers.set("Authorization", auth);
-    const target = new URL(url.pathname + url.search, "http://pando.local");
-    return this.env.PANDO.fetch(new Request(target, { method: request.method, headers, body: request.body, duplex: "half" } as RequestInit));
+    // The URL stays http://pando.internal/..., so the clone URLs Pando
+    // answers with point back through this gateway.
+    return this.env.PANDO.fetch(new Request(url, { method: request.method, headers, body: request.body, duplex: "half" } as RequestInit));
   }
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const m = /^\/s\/([a-z0-9-]{1,63})\/(ask|transcript|raw|setup|container|destroy|snapshot)$/.exec(url.pathname);
+    const m = /^\/s\/([a-z0-9-]{1,63})\/(ask|transcript|raw|setup|container|destroy|snapshot|forget)$/.exec(url.pathname);
     // Everything else goes to the Pando Worker, so one port serves both.
     if (!m) return env.PANDO ? env.PANDO.fetch(request) : new Response("not found\n", { status: 404 });
     const [, name, action] = m;
@@ -194,8 +212,8 @@ export default {
       case "raw":
         return new Response(await agent.rawTranscript(), { headers: { "content-type": "application/json" } });
       case "setup": {
-        const body = (await request.json()) as { auth: string; monorepo: string };
-        return Response.json(await agent.setup(body.auth, body.monorepo));
+        const body = (await request.json()) as { auth: string; monorepo: string; image?: string };
+        return Response.json(await agent.setup(body.auth, body.monorepo, body.image));
       }
       case "container":
         return Response.json(await agent.containerState());
@@ -205,6 +223,8 @@ export default {
         } catch (e) {
           return Response.json({ error: String(e) }, { status: 500 });
         }
+      case "forget":
+        return Response.json(await agent.forgetSnapshot());
       case "destroy":
         return Response.json(await agent.destroyContainer());
     }

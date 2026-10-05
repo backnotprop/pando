@@ -1,0 +1,93 @@
+Stage 0 (mount in the sandbox), local wrangler dev, Colima profile cloud-agents, image linux/amd64 under emulation, 2026-10-05T04:09Z:
+PASS  a person with a machine credential
+      201
+PASS  a plain repository
+      201
+PASS  main pushed from the Mac
+      remote: Processing objects: 100% (54/54)        
+      
+PASS  the container has /dev/fuse and the kernel's fuse
+      560 ms (includes the container start)
+      exit 0
+      crw-rw-rw- 1 root root 10, 229 Oct  5 04:08 /dev/fuse
+      3
+      0
+      
+PASS  pando clone mounts main read-only through ArtifactFS
+      3195 ms
+      exit 0
+      Cloning repo mountspike-muuqcs8t/mount-muuqcs8t from http://pando.internal into /workspace/r
+      worktrees/main: main (main, read-only), fuse worktree, ready in 3.0s
+      Done. cd r
+      fuse.artifact-fs ro,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions
+      
+PASS  pando worktree add mounts a branch worktree and reports it
+      3147 ms
+      exit 0
+      worktrees/agent-work: agent-work (new branch off main), fuse worktree, ready in 2.1s
+        commits get the trailers Pando-Worktree: worktrees/agent-work, Pando-Machine: cloud-1
+      Next: cd worktrees/agent-work
+      rc=0
+      fuse.artifact-fs
+      README.md
+      pkg
+      50
+      
+PASS  edit, commit (with Pando's trailers) and push inside the mount
+      2900 ms
+      exit 0
+      remote: Processing objects: 100% (3/3)        
+      pushed=0
+      adbbd68 Fix the README typo
+      Pando-Worktree: worktrees/agent-work
+      Pando-Machine: cloud-1
+      
+      
+PASS  Pando lists the branch
+PASS  an unpushed commit and an uncommitted edit
+      exit 0
+       M pkg/f1.txt
+      cd85555 Local only
+      
+      before the snapshot: exit 0 | 2 | 1.2M	/root/.pando | 
+PASS  a snapshot of the running container (it is stopped after)
+      291 ms, 140 MB 
+PASS  after the restore the mount and the daemon are gone (processes and mounts are not in a snapshot)
+      168 ms (includes the start from the snapshot)
+      exit 0
+      no-mount
+      ---
+      0
+      no-daemon
+      
+PASS  pando worktree mount brings it back with the unpushed commit and the uncommitted edit
+      885 ms
+      exit 0
+      worktrees/agent-work: mounted (fuse) in 0.4s
+      fuse.artifact-fs
+       M pkg/f1.txt
+      cd85555 Local only
+      adbbd68 Fix the README typo
+      not committed
+      
+PASS  and carries on: commit and push after the restore
+      exit 0
+      remote: Processing objects: 100% (7/7)        
+      pushed=0
+      
+PASS  from nothing: pando clone and pando worktree add bring back every pushed commit
+      6427 ms (includes a fresh container start)
+      exit 0
+      worktrees/agent-work: agent-work (existing branch), fuse worktree, ready in 3.0s
+        commits get the trailers Pando-Worktree: worktrees/agent-work, Pando-Machine: cloud-1
+      Next: cd worktrees/agent-work
+      b55a666 After the restore
+      cd85555 Local only
+      adbbd68 Fix the README typo
+      ad0df95 first
+      not committed
+      
+PASS  cleanup: the repository mount-muuqcs8t (and its Artifacts repo) is deleted
+      204
+
+15 of 15 passed

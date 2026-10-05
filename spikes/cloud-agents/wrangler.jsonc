@@ -10,7 +10,11 @@
     {
       "class_name": "SessionAgent",
       "scheduling_policy": "durable_object",
-      "images": { "git": { "dockerfile": "./Dockerfile" } }
+      "images": {
+        "git": { "dockerfile": "./Dockerfile" },
+        // Stage 0: pando and the ArtifactFS fork, built from ../../cli.
+        "mount": { "dockerfile": "./mount/Dockerfile", "build_context": "../../cli" }
+      }
     }
   ],
   // The Pando Worker (worker/wrangler.jsonc, name pando-dev), run in the same

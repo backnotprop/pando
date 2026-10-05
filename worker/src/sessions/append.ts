@@ -51,7 +51,8 @@ export async function appendPiece(env: Env, monorepoId: string, by: Sender, inpu
   // A Codex subagent names its parent thread in its first line; the parent's id is derived like any session's.
   if (!end.exists && !parent && start.program === "codex" && parsed.facts.parent_agent_id) parent = await sessionIdFor("codex", parsed.facts.parent_agent_id);
   const key = pieceKey(monorepoId, session, at);
-  const bytes = await putPiece(env.BLOBS, key, text);
+  await putPiece(env.BLOBS, key, text);
+  const bytes = new TextEncoder().encode(text).byteLength;
   const out = await stub.sessionAppend(session, at, next, { ...start, parent }, by, { key, bytes, redactions, facts: parsed.facts });
 
   if (!out.ok) await env.BLOBS.delete(key);

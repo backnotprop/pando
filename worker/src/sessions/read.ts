@@ -9,8 +9,8 @@ import { linesOf, parsePiece, type Carry, type Entry } from "./parse";
 import { deletePrefix, getPiece, pieceKey, piecePrefix, putPiece, scan } from "./pieces";
 import type { PieceReread, PieceRow, RewrittenPiece, SessionSource, SessionView } from "./store";
 
-/** Stored (gzipped) bytes a page of the conversation reads, at least one piece: about 2 to 5 MB of lines. */
-export const PAGE_BYTES = 512 * 1024;
+/** Bytes of lines a page of the conversation reads, at least one piece (a piece is at most 8 MB). */
+export const PAGE_BYTES = 2_000_000;
 
 /** A page of the conversation; `next_cursor` is the next piece's start. */
 export interface EntryPage {
@@ -120,7 +120,8 @@ export async function removeTurn(env: Env, monorepoId: string, id: string, n: nu
     const body = kept.map((l) => `${l.raw}\n`).join("");
     const facts = parsePiece(src.program, body, String(p.at), src.agent_id, { model: p.carry_model, at: p.carry_at }).facts;
     const key = pieceKey(monorepoId, id, p.at);
-    const bytes = await putPiece(env.BLOBS, key, body);
+    await putPiece(env.BLOBS, key, body);
+    const bytes = new TextEncoder().encode(body).byteLength;
     rewritten.push({ at: p.at, record: { key, bytes, redactions: scan(body).redactions, facts } });
   }
 

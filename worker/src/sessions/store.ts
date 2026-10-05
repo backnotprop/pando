@@ -58,6 +58,7 @@ export interface Sender {
 /** A stored piece, as the append step records it. */
 export interface PieceRecord {
   key: string;
+  /** Bytes of lines as stored (before gzip). */
   bytes: number;
   redactions: number;
   facts: PieceFacts;

@@ -81,11 +81,9 @@ export async function pieceText(body: ReadableStream<Uint8Array> | null, gzip: b
   return new TextDecoder().decode(bytes);
 }
 
-export async function putPiece(bucket: R2Bucket, key: string, text: string): Promise<number> {
+export async function putPiece(bucket: R2Bucket, key: string, text: string): Promise<void> {
   const gz = await readAll(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip")), Number.MAX_SAFE_INTEGER);
   await bucket.put(key, gz, { httpMetadata: { contentType: "application/x-ndjson", contentEncoding: "gzip" } });
-
-  return gz.byteLength;
 }
 
 /** A stored piece's lines, or null when it is gone (a delete raced the read). */

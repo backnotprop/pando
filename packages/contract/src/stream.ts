@@ -11,6 +11,7 @@ import { Count, RepoName, Sha, Timestamp } from "./ids.ts";
 import { Machine } from "./repo.ts";
 import { IssueComment, IssueRow, Label, Reactions, TimelineItem } from "./issue.ts";
 import { Session, SessionDeleted } from "./session.ts";
+import { AgentSession } from "./agent.ts";
 
 /** What every event frame carries: its place in the stream, its key, and who did it (null when no person did). */
 const envelope = {
@@ -178,8 +179,21 @@ export const SessionEvent = Schema.Union([
   Schema.Struct({ ...envelope, kind: Schema.Literal("session.deleted"), collection: Schema.Literal("sessions"), op: Schema.Literal("delete"), row: SessionDeleted }),
 ]);
 
+/**
+ * An agent session changed: launched, or its state as its object reports it (topics `agents`, `agent:<n>`,
+ * `repo:<repo>`, and `issue:<n>` when it addresses one). `actor` is the person who launched it, on launch only.
+ */
+export const AgentEvent = Schema.Struct({
+  ...envelope,
+  kind: Schema.Literal("agent.updated"),
+  collection: Schema.Literal("agents"),
+  op: Schema.Literal("upsert"),
+  number: Count,
+  row: AgentSession,
+});
+
 /** The row kinds the web subscribes to, each a `kind:<kind>` topic. */
-export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection", "mirror.updated"] as const;
+export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection", "mirror.updated", "agent.updated"] as const;
 
 /** Frames of a monorepo's event socket opened with row topics. */
 export const MonorepoEventFrame = Schema.Union([
@@ -195,6 +209,7 @@ export const MonorepoEventFrame = Schema.Union([
   LabelEvent,
   MirrorEvent,
   SessionEvent,
+  AgentEvent,
   /** The replay after `since` is done; keep the highest `seq` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), seq: Count }),
   /** More was missed than the stream replays: refetch what is on screen, then reconnect from `seq`. */

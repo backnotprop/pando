@@ -36,6 +36,8 @@ import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
+import { AGENTS_SCHEMA, AgentStore, type AgentInput } from "../agents/store";
+import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
 import {
@@ -361,6 +363,7 @@ export class MonorepoObject extends DurableObject<Env> {
   private issues: IssueStore;
   /** Agent sessions (sessions/store.ts): the index; the pieces are in R2. */
   private sessions: SessionStore;
+  private agents: AgentStore;
   private mirror: MirrorOut;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -391,6 +394,7 @@ export class MonorepoObject extends DurableObject<Env> {
       summaryChanged: () => this.feed.scheduleSummary(),
     });
     this.sessions = new SessionStore(this.sql, { publish: (e) => this.publish(e) });
+    this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
@@ -411,6 +415,8 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
 
     for (const stmt of statements(SESSIONS_SCHEMA)) this.sql.exec(stmt);
+
+    for (const stmt of statements(AGENTS_SCHEMA)) this.sql.exec(stmt);
     this.issues.seedLabels();
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
@@ -1156,6 +1162,36 @@ export class MonorepoObject extends DurableObject<Env> {
 
       return this.branchRecord(repo, name)!;
     });
+  }
+
+  // ── Agent sessions (agents/store.ts; routes in agents/routes.ts) ─────────
+
+  agentCreate(input: AgentInput, identity: Identity) {
+    return this.guard(() => {
+      if (!this.repoRow(input.repo)) throw new HttpError(400, "bad_request", `no repo ${input.repo}`);
+
+      return this.agents.create(input, identity.login);
+    });
+  }
+
+  agentSetCredential(number: number, credentialId: string): void {
+    this.agents.setCredential(number, credentialId);
+  }
+
+  agentCredential(number: number) {
+    return this.guard(() => this.agents.credentialOf(number));
+  }
+
+  agentGet(number: number) {
+    return this.guard(() => this.agents.get(number));
+  }
+
+  agentList(before: number | null, limit: number) {
+    return this.guard(() => this.agents.list(before, limit));
+  }
+
+  agentReport(state: SessionState) {
+    return this.agents.report(state);
   }
 
   // ── Issues (issues/store.ts; routes in issues/routes.ts) ─────────────────

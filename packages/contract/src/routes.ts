@@ -2,6 +2,7 @@
 // GET, and the schema of its 200 body. Names are api-v1.yaml's operationIds.
 // Path segments are encoded here, so callers pass plain values; a branch's
 // `/` is sent as %2F.
+import { AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
@@ -121,7 +122,8 @@ export const monorepoFeedSocketPath = (owner: Login, name: MonorepoName, feedSin
 /**
  * A monorepo's event socket for row updates (open it with `Upgrade: websocket`): `topics` such as
  * `kind:branch.updated` or `repo:<repo>` (at most 10; ROW_KINDS lists the row kinds), `issues` (every issue and
- * label event) or `issue:<n>` (one issue's), `since` the highest `seq` seen.
+ * label event) or `issue:<n>` (one issue's), `agents` (every agent session's) or `agent:<n>` (one session's), `since`
+ * the highest `seq` seen.
  */
 export const monorepoEventsSocketPath = (owner: Login, name: MonorepoName, topics: readonly string[], since: number | null): string => {
   const params = new URLSearchParams({ topics: topics.join(",") });
@@ -572,3 +574,33 @@ export const chooseGithubInstallation = (owner: Login, name: MonorepoName) => ({
 
 /** The address a browser goes to, to connect GitHub (or to authorize creating repositories). */
 export const mirrorConnectPath = (owner: Login, name: MonorepoName, purpose: "connect" | "create" = "connect"): string => `${mirrorBase(owner, name)}/connect?purpose=${purpose}`;
+
+// ── Cloudflare-run agents (agent.ts) ──
+
+const agentsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/agents`;
+
+/** GET .../agents: newest first; `before` is a page's next_before. */
+export const listAgents = (owner: Login, name: MonorepoName, page: { before?: number; limit?: number } = {}) => {
+  const params = new URLSearchParams();
+
+  if (page.before !== undefined) params.set("before", String(page.before));
+
+  if (page.limit !== undefined) params.set("limit", String(page.limit));
+
+  return { path: `${agentsBase(owner, name)}${query(params)}`, response: AgentSessionList };
+};
+
+/** POST .../agents {prompt, repo?, branch?, model?} (201): launch a session acting as the caller. */
+export const launchAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: agentsBase(owner, name), response: AgentSession }) as const;
+
+/** GET .../agents/{n}. */
+export const getAgent = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}`, response: AgentSession });
+
+/** GET .../agents/{n}/transcript. */
+export const agentTranscript = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}/transcript`, response: AgentTranscript });
+
+/** POST .../agents/{n}/messages {prompt}: a follow-up, from the person who launched it (403 `not_launcher` for others). */
+export const sendAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${agentsBase(owner, name)}/${n}/messages`, response: AgentSession }) as const;
+
+/** POST .../agents/{n}/stop: its launcher or an owner. */
+export const stopAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${agentsBase(owner, name)}/${n}/stop`, response: AgentSession }) as const;

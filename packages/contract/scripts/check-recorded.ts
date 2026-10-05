@@ -11,6 +11,9 @@ import * as Result from "effect/Result";
 
 import {
   ActivityFrame,
+  AgentSession,
+  AgentSessionList,
+  AgentTranscript,
   Branch,
   BranchCommits,
   BranchDiff,
@@ -100,6 +103,9 @@ const refuses = <A, I>(schema: Schema.Codec<A, I>) => flow(decodeStrict(schema),
 
 const decoders = {
   Me: refuses(Me),
+  AgentSession: refuses(AgentSession),
+  AgentSessionList: refuses(AgentSessionList),
+  AgentTranscript: refuses(AgentTranscript),
   ErrorBody: refuses(ErrorBody),
   MonorepoList: refuses(MonorepoList),
   MonorepoSummaryList: refuses(MonorepoSummaryList),

@@ -50,6 +50,8 @@ export { HooksDrain } from "./monorepo/hooks";
 
 export { MirrorDrain } from "./mirror/run";
 
+export { AgentReports } from "./agents/reports";
+
 export type { Env };
 
 const META_RE = /^\/v1\/monorepos\/[^/]+\/[^/]+\/meta(\/|$)/;

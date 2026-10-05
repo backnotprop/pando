@@ -11,6 +11,7 @@ import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
 import { sessionUserRoutes } from "../sessions/user-routes";
+import { agentRoutes } from "../agents/routes";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -1564,9 +1565,12 @@ mirrorRoutes(api);
 
 issueRoutes(api);
 
-// ── Agent sessions (sessions/routes.ts) ──
+// ── Recorded agent sessions, from people's machines (sessions/routes.ts) ──
 
 sessionRoutes(api);
+// ── Agent sessions (agents/routes.ts) ──
+
+agentRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

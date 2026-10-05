@@ -1192,7 +1192,12 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.agents.get(number));
   }
 
-  /** A page of sessions, each with its branch's facts now (state, commits ahead, merge, checks). */
+  /** An issue's title now, or null when it is gone. */
+  private issueTitle(n: number): string | null {
+    return this.row<{ title: string }>("SELECT title FROM issues WHERE number = ?", n)?.title ?? null;
+  }
+
+  /** A page of sessions, each with its branch's facts now (state, commits ahead, merge, checks) and its issue's title. */
   agentList(f: AgentFilters) {
     return this.guard(() => {
       const page = this.agents.list(f);
@@ -1201,6 +1206,8 @@ export class MonorepoObject extends DurableObject<Env> {
         const b = this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
 
         v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
+
+        if (v.issue !== null) v.issue_title = this.issueTitle(v.issue);
       }
 
       return page;

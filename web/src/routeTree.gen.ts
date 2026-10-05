@@ -25,6 +25,7 @@ import { Route as OwnerNameSettingsRouteImport } from './routes/$owner/$name/set
 import { Route as OrgsOrgIndexRouteImport } from './routes/orgs/$org/index'
 import { Route as OrgsOrgPeopleRouteImport } from './routes/orgs/$org/people'
 import { Route as OrgsOrgSettingsRouteImport } from './routes/orgs/$org/settings'
+import { Route as OwnerNameAgentsIndexRouteImport } from './routes/$owner/$name/agents/index'
 import { Route as OwnerNameBlobSplatRouteImport } from './routes/$owner/$name/blob/$'
 import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$name/branches/index'
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
@@ -123,6 +124,11 @@ const OrgsOrgSettingsRoute = OrgsOrgSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => OrgsOrgRouteRoute,
+} as any)
+const OwnerNameAgentsIndexRoute = OwnerNameAgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => OwnerNameRouteRoute,
 } as any)
 const OwnerNameBlobSplatRoute = OwnerNameBlobSplatRouteImport.update({
   id: '/blob/$',
@@ -248,6 +254,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/agents/': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
@@ -281,6 +288,7 @@ export interface FileRoutesByTo {
   '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/agents': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues': typeof OwnerNameIssuesIndexRoute
@@ -318,6 +326,7 @@ export interface FileRoutesById {
   '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/agents/': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
@@ -356,6 +365,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/issues/$number'
     | '/$owner/$name/issues/new'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/agents/'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
     | '/$owner/$name/issues/'
@@ -389,6 +399,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/issues/$number'
     | '/$owner/$name/issues/new'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/agents'
     | '/$owner/$name/branches'
     | '/$owner/$name/ci'
     | '/$owner/$name/issues'
@@ -425,6 +436,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/issues/$number'
     | '/$owner/$name/issues/new'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/agents/'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
     | '/$owner/$name/issues/'
@@ -562,6 +574,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/orgs/$org/settings'
       preLoaderRoute: typeof OrgsOrgSettingsRouteImport
       parentRoute: typeof OrgsOrgRouteRoute
+    }
+    '/$owner/$name/agents/': {
+      id: '/$owner/$name/agents/'
+      path: '/agents'
+      fullPath: '/$owner/$name/agents/'
+      preLoaderRoute: typeof OwnerNameAgentsIndexRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
     }
     '/$owner/$name/blob/$': {
       id: '/$owner/$name/blob/$'
@@ -734,6 +753,7 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameIssuesNumberRoute: typeof OwnerNameIssuesNumberRoute
   OwnerNameIssuesNewRoute: typeof OwnerNameIssuesNewRoute
   OwnerNameTreeSplatRoute: typeof OwnerNameTreeSplatRoute
+  OwnerNameAgentsIndexRoute: typeof OwnerNameAgentsIndexRoute
   OwnerNameBranchesIndexRoute: typeof OwnerNameBranchesIndexRoute
   OwnerNameCiIndexRoute: typeof OwnerNameCiIndexRoute
   OwnerNameIssuesIndexRoute: typeof OwnerNameIssuesIndexRoute
@@ -755,6 +775,7 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameIssuesNumberRoute: OwnerNameIssuesNumberRoute,
   OwnerNameIssuesNewRoute: OwnerNameIssuesNewRoute,
   OwnerNameTreeSplatRoute: OwnerNameTreeSplatRoute,
+  OwnerNameAgentsIndexRoute: OwnerNameAgentsIndexRoute,
   OwnerNameBranchesIndexRoute: OwnerNameBranchesIndexRoute,
   OwnerNameCiIndexRoute: OwnerNameCiIndexRoute,
   OwnerNameIssuesIndexRoute: OwnerNameIssuesIndexRoute,

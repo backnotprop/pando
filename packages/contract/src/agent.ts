@@ -46,6 +46,8 @@ export const AgentSession = Schema.Struct({
   awaiting_checks: Schema.Boolean,
   created_at: Timestamp,
   updated_at: Timestamp,
+  /** In a list: the title of the issue it addresses, as it reads now (null when that issue is gone). */
+  issue_title: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** In a list (GET .../agents, .../assistant): its branch as Pando knows it now; null while the branch is not made yet. */
   branch_facts: Schema.optionalKey(
     Schema.NullOr(

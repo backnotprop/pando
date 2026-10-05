@@ -59,6 +59,8 @@ export interface AgentView {
   updated_at: string;
   /** In a list: its branch as Pando knows it now; null while the branch is not made yet. */
   branch_facts?: BranchFacts | null;
+  /** In a list: the title of the issue it addresses, as it reads now. */
+  issue_title?: string | null;
 }
 
 /** What a list row shows of its branch: exact, from the branch's record. */

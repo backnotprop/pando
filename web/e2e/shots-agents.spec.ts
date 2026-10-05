@@ -175,11 +175,14 @@ test("agents: shots of the built screens for the owner's look", async ({ page, b
 
       await open(page, `/${FULL}/issues/2`, theme);
       await shot(page, `issue-${at}.png`, `An issue with Address with agent and its Agents block, ${at}`);
-      await open(page, `/${FULL}/issues/3`, theme);
-      await page.getByRole("button", { name: "Address with agent" }).click();
-      await settle(page);
-      await shot(page, `issue-address-${at}.png`, `Address with agent, the branch from the issue, ${at}`, false);
-      await page.keyboard.press("Escape");
+      // The issue's header buttons (Edit, New issue, Address with agent) are not shown on a phone.
+      if (width === 1440) {
+        await open(page, `/${FULL}/issues/3`, theme);
+        await page.getByRole("button", { name: "Address with agent" }).click();
+        await settle(page);
+        await shot(page, `issue-address-${at}.png`, `Address with agent, the branch from the issue, ${at}`, false);
+        await page.keyboard.press("Escape");
+      }
 
       await open(page, `/${FULL}/branches/api-pagination`, theme);
       await shot(page, `branch-review-${at}.png`, `A branch: Review with agent, a review agent at work, a posted review, ${at}`);

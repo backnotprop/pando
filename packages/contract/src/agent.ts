@@ -125,6 +125,9 @@ export const AgentTranscript = Schema.Struct({ messages: Schema.Array(AgentMessa
 
 export interface AgentTranscript extends Schema.Schema.Type<typeof AgentTranscript> {}
 
+/** Small words a branch name does not end on. */
+const TRAILING_SMALL = /(-(a|an|and|at|by|for|from|in|of|on|or|the|to|with))+$/;
+
 /** Title words a branch name keeps, at most. */
 const NAME_MAX = 30;
 
@@ -143,6 +146,9 @@ export function issueBranchName(n: number, title: string): string {
     if (words && words.length + 1 + w.length > NAME_MAX) break;
     words = words ? `${words}-${w}` : w.slice(0, NAME_MAX);
   }
+
+  // A name does not end on a small word ("41-login-page-flashes-white", not "...-white-in").
+  words = words.replace(TRAILING_SMALL, "");
 
   return words ? `${n}-${words}` : String(n);
 }

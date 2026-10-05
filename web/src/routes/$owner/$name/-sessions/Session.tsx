@@ -36,7 +36,7 @@ function when(s: Session): string {
 const sep = <span aria-hidden="true" className="text-ash"> · </span>;
 
 /** A commit's own checks: "ci passed · typecheck passed", or "no checks on this commit" (DETERMINISM.md row 27). */
-function CommitChecks({ repo, sha }: { repo: RepoName; sha: string }) {
+export function CommitChecks({ repo, sha }: { repo: RepoName; sha: string }) {
   const { monorepo } = useMonorepo();
 
   const checks = useQuery({

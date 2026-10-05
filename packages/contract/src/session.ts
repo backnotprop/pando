@@ -121,6 +121,8 @@ export const BranchSessions = Schema.Struct({
   commits: Schema.Array(Schema.Struct({ sha: Sha, sessions: Schema.Array(Count), model: Schema.NullOr(Schema.String) })),
 });
 
+export interface BranchSessions extends Schema.Schema.Type<typeof BranchSessions> {}
+
 /** GET /v1/user/session-exclusions: what the person does not record (project null: the whole repository). */
 export const SessionExclusions = Schema.Struct({
   exclusions: Schema.Array(Schema.Struct({ monorepo: Schema.String, monorepo_id: Schema.String, project: Schema.NullOr(Schema.String) })),

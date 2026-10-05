@@ -47,6 +47,8 @@ interface Story {
   s1: string;
   s4: string;
   folder: string;
+  /** In the repository folder, with no commits. */
+  quiet: string;
   anaActive: string;
 }
 
@@ -67,6 +69,7 @@ async function seed(page: Page, browser: Browser): Promise<Story> {
   const s1 = await recordSession(sandbox.secret, full, "pi", "pi-refresh-1", where("refresh-margin"), 3 * H);
   const s4 = await recordSession(sandbox.secret, full, "opencode", "ses_refresh_2", where("refresh-margin"), 2 * H);
   const folder = await recordSession(sandbox.secret, full, "opencode", "ses_folder_1", where(null), 5 * H);
+  const quiet = await recordSession(sandbox.secret, full, "opencode", "ses_folder_2", where(null), 6 * H);
   const anaActive = await recordSession(anaMbp.secret, full, "pi", "pi-rate-1", where("rate-limit"), 2 * 60_000);
 
   await recordSession(sandbox.secret, full, "pi", "pi-docs-1", where("docs-sync"), 26 * H);
@@ -78,6 +81,12 @@ async function seed(page: Page, browser: Browser): Promise<Story> {
   sandbox.m.commit("pando", url, "refresh-margin", { "web/client.ts": "export const margin = 60;\nexport const retry = 1;\n" }, naming("Retry once after a 401 that follows a refresh", s1.id));
   sandbox.m.push(dir, url, "refresh-margin");
   await send(page, "POST", `/v1/monorepos/${full}/issues`, { title: "Users get signed out mid-merge", link: [{ repo: "projects-pando", branch: "refresh-margin" }] });
+  // An open branch: two sessions name its commits, one commit names none.
+  const tc = sandbox.m.commit("pando", url, "theme-cache", { "web/theme.ts": "export const cache = 1;\n" }, naming("Cache the theme", folder.id));
+
+  sandbox.m.commit("pando", url, "theme-cache", { "web/theme.md": "cache\n" }, "Say why the theme is cached");
+  sandbox.m.commit("pando", url, "theme-cache", { "web/theme.ts": "export const cache = 2;\n" }, naming("Clear the cache on a theme change", folder.id, anaActive.id));
+  sandbox.m.push(tc, url, "theme-cache");
   anaMbp.m.push(anaMbp.m.commit("pando", url, "rate-limit", { "web/rate.ts": "export const limit = 10;\n" }, naming("Limit retries", anaActive.id)), url, "rate-limit");
   await expect.poll(async () => ((await (await page.request.get(`/v1/monorepos/${full}/sessions/${s1.id}`)).json()).commits ?? []).length, { timeout: 60_000 }).toBe(2);
   await send(page, "POST", `/v1/monorepos/${full}/repos/projects-pando/branches/refresh-margin/merge?force=1`);
@@ -86,7 +95,7 @@ async function seed(page: Page, browser: Browser): Promise<Story> {
   await sandbox.m.api("PUT", "/v1/user/session-machine", { recording: true, stores: [{ program: "pi", path: "/home/ramos/.pi/agent/sessions", found: "default" }, { program: "claude-code", path: "/home/ramos/work/claude-b/projects", found: "commit hook" }] });
   await anaContext.close();
 
-  return { full, s1: s1.id, s4: s4.id, folder: folder.id, anaActive: anaActive.id };
+  return { full, s1: s1.id, s4: s4.id, folder: folder.id, quiet: quiet.id, anaActive: anaActive.id };
 }
 
 let story: Story | null = null;
@@ -119,15 +128,17 @@ test("the Sessions tab: one line per session under day headers, Active and Inact
   await expect(row).toContainText("Pi, GPT-5.5");
   await expect(row).toContainText("ramos");
   await expect(row).toContainText("2 commits, 2 on main");
-  await expect(today.locator(`li[data-session="${s.folder}"]`)).toContainText("repository folder");
-  await expect(today.locator(`li[data-session="${s.folder}"]`)).toContainText("no commits");
+  await expect(today.locator(`li[data-session="${s.quiet}"]`)).toContainText("repository folder");
+  await expect(today.locator(`li[data-session="${s.quiet}"]`)).toContainText("no commits");
+  // A session that ran in the repository folder leads with the branch its commits are on (DETERMINISM.md row 23).
+  await expect(today.locator(`li[data-session="${s.folder}"]`)).toContainText("theme-cache");
   await expect(today.locator(`li[data-session="${s.anaActive}"]`)).toContainText(/active · \d+ min ago/);
   await expect(page.getByRole("list", { name: "Yesterday" })).toHaveCount(1);
   await expect(page.getByRole("navigation", { name: "State" }).getByRole("link", { name: /Active/ })).toContainText("1");
   await page.getByRole("navigation", { name: "State" }).getByRole("link", { name: /Active/ }).click();
   await expect(page.locator("li[data-session]")).toHaveCount(1);
   await page.goto(`/${s.full}/sessions?agent=opencode`);
-  await expect(page.locator("li[data-session]")).toHaveCount(2);
+  await expect(page.locator("li[data-session]")).toHaveCount(3);
   await page.goto(`/${s.full}/sessions?main=yes`);
   await expect(page.locator("li[data-session]")).toHaveCount(2);
   await page.goto(`/${s.full}/sessions?group=branch`);
@@ -173,12 +184,33 @@ test("the profile: the graph's agents by week and by day, the latest sessions, a
   await graph.getByRole("radio", { name: "By week" }).click();
   const sessions = page.getByRole("region", { name: "Sessions" });
 
-  await expect(sessions.locator("li[data-session]")).toHaveCount(3);
+  await expect(sessions.locator("li[data-session]")).toHaveCount(4);
   await sessions.getByRole("link", { name: /^All \d+/ }).click();
   await expect(page).toHaveURL(/\/ramos\/sessions$/);
   await expect(page.locator(`li[data-session="${s.folder}"]`)).toContainText("ramos/pando");
   await page.getByRole("button", { name: /ramos/ }).first().click();
   await expect(page.getByRole("menuitem", { name: "Your sessions" })).toBeVisible();
+});
+
+test("a branch: each commit's session numbers on the Overview, and its Sessions tab", async ({ page }) => {
+  const s = story!;
+
+  await page.goto(`/${s.full}/projects/pando/branches/theme-cache`);
+  const commits = page.getByRole("list", { name: "Commits" });
+
+  await expect(commits.getByRole("listitem").filter({ hasText: "Clear the cache on a theme change" }).getByLabel("Session 1 and 2")).toBeVisible();
+  await expect(commits.getByRole("listitem").filter({ hasText: "Cache the theme" }).getByLabel("Session 1")).toBeVisible();
+  await expect(commits.getByRole("listitem").filter({ hasText: "Say why the theme is cached" }).getByLabel(/^Session/)).toHaveCount(0);
+  await page.getByRole("link", { name: /^Sessions/ }).click();
+  const list = page.getByRole("list", { name: "Sessions on this branch" });
+
+  await expect(list.locator(`[data-branch-session="${s.folder}"]`)).toContainText("Session 1");
+  await expect(list.locator(`[data-branch-session="${s.anaActive}"]`)).toContainText("Session 2");
+  await expect(list.locator(`[data-branch-session="${s.folder}"]`)).toContainText("2 commits");
+  await expect(list.locator(`[data-branch-session="${s.folder}"]`)).not.toContainText("on main");
+  await list.locator(`[data-branch-session="${s.folder}"]`).getByRole("button", { name: /2 commits/ }).click();
+  await expect(list.getByRole("list", { name: "Its commits on this branch" }).first()).toContainText("no checks on this commit");
+  await expect(page.getByText(/No session recorded:/)).toContainText("Say why the theme is cached");
 });
 
 test("Settings: recording per machine, not recorded, data folders, delete sessions", async ({ page }) => {
@@ -244,6 +276,8 @@ test("shots of the built pages, for the owner's look", async ({ page }) => {
       await shot("profile-sessions", "/ramos", "The profile: the graph's agents by week, the latest sessions");
       await shot("person-sessions", "/ramos/sessions", "/ramos/sessions");
       await shot("settings-sessions", "/settings/sessions", "Settings, Sessions");
+      await shot("branch-overview", `/${s.full}/projects/pando/branches/theme-cache`, "A branch's Overview: each commit's session numbers");
+      await shot("branch-sessions", `/${s.full}/projects/pando/branches/theme-cache?tab=sessions`, "A branch's Sessions tab");
     }
   }
 

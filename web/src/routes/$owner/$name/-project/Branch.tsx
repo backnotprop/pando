@@ -10,7 +10,8 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
-import type { Branch, ChangedFile, Checks, Commit, Repo, Review, Status } from "@pando/contract";
+import type { Branch, BranchSessions, ChangedFile, Checks, Commit, Repo, Review, Status } from "@pando/contract";
+import { branchSessionsQuery } from "../../../../api/sessions";
 import { branchDiffQuery, branchQuery, type CheckRun, checkRunsQuery, commitsQuery, type FilesSoFar, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
@@ -18,10 +19,11 @@ import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
 import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
-import { branchLink, ciBuildLink, codeBlobLink, ownerLink } from "../../../../ui/paths";
+import { branchLink, branchSessionsLink, ciBuildLink, codeBlobLink, ownerLink } from "../../../../ui/paths";
 import { Ref, refClass } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
+import { BranchSessionsTab, SessionNumbers } from "../-sessions/BranchTab";
 import { useMonorepo } from "../-frame/heads";
 import { loadColourViews } from "../-code/coloured";
 import { BranchIssues } from "../-issues/BranchIssues";
@@ -105,7 +107,7 @@ function Authors({ c }: { c: Commit }) {
   );
 }
 
-function Commits({ commits }: { commits: readonly Commit[] }) {
+function Commits({ commits, on }: { commits: readonly Commit[]; on: BranchSessions | undefined }) {
   const clock = useNow();
 
   return (
@@ -114,7 +116,10 @@ function Commits({ commits }: { commits: readonly Commit[] }) {
         <li key={c.sha} className="border-t border-rule-faint">
           <div className="-mx-2.5 grid min-h-10 grid-cols-[76px_minmax(0,1fr)_200px_56px] items-center gap-4 rounded-[7px] px-2.5 py-2 phone:grid-cols-[64px_minmax(0,1fr)]">
             <span className="font-mono text-[13.5px] leading-[16px] text-bark-dim">{c.sha.slice(0, 7)}</span>
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{c.title}</span>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+              <SessionNumbers sha={c.sha} on={on} />
+              {c.title}
+            </span>
             <span className="phone:col-span-2">
               <Authors c={c} />
             </span>
@@ -416,7 +421,7 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
 }
 
-export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string; files: boolean }) {
+export function BranchPage({ repo, branch, files, sessions }: { repo: Repo; branch: string; files: boolean; sessions: boolean }) {
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
 
@@ -433,6 +438,8 @@ export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
   const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.start?.files_total;
+  // The agent sessions its commits name: the Sessions tab, and each commit's numbers on the Overview.
+  const on = useQuery(branchSessionsQuery(monorepo, repo.name, branch)).data;
   // One count for the line under the title and the Commits heading, from the commits read (a new head reads it again, live/rows.ts).
   const n = commits.total;
 
@@ -447,20 +454,27 @@ export function BranchPage({ repo, branch, files }: { repo: Repo; branch: string
         </p>
       </div>
       <TabBar label="Branch">
-        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files} label="Overview" />
+        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files && !sessions} label="Overview" />
+        {on?.sessions.length ? <Tab link={branchSessionsLink(monorepo.full, repo.path, branch)} current={sessions} label="Sessions" count={on.sessions.length} /> : null}
         <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
       </TabBar>
-      {files ? <FilesTab repo={repo} branch={branch} /> : <Overview repo={repo} b={b} commits={commits.commits} total={n} reviews={reviews} live={live} />}
+      {files ? (
+        <FilesTab repo={repo} branch={branch} />
+      ) : sessions ? (
+        <BranchSessionsTab repo={repo} branch={branch} merged={b.state === "merged"} on={on} commits={commits.commits} />
+      ) : (
+        <Overview repo={repo} b={b} commits={commits.commits} total={n} reviews={reviews} live={live} on={on} />
+      )}
     </>
   );
 }
 
-function Overview({ repo, b, commits, total, reviews, live }: { repo: Repo; b: Branch; commits: readonly Commit[]; total: number; reviews: readonly Review[]; live: boolean }) {
+function Overview({ repo, b, commits, total, reviews, live, on }: { repo: Repo; b: Branch; commits: readonly Commit[]; total: number; reviews: readonly Review[]; live: boolean; on: BranchSessions | undefined }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
       <section>
         <SectionHead title="Commits" count={total} />
-        {commits.length ? <Commits commits={commits} /> : <Empty>No commits ahead of main.</Empty>}
+        {commits.length ? <Commits commits={commits} on={on} /> : <Empty>No commits ahead of main.</Empty>}
         <div className="mt-10">
           <SectionHead title="Reviews" />
           <Reviews reviews={reviews} />

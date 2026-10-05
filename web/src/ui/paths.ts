@@ -116,6 +116,12 @@ export const branchLink = (full: string, repoPath: string, branch: string, files
         search: files ? { tab: "files" } : {},
       });
 
+/** A branch's Sessions tab. */
+export const branchSessionsLink = (full: string, repoPath: string, branch: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: { tab: "sessions" } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch }, search: { tab: "sessions" } });
+
 /** A code file's bytes (the Worker's raw route; members only). */
 export const codeRawHref = (full: string, repoPath: string, path: string, ref: string | null) =>
   `/${full}${repoPath === "." ? "" : `/projects/${project(repoPath)}`}/raw/${path.split("/").map(encodeURIComponent).join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
@@ -157,6 +163,7 @@ export type AppLink =
   | ReturnType<typeof codeHistoryLink>
   | ReturnType<typeof branchesLink>
   | ReturnType<typeof branchLink>
+  | ReturnType<typeof branchSessionsLink>
   | ReturnType<typeof sessionsLink>
   | ReturnType<typeof sessionLink>
   | ReturnType<typeof personSessionsLink>;

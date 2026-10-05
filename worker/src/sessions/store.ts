@@ -527,6 +527,11 @@ export class SessionStore {
     return this.pieces(id, 0, Number.MAX_SAFE_INTEGER).pieces;
   }
 
+  /** When the answering model changed, oldest first: each answer's model is the last change at or before it. */
+  modelChanges(id: string): { at: string; model: string }[] {
+    return this.rows<{ at: string; model: string } & Row>("SELECT at, model FROM session_model_changes WHERE session = ? ORDER BY at", id);
+  }
+
   /** Removed turns, as the reader places their marks. */
   removals(id: string): RemovalRow[] {
     return this.rows<RemovalRow & Row>("SELECT prompt, from_at, to_at, by, at FROM session_removals WHERE session = ? ORDER BY prompt", id);

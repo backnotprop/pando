@@ -1288,6 +1288,10 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.sessions.allPieces(id));
   }
 
+  sessionModelChanges(id: string) {
+    return this.guard(() => this.sessions.modelChanges(id));
+  }
+
   sessionRemovals(id: string) {
     return this.guard(() => this.sessions.removals(id));
   }

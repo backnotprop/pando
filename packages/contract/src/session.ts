@@ -107,6 +107,8 @@ export const SessionEntry = Schema.Struct({
 export const SessionEntries = Schema.Struct({
   entries: Schema.Array(SessionEntry),
   next_cursor: Schema.NullOr(Count),
+  /** When the answering model changed, oldest first (on the first page): an answer's model is the last at or before it. */
+  model_changes: Schema.Array(Schema.Struct({ at: Timestamp, model: Schema.String })),
 });
 
 /**

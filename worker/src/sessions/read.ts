@@ -19,6 +19,8 @@ export const PAGE_BYTES = 2_000_000;
 export interface EntryPage {
   entries: Entry[];
   next_cursor: number | null;
+  /** When the answering model changed, oldest first (on the first page only). */
+  model_changes: { at: string; model: string }[];
 }
 
 interface Removal {
@@ -75,7 +77,7 @@ export async function readEntries(env: Env, monorepoId: string, id: string, from
 
   for (const p of page.pieces) entries.push(...(await pieceEntries(env, src, p, removals)));
 
-  return { entries, next_cursor: page.next };
+  return { entries, next_cursor: page.next, model_changes: from === 0 ? unwrap(await stub.sessionModelChanges(id)) : [] };
 }
 
 /**

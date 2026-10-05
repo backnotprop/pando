@@ -5113,10 +5113,14 @@ components:
         by: { type: [string, "null"], description: "A removed turn: who removed it." }
     SessionEntries:
       type: object
-      required: [entries, next_cursor]
+      required: [entries, next_cursor, model_changes]
       properties:
         entries: { type: array, items: { $ref: "#/components/schemas/SessionEntry" } }
         next_cursor: { type: [integer, "null"] }
+        model_changes:
+          type: array
+          description: "When the answering model changed, oldest first (on the first page only): an answer's model is the last change at or before it."
+          items: { type: object, required: [at, model], properties: { at: { type: string, format: date-time }, model: { type: string } } }
     SessionExclusions:
       type: object
       required: [exclusions]

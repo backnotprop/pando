@@ -97,15 +97,16 @@ export function sessionUserRoutes(users: UserApp): void {
 
   users.get("/v1/user/session-machines", async (c) => {
     const rows = await c.env.ACCOUNTS_DB.prepare(
-      "SELECT s.credential_id, c.name, s.recording, s.stores, s.updated_at FROM session_machines s JOIN credentials c ON c.id = s.credential_id WHERE s.login = ?1 AND c.revoked_at IS NULL ORDER BY c.name",
+      "SELECT s.credential_id, c.name, c.kind, s.recording, s.stores, s.updated_at FROM session_machines s JOIN credentials c ON c.id = s.credential_id WHERE s.login = ?1 AND c.revoked_at IS NULL ORDER BY c.name",
     )
       .bind(c.get("auth").user.login)
-      .all<{ credential_id: string; name: string; recording: number; stores: string; updated_at: string }>();
+      .all<{ credential_id: string; name: string; kind: string; recording: number; stores: string; updated_at: string }>();
 
     return c.json({
       machines: rows.results.map((r) => ({
         credential_id: r.credential_id,
         machine: r.name,
+        kind: r.kind,
         recording: r.recording === 1,
         // SAFETY: PUT /v1/user/session-machine is the only writer: JSON of checked {program, path, found} objects.
         stores: JSON.parse(r.stores) as { program: "claude-code" | "codex" | "pi" | "opencode"; path: string; found: string }[],

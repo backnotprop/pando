@@ -71,8 +71,12 @@ function filtersOf(c: C): SessionFilters {
   const main = q("main");
 
   if (main !== null && main !== "yes" && main !== "no") bad("main: yes or no");
+  const days = q("older_than_days");
+  const older = days === null ? null : Number(days);
 
-  return { person: person === "@me" ? c.get("identity").login : person, program: q("agent"), repo: q("repo"), branch: q("branch"), state, main, cursor: q("cursor"), limit };
+  if (older !== null && (!Number.isInteger(older) || older < 0 || older > 3650)) bad("older_than_days: 0 to 3650");
+
+  return { person: person === "@me" ? c.get("identity").login : person, program: q("agent"), repo: q("repo"), branch: q("branch"), state, main, before: older === null ? null : new Date(Date.now() - older * 86_400_000).toISOString(), cursor: q("cursor"), limit };
 }
 
 export function sessionRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void {

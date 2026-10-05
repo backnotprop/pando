@@ -1,17 +1,18 @@
 // Your settings' frame (mock `edit`): a short list at the side, Profile and
-// Machines, beside the page you are on. On a phone the list sits above it.
+// Machines and Sessions, beside the page you are on. On a phone the list sits above it.
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { LaptopIcon, PersonIcon } from "../../ui/Icons";
+import { LaptopIcon, PersonIcon, TerminalIcon } from "../../ui/Icons";
 import { Page } from "../../ui/pages";
 import { ownerLink } from "../../ui/paths";
 
 const PAGES = [
   { to: "/settings/profile", label: "Profile", icon: <PersonIcon /> },
   { to: "/settings/machines", label: "Machines", icon: <LaptopIcon /> },
+  { to: "/settings/sessions", label: "Sessions", icon: <TerminalIcon /> },
 ] as const;
 
-export function SettingsFrame({ login, page, children }: { login: string; page: "profile" | "machines"; children: ReactNode }) {
+export function SettingsFrame({ login, page, children }: { login: string; page: "profile" | "machines" | "sessions"; children: ReactNode }) {
   return (
     <Page crumbs={[{ label: login, link: ownerLink(login) }, { label: "settings" }]}>
       <div className="grid grid-cols-[200px_minmax(0,1fr)] items-start gap-14 narrow:gap-10 phone:grid-cols-[minmax(0,1fr)] phone:gap-5">

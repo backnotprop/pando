@@ -131,7 +131,7 @@ export const SessionStore = Schema.Struct({ program: SessionProgram, path: Schem
 
 /** GET /v1/user/session-machines: each of the person's machines, as it last reported its recording. */
 export const SessionMachines = Schema.Struct({
-  machines: Schema.Array(Schema.Struct({ credential_id: Schema.String, machine: Schema.String, recording: Schema.Boolean, stores: Schema.Array(SessionStore), updated_at: Timestamp })),
+  machines: Schema.Array(Schema.Struct({ credential_id: Schema.String, machine: Schema.String, kind: Schema.String, recording: Schema.Boolean, stores: Schema.Array(SessionStore), updated_at: Timestamp })),
 });
 
 /** GET .../sessions/{id}/files: the files its commits changed (at most its first 50 commits are read). */

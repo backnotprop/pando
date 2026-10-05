@@ -247,6 +247,8 @@ export interface SessionFilters {
   state: "active" | "inactive" | null;
   /** "yes": some commit reached main; "no": none did. */
   main: "yes" | "no" | null;
+  /** Only sessions whose last record is before this time (Settings' Delete sessions counts them). */
+  before?: string | null;
   cursor: string | null;
   limit: number;
 }
@@ -466,6 +468,11 @@ export class SessionStore {
     } else if (f.repo !== null) {
       where.push("(repo = ? OR id IN (SELECT session FROM session_commits WHERE repo = ?))");
       args.push(f.repo, f.repo);
+    }
+
+    if (f.before) {
+      where.push("last_at < ?");
+      args.push(f.before);
     }
 
     if (f.main !== null) where.push(`id ${f.main === "yes" ? "IN" : "NOT IN"} (SELECT session FROM session_commits WHERE on_main = 1)`);

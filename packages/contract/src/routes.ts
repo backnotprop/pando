@@ -642,6 +642,8 @@ export interface SessionFilters {
   branch?: string;
   /** "yes": some commit reached main; "no": none. */
   main?: "yes" | "no";
+  /** Only those whose last record is older (Settings' Delete sessions). */
+  olderThanDays?: number;
   cursor?: string;
   limit?: number;
 }
@@ -655,6 +657,8 @@ export const listSessions = (owner: Login, name: MonorepoName, f: SessionFilters
   }
 
   if (f.limit !== undefined) params.set("limit", String(f.limit));
+
+  if (f.olderThanDays !== undefined) params.set("older_than_days", String(f.olderThanDays));
 
   return { path: `${sessionsBase(owner, name)}${query(params)}`, response: SessionList };
 };

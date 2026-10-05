@@ -2,7 +2,7 @@
 // page's socket reads them again (live/rows.ts). A person's sessions and the graph's marks key under ["u", login].
 import { type Login, type RepoName, Routes } from "@pando/contract";
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
-import { get, remove } from "./client";
+import { get, put, remove } from "./client";
 import type { MonorepoRef } from "./names";
 
 export const sessionsKey = (m: MonorepoRef) => ["m", m.owner, m.name, "sessions"] as const;
@@ -124,3 +124,8 @@ export const sessionExclusionsQuery = queryOptions({
   queryKey: ["user", "session-exclusions"],
   queryFn: () => get(Routes.sessionExclusions.response, Routes.sessionExclusions.path).then((r) => r.exclusions),
 });
+
+/** Replace the person's list of what is not recorded (owner/name, and a project's path or null for the whole repository). */
+export async function setExclusions(list: readonly { monorepo: string; project: string | null }[]): Promise<void> {
+  await put(Routes.setSessionExclusions, { exclusions: list.map((x) => ({ monorepo: x.monorepo, project: x.project })) });
+}

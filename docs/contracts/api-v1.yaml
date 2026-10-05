@@ -5014,6 +5014,7 @@ components:
         machine: { type: string, description: "The session's credential, cloud-<n>." }
         workspace: { type: [string, "null"], enum: [mount, clone, null] }
         awaiting_checks: { type: boolean, description: "Its merge waits for required checks still running; Pando tells it when they are green." }
+        first_message: { type: [string, "null"], description: "An assistant's chat: its first message, cut at 200 characters; null for other kinds." }
         branch_facts:
           type: [object, "null"]
           description: In a list only. Its branch now (state, ahead, merged_at, checks); null while the branch is not made yet.

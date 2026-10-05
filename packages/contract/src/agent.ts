@@ -47,6 +47,8 @@ export const AgentSession = Schema.Struct({
   created_at: Timestamp,
   updated_at: Timestamp,
   /** In a list: the title of the issue it addresses, as it reads now (null when that issue is gone). */
+  /** An assistant's chat: its first message, cut at 200 characters (the Chats list); null for other kinds. */
+  first_message: Schema.NullOr(Schema.String),
   issue_title: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** In a list: that issue's state now. */
   issue_state: Schema.optionalKey(Schema.NullOr(Schema.Literals(["open", "closed"]))),

@@ -124,6 +124,9 @@ async function failed(c: C, s: AgentView, reason: string): Promise<AgentView> {
   return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo, sandbox: "stopped", updated_at: now() })) ?? s;
 }
 
+/** A chat's first message as its Chats list keeps it. */
+const FIRST_MESSAGE_MAX = 200;
+
 export interface LaunchInput {
   kind: SessionKind;
   prompt: string;
@@ -143,7 +146,7 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
   const identity = c.get("identity");
   const repos = await c.get("stub").listRepos();
   const repo = input.repo === null ? (repos.length === 1 ? repos[0] : bad("repo: which project the agent works in")) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
-  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo.name, branch: input.branch, model: input.model, issue: input.issue }, identity));
+  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo.name, branch: input.branch, model: input.model, issue: input.issue, first_message: input.kind === "chat" ? input.prompt.slice(0, FIRST_MESSAGE_MAX) : null }, identity));
   const secret = newToken();
   const cred = await accounts(c.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox", monorepo_id: info.id });
 

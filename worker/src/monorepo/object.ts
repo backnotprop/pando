@@ -423,6 +423,10 @@ export class MonorepoObject extends DurableObject<Env> {
       this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN awaiting_checks INTEGER NOT NULL DEFAULT 0");
     }
 
+    if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "first_message")) {
+      this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN first_message TEXT");
+    }
+
     this.issues.seedLabels();
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);

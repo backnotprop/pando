@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   number INTEGER PRIMARY KEY, kind TEXT NOT NULL, repo TEXT NOT NULL, branch TEXT NOT NULL, model TEXT NOT NULL,
   issue INTEGER, launched_by TEXT NOT NULL, machine TEXT NOT NULL, credential_id TEXT,
   status TEXT NOT NULL, reason TEXT, workspace TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  awaiting_checks INTEGER NOT NULL DEFAULT 0);
+  awaiting_checks INTEGER NOT NULL DEFAULT 0, first_message TEXT);
 CREATE INDEX IF NOT EXISTS agent_sessions_issue ON agent_sessions (issue, number) WHERE issue IS NOT NULL;
 CREATE INDEX IF NOT EXISTS agent_sessions_branch ON agent_sessions (repo, branch, number)`;
 
@@ -37,6 +37,7 @@ interface AgentRow {
   created_at: string;
   updated_at: string;
   awaiting_checks: number;
+  first_message: string | null;
 }
 
 /** A session as the API shows it (Contract.AgentSession). */
@@ -56,6 +57,8 @@ export interface AgentView {
   workspace: "mount" | "clone" | null;
   /** Its merge was refused while required checks were still running; Pando tells it when they are green. */
   awaiting_checks: boolean;
+  /** A chat's first message, its first 200 characters (the Chats list); null for other kinds. */
+  first_message: string | null;
   created_at: string;
   updated_at: string;
   /** In a list: its branch as Pando knows it now; null while the branch is not made yet. */
@@ -103,6 +106,8 @@ export interface AgentInput {
   branch: string | null;
   model: string;
   issue: number | null;
+  /** A chat's first message (kept cut, for its person's Chats list). */
+  first_message: string | null;
 }
 
 export interface AgentHost {
@@ -119,7 +124,7 @@ function view(r: AgentRow): AgentView {
   return {
     number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch || null, program: PROGRAM, model: r.model,
     issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, awaiting_checks: r.awaiting_checks === 1,
-    created_at: r.created_at, updated_at: r.updated_at,
+    first_message: r.first_message, created_at: r.created_at, updated_at: r.updated_at,
   };
 }
 
@@ -148,8 +153,8 @@ export class AgentStore {
     const branch = input.branch ?? "";
 
     this.sql.exec(
-      "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)",
-      number, input.kind, input.repo, branch, input.model, input.issue, login, machineName(number), at, at,
+      "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, first_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)",
+      number, input.kind, input.repo, branch, input.model, input.issue, login, machineName(number), input.first_message, at, at,
     );
     this.publish(this.must(number), login);
 

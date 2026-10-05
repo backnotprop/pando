@@ -29,7 +29,7 @@ try {
 
   // ── Its person's alone ──
   r = await call("GET", `/v1/monorepos/${t.full}/assistant`, t.secret);
-  check("GET .../assistant lists the person's chat", r.json?.sessions?.length === 1 && r.json.sessions[0].number === 1);
+  check("GET .../assistant lists the person's chat, with its first message", r.json?.sessions?.length === 1 && r.json.sessions[0].number === 1 && r.json.sessions[0].first_message?.startsWith("What does src/app.js export?"), r.json?.sessions?.[0]?.first_message);
   r = await call("GET", `/v1/monorepos/${t.full}/agents`, t.secret);
   check("the Agents tab does not list chats", r.json?.sessions?.length === 0, JSON.stringify(r.json));
   r = await call("POST", "/v1/users", BOOT, { login: `${t.login}-b`, name: "Member B", email: `b-${t.login}@pando.invalid`, credential_name: "b-mbp" });

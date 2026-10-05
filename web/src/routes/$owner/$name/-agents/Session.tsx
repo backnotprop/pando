@@ -131,7 +131,8 @@ export function AgentSessionPage({ n }: { n: number }) {
   const prompts = items.filter((i) => i.kind === "prompt").length;
   const steps = items.filter((i) => i.kind === "step").length;
   const mine = s.launched_by === me;
-  const running = s.status === "working" || s.status === "waiting";
+  // Stop is for a session still at work or waiting; a merged one is done (the mocks' done page has none).
+  const running = (s.status === "working" || s.status === "waiting") && s.branch_facts?.state !== "merged";
 
   const stop = async () => {
     qc.setQueryData(agentQuery(monorepo, n).queryKey, await stopAgent(monorepo, n));

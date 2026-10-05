@@ -83,6 +83,8 @@ try {
   check("merge goes through Pando's normal route and closes #1", merged?.name === "merge" && !merged.error && /Merged fix-readme into main \(merge commit [0-9a-f]{12}, closing #1\)/.test(merged.text), merged?.text);
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/fix-readme`, t.secret);
   check("fix-readme is merged, by the person, from cloud-1", r.json?.state === "merged" && r.json?.merged_by === t.login && r.json?.merged_machine === "cloud-1", scrub(JSON.stringify({ state: r.json?.state, by: r.json?.merged_by, machine: r.json?.merged_machine })));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents/1`, t.secret);
+  check("the session itself says its branch is merged (its page)", r.json?.branch_facts?.state === "merged", JSON.stringify(r.json?.branch_facts));
   r = await untilClosed(t, 1);
   check("issue #1 is closed by the merge", r.json?.state === "closed", r.json?.state);
 } catch (error) {

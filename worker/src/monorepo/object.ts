@@ -36,7 +36,7 @@ import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
-import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput } from "../agents/store";
+import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput, type AgentView } from "../agents/store";
 import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
@@ -1192,8 +1192,9 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.agents.credentialOf(number));
   }
 
+  /** One session, with its branch's facts and its issue's title now (its page). */
   agentGet(number: number) {
-    return this.guard(() => this.agents.get(number));
+    return this.guard(() => this.withFacts(this.agents.get(number)));
   }
 
   /** An issue's title and state now, or null when it is gone. */
@@ -1201,23 +1202,28 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.row<{ title: string; state: "open" | "closed" }>("SELECT title, state FROM issues WHERE number = ?", n);
   }
 
-  /** A page of sessions, each with its branch's facts now (state, commits ahead, merge, checks) and its issue's title. */
+  /** A session with its branch's facts now (state, commits ahead, merge, checks) and its issue's title and state. */
+  private withFacts(v: AgentView): AgentView {
+    const b = v.branch === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
+
+    v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
+
+    if (v.issue !== null) {
+      const issue = this.issueNow(v.issue);
+
+      v.issue_title = issue?.title ?? null;
+      v.issue_state = issue?.state ?? null;
+    }
+
+    return v;
+  }
+
+  /** A page of sessions, each with its facts now. */
   agentList(f: AgentFilters) {
     return this.guard(() => {
       const page = this.agents.list(f);
 
-      for (const v of page.sessions) {
-        const b = v.branch === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
-
-        v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
-
-        const issue = v.issue === null ? null : this.issueNow(v.issue);
-
-        if (v.issue !== null) {
-          v.issue_title = issue?.title ?? null;
-          v.issue_state = issue?.state ?? null;
-        }
-      }
+      page.sessions = page.sessions.map((v) => this.withFacts(v));
 
       return page;
     });

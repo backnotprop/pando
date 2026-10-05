@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { ActivityFrame, MonorepoFeedFrame } from "./feed.ts";
 import { MonorepoEventFrame } from "./stream.ts";
 import { BranchDiffLine } from "./branch.ts";
+import { AgentLiveFrame } from "./agent.ts";
 
 /** Runtime, for clients: unknown fields are ignored. Answers a Result (success, or a Schema.SchemaError). */
 export const decodeResponse = <A, I>(schema: Schema.Codec<A, I>) => Schema.decodeUnknownResult(schema, { onExcessProperty: "ignore" });
@@ -33,3 +34,6 @@ export const decodeMonorepoEventFrame = Schema.decodeUnknownOption(Schema.fromJs
 
 /** One line of a streamed Files changed (branchDiffStream): Some(line), or None for a line this build does not know. */
 export const decodeBranchDiffLine = Schema.decodeUnknownOption(Schema.fromJsonString(BranchDiffLine), { onExcessProperty: "ignore" });
+
+/** One frame of an agent session's live socket: Some(frame), or None for a ping's answer or a frame this build does not know. */
+export const decodeAgentLiveFrame = Schema.decodeUnknownOption(Schema.fromJsonString(AgentLiveFrame), { onExcessProperty: "ignore" });

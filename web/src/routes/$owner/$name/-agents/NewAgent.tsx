@@ -6,19 +6,18 @@
 // existing branch. Existing branch picks one of the project's open branches,
 // which the agent works on as it is. It acts as the person, through a
 // credential made for it (cloud-<n>).
-import { Dialog } from "@base-ui/react/dialog";
 import type { RepoName } from "@pando/contract";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { agentModelsQuery, agentsKey, BRANCH_NAME, checksWords, launchAgent } from "../../../../api/agents";
+import { agentsKey, BRANCH_NAME, checksWords, launchAgent } from "../../../../api/agents";
 import { branchesQuery } from "../../../../api/projects";
 import { reposQuery } from "../../../../api/queries";
-import { button, field, lnk, Refusal } from "../../../../ui/controls";
+import { field, lnk } from "../../../../ui/controls";
 import { Select } from "../../../../ui/dropdown";
 import { SearchIcon } from "../../../../ui/IssueIcons";
-import { Leaf } from "../../../../ui/Leaf";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { AgentDialog, fieldLabel, ModelField, useModel } from "./Dialog";
 
 const segment = "inline-flex h-7 cursor-pointer items-center rounded-[7px] px-3 text-[13px] text-bark-dim aria-pressed:bg-pop-hi aria-pressed:font-semibold aria-pressed:text-bark";
 
@@ -66,9 +65,8 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
   const projects = info.kind === "monorepo" ? repos.filter((r) => r.path !== ".") : repos;
   const [prompt, setPrompt] = useState("");
   const [repo, setRepo] = useState<RepoName | null>(null);
-  const models = useQuery(agentModelsQuery(monorepo)).data ?? [];
-  const [chosenModel, setModel] = useState<string | null>(null);
-  const model = chosenModel ?? models[0]?.id ?? null;
+  const pick = useModel();
+  const model = pick.model;
   const [existing, setExisting] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -101,125 +99,84 @@ export function NewAgent({ open, onClose }: { open: boolean; onClose: () => void
   const ready = prompt.trim() && chosenRepo && model && chosenBranch && !start.isPending;
 
   return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-10 bg-[color-mix(in_srgb,var(--soil)_72%,transparent)] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup className="fixed top-[112px] left-1/2 z-10 w-[560px] max-w-[calc(100%-32px)] -translate-x-1/2 rounded-xl border border-rootline bg-pop px-[22px] pt-5 pb-5 shadow-pop outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 phone:top-6">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-
-              if (ready) start.mutate();
-            }}
-          >
-            <Dialog.Title className="mb-3.5 flex items-center gap-2.5 text-[16px] font-semibold">
-              <Leaf state="idle" size={20} />
-              New agent
-            </Dialog.Title>
-            <label className="grid gap-1.5 text-[13px]">
-              <span className="font-semibold text-bark">What to do</span>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="What should change"
-                rows={5}
-                className="min-h-32 resize-y rounded-lg border border-rootline bg-air px-3 py-2.5 text-[14px] leading-[21px] text-bark placeholder:text-ash focus:border-ash focus:outline-none"
-              />
-            </label>
-            <div className="mt-3.5 grid grid-cols-2 gap-3 phone:grid-cols-1">
-              {projects.length > 1 ? (
-                <label className="grid gap-1.5 text-[13px]">
-                  <span className="font-semibold text-bark">Project</span>
-                  <Select
-                    label="Project"
-                    value={chosenRepo ?? ""}
-                    wide
-                    onChange={(v) => {
-                      setRepo(projects.find((r) => r.name === v)?.name ?? null);
-                      setBranch(null);
-                    }}
-                  >
-                    {projects.map((r) => (
-                      <option key={r.name} value={r.name}>
-                        {r.path}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-              ) : null}
-              <label className="grid gap-1.5 text-[13px]">
-                <span className="font-semibold text-bark">Model</span>
-                <Select label="Model" value={model ?? ""} wide onChange={setModel}>
-                  {models.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            </div>
-            <div className="mt-3.5 grid gap-1.5 text-[13px]">
-              <span className="font-semibold text-bark">Branch</span>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <span role="group" aria-label="Branch" className="inline-flex gap-0.5 rounded-[9px] bg-air p-[3px] shadow-[inset_0_0_0_1px_var(--rootline)]">
-                  <button type="button" aria-pressed={!existing} className={segment} onClick={() => setExisting(false)}>
-                    New branch
-                  </button>
-                  <button type="button" aria-pressed={existing} className={segment} onClick={() => setExisting(true)}>
-                    Existing branch
-                  </button>
-                </span>
-              </div>
-              {existing ? null : (
-                <>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Name it for the change, e.g. theme-light-default"
-                    aria-label="New branch name"
-                    aria-invalid={nameWrong || nameTaken}
-                    className={`${field} h-[34px] font-mono text-[13px] placeholder:font-sans aria-invalid:border-rust-half`}
-                  />
-                  {nameTaken ? (
-                    <p className="text-[12.5px] text-bark-dim">
-                      <code className="font-mono">{typed}</code> already exists.{" "}
-                      <button
-                        type="button"
-                        className={lnk}
-                        onClick={() => {
-                          setBranch(typed);
-                          setExisting(true);
-                        }}
-                      >
-                        Use the existing branch
-                      </button>
-                    </p>
-                  ) : (
-                    <p className="text-[12.5px] text-ash">{nameWrong ? "Letters, digits and . _ / - only, not main." : "Required. It becomes the worktree folder on every machine."}</p>
-                  )}
-                </>
-              )}
-              {existing && chosenRepo ? <BranchPick repo={chosenRepo} chosen={branch} onChoose={setBranch} /> : null}
-            </div>
-            <Refusal error={start.error} />
-            <div className="mt-5 flex items-center justify-end gap-2.5">
-              <span className="mr-auto text-[12.5px] text-ash">Acts as you</span>
-              <button type="button" className={button("quiet")} onClick={onClose}>
-                Cancel
-              </button>
-              <button type="submit" className={button("solid")} disabled={!ready}>
-                Start
-              </button>
-            </div>
-          </form>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <AgentDialog open={open} onClose={onClose} title="New agent" ready={Boolean(ready)} error={start.error} onStart={() => start.mutate()}>
+      <label className={fieldLabel}>
+        <span className="font-semibold text-bark">What to do</span>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="What should change"
+          rows={5}
+          className="min-h-32 resize-y rounded-lg border border-rootline bg-air px-3 py-2.5 text-[14px] leading-[21px] text-bark placeholder:text-ash focus:border-ash focus:outline-none"
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-3 phone:grid-cols-1">
+        {projects.length > 1 ? (
+          <label className={fieldLabel}>
+            <span className="font-semibold text-bark">Project</span>
+            <Select
+              label="Project"
+              value={chosenRepo ?? ""}
+              wide
+              onChange={(v) => {
+                setRepo(projects.find((r) => r.name === v)?.name ?? null);
+                setBranch(null);
+              }}
+            >
+              {projects.map((r) => (
+                <option key={r.name} value={r.name}>
+                  {r.path}
+                </option>
+              ))}
+            </Select>
+          </label>
+        ) : null}
+        <ModelField pick={pick} />
+      </div>
+      <div className="grid gap-1.5 text-[13px]">
+        <span className="font-semibold text-bark">Branch</span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span role="group" aria-label="Branch" className="inline-flex gap-0.5 rounded-[9px] bg-air p-[3px] shadow-[inset_0_0_0_1px_var(--rootline)]">
+            <button type="button" aria-pressed={!existing} className={segment} onClick={() => setExisting(false)}>
+              New branch
+            </button>
+            <button type="button" aria-pressed={existing} className={segment} onClick={() => setExisting(true)}>
+              Existing branch
+            </button>
+          </span>
+        </div>
+        {existing ? null : (
+          <>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Name it for the change, e.g. theme-light-default"
+              aria-label="New branch name"
+              aria-invalid={nameWrong || nameTaken}
+              className={`${field} h-[34px] font-mono text-[13px] placeholder:font-sans aria-invalid:border-rust-half`}
+            />
+            {nameTaken ? (
+              <p className="text-[12.5px] text-bark-dim">
+                <code className="font-mono">{typed}</code> already exists.{" "}
+                <button
+                  type="button"
+                  className={lnk}
+                  onClick={() => {
+                    setBranch(typed);
+                    setExisting(true);
+                  }}
+                >
+                  Use the existing branch
+                </button>
+              </p>
+            ) : (
+              <p className="text-[12.5px] text-ash">{nameWrong ? "Letters, digits and . _ / - only, not main." : "Required. It becomes the worktree folder on every machine."}</p>
+            )}
+          </>
+        )}
+        {existing && chosenRepo ? <BranchPick repo={chosenRepo} chosen={branch} onChoose={setBranch} /> : null}
+      </div>
+    </AgentDialog>
   );
 }
 

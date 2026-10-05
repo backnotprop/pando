@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import { mirrorQuery } from "../api/mirror";
+import { sessionsKey } from "../api/sessions";
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
@@ -154,6 +155,12 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     case "issue.updated":
     case "label.updated":
       applyIssueFrame(qc, m, f);
+      break;
+    case "session.started":
+    case "session.updated":
+    case "session.deleted":
+      // A session started, grew or went: its lists and its page read again (they are small; a session sends at most a piece per 30 s).
+      void qc.invalidateQueries({ queryKey: sessionsKey(m) });
       break;
     case "mirror.updated":
       // A run ended or a setting changed: Settings reads its section again (the event's row has no paths or counts behind).

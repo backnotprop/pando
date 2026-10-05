@@ -22,6 +22,7 @@ const PI_CELLS: [string, [number, number][]][] = [
   ["rgb(234,182,93)", [[3, 2], [3, 3]]],
 ];
 
+// The URL is quoted: Vite inlines a small SVG as a data: URL, which an unquoted url() would cut short.
 export function AgentMark({ program, size = 14, className = "" }: { program: Program; size?: number; className?: string }) {
   const label = PROGRAM_NAME[program];
 
@@ -51,14 +52,14 @@ export function AgentMark({ program, size = 14, className = "" }: { program: Pro
       role="img"
       aria-label={label}
       className={`inline-block shrink-0 ${className}`}
-      style={{ width: size, height: size, background: m.color, mask: `url(${m.url}) center / contain no-repeat`, WebkitMask: `url(${m.url}) center / contain no-repeat` }}
+      style={{ width: size, height: size, background: m.color, mask: `url("${m.url}") center / contain no-repeat`, WebkitMask: `url("${m.url}") center / contain no-repeat` }}
     />
   );
 }
 
 /** Any other agent's mark (a future program): the generic glyph, in the text colour. */
 export const OtherMark = ({ size = 14 }: { size?: number }) => (
-  <span aria-hidden="true" className="inline-block shrink-0" style={{ width: size, height: size, background: "currentColor", mask: `url(${custom}) center / contain no-repeat`, WebkitMask: `url(${custom}) center / contain no-repeat` }} />
+  <span aria-hidden="true" className="inline-block shrink-0" style={{ width: size, height: size, background: "currentColor", mask: `url("${custom}") center / contain no-repeat`, WebkitMask: `url("${custom}") center / contain no-repeat` }} />
 );
 
 /**

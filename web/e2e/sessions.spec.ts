@@ -37,6 +37,10 @@ async function send(page: Page, method: "POST" | "PUT" | "PATCH" | "DELETE", pat
 
 /** A machine credential for the signed-in person, and its secret (to append sessions as `pando sync` does). */
 async function machine(page: Page, name: string, author: string): Promise<{ m: Machine; secret: string }> {
+  // One machine of that name: an earlier run's goes first (the state is kept between runs).
+  const had = (await (await page.request.get("/v1/user/credentials")).json()).credentials ?? [];
+
+  for (const c of had.filter((x: { name: string; revoked_at: string | null }) => x.name === name && !x.revoked_at)) await send(page, "DELETE", `/v1/user/credentials/${c.id}`);
   const made = await browserPost(page, "/v1/user/credentials", { name, kind: "machine" });
 
   return { m: new Machine(made.secret, name, author), secret: made.secret };

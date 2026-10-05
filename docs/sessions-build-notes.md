@@ -214,7 +214,7 @@ login question, the hidden `pando session trailer` the hook calls),
 `cli/internal/server/sessions.go` (the client calls), `cmd/pando/main.go`
 (`pando sync` starts the recorder beside the shared files), the hook in
 `cli/internal/worktree/hook.go`, `[sessions]` in `config.Settings`. Server:
-`worker/migrations/0008_sessions.sql` and `worker/src/sessions/user-routes.ts`.
+`worker/migrations/0009_sessions.sql` and `worker/src/sessions/user-routes.ts`.
 
 - **Two jobs apart.** `session.Start` runs its own goroutine with its own
   recover; every error is logged as `pando sync (sessions): ...` and the pass

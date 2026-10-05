@@ -1,6 +1,6 @@
 -- Agent sessions (worker/src/sessions): what a person does not record, followed by every machine they sign in on,
 -- and what each machine last reported about its own recording (Settings shows both). Additive only.
--- (Numbered 0008; renumbered at landing if another lane takes it first.)
+-- (Numbered 0009: cloud-agents takes 0008.)
 
 -- A repository (project '') or one of its projects ('projects/web') a person does not record.
 CREATE TABLE session_exclusions (

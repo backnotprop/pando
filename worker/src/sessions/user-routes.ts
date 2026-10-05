@@ -1,4 +1,4 @@
-// A person's session settings, the signed-in person's own (D1, migration 0008_sessions.sql):
+// A person's session settings, the signed-in person's own (D1, migration 0009_sessions.sql):
 //   GET /v1/user/session-exclusions     the repositories and projects they do not record, on every machine
 //   PUT /v1/user/session-exclusions     replace that list: {exclusions: [{monorepo: "owner/name", project: "projects/web" | null}]}
 //   PUT /v1/user/session-machine        this machine says whether it records and which stores it reads

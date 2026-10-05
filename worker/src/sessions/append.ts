@@ -37,7 +37,8 @@ export async function appendPiece(env: Env, monorepoId: string, by: Sender, inpu
 
   if (!Number.isSafeInteger(at) || !Number.isSafeInteger(next) || at < 0 || next <= at) throw new HttpError(400, "bad_request", "at and next: whole numbers, next after at");
 
-  if (!input.lines.endsWith("\n")) throw new HttpError(400, "bad_request", "a piece is whole lines, each ending with a newline");
+  // Empty is allowed: lines the machine read and did not keep (all reasoning) still move the end on.
+  if (input.lines !== "" && !input.lines.endsWith("\n")) throw new HttpError(400, "bad_request", "a piece is whole lines, each ending with a newline");
 
   if (input.lines.length > PIECE_MAX) throw new HttpError(413, "piece_too_large", `a piece is at most ${PIECE_MAX} bytes of lines`);
 

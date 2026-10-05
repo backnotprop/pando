@@ -70,7 +70,7 @@ async function readAll(stream: ReadableStream<Uint8Array>, max: number): Promise
 
 /** A request's piece: its lines as text, gunzipped when sent gzipped, refused over PIECE_MAX. */
 export async function pieceText(body: ReadableStream<Uint8Array> | null, gzip: boolean): Promise<string> {
-  if (!body) throw new HttpError(400, "bad_request", "send the piece's lines as the body");
+  if (!body) return "";
   const plain = gzip ? body.pipeThrough(new DecompressionStream("gzip")) : body;
 
   const bytes = await readAll(plain, PIECE_MAX).catch((err) => {

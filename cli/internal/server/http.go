@@ -35,6 +35,7 @@ type request struct {
 	query  url.Values
 	body   any
 	bearer string // overrides the token (bootstrap)
+	raw    []byte // sent as is, with its own Content-Type and Content-Encoding in header (body must be nil)
 	accept string
 	header http.Header
 }
@@ -47,6 +48,8 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 			return nil, nil, err
 		}
 		rd = bytes.NewReader(b)
+	} else if r.raw != nil {
+		rd = bytes.NewReader(r.raw)
 	}
 	u := h.Base + r.path
 	if len(r.query) > 0 {

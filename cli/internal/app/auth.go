@@ -156,6 +156,7 @@ func Login(e *Env, args []string) error {
 	if len(joined) > 0 {
 		e.printf("You were added to: %s\n", strings.Join(joined, ", "))
 	}
+	askRecording(e)
 	return nil
 }
 

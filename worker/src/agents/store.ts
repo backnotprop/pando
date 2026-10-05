@@ -13,7 +13,8 @@ export const AGENTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS agent_sessions (
   number INTEGER PRIMARY KEY, kind TEXT NOT NULL, repo TEXT NOT NULL, branch TEXT NOT NULL, model TEXT NOT NULL,
   issue INTEGER, launched_by TEXT NOT NULL, machine TEXT NOT NULL, credential_id TEXT,
-  status TEXT NOT NULL, reason TEXT, workspace TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  status TEXT NOT NULL, reason TEXT, workspace TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  awaiting_checks INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS agent_sessions_issue ON agent_sessions (issue, number) WHERE issue IS NOT NULL;
 CREATE INDEX IF NOT EXISTS agent_sessions_branch ON agent_sessions (repo, branch, number)`;
 
@@ -35,6 +36,7 @@ interface AgentRow {
   workspace: "mount" | "clone" | null;
   created_at: string;
   updated_at: string;
+  awaiting_checks: number;
 }
 
 /** A session as the API shows it (Contract.AgentSession). */
@@ -51,6 +53,8 @@ export interface AgentView {
   launched_by: string;
   machine: string;
   workspace: "mount" | "clone" | null;
+  /** Its merge was refused while required checks were still running; Pando tells it when they are green. */
+  awaiting_checks: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -83,7 +87,8 @@ export function machineName(number: number): string {
 function view(r: AgentRow): AgentView {
   return {
     number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch, program: PROGRAM, model: r.model,
-    issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, created_at: r.created_at, updated_at: r.updated_at,
+    issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, awaiting_checks: r.awaiting_checks === 1,
+    created_at: r.created_at, updated_at: r.updated_at,
   };
 }
 
@@ -132,10 +137,13 @@ export class AgentStore {
     return view(this.must(number));
   }
 
-  /** Newest first; `before` a number to page back. */
-  list(before: number | null, limit: number): AgentPage {
+  /** Newest first; `before` a number to page back; `issue` only the sessions addressing it. */
+  list(before: number | null, limit: number, issue: number | null): AgentPage {
     const rows = this.sql
-      .exec<AgentRow & Record<string, SqlStorageValue>>("SELECT * FROM agent_sessions WHERE number < ? ORDER BY number DESC LIMIT ?", before ?? Number.MAX_SAFE_INTEGER, limit + 1)
+      .exec<AgentRow & Record<string, SqlStorageValue>>(
+        "SELECT * FROM agent_sessions WHERE number < ? AND (? IS NULL OR issue = ?) ORDER BY number DESC LIMIT ?",
+        before ?? Number.MAX_SAFE_INTEGER, issue, issue, limit + 1,
+      )
       .toArray();
 
     const more = rows.length > limit;
@@ -159,6 +167,37 @@ export class AgentStore {
     if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace) this.publish(next, null);
 
     return view(next);
+  }
+
+  /**
+   * A merge of (repo, branch) by this credential was refused while required
+   * checks were still running: if the credential is a session's on that
+   * branch, it waits for them.
+   */
+  awaitChecks(credentialId: string, repo: string, branch: string): void {
+    const r = this.sql
+      .exec<AgentRow & Record<string, SqlStorageValue>>("SELECT * FROM agent_sessions WHERE credential_id = ? AND repo = ? AND branch = ? AND awaiting_checks = 0", credentialId, repo, branch)
+      .toArray()[0];
+
+    if (!r) return;
+    this.sql.exec("UPDATE agent_sessions SET awaiting_checks = 1 WHERE number = ?", r.number);
+    this.publish(this.must(r.number), null);
+  }
+
+  isAwaiting(repo: string, branch: string): boolean {
+    return this.sql.exec("SELECT 1 FROM agent_sessions WHERE repo = ? AND branch = ? AND awaiting_checks = 1 LIMIT 1", repo, branch).toArray().length > 0;
+  }
+
+  /** The sessions waiting for (repo, branch)'s checks, no longer waiting: their numbers. */
+  takeAwaiting(repo: string, branch: string): number[] {
+    const numbers = this.sql
+      .exec<{ number: number }>("UPDATE agent_sessions SET awaiting_checks = 0 WHERE repo = ? AND branch = ? AND awaiting_checks = 1 RETURNING number", repo, branch)
+      .toArray()
+      .map((r) => r.number);
+
+    for (const n of numbers) this.publish(this.must(n), null);
+
+    return numbers;
   }
 
   private publish(r: AgentRow, actor: string | null): void {

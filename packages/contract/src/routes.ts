@@ -579,9 +579,11 @@ export const mirrorConnectPath = (owner: Login, name: MonorepoName, purpose: "co
 
 const agentsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/agents`;
 
-/** GET .../agents: newest first; `before` is a page's next_before. */
-export const listAgents = (owner: Login, name: MonorepoName, page: { before?: number; limit?: number } = {}) => {
+/** GET .../agents: newest first; `before` is a page's next_before; `issue` only the sessions addressing it. */
+export const listAgents = (owner: Login, name: MonorepoName, page: { before?: number; limit?: number; issue?: number } = {}) => {
   const params = new URLSearchParams();
+
+  if (page.issue !== undefined) params.set("issue", String(page.issue));
 
   if (page.before !== undefined) params.set("before", String(page.before));
 
@@ -592,6 +594,12 @@ export const listAgents = (owner: Login, name: MonorepoName, page: { before?: nu
 
 /** POST .../agents {prompt, repo?, branch?, model?} (201): launch a session acting as the caller. */
 export const launchAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: agentsBase(owner, name), response: AgentSession }) as const;
+
+/**
+ * POST .../issues/{n}/agent {prompt?, repo?, model?} (201): "Address with agent". Makes agent/<n>-<title words> off
+ * main, linked to the issue, and launches a session on it. 409 `issue_closed` for a closed issue.
+ */
+export const addressIssueWithAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${monorepoBase(owner, name)}/issues/${n}/agent`, response: AgentSession }) as const;
 
 /** GET .../agents/{n}. */
 export const getAgent = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}`, response: AgentSession });

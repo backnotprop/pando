@@ -1,5 +1,6 @@
 // Agent session routes, members only, under /v1/monorepos/{owner}/{name}:
-//   GET   /agents                     the repository's sessions, newest first (?before, ?limit)
+//   GET   /agents                     the repository's sessions, newest first (?before, ?limit, ?issue)
+//   POST  /issues/{n}/agent           "Address with agent" (issue.ts)
 //   POST  /agents                     launch one: {prompt, repo?, branch?, model?}
 //   GET   /agents/{n}                 one session
 //   GET   /agents/{n}/transcript      its transcript, from its object in pando-agents
@@ -134,12 +135,16 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
   api.get(base, async (c) => {
     const limit = Number(c.req.query("limit") ?? LIST_DEFAULT);
     const before = c.req.query("before");
+    const issue = c.req.query("issue");
 
     if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
 
     if (before !== undefined && !/^[1-9][0-9]{0,8}$/.test(before)) bad("before: a session number");
 
-    return c.json(unwrap(await c.get("stub").agentList(before === undefined ? null : Number(before), limit)) satisfies typeof Contract.AgentSessionList.Encoded);
+    if (issue !== undefined && !/^[1-9][0-9]{0,8}$/.test(issue)) bad("issue: an issue number");
+    const page = await c.get("stub").agentList(before === undefined ? null : Number(before), limit, issue === undefined ? null : Number(issue));
+
+    return c.json(unwrap(page) satisfies typeof Contract.AgentSessionList.Encoded);
   });
 
   api.post(base, async (c) => {

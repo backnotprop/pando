@@ -410,6 +410,12 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
 
     for (const stmt of statements(AGENTS_SCHEMA)) this.sql.exec(stmt);
+
+    // Added before any deploy, for local states made earlier on the branch.
+    if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "awaiting_checks")) {
+      this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN awaiting_checks INTEGER NOT NULL DEFAULT 0");
+    }
+
     this.issues.seedLabels();
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
@@ -1179,8 +1185,8 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.agents.get(number));
   }
 
-  agentList(before: number | null, limit: number) {
-    return this.guard(() => this.agents.list(before, limit));
+  agentList(before: number | null, limit: number, issue: number | null) {
+    return this.guard(() => this.agents.list(before, limit, issue));
   }
 
   agentReport(state: SessionState) {
@@ -1311,9 +1317,31 @@ export class MonorepoObject extends DurableObject<Env> {
     // The branches at this commit have new checks and gate state: their full rows go out (combine() is the one rule).
     for (const b of this.rows<{ name: string }>("SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL", repo, sha)) {
       this.publishBranchRow(repo, b.name);
+      this.checksGreenForAgents(repo, b.name);
     }
 
     return status;
+  }
+
+  /** Agent sessions waiting for this branch's checks hear when they are green, and merge (agents/store.ts). */
+  private checksGreenForAgents(repo: string, branch: string): void {
+    if (!this.agents.isAwaiting(repo, branch)) return;
+
+    if (this.branchRows(repo, { names: [branch], state: "open" }).branches[0]?.checks.state !== "success") return;
+
+    for (const n of this.agents.takeAwaiting(repo, branch)) {
+      this.ctx.waitUntil(this.tellAgent(n, `[Pando] The required checks on ${branch} are green now. Merge it with the merge tool.`));
+    }
+  }
+
+  private async tellAgent(number: number, prompt: string): Promise<void> {
+    try {
+      const state = await this.env.AGENTS?.send(this.info()!.id, number, prompt);
+
+      if (state) this.agents.report(state);
+    } catch (err) {
+      console.warn(`agent ${number}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   statuses(repo: string, sha: string): StatusRecord[] {
@@ -1396,6 +1424,8 @@ export class MonorepoObject extends DurableObject<Env> {
     }
 
     if (checks && checks.state !== "success" && !a.force) {
+      // An agent session's merge waits for checks still running: Pando tells it when they are green.
+      if (checks.state === "pending" || checks.state === "missing") this.agents.awaitChecks(a.identity.credential_id, a.repo, a.branch);
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });
     }
 

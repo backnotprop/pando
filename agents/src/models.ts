@@ -72,7 +72,8 @@ export function openModels(env: ModelEnv): SessionModels {
 // is one tool call, made in order, one per turn. When every call has its
 // result, it answers "Finished." with the last result's text. A message that
 // is exactly "recall" is answered with the earlier user messages it was
-// given, which shows what the session remembers.
+// given, which shows what the session remembers. Pando's own message that a
+// branch's checks are green is answered with a merge call, as an agent would.
 
 const CALL_LINE = /^> ([a-z_][a-z0-9_]*) (\{.*\})\s*$/;
 
@@ -100,7 +101,7 @@ function scripted(context: TranscriptContext) {
     return fauxAssistantMessage(fauxText(`I see ${earlier.length} earlier prompts: ${JSON.stringify(earlier)}`));
   }
 
-  const calls = prompt.split("\n").flatMap(parseCall);
+  const calls = /^\[Pando\] The required checks on \S+ are green now\./.test(prompt) ? [{ name: "merge", args: {} }] : prompt.split("\n").flatMap(parseCall);
 
   if (results.length < calls.length) {
     const next = calls[results.length];

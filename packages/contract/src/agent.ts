@@ -42,6 +42,8 @@ export const AgentSession = Schema.Struct({
   machine: Schema.String,
   /** How its sandbox holds the branch, once started: through pando and ArtifactFS, or a clone. */
   workspace: Schema.NullOr(Schema.Literals(["mount", "clone"])),
+  /** Its merge was refused while required checks were still running; Pando tells it when they are green, and it merges. */
+  awaiting_checks: Schema.Boolean,
   created_at: Timestamp,
   updated_at: Timestamp,
 });

@@ -1679,6 +1679,7 @@ paths:
       tags: [agents]
       parameters:
         - { name: before, in: query, description: "A page's `next_before`.", schema: { type: integer } }
+        - { name: issue, in: query, description: "Only the sessions addressing this issue.", schema: { type: integer } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
@@ -1708,6 +1709,33 @@ paths:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "400": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{n}/agent:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: addressIssueWithAgent
+      summary: Address with agent
+      description: |
+        Makes the branch `agent/<n>-<the title's words>` off main (a number
+        after it when that exists), titled as the issue and linked to it, so
+        merging it closes the issue; then launches a session acting as the
+        caller, told the issue's title, body and comments and `prompt` when
+        given. 409 `issue_closed` for a closed issue.
+      tags: [agents]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt: { type: string, maxLength: 65536 }
+                repo: { type: string }
+                model: { type: string }
+      responses:
+        "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/agents/{n}:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -4630,7 +4658,7 @@ components:
     AgentSession:
       type: object
       description: packages/contract/src/agent.ts is the exact shape.
-      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, created_at, updated_at]
+      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, awaiting_checks, created_at, updated_at]
       properties:
         number: { type: integer }
         kind: { type: string, enum: [task, issue, review, chat] }
@@ -4644,6 +4672,7 @@ components:
         launched_by: { type: string }
         machine: { type: string, description: "The session's credential, cloud-<n>." }
         workspace: { type: [string, "null"], enum: [mount, clone, null] }
+        awaiting_checks: { type: boolean, description: "Its merge waits for required checks still running; Pando tells it when they are green." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AgentSessionList:

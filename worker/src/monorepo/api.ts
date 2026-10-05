@@ -10,6 +10,7 @@ import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
 import { agentRoutes } from "../agents/routes";
+import { issueAgentRoutes } from "../agents/issue";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -789,9 +790,19 @@ api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const from = str(b.from, "from", { optional: true }) ?? r.default_branch;
   const title = str(b.title, "title", { optional: true, max: 300 }) ?? null;
   const description = str(b.description, "description", { optional: true, max: 20_000 }) ?? null;
+
+  await createBranch(c, r, b.name, from, title, description);
+  // Its facts come from the queue (a branch.updated event); the answer says stale until then.
+  const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
+
+  return c.json(view satisfies typeof Contract.Branch.Encoded, 201);
+});
+
+/** Makes branch `name` at `from` (a branch or a commit) through the repo's write gate, and its record; 409 branch_exists when it is there. */
+export async function createBranch(c: C, r: RepoRecord, name: string, from: string, title: string | null, description: string | null): Promise<void> {
   const refs = branchesOf(await listRefs(c.env, r));
 
-  if (refs.has(b.name)) throw new HttpError(409, "branch_exists", `branch ${b.name} exists`);
+  if (refs.has(name)) throw new HttpError(409, "branch_exists", `branch ${name} exists`);
   let sha = refs.get(from) ?? null;
 
   if (!sha && isSha(from)) {
@@ -801,19 +812,15 @@ api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   }
 
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${from}`);
-  const ref = `refs/heads/${b.name}`;
+  const ref = `refs/heads/${name}`;
   // Through the repo's write gate: waits for a slot, and goes out with other waiting ref updates.
   const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [{ old: ZERO, new: sha, ref }]));
   const reason = result[ref];
 
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
-  await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
-  // Its facts come from the queue (a branch.updated event); the answer says stale until then.
-  const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
-
-  return c.json(view satisfies typeof Contract.Branch.Encoded, 201);
-});
+  await stub.createBranchRecord(r.name, name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
+}
 
 /** /branches/<name>[/diff|/reviews|/merge], with the name raw or %2F-encoded. */
 /** A branch route's branch name, and what follows it (diff, reviews, merge, commits, or ""). */
@@ -1562,6 +1569,8 @@ issueRoutes(api);
 // ── Agent sessions (agents/routes.ts) ──
 
 agentRoutes(api);
+
+issueAgentRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

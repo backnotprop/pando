@@ -6,16 +6,17 @@
     "number": 1,
     "kind": "task",
     "status": "stopped",
-    "reason": "stopped by agents-s2-muurol2p",
-    "repo": "agents-s2-muurol2p",
+    "reason": "stopped by agents-s2-muus6ok4",
+    "repo": "agents-s2-muus6ok4",
     "branch": "agent/1",
     "program": "pi",
     "model": "scripted",
     "issue": null,
-    "launched_by": "agents-s2-muurol2p",
+    "launched_by": "agents-s2-muus6ok4",
     "machine": "cloud-1",
     "workspace": "mount",
-    "created_at": "2026-10-05T04:46:05.760Z",
-    "updated_at": "2026-10-05T04:46:15.902Z"
+    "awaiting_checks": false,
+    "created_at": "2026-10-05T05:00:09.222Z",
+    "updated_at": "2026-10-05T05:00:17.346Z"
   }
 }

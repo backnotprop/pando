@@ -6,24 +6,20 @@
 //
 //   agents/test/serve.sh start && node agents/test/tools.mjs
 
-import { call, check, done, makeRepo, say, scrub } from "./lib.mjs";
+import { call, check, done, makeRepo, say, scrub, sleep, tool, untilClosed, untilSettled } from "./lib.mjs";
 
-const tool = (name, args) => `> ${name} ${JSON.stringify(args)}`;
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function until(t, n, statuses, ms = 180_000) {
+/** Until the session's last tool result is a merge, after Pando told it the checks are green. */
+async function untilMerged(t, ms = 120_000) {
   const end = Date.now() + ms;
-  let r;
 
   while (Date.now() < end) {
-    r = await call("GET", `/v1/monorepos/${t.full}/agents/${n}`, t.secret);
+    const last = (await results(t, 1)).at(-1);
 
-    if (statuses.includes(r.json?.status)) return r;
+    if (last?.name === "merge" && !last.error) return last;
     await sleep(500);
   }
 
-  return r;
+  return null;
 }
 
 /** Each tool result of the transcript by tool name, in order. */
@@ -58,7 +54,7 @@ try {
 
   r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted" });
   check("launched", r.status === 201, scrub(JSON.stringify(r.json)));
-  r = await until(t, 1, ["waiting", "failed"]);
+  r = await untilSettled(t, 1);
   check("the run ends, waiting", r.json?.status === "waiting", JSON.stringify(r.json));
 
   const res = await results(t, 1);
@@ -78,19 +74,16 @@ try {
   const review = r.json?.reviews?.[0];
   check("the review is on agent/1, as the person", review?.verdict === "comment" && JSON.stringify(review).includes(t.login), scrub(JSON.stringify(review)));
 
-  // The check goes green; the agent merges.
+  // The check goes green: Pando tells the session, which merges (stage 4's issue.mjs follows that message itself).
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/agent%2F1`, t.secret);
   const head = r.json?.head;
   r = await call("POST", `/v1/monorepos/${t.full}/repos/${t.name}/statuses/${head}`, t.secret, { state: "success", context: "ci/test" });
   check("ci/test is green on the branch head", r.status === 201 || r.status === 200, r.status);
-  r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: ["ci/test is green now.", tool("merge", {})].join("\n") });
-  r = await until(t, 1, ["waiting", "failed"]);
-  const merged = (await results(t, 1)).at(-1);
+  const merged = await untilMerged(t);
   check("merge goes through Pando's normal route and closes #1", merged?.name === "merge" && !merged.error && /Merged agent\/1 into main \(merge commit [0-9a-f]{12}, closing #1\)/.test(merged.text), merged?.text);
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/agent%2F1`, t.secret);
   check("agent/1 is merged, by the person, from cloud-1", r.json?.state === "merged" && r.json?.merged_by === t.login && r.json?.merged_machine === "cloud-1", scrub(JSON.stringify({ state: r.json?.state, by: r.json?.merged_by, machine: r.json?.merged_machine })));
-  await sleep(2500); // an issue named by a merge closes about a second later
-  r = await call("GET", `/v1/monorepos/${t.full}/issues/1`, t.secret);
+  r = await untilClosed(t, 1);
   check("issue #1 is closed by the merge", r.json?.state === "closed", r.json?.state);
 } catch (error) {
   check("the run reached its end", false, scrub(error.stack ?? error));

@@ -113,3 +113,41 @@ export async function makeRepo(prefix, files) {
 
   return { login, name, full: `${login}/${name}`, secret, cloneUrl, monorepoId, work };
 }
+
+/** A line the scripted model reads as one tool call (agents/src/models.ts). */
+export const tool = (name, args) => `> ${name} ${JSON.stringify(args)}`;
+
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Polls agent session n until `done(session)` holds, or the time is up; the last answer. */
+export async function untilSession(t, n, done, ms = 180_000) {
+  const end = Date.now() + ms;
+  let r;
+
+  do {
+    r = await call("GET", `/v1/monorepos/${t.full}/agents/${n}`, t.secret);
+
+    if (done(r.json)) return r;
+    await sleep(500);
+  } while (Date.now() < end);
+
+  return r;
+}
+
+/** Until the run ends: waiting or failed. */
+export const untilSettled = (t, n) => untilSession(t, n, (s) => s?.status === "waiting" || s?.status === "failed");
+
+/** An issue named by a merge closes about a second later, in its own step. */
+export async function untilClosed(t, n, ms = 30_000) {
+  const end = Date.now() + ms;
+  let r;
+
+  do {
+    r = await call("GET", `/v1/monorepos/${t.full}/issues/${n}`, t.secret);
+
+    if (r.json?.state === "closed") return r;
+    await sleep(500);
+  } while (Date.now() < end);
+
+  return r;
+}

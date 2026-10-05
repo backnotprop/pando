@@ -9,9 +9,7 @@
 // price at the list prices ($0.15 per million input, $0.03 cached, $0.50
 // output, research/external/.../workers-ai/platform-pricing.md).
 
-import { call, check, done, makeRepo, say, scrub } from "./lib.mjs";
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+import { call, check, done, makeRepo, say, scrub, sleep } from "./lib.mjs";
 
 const t = await makeRepo("agents-real", { "README.md": "# Real model\n\nThis repository has one file. Its last line has a spelling mistake: recieve.\n" });
 

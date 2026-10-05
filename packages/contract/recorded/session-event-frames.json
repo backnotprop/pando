@@ -1,0 +1,104 @@
+{
+  "schema": "MonorepoEventFrame[]",
+  "route": "GET .../events?topics=sessions (WebSocket)",
+  "status": 101,
+  "body": [
+    {
+      "type": "event",
+      "seq": 1,
+      "at": "2026-10-05T04:38:42.318Z",
+      "kind": "session.started",
+      "collection": "sessions",
+      "key": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+      "op": "upsert",
+      "repo": "projects-a",
+      "actor": "se-a-muurf3fm",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+        "state": "active",
+        "person": "se-a-muurf3fm",
+        "machine": "ana-mbp",
+        "program": "pi",
+        "models": [
+          {
+            "model": "gpt-5.5",
+            "answers": 1
+          }
+        ],
+        "repo": "projects-a",
+        "branch": "fix-login",
+        "parent": null,
+        "subagents": 0,
+        "started_at": "2026-10-05T04:37:34.212Z",
+        "last_at": "2026-10-05T04:37:36.661Z",
+        "prompts": 1,
+        "tool_calls": 1,
+        "images": 0,
+        "redactions": 0,
+        "bytes": 2003,
+        "end": 2003,
+        "removed": []
+      }
+    },
+    {
+      "type": "event",
+      "seq": 2,
+      "at": "2026-10-05T04:38:42.334Z",
+      "kind": "session.updated",
+      "collection": "sessions",
+      "key": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+      "op": "upsert",
+      "repo": "projects-a",
+      "actor": "se-a-muurf3fm",
+      "machine": "ana-mbp",
+      "agent": null,
+      "row": {
+        "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+        "state": "active",
+        "person": "se-a-muurf3fm",
+        "machine": "ana-mbp",
+        "program": "pi",
+        "models": [
+          {
+            "model": "gpt-5.5",
+            "answers": 3
+          }
+        ],
+        "repo": "projects-a",
+        "branch": "fix-login",
+        "parent": null,
+        "subagents": 0,
+        "started_at": "2026-10-05T04:37:34.212Z",
+        "last_at": "2026-10-05T04:37:42.306Z",
+        "prompts": 2,
+        "tool_calls": 1,
+        "images": 0,
+        "redactions": 0,
+        "bytes": 3663,
+        "end": 3663,
+        "removed": []
+      }
+    },
+    {
+      "type": "event",
+      "seq": 8,
+      "at": "2026-10-05T04:38:43.918Z",
+      "kind": "session.deleted",
+      "collection": "sessions",
+      "key": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+      "op": "delete",
+      "repo": null,
+      "actor": "se-a-muurf3fm",
+      "machine": null,
+      "agent": null,
+      "row": {
+        "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+        "state": "deleted",
+        "deleted_by": "se-a-muurf3fm",
+        "deleted_at": "2026-10-05T04:38:43.918Z"
+      }
+    }
+  ]
+}

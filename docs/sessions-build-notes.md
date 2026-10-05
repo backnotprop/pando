@@ -15,8 +15,8 @@ removed).
 
 | Stage | State |
 | --- | --- |
-| 0. Prove three things | done 2026-10-05, reported to pando-ops, waiting for the gate |
-| 1. Server: store and read | not started |
+| 0. Prove three things | done, accepted by pando-ops 2026-10-05 |
+| 1. Server: store and read | done, reported; waiting for the gate. Claude Code and Codex fixtures wait on the owner's fixture logins |
 | 2. Machine: capture | not started |
 | 3. Linking | not started |
 | 4. Web | waits for the owner's approval of the final screens |
@@ -128,7 +128,92 @@ DETERMINISM row 31, checked on the Codex run above: its only tool call is
 so a Codex prompt count comes from trajectory's user records, not from
 `user_message` (row 12 needs that change).
 
+## Stage 1: the server (store and read)
+
+Code: `worker/src/sessions/` (ids, parse, pieces, store, append, read, routes),
+wired in `monorepo/object.ts` (SessionStore and its RPC methods),
+`monorepo/api.ts` (routes; the repository delete clears `sessions/<id>/` in
+BLOBS), `monorepo/stream.ts` (topics `sessions`, `session:<id>`). Contract:
+`packages/contract/src/session.ts`, the frames in `stream.ts`, `end` on
+`ErrorBody`; `docs/contracts/api-v1.yaml` tag `sessions`. trajectory 0.4.3 is
+pinned exactly in `worker/package.json`; credited in NOTICE.
+
+- R2: the existing BLOBS bucket, `sessions/<monorepo id>/<session id>/<at, 16
+  digits>-<random>.ndjson.gz`. No new bucket or binding.
+- Index (the monorepo object's SQLite): `sessions` (one row each; a deleted
+  one keeps only id, deleted_by, deleted_at), `session_pieces` (start, next,
+  key, bytes of lines, times, the carry for the next parse, prompt numbering,
+  counts), `session_piece_models` (answers per model per piece, last use),
+  `session_model_changes` (when the answering model changed: stage 3's
+  model per commit reads these), `session_removals`.
+- Parsing: at append, the Worker parses the new piece once for the index; a
+  page of the conversation parses only its pieces (about 2 MB of lines a
+  page). The model of each answer is Pando's own pass: Claude Code
+  `message.model` by message id (`<synthetic>` skipped), Codex the
+  `turn_context` model in force at each assistant message, Pi
+  `message.model`, OpenCode `data.model.id`.
+- Prompts are trajectory's user records minus the non-prompts of
+  DETERMINISM row 12 (shown as notes). Images are their own entries ("Image,
+  not kept"). A Codex subagent's task (`agent_message`) is an entry of its
+  own. A Codex subagent's parent comes from `session_meta`.
+- Remove a turn: lines from the prompt up to the next prompt (or up to the
+  removal, for the last) are cut by their own time from the stored pieces,
+  which are written again; the mark keeps the prompt's number, who and when.
+- Reindex (`POST .../sessions/{id}/reindex`) reads every stored piece again.
+- Server secret check: fixed prefixes and private key blocks, replaced by
+  `[pando:redacted]`, the same mark the machine writes; counted per session.
+- Events: `session.started`, `session.updated` (every piece; the machine
+  sends at most one piece per 30 s per session), `session.deleted`.
+
+### The append function (for the Cloudflare agents lane)
+
+`worker/src/sessions/append.ts`:
+
+```ts
+appendPiece(env, monorepoId, { login, machine }, {
+  session,  // sessionIdFor(program, agentId) from worker/src/sessions/ids.ts
+  at,       // where this piece starts: the session's end (0 for a new one)
+  next,     // where the next starts; any growing number of the writer's own
+  start: { program, agent_id, repo, branch, parent },
+  lines,    // whole lines, each ending "\n", at most 8,000,000 bytes, in the agent's own format
+}): Promise<SessionView>
+```
+
+It throws HttpError 409 `not_at_end` (with `extra.end`), 410
+`session_deleted`, 403 `not_your_session`, 400, 413. A server-side writer for
+Pi passes `program: "pi"` and Pi's own JSONL lines, exactly as Pi writes
+them.
+
+### Tests
+
+- `worker/test/sessions.mjs`: 46 checks. Run as in its header on port 8869:
+  `npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to /tmp/pando-sessions-state`,
+  `npx wrangler dev --port 8869 --inspector-port 9369 --persist-to /tmp/pando-sessions-state --var FEED_TICK_MS:500`,
+  then `PANDO_URL=http://localhost:8869 node test/sessions.mjs`. It needs
+  `worker/.dev.vars` with a local `PANDO_BOOTSTRAP` (any random value; this
+  worktree has one, gitignored) and a `web/dist` folder (an empty
+  index.html is enough for the API).
+  It also writes the contract recordings `packages/contract/recorded/session*.json`;
+  then `npm run check -w @pando/contract`.
+- Fixtures: `worker/test/sessions/fixtures/pi.jsonl` (Pi 0.85.1,
+  `--session-dir` scratch, no context files) and `opencode.jsonl` (OpenCode
+  V2 2.0.22 rows in the line format `pando sync` sends: a first line
+  `{"type":"session", id, directory, parent_id, version, time_created}`, then
+  `{id, type, seq, time_created, data}` per settled row). Two placeholder
+  prompts each, one commit.
+- Claude Code and Codex fixtures: blocked on the owner logging each into a
+  folder kept for fixtures (asked of pando-ops 2026-10-05):
+  `CLAUDE_CONFIG_DIR=$HOME/.pando-fixtures/claude claude` then /login;
+  `CODEX_HOME=$HOME/.pando-fixtures/codex codex login`.
+
 ## Decisions taken here, and why
+
+- Sessions store under a prefix of the existing BLOBS bucket: no new
+  Cloudflare resource.
+- Pieces are budgeted by bytes of lines, not gzip size: memory follows the
+  text, and repeated lines gzip too well to bound a page.
+- The machine's folder path is never stored: it sends `repo` and `branch`
+  (DETERMINISM row 23 only needs the worktree).
 
 - The append cursor is in the agent's own coordinates: the byte offset in the
   session file, or the last `seq` read for OpenCode. A piece says where it

@@ -1,0 +1,62 @@
+{
+  "schema": "SessionList",
+  "route": "GET .../sessions",
+  "status": 200,
+  "body": {
+    "sessions": [
+      {
+        "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+        "state": "active",
+        "person": "se-a-muurf3fm",
+        "machine": "ana-mbp",
+        "program": "pi",
+        "models": [
+          {
+            "model": "gpt-5.5",
+            "answers": 6891
+          }
+        ],
+        "repo": "projects-a",
+        "branch": "fix-login",
+        "parent": null,
+        "subagents": 0,
+        "started_at": "2026-10-05T04:37:34.212Z",
+        "last_at": "2026-10-05T23:45:42.306Z",
+        "prompts": 4595,
+        "tool_calls": 2297,
+        "images": 0,
+        "redactions": 1,
+        "bytes": 7505156,
+        "end": 7505184,
+        "removed": []
+      },
+      {
+        "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+        "state": "inactive",
+        "person": "se-b-muurf3fm",
+        "machine": "bo-mbp",
+        "program": "opencode",
+        "models": [
+          {
+            "model": "big-pickle",
+            "answers": 4
+          }
+        ],
+        "repo": null,
+        "branch": null,
+        "parent": null,
+        "subagents": 0,
+        "started_at": "2026-10-05T03:53:37.045Z",
+        "last_at": "2026-10-05T03:53:43.104Z",
+        "prompts": 2,
+        "tool_calls": 2,
+        "images": 0,
+        "redactions": 0,
+        "bytes": 4244,
+        "end": 37,
+        "removed": []
+      }
+    ],
+    "next_cursor": null
+  }
+}

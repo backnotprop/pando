@@ -8,7 +8,7 @@
 //
 // Credentials stay in memory and are never printed. It deletes its monorepo.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
 import { request } from "./http.mjs";
@@ -68,6 +68,11 @@ function recent(text, agoMs) {
 
   return lines.map((l) => shift(l, by)).join("\n") + "\n";
 }
+
+// The contract's recordings of the session answers (packages/contract/recorded, checked by check-recorded.ts).
+const RECORDED = new URL("../../packages/contract/recorded/", import.meta.url);
+
+const record = (file, schema, route, status, body) => writeFileSync(new URL(file, RECORDED), `${JSON.stringify({ schema, route, status, body }, null, 2).replace(/pando_[a-f0-9]{20,}/g, "<credential>")}\n`);
 
 const piece = (path, secret, start, at, next, lines, extra = {}) => {
   const gzip = extra.gzip ?? false;
@@ -140,6 +145,7 @@ try {
   check("the first piece makes the session, at the end it names", r.status === 200 && r.json?.end === cut && r.json?.person === ana && r.json?.machine === "ana-mbp" && r.json?.program === "pi", `${r.status} ${r.json?.end}`);
   check("its first piece already counts one prompt and one tool call", r.json?.prompts === 1 && r.json?.tool_calls === 1, `${r.json?.prompts} ${r.json?.tool_calls}`);
   r = await piece(piPath, A, piStart, 0, cut, first);
+  record("session-not-at-end.json", "ErrorBody", "POST .../sessions/{id}/pieces (not at the end: 409 with it)", r.status, r.json);
   check("the same piece again is refused with the end to resume from (409)", r.status === 409 && r.json?.error?.code === "not_at_end" && r.json?.error?.end === cut, `${r.status} ${JSON.stringify(r.json?.error ?? {}).slice(0, 120)}`);
   r = await piece(piPath, B, piStart, cut, Buffer.byteLength(pi), rest);
   check("another person cannot add to ana's session (403)", r.status === 403 && r.json?.error?.code === "not_your_session", `${r.status}`);
@@ -147,11 +153,13 @@ try {
   check("someone outside the repository cannot (403 not_a_member)", r.status === 403, `${r.status}`);
   r = await piece(piPath, A, piStart, cut, Buffer.byteLength(pi), rest, { gzip: true });
   const pi1 = r.json;
+  record("session.json", "Session", "POST .../sessions/{id}/pieces?at=&next= (gzip)", r.status, r.json);
   check("the second piece, gzipped, lands at the end", r.status === 200 && pi1?.end === Buffer.byteLength(pi), `${r.status}`);
   check("two prompts, one tool call, one model with its answers", pi1?.prompts === 2 && pi1?.tool_calls === 1 && pi1?.models?.length === 1 && pi1?.models[0].answers === 3, JSON.stringify(pi1?.models));
   check("a record in the last 30 minutes: active", pi1?.state === "active" && pi1?.repo === "projects-a" && pi1?.branch === "fix-login", pi1?.state);
 
   r = await call("GET", `${piPath}/entries`, B);
+  record("session-entries.json", "SessionEntries", "GET .../sessions/{id}/entries", r.status, r.json);
   const entries = r.json?.entries ?? [];
   const prompts = entries.filter((e) => e.kind === "prompt");
   const tool = entries.find((e) => e.kind === "tool");
@@ -223,6 +231,7 @@ try {
 
   // ── Lists ──
   r = await call("GET", `${mb}/sessions`, B);
+  record("sessions.json", "SessionList", "GET .../sessions", r.status, r.json);
   check("the list has both, newest activity first", r.status === 200 && r.json?.sessions?.map((s) => s.id).join() === [piId, ocId].join(), r.json?.sessions?.map((s) => s.program).join());
   r = await call("GET", `${mb}/sessions?state=active`, B);
   check("?state=active has only the Pi session", r.json?.sessions?.length === 1 && r.json.sessions[0].id === piId, `${r.json?.sessions?.length}`);
@@ -239,6 +248,7 @@ try {
   r = await call("DELETE", `${piPath}/prompts/1`, A);
   check("ana removes prompt 1's turn: one prompt and its tool call fewer, the mark kept", r.status === 200 && r.json?.prompts === before.prompts - 1 && r.json?.tool_calls === before.tool_calls - 1 && r.json?.removed?.[0]?.prompt === 1 && r.json.removed[0].by === ana, `${r.status} ${r.json?.prompts}/${before.prompts}`);
   r = await call("GET", `${piPath}/entries`, B);
+  record("session-entries-removed.json", "SessionEntries", "GET .../sessions/{id}/entries (a removed turn's mark)", r.status, r.json);
   const after = r.json?.entries ?? [];
   check("the conversation shows 'prompt 1 was removed by ana', then prompt 2, numbers kept", after[0]?.kind === "removed" && after[0]?.prompt === 1 && after[0]?.by === ana && after.find((e) => e.kind === "prompt")?.prompt === 2, after.slice(0, 3).map((e) => `${e.kind}${e.prompt ?? ""}`).join(","));
   check("nothing of the removed turn is left in the stored lines", !after.some((e) => e.kind === "tool" && e.input?.includes("placeholder one")), "");
@@ -266,6 +276,7 @@ try {
   r = await call("DELETE", piPath, A);
   check("ana deletes her own at once", r.status === 200 && r.json?.state === "deleted", `${r.status}`);
   r = await call("GET", piPath, B);
+  record("session-deleted.json", "SessionAny", "GET .../sessions/{id} (deleted: its stub)", r.status, r.json);
   check("what stays is who deleted it and when, nothing else", r.status === 200 && Object.keys(r.json ?? {}).sort().join() === "deleted_at,deleted_by,id,state", Object.keys(r.json ?? {}).join());
   r = await call("GET", `${piPath}/entries`, A);
   check("its conversation is gone (410)", r.status === 410, `${r.status}`);
@@ -275,6 +286,8 @@ try {
   check("deleted sessions leave the list", r.json?.sessions?.length === 0, `${r.json?.sessions?.length}`);
   await sleep(300);
   check("the socket saw the deletes", live.frames.filter((f) => f.kind === "session.deleted").length === 2, "");
+  const frames = ["session.started", "session.updated", "session.deleted"].map((k) => live.frames.find((f) => f.kind === k));
+  record("session-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=sessions (WebSocket)", 101, frames);
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

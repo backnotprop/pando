@@ -69,6 +69,10 @@ import {
   LabelList,
   ReactionsAnswer,
   Timeline,
+  Session,
+  SessionAny,
+  SessionEntries,
+  SessionList,
   MonorepoCreated,
   Org,
   OrgInviteResult,
@@ -162,6 +166,10 @@ const decoders = {
   LabelList: refuses(LabelList),
   ReactionsAnswer: refuses(ReactionsAnswer),
   Timeline: refuses(Timeline),
+  Session: refuses(Session),
+  SessionAny: refuses(SessionAny),
+  SessionEntries: refuses(SessionEntries),
+  SessionList: refuses(SessionList),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

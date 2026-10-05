@@ -18,8 +18,8 @@ import { Avatar } from "../../../../ui/Avatar";
 import { button } from "../../../../ui/controls";
 import { Caret } from "../../../../ui/dropdown";
 import { Leaf } from "../../../../ui/Leaf";
-import { type AgentsSearch, agentsLink, branchLink } from "../../../../ui/paths";
-import { IssueRef, Ref } from "../../../../ui/Ref";
+import { type AgentsSearch, agentsLink, branchLink, issueLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { useMe } from "../-issues/parts";
@@ -45,15 +45,23 @@ export function filtersOf(s: AgentsSearch): AgentFilters {
   return f;
 }
 
-/** The table's columns (owner, 2026-10-05): the leaf, the agent, its branch, its issue's number, who started it, its state, its last activity. */
-const COLUMNS = "grid grid-cols-[20px_84px_minmax(0,1.6fr)_48px_140px_minmax(0,1fr)_96px] items-center gap-4 px-4";
+/**
+ * The table's columns (owner, 2026-10-05): the leaf, the agent, its branch,
+ * its issue's number, who started it, its state, its last activity. Each takes
+ * its content's width (the branch at most 300 px), as the Sessions list does,
+ * so no column leaves a wide blank; the last activity sits at the right.
+ */
+const TABLE = "grid grid-cols-[20px_auto_fit-content(300px)_auto_auto_auto_minmax(80px,1fr)] phone:grid-cols-[20px_minmax(0,1fr)_auto]";
+
+/** A row: the table's columns, through subgrid. */
+const ROW = "col-span-full grid grid-cols-subgrid items-center gap-x-6 px-4";
 
 function Row({ s, full, repoPath, me }: { s: AgentSession; full: string; repoPath: string; me: string | null }) {
   const clock = useNow();
   const l = leafOf(s);
 
   return (
-    <li data-agent={s.number} className={`${COLUMNS} min-h-[46px] border-t border-rule-faint text-[13.5px] text-bark-dim phone:grid-cols-[20px_minmax(0,1fr)_auto] phone:gap-y-0.5 phone:px-3 phone:py-2.5`}>
+    <li data-agent={s.number} className={`${ROW} min-h-[46px] border-t border-rule-faint text-[13.5px] text-bark-dim phone:gap-x-3 phone:gap-y-0.5 phone:px-3 phone:py-2.5`}>
       <Leaf state={l.state} tone={l.tone} label={s.status} />
       <span className="font-semibold whitespace-nowrap text-bark">Agent #{s.number}</span>
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap phone:col-span-2 phone:col-start-2 phone:row-start-2">
@@ -64,7 +72,11 @@ function Row({ s, full, repoPath, me }: { s: AgentSession; full: string; repoPat
         ) : null}
       </span>
       <span className="phone:hidden" title={s.issue !== null && s.issue_title ? `#${s.issue} ${s.issue_title}${s.issue_state ? ` (${s.issue_state})` : ""}` : undefined}>
-        {s.issue !== null ? <IssueRef full={full} number={s.issue} state={s.issue_state ?? "open"} /> : null}
+        {s.issue !== null ? (
+          <Link {...issueLink(full, s.issue)} className="text-ash hover:text-bark">
+            #{s.issue}
+          </Link>
+        ) : null}
       </span>
       <span className="flex min-w-0 items-center gap-[7px] text-bark phone:hidden">
         <Avatar name={s.launched_by} size={18} />
@@ -139,8 +151,8 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
           </div>
         </div>
         {rows.length ? (
-          <>
-            <div aria-hidden="true" className={`${COLUMNS} h-[34px] border-t border-rule-faint text-[12px] text-ash phone:hidden`}>
+          <div className={TABLE}>
+            <div aria-hidden="true" className={`${ROW} h-[34px] border-t border-rule-faint text-[12px] text-ash phone:hidden`}>
               <span />
               <span>Agent</span>
               <span>Branch</span>
@@ -149,12 +161,12 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
               <span>State</span>
               <span className="text-right">Last activity</span>
             </div>
-            <ul aria-label="Agents">
+            <ul aria-label="Agents" className="col-span-full grid grid-cols-subgrid">
               {rows.map((s) => (
                 <Row key={s.number} s={s} full={full} repoPath={paths.get(s.repo) ?? "."} me={me} />
               ))}
             </ul>
-          </>
+          </div>
         ) : list.isSuccess ? (
           <div className="grid justify-items-center gap-3.5 border-t border-rule-faint px-4 pt-14 pb-[60px] text-center text-[14px] text-bark-dim">
             <Leaf state="idle" size={32} />

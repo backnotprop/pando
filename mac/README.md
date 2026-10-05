@@ -41,7 +41,7 @@ The wire is version 3, owned by the fskit lane:
 | --- | --- |
 | App | `Pando.app` (product "Pando") |
 | Name in System Settings | **Pando** (the extension's `CFBundleDisplayName`) |
-| FSKit short name | `pando` (`/sbin/mount -F -t pando -o nobrowse <state dir> <mount point>`) |
+| FSKit short name | `pando` (`/sbin/mount -F -t pando <state dir> <mount point>`; the daemon mounts with nobrowse its own way, see "Not a drive") |
 | Host app bundle id | `ai.plannotator.pando` |
 | Extension bundle id | `ai.plannotator.pando.extension` |
 | Broker bundle id and mach service | `ai.plannotator.pando.broker` |
@@ -293,6 +293,29 @@ a time in the background, and asks for a listed folder's page at once; it
 downloads files to learn their sizes only when the server cannot answer.
 Numbers: `research/operational/mac-mount-downloads-2026-10-04.md` in the
 meta layer.
+
+**Downloads.** A request to Artifacts costs about 0.65 s whatever it
+carries (1 blob 0.65 s, 100 blobs 0.67 s, 1,000 blobs 1.7 s). So the daemon
+fetches every read that misses at the same moment in one request (up to 500
+blobs), and the worktrees of one repository share one blob cache, so a file
+downloads once. Git's own automatic repack is off in the daemon's clones: it
+swapped packs under running fetches and failed reads. The daemon merges
+packs itself with no fetch running. Listing a folder costs about 1 ms through
+the mount. Numbers: the same file in the meta layer.
+
+**Not a drive.** A worktree must be a folder, not a drive icon on the
+Desktop and in Finder's sidebar. That takes the `nobrowse` mount flag, and
+`/sbin/mount -F` drops every `-o` option on macOS 26.3: its last step
+(LiveFS's `mountVolume`) gets an empty options string. Apple's own msdos
+module loses `nobrowse` and `rdonly` the same way (Apple DTS, developer
+forums thread 820931: "it should be" supported). So the daemon does
+`/sbin/mount`'s FSKit steps itself, through FSKit's and LiveFS's classes
+looked up at run time, and passes `nobrowse` (the fork's
+`internal/fskit/nobrowse_darwin.go`). These classes are private: if a macOS
+drops them the daemon runs `/sbin/mount`, and the mount works but shows as
+a drive. FSEvents, Quick Look and git work the same on a `nobrowse` volume;
+`/System/Volumes/Data`, which holds every home folder, is one.
+`cli/testbed/mac-sizes.sh` checks it.
 
 ## Icon
 

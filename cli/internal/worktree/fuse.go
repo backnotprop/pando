@@ -343,20 +343,24 @@ func (f *Fuse) Remove(ctx context.Context, s Spec) error {
 	return nil
 }
 
-// cleanState deletes one worktree's git folder, edit layer, blob cache and
-// snapshot database.
+// cleanState deletes one worktree's git folder, edit layer and snapshot
+// database. The blob cache is shared by the repo's worktrees (the daemon's
+// cache/objects); it goes with the last worktree.
 func (f *Fuse) cleanState(s Spec) {
 	state, n := f.stateDir(s), f.name(s)
 	for _, p := range []string{
 		filepath.Join(state, "repos", n),
 		filepath.Join(state, "overlays", n),
-		filepath.Join(state, "cache", "blobs", n),
+		filepath.Join(state, "cache", "blobs", n), // a per-worktree cache from an older daemon
 	} {
 		_ = os.RemoveAll(p)
 	}
 	matches, _ := filepath.Glob(filepath.Join(state, "meta", n+".sqlite*"))
 	for _, m := range matches {
 		_ = os.Remove(m)
+	}
+	if left, _ := os.ReadDir(filepath.Join(state, "repos")); len(left) == 0 {
+		_ = os.RemoveAll(filepath.Join(state, "cache", "objects"))
 	}
 }
 

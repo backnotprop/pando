@@ -4,7 +4,8 @@
 # FSKit worktree; then:
 #   - every file's size through the mount is its real size, and listing the
 #     whole tree (ls -lR, find -size) downloads nothing;
-#   - reading a file downloads that file only;
+#   - reading a file downloads that file only, and a second worktree of
+#     the repo reads it from the same cache without downloading it again;
 #   - after a branch is merged, main's new snapshot has the new sizes and
 #     listing still downloads nothing.
 #
@@ -73,6 +74,12 @@ t1=$(ms)
 main="$work/clone/projects/app/worktrees/main"
 grep -q 'fskit worktree' "$work/clone.log" && ok "main is an FSKit worktree, ready in $((t1 - t0)) ms" || { bad "not an FSKit worktree"; cat "$work/clone.log"; exit 1; }
 
+echo "== a folder, not a drive: mounted nobrowse, so not on the Desktop or in Finder's sidebar"
+mount | grep -F " on $main (" | grep -q nobrowse && ok "mounted nobrowse" || bad "no nobrowse: $(mount | grep -F " on $main (")"
+# Finder's volume list: mountedVolumeURLs without hidden volumes.
+finder=$(osascript -l JavaScript -e 'function run(a){ObjC.import("Foundation"); var l=$.NSFileManager.defaultManager.mountedVolumeURLsIncludingResourceValuesForKeysOptions($(), $.NSVolumeEnumerationSkipHiddenVolumes); for (var i=0;i<l.count;i++){ if (ObjC.unwrap(l.objectAtIndex(i).path)===a[0]) return "listed"; } return "hidden";}' "$main")
+[ "$finder" = hidden ] && ok "not in Finder's volume list" || bad "Finder lists $main as a volume"
+
 AFS="${PANDO_ARTIFACT_FS:-artifact-fs}" bash "$HYD" "$main" > /dev/null
 state=$(cd "$main/../.." && printf '%s' "$PWD" | shasum -a 256 | cut -c1-10)
 [ -d "${PANDO_HOME:-$HOME/.pando}/afs/app-$state" ] || { bad "no daemon state for $main; downloads cannot be counted"; exit 1; }
@@ -93,6 +100,13 @@ read -r files bytes < <(downloads "$main")
 echo "== a branch merged: main's next snapshot keeps its sizes right"
 (cd "$work/clone" && "$P" worktree add projects/app feat > "$work/add.log" 2>&1) || { bad "worktree add"; cat "$work/add.log"; }
 feat="$work/clone/projects/app/worktrees/feat"
+
+echo "== a second worktree reads from the same cache: a file main downloaded is not downloaded again"
+before=$(downloads "$feat" | cut -d' ' -f1)
+cmp -s "$work/src/projects/app/big.bin" "$feat/big.bin" && ok "big.bin read back whole in feat" || bad "big.bin differs in feat"
+after=$(downloads "$feat" | cut -d' ' -f1)
+[ "$after" = "$before" ] && ok "feat downloaded nothing for it (cache shared by the repo's worktrees)" || bad "feat downloaded $((after - before)) files for a file main has"
+
 for k in 1 2 3 4 5; do printf 'changed %s\n' "$k" >> "$feat/d0$k/f0000$k.txt"; printf 'new file %s\n' "$k" > "$feat/d0$k/new$k.txt"; done
 git -C "$feat" add -A && git -C "$feat" commit -qm "5 edits, 5 new files" && git -C "$feat" push -q 2>&1 | grep -v '^remote:' || true
 (cd "$work/clone" && "$P" merge feat --force > "$work/merge.log" 2>&1) && ok "merged feat" || { bad "merge"; cat "$work/merge.log"; }

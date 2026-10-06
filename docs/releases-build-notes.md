@@ -66,3 +66,45 @@ projects/pando/worktrees/releases). The design: research/plans/releases-2026-10-
 - A run killed outright left two repositories (rel-muw4t956); deleted by
   hand with a local credential. The suite now uses throwaways() (cleans up on
   Ctrl-C and kill).
+- Stage 4: mocks at research/design/pando-ui-2026-10-03/releases/INDEX.html
+  (built by _tools/build.mjs on the sessions mocks' base, rendered by
+  _tools/shoot.mjs; Pando dark and light, 1440 and 390; no ../ paths). The
+  strip reads "main passed · pando-ci #142 4 min ago   Latest release v0.3.0
+  2 days ago": the branch page's words for states, not a ✓. The web shows
+  releases; making, publishing and deleting stay CLI and API (asked in the
+  INDEX). The web build waits for the owner's look.
+- Stage 5 (295b886 server, c06dfca script): deployments (POST and GET
+  .../deployments, members, the release found from the commit), /healthz
+  names the commit through the version_metadata binding (VERSION): body
+  still "ok" (the docs' Status page compares it), X-Pando-Commit, and JSON
+  {ok, commit, version, deployed_at} on Accept: application/json; commit is
+  the version's tag when it is a 40-hex sha, else null. tools/release.sh
+  builds the four binaries on a Mac (darwin with cgo, linux with cgo off),
+  writes SHA256SUMS, and runs pando release create <tag> <files> --target
+  <sha> --generate. The binaries are about 22 MB each now (the report's 7.7
+  MB was an older, smaller CLI); still far under 100 MB.
+
+### Proposed deploy.sh change (pando-ops applies it)
+
+In research/operational/gates/deploy.sh, the deploy line and two lines after
+the smoke:
+
+```
+-cd worker && npx wrangler deploy > /tmp/pando-ops/deploy-$S.txt 2>&1; echo "deploy exit=$?"; grep -E 'Total Upload|Uploaded pando-dev|Current Version ID' /tmp/pando-ops/deploy-$S.txt
++SUBJ=$(git -C $M log -1 --format=%s $S | cut -c1-100)
++cd worker && npx wrangler deploy --tag $S --message "$SUBJ" > /tmp/pando-ops/deploy-$S.txt 2>&1; echo "deploy exit=$?"; grep -E 'Total Upload|Uploaded pando-dev|Current Version ID' /tmp/pando-ops/deploy-$S.txt
+```
+
+after the smoke:
+
+```
++# which commit pando-dev runs now, and the deployment recorded on Pando (pando api signs as this machine: no secret here)
++printf "healthz: "; curl -s -H 'accept: application/json' $U/healthz; echo
++pando api /v1/monorepos/<owner>/<name>/repos/<projects-pando>/deployments -X POST -f environment=pando-dev -f sha=$S -f url=$U -f description=deploy.sh > /dev/null && echo "deployment recorded"
+```
+
+`<owner>/<name>/repos/<projects-pando>` is wherever Pando's own code is hosted
+on pando-dev (the release script defaults to ramos/pando, projects/pando,
+repo name projects-pando). The deployment's release is filled in by the
+server when a published release sits at $S. The version_metadata binding
+needs no new resource; the first deploy with this branch adds it.

@@ -61,7 +61,10 @@ export function ago(at: string | number, clock: number): string {
   return /\d (s|min|h|d|w)$/.test(t) ? `${t} ago` : t;
 }
 
-const clockTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** "15:27": a time of day, 24-hour, as Pando writes it everywhere. */
+export const clock = (at: string | number) => clockTime.format(new Date(at));
 
 /** "Today, 14:20", "Yesterday, 17:48", "Oct 2, 09:15": when something started, as a list of them says it ("today, 14:20" mid-sentence). */
 export function dayAndTime(at: string | number, clock: number, midSentence = false): string {

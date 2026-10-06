@@ -33,6 +33,9 @@
     "META_COMMIT_GROUPING": "window"
   },
   "observability": { "enabled": true },
+  // Which version runs: /healthz answers its tag, the commit deploy.sh passes
+  // with `wrangler deploy --tag <sha>` (releases lane). No new resource.
+  "version_metadata": { "binding": "VERSION" },
   "artifacts": [
     // remote: wrangler dev talks to the real Artifacts service.
     { "binding": "ARTIFACTS", "namespace": "pando-dev", "remote": true }

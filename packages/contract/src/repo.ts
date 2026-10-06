@@ -22,6 +22,8 @@ export const Repo = Schema.Struct({
   required_checks: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
   /** With required_checks: why they are unknown (pando.toml unreadable or broken), else null. */
   checks_unknown: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The switch "Anyone can download releases": its release files download without signing in (never its code). Only when the repo is fetched alone (getRepo). */
+  releases_public: Schema.optionalKey(Schema.Boolean),
   created_at: Timestamp,
   created_by: Schema.NullOr(Login),
 });

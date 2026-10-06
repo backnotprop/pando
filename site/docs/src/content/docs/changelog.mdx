@@ -7,6 +7,12 @@ sidebar:
 
 What changed in Pando, newest first. Dates are UTC.
 
+## 2026-10-06
+
+### Releases, tags, and main built at every merge
+
+A Buildkite pipeline now builds main's merge commit at each merge, and each project's page shows main's build ("not built" when nothing reported on it, never green) and its latest release. Pando records every tag pushed. `pando release create v0.3.0 --generate dist/*` tags main, writes the notes from the branches merged since the last release, uploads the files and publishes, once the required checks are green (or with `--force`). A published release's tag can't be moved or deleted with git. Owners can let anyone download a project's release files. Pando's own `pando` is installed from its releases. See [Releases](/releases/).
+
 ## 2026-10-04
 
 ### A push over 64 MiB is refused plainly, and `pando init` brings in a larger history in steps

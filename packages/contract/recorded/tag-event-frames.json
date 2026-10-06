@@ -1,0 +1,70 @@
+{
+  "schema": "MonorepoEventFrame[]",
+  "route": "GET .../events?topics=kind:tag.created,kind:tag.deleted (WebSocket)",
+  "status": 101,
+  "body": [
+    {
+      "type": "event",
+      "seq": 12,
+      "at": "2026-10-06T04:08:26.337Z",
+      "kind": "tag.created",
+      "collection": "tags",
+      "key": "rel-muw5rrqb/v0.0.1",
+      "op": "upsert",
+      "repo": "rel-muw5rrqb",
+      "actor": "rel-muw5rrqb",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "repo": "rel-muw5rrqb",
+        "name": "v0.0.1",
+        "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
+        "annotated": false,
+        "created_by": "rel-muw5rrqb",
+        "created_at": "2026-10-06T04:08:26.336Z",
+        "updated_at": "2026-10-06T04:08:26.336Z",
+        "frozen": false
+      }
+    },
+    {
+      "type": "event",
+      "seq": 13,
+      "at": "2026-10-06T04:08:26.337Z",
+      "kind": "tag.created",
+      "collection": "tags",
+      "key": "rel-muw5rrqb/v0.0.2",
+      "op": "upsert",
+      "repo": "rel-muw5rrqb",
+      "actor": "rel-muw5rrqb",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "repo": "rel-muw5rrqb",
+        "name": "v0.0.2",
+        "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
+        "annotated": true,
+        "created_by": "rel-muw5rrqb",
+        "created_at": "2026-10-06T04:08:26.336Z",
+        "updated_at": "2026-10-06T04:08:26.336Z",
+        "frozen": false
+      }
+    },
+    {
+      "type": "event",
+      "seq": 14,
+      "at": "2026-10-06T04:08:28.159Z",
+      "kind": "tag.deleted",
+      "collection": "tags",
+      "key": "rel-muw5rrqb/v0.0.2",
+      "op": "delete",
+      "repo": "rel-muw5rrqb",
+      "actor": "rel-muw5rrqb",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "repo": "rel-muw5rrqb",
+        "name": "v0.0.2"
+      }
+    }
+  ]
+}

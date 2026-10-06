@@ -1,0 +1,40 @@
+{
+  "schema": "ReleaseList",
+  "route": "GET .../releases?limit=2",
+  "status": 200,
+  "body": {
+    "releases": [
+      {
+        "repo": "rel-muw5rrqb",
+        "tag": "v0.3.0",
+        "sha": "285975408bd5aa467288897580c71a2e2bab135f",
+        "title": "v0.3.0",
+        "notes": "",
+        "draft": false,
+        "forced": true,
+        "created_by": "rel-muw5rrqb",
+        "created_at": "2026-10-06T04:08:53.765Z",
+        "updated_at": "2026-10-06T04:08:54.279Z",
+        "published_by": "rel-muw5rrqb",
+        "published_at": "2026-10-06T04:08:54.279Z",
+        "files": []
+      },
+      {
+        "repo": "rel-muw5rrqb",
+        "tag": "v0.2.0",
+        "sha": "425646d676676202988f5852aa2946aa853ff48f",
+        "title": "v0.2.0",
+        "notes": "## Changes since v0.1.0\n\n- Add release notes (`feat-d`) by rel-muw5rrqb\n",
+        "draft": false,
+        "forced": false,
+        "created_by": "rel-b-muw5rrqb",
+        "created_at": "2026-10-06T04:08:49.694Z",
+        "updated_at": "2026-10-06T04:08:50.220Z",
+        "published_by": "rel-b-muw5rrqb",
+        "published_at": "2026-10-06T04:08:50.220Z",
+        "files": []
+      }
+    ],
+    "next_cursor": "MjAyNi0xMC0wNlQwNDowODo1MC4yMjBaIHJlbF9jMWVlYjY1MGQzZjZmYzVm"
+  }
+}

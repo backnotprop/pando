@@ -1,0 +1,112 @@
+---
+title: Releases
+description: Builds of main, tags, releases with notes and files, and deployments, per project.
+sidebar:
+  order: 7
+---
+
+Pando records builds, tags, releases and deployments. Your CI runs the builds and the deploys; Pando keeps the record and shows it. Everything here is per project (a plain repository is its own one project).
+
+## Main's build
+
+When a branch is merged, Pando makes a merge commit on main. A Buildkite pipeline added with `pando ci pipeline add` builds each push to a branch and also main's merge commit at each merge, on main. Its checks land on that commit.
+
+Each project's page shows one line over its files:
+
+```text
+main passed · pando-ci #142 4 min ago        Latest release v0.3.0 2 days ago
+```
+
+- **main's state**: the checks on main's commit, in the words the branch page uses: passed, failed, running. A commit nothing has reported on, with no required checks, reads **not built**. It is never shown as green.
+- **the newest build on main**, with its number and when.
+- **the latest release**, and when it was published.
+
+The API gives the same: `GET /v1/monorepos/{owner}/{name}/repos/{repo}/summary`.
+
+Merging is not changed by any of this: a repository with no CI still merges, as before.
+
+## Tags
+
+Pando records every tag pushed through git (`refs/tags/*`): its name, the commit it names (an annotated tag is followed to its commit), who pushed it and when.
+
+```sh
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+`GET .../repos/{repo}/tags` lists them, newest first. A hook can take the event `tag` (see [Hooks](/cli/#pando-hook)): a tag pushed, moved or deleted.
+
+Tags move and delete freely, as in git, until a published release holds one.
+
+## Releases
+
+A release is a tag on its project's main, with a title, notes and files.
+
+```sh
+pando release create v0.3.0 --generate                 # tag main, write the notes, publish
+pando release create v0.3.0 --generate dist/*          # the same, with files
+pando release list
+pando release view v0.3.0
+```
+
+- **From main only.** A release's commit is main's head, or a commit on main (`--target <sha>`). Any other commit is refused.
+- **Checks green, as for a merge.** Publishing is refused while the commit's required checks are red or missing, unless you add `--force`. A forced release says so.
+- **Anyone who may merge may publish**, agents included, as with `pando merge`.
+- **A published release freezes its tag.** git refuses to move or delete it:
+
+  ```text
+  ! [remote rejected] v0.3.0 (tag v0.3.0 belongs to the published release v0.3.0; delete the release first to move or delete it (pando release delete v0.3.0))
+  ```
+
+  `pando release delete v0.3.0` deletes the release and its files. The tag stays, and git can move or delete it again.
+- **Drafts.** `--draft` keeps a release unpublished, with no tag yet. `pando release publish v0.3.0` publishes it later. With files, `pando release create` makes a draft, uploads the files, then publishes, so a release is never seen without its files.
+
+### Notes
+
+`--generate` writes the notes from Pando's own records: the branches merged into main since the previous published release, newest first, each with its title, who merged it, and the issues it closed.
+
+```markdown
+## Changes since v0.2.1
+
+- Release files and the install command (`release-files`) by ramos, closes #41
+- Build main's merge commit at merge (`main-builds`) by ana, closes #38 and #39
+```
+
+Your own `--notes` (or `--notes-file`) come first, then the generated part. The web shows notes with the same viewer as every document.
+
+### Files
+
+```sh
+pando release upload v0.3.0 dist/pando-linux-amd64
+pando release download v0.3.0 --dir ~/Downloads
+pando release download --pattern 'pando-darwin-*'     # the latest release
+```
+
+Pando keeps each file and its SHA-256. `pando release upload` sends the SHA-256 it computed, and the server refuses a file that does not match. `pando release download` checks every file against the recorded SHA-256 before it writes it.
+
+## Who can download
+
+Release files are for the repository's members, like everything else. An owner can turn on **Anyone can download releases** for a project in the repository's Settings (or `PATCH .../repos/{repo}` with `{"releases_public": true}`). Then that project's release files download without signing in. Only release files: its code, branches and everything else stay members only.
+
+A file's address, where `latest` is the newest published release:
+
+```text
+https://<server>/v1/monorepos/<owner>/<name>/repos/<repo>/releases/<tag>/files/<file>
+```
+
+## Deployments
+
+Pando records deployments; it never deploys. Your CI, or a deploy script, tells Pando which commit reached which environment:
+
+```sh
+pando api /v1/monorepos/<owner>/<name>/repos/<repo>/deployments -X POST \
+  -f environment=production -f sha=<commit> -f url=https://example.com
+```
+
+When a published release sits at that commit, the deployment names it. `GET .../deployments?environment=production` lists them, newest first.
+
+Pando's own server says which commit it runs: `curl -H 'accept: application/json' https://<server>/healthz`.
+
+## Limits
+
+See [Limits](/limits/#releases): files at most 100 MB, 20 per release, notes from at most 500 merges.

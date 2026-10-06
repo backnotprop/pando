@@ -5,21 +5,24 @@ sidebar:
   order: 1
 ---
 
-This page takes you from nothing to a merged branch. You need git, and Go 1.26 to build the `pando` command.
+This page takes you from nothing to a merged branch. You need git.
 
 ## Install pando
 
-`pando` is one program, built from Pando's source with Go. There is no prebuilt download yet.
+`pando` is one program. Pando releases it on Pando itself: each [release](/releases/) of Pando's code carries `pando` for macOS and Linux, on Apple chips or ARM and on Intel or AMD. One command downloads the one for this machine from the latest release, into `~/.local/bin`:
 
-From a checkout of Pando's code:
+```sh
+mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/pando "https://pando-dev.plannotator.workers.dev/v1/monorepos/ramos/pando/repos/projects-pando/releases/latest/files/pando-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && chmod +x ~/.local/bin/pando && pando help
+```
+
+Put `~/.local/bin` on your `PATH` if it is not there already. The release's `SHA256SUMS` file lists each file's SHA-256, to check it with `shasum -a 256 ~/.local/bin/pando`.
+
+Or build it from Pando's source, with Go 1.26:
 
 ```sh
 cd cli
 go build -o ~/.local/bin/pando ./cmd/pando
-pando help        # every command
 ```
-
-Put `~/.local/bin` on your `PATH` if it is not there already.
 
 ## Sign in
 

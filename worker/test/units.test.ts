@@ -14,6 +14,7 @@ import type { StatusRecord } from "../src/monorepo/types";
 import { hasCode, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../src/parse";
 import { sessionIdFor } from "../src/sessions/ids";
 import { dayIn, sundayOf, winners } from "../src/sessions/marks";
+import { NOTES_MAX, notesMarkdown, walkMerges, type NotesLine } from "../src/releases/notes";
 
 const dec = new TextDecoder();
 
@@ -736,5 +737,82 @@ describe("the profile graph's agent of a day and a week", () => {
     const week = (x: { at: string }) => sundayOf(dayIn(x.at, 0));
     const commits = [c("2026-10-05T09:00:00Z", "codex", "a"), c("2026-10-06T09:00:00Z", "codex", "a"), c("2026-10-07T09:00:00Z", "pi", "b"), c("2026-10-07T10:00:00Z", "pi", "b"), c("2026-10-07T11:00:00Z", "pi", "b")];
     expect(winners(commits, week)).toEqual([{ date: "2026-10-04", program: "pi", commits: 3 }]);
+  });
+});
+
+describe("release notes: the merge walk", () => {
+  // main: m0 (first push) <- m1 <- m2 <- m3 <- m4, each a merge row from the one before.
+  const chain = (n: number) => new Map(Array.from({ length: n }, (_, i) => [`m${i + 1}`, { id: i + 1, base_before: `m${i}` }]));
+  const at = (rows: Map<string, { id: number; base_before: string }>) => (sha: string) => rows.get(sha) ?? null;
+
+  it("walks back to main's first commit when no release came before, newest first", () => {
+    const w = walkMerges("m4", at(chain(4)), new Map());
+
+    expect(w.merges.map((m) => m.id)).toEqual([4, 3, 2, 1]);
+    expect(w).toMatchObject({ more: 0, since: null });
+  });
+
+  it("stops at the first earlier release it reaches, which may not be the newest by date", () => {
+    expect(walkMerges("m4", at(chain(4)), new Map([["m2", "v1.0.0"], ["m1", "v0.9.0"]]))).toMatchObject({ since: "v1.0.0", more: 0 });
+    expect(walkMerges("m4", at(chain(4)), new Map([["m2", "v1.0.0"]])).merges.map((m) => m.id)).toEqual([4, 3]);
+  });
+
+  it("lists nothing for a release on the same commit as an earlier one", () => {
+    expect(walkMerges("m3", at(chain(4)), new Map([["m3", "v1.0.0"]]))).toEqual({ merges: [], more: 0, since: "v1.0.0" });
+  });
+
+  it("lists nothing for a commit no merge made (main's first push)", () => {
+    expect(walkMerges("m0", at(chain(4)), new Map())).toEqual({ merges: [], more: 0, since: null });
+  });
+
+  it("lists at most max merges and counts the rest", () => {
+    const w = walkMerges("m1200", at(chain(1200)), new Map(), 500);
+
+    expect(w.merges.length).toBe(500);
+    expect(w.merges[0].id).toBe(1200);
+    expect(w.more).toBe(700);
+  });
+
+  it("never loops on a broken chain", () => {
+    const loop = new Map([["a", { id: 1, base_before: "b" }], ["b", { id: 2, base_before: "a" }]]);
+
+    expect(walkMerges("a", at(loop), new Map()).merges.map((m) => m.id)).toEqual([1, 2]);
+  });
+});
+
+describe("release notes: the Markdown", () => {
+  const line = (n: number, o: Partial<NotesLine> = {}): NotesLine => ({ branch: `b${n}`, title: `Change ${n}`, merged_by: "ana", closes: [], ...o });
+
+  it("names each merge's title, branch, who merged it and the issues it closed", () => {
+    expect(notesMarkdown([line(2, { closes: [12, 14, 20] }), line(1, { title: null })], 0, "v0.1.0")).toBe(
+      "## Changes since v0.1.0\n\n- Change 2 (`b2`) by ana, closes #12, #14 and #20\n- `b1` by ana\n",
+    );
+  });
+
+  it("says so when nothing was merged, and counts the merges past the limit", () => {
+    expect(notesMarkdown([], 0, "v1.0.0")).toBe("## Changes since v1.0.0\n\nNo branches were merged since v1.0.0.\n");
+    expect(notesMarkdown([line(1)], 3, null)).toBe("## Changes\n\n- Change 1 (`b1`) by ana\n- and 3 more\n");
+  });
+
+  it("keeps a title to one line of at most 150 characters", () => {
+    expect(notesMarkdown([line(1, { title: `a\nb ${"x".repeat(300)}` })], 0, null)).toContain(`- a b ${"x".repeat(145)}… (\`b1\`)`);
+  });
+
+  it("stays under the notes limit by counting the lines it leaves out", () => {
+    const lines = Array.from({ length: 800 }, (_, i) => line(i, { title: "t".repeat(150), closes: [1, 2, 3] }));
+    const text = notesMarkdown(lines, 0, null);
+
+    expect(text.length).toBeLessThanOrEqual(NOTES_MAX);
+    expect(text).toMatch(/- and \d+ more\n$/);
+    expect(text.split("\n").filter((l) => l.startsWith("- Change") || l.startsWith("- t")).length + Number(/and (\d+) more/.exec(text)?.[1])).toBe(800);
+  });
+});
+
+describe("the advertisement with peeled tags", () => {
+  it("keeps an annotated tag's ^{} line only when asked", () => {
+    const adv = concat([pkt("# service=git-upload-pack\n"), FLUSH, pkt(`${A} HEAD\0side-band-64k\n`), pkt(`${A} refs/tags/v1\n`), pkt(`${B} refs/tags/v1^{}\n`), FLUSH]);
+
+    expect(parseAdvertisement(adv).has("refs/tags/v1^{}")).toBe(false);
+    expect(parseAdvertisement(adv, true).get("refs/tags/v1^{}")).toBe(B);
   });
 });

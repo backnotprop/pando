@@ -280,6 +280,33 @@ tags:
       `issues` and `issue:<n>`); `issue.opened`, `issue.commented`,
       `issue.closed` (by a person) and `issue.reopened` are activity lines.
       Open issues assigned to a person show in the home's "Needs you".
+  - name: releases
+    description: |
+      Builds of main, tags and releases, per project. Pando records them;
+      the CI runs the builds (research/plans/releases-2026-10-04).
+
+      - **Main is built at merge.** A Buildkite hook taking `merged` builds
+        main's new merge commit on main (its status token is for that
+        commit), never the branch head again.
+      - **Not built.** The summary reads `not_built` for a commit nothing
+        reported on and nothing requires, never green. The merge gate keeps
+        reading such a commit as `success`.
+      - **Tags** are recorded by the git door from `refs/tags/*` as pushes
+        land, an annotated tag peeled to its commit; events `tag.created`
+        and `tag.deleted`; the hook event `tag`.
+      - **A release** is a tag on its project's main with a title, notes and
+        files. Anyone who may merge may publish one; the commit's required
+        checks must be green unless forced (the merge rule). A published
+        release's tag can't be moved or deleted with git until the release
+        is deleted; deleting a release keeps its tag.
+      - **Notes** can be written from the merges since the last published
+        release: each branch's title, who merged it, the issues it closed.
+        At most 500 merges, then "and N more"; notes at most 100,000
+        characters.
+      - **Files** are kept in R2: at most 100 MB (100,000,000 bytes) each and
+        20 a release, SHA-256 kept. Downloads are for members unless the
+        project's switch "Anyone can download releases" (`releases_public`)
+        is on; it opens release files only, never code.
   - name: ci
     description: |
       CI on one model for every service:
@@ -1289,6 +1316,11 @@ paths:
           build's repo.
         - ci_connections: `ci.connection` (CiConnection row; delete on
           disconnect, row `{id}`).
+        - tags: `tag.created` (a Tag row with its `repo`; also a moved tag),
+          `tag.deleted` (delete, row `{repo, name}`).
+        - releases: `release.created`, `release.updated` (also a file added
+          or deleted), `release.published` (a Release row), `release.deleted`
+          (delete, row `{repo, tag}`).
         - reviews: `review` (Review row).
         - worktrees: `worktree.reported` (upsert), `worktree.removed` (delete).
         - meta_files: `meta.saved` (a meta history entry, no bytes; not sent
@@ -2400,6 +2432,27 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Repo" }
         "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateRepo
+      summary: A project's settings (owners)
+      description: "`releases_public`: the switch \"Anyone can download releases\" (release files only, never code)."
+      tags: [repos, releases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [releases_public]
+              properties:
+                releases_public: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repo" }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -3012,6 +3065,287 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Checks" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/summary:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: getRepoSummary
+      summary: The project's main (its commit, checks or not built, the newest build on main) and its latest release
+      tags: [releases]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepoSummary" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/tags:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: listTags
+      summary: The project's tags, newest first
+      tags: [releases]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tags]
+                properties:
+                  tags: { type: array, items: { $ref: "#/components/schemas/Tag" } }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/releases:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    get:
+      operationId: listReleases
+      summary: Releases, newest first (a draft by when it was made, a published one by when it was published), 30 a page
+      tags: [releases]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases, next_cursor]
+                properties:
+                  releases: { type: array, items: { $ref: "#/components/schemas/Release" } }
+                  next_cursor: { type: [string, "null"] }
+    post:
+      operationId: createRelease
+      summary: Make a release (published at once unless draft)
+      description: |
+        Its commit: the tag's when the tag exists, else `target` (a commit on
+        main, or main), else main's head. A commit not on main is refused
+        (422 not_on_main). Unless `draft`, it is published at once by the
+        publish rule, and refused (412 checks_not_green) before anything is
+        made. `generate_notes` appends notes written from the merges since
+        the last published release. The tag `latest` is refused.
+      tags: [releases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag: { type: string }
+                target: { type: string }
+                title: { type: string, description: "At most 200 characters; default: the tag." }
+                notes: { type: string }
+                generate_notes: { type: boolean }
+                draft: { type: boolean, default: false }
+                force: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Made
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/releases/{tag}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - { name: tag, in: path, required: true, schema: { type: string }, description: "The tag; on GET, `latest` is the newest published release." }
+    get:
+      operationId: getRelease
+      summary: One release, with its commit's checks
+      tags: [releases]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+    patch:
+      operationId: updateRelease
+      summary: Edit its title or notes
+      tags: [releases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                notes: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+    delete:
+      operationId: deleteRelease
+      summary: Delete a release and its files; its tag stays, and git can move or delete it again
+      tags: [releases]
+      responses:
+        "204":
+          description: Deleted
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/releases/{tag}/publish:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - { name: tag, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishRelease
+      summary: Publish a draft
+      description: |
+        Refused (412 checks_not_green, with `checks`) when the commit's
+        required checks are red or missing, unless `force`; the same rule as
+        merge, and anyone who may merge may publish. The tag is made at the
+        release's commit when it does not exist (409 tag_exists when it names
+        another commit), and from then on git can't move or delete it.
+      tags: [releases]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Published
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/releases/{tag}/notes:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - { name: tag, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getReleaseNotes
+      summary: A release's notes, or (generate=1) notes written from the merges since the last published release
+      description: With `generate`, for a release, a tag, or a release still to be made (`target`, else main).
+      tags: [releases]
+      parameters:
+        - { name: generate, in: query, schema: { type: string, enum: ["1"] } }
+        - { name: target, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseNotes" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/releases/{tag}/files/{name}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - { name: tag, in: path, required: true, schema: { type: string } }
+      - { name: name, in: path, required: true, schema: { type: string }, description: "Letters, digits, '.', '_', '+' and '-', starting with a letter or digit; at most 200 characters." }
+    put:
+      operationId: uploadReleaseFile
+      summary: Upload a file (a name sent again replaces it)
+      description: |
+        The body is the file's bytes, with Content-Length (411 without it):
+        at most 100,000,000 bytes (413), 20 files a release (409
+        too_many_files). Pando computes its SHA-256; send X-Pando-Sha256 to
+        have a mismatch refused (422 sha256_mismatch).
+      tags: [releases]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Added (200 when it replaced a file)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+    get:
+      operationId: downloadReleaseFile
+      summary: Download a file
+      description: |
+        Members, or anyone (no credential needed) when the project's switch
+        `releases_public` is on. `latest` names the newest published release.
+        Headers: Content-Disposition (attachment), X-Pando-Sha256.
+      tags: [releases]
+      security:
+        - credential: []
+        - session: []
+        - {}
+      responses:
+        "200":
+          description: The bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+    delete:
+      operationId: deleteReleaseFile
+      summary: Delete a file
+      tags: [releases]
+      responses:
+        "204":
+          description: Deleted
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/deployments:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    post:
+      operationId: createDeployment
+      summary: Record a deployment (the CI or a deploy script deploys; Pando records)
+      description: |
+        `release`: a published release's tag; left out, the newest published
+        release at `sha` is named, if any. Pando never deploys.
+      tags: [releases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environment, sha]
+              properties:
+                environment: { type: string, description: "a-z, 0-9, '.', '_', '-'; at most 64 (pando-dev, production)." }
+                sha: { type: string }
+                state: { type: string, enum: [in_progress, success, failure], default: success }
+                release: { type: string }
+                url: { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deployment" }
+    get:
+      operationId: listDeployments
+      summary: Deployments, newest first
+      tags: [releases]
+      parameters:
+        - { name: environment, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deployments]
+                properties:
+                  deployments: { type: array, items: { $ref: "#/components/schemas/Deployment" } }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -3056,7 +3390,7 @@ paths:
                 events:
                   type: array
                   items: { $ref: "#/components/schemas/HookEvent" }
-                  description: Default `[push, branch.opened, merged]` for web, `[push]` for buildkite.
+                  description: Default `[push, branch.opened, merged, tag]` for web, `[push, merged]` for buildkite (a merge builds main's merge commit).
                 buildkite:
                   type: object
                   required: [organization, pipeline]
@@ -4333,6 +4667,9 @@ components:
         checks_unknown:
           type: [string, "null"]
           description: With required_checks, why they are unknown (pando.toml unreadable or broken); else null.
+        releases_public:
+          type: boolean
+          description: The switch "Anyone can download releases" (getRepo only). On, the project's release files download without signing in; never its code.
         created_at: { type: string, format: date-time }
         created_by: { type: string }
     Branch:
@@ -4701,10 +5038,109 @@ components:
             merged commits). Each closes about a second later in its own step
             (`issue.closed`, naming the merge); one a person closed meanwhile
             is left as it is.
+    BuildState:
+      type: string
+      enum: [success, pending, failure, error, missing, unknown, not_built]
+      description: "A commit's checks as a build state: Checks' state, or `not_built` when nothing reported on it and nothing is required (never green)."
+    RepoSummary:
+      type: object
+      required: [repo, main, latest_release]
+      properties:
+        repo: { type: string }
+        main:
+          type: object
+          required: [branch, sha, title, state, checks, build]
+          properties:
+            branch: { type: string }
+            sha: { type: [string, "null"], description: Null for an empty repo. }
+            title: { type: [string, "null"] }
+            state: { $ref: "#/components/schemas/BuildState" }
+            checks:
+              oneOf: [{ $ref: "#/components/schemas/Checks" }, { type: "null" }]
+            build:
+              description: The newest build on main, whatever its commit.
+              oneOf: [{ $ref: "#/components/schemas/CiBuild" }, { type: "null" }]
+        latest_release:
+          type: [object, "null"]
+          required: [tag, title, sha, published_at, published_by]
+          properties:
+            tag: { type: string }
+            title: { type: string }
+            sha: { type: string }
+            published_at: { type: string, format: date-time }
+            published_by: { type: string }
+    Tag:
+      type: object
+      required: [name, sha, annotated, created_by, created_at, updated_at, frozen]
+      properties:
+        name: { type: string }
+        sha: { type: [string, "null"], description: "The commit (an annotated tag peeled); null until read." }
+        annotated: { type: boolean }
+        created_by: { type: [string, "null"], description: Null when Pando found the tag rather than saw it pushed. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        frozen: { type: boolean, description: A published release holds it. }
+    ReleaseFile:
+      type: object
+      required: [name, size, sha256, content_type, uploaded_by, uploaded_at]
+      properties:
+        name: { type: string }
+        size: { type: integer }
+        sha256: { type: string }
+        content_type: { type: string }
+        uploaded_by: { type: string }
+        uploaded_at: { type: string, format: date-time }
+    Release:
+      type: object
+      required: [repo, tag, sha, title, notes, draft, forced, created_by, created_at, updated_at, published_by, published_at, files]
+      properties:
+        repo: { type: string }
+        tag: { type: string }
+        sha: { type: string, description: Its commit, on main. }
+        title: { type: string }
+        notes: { type: string, description: Markdown, at most 100,000 characters. }
+        draft: { type: boolean }
+        forced: { type: boolean, description: Published past red or missing required checks. }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        published_by: { type: [string, "null"] }
+        published_at: { type: [string, "null"], format: date-time }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/ReleaseFile" }
+        checks:
+          $ref: "#/components/schemas/Checks"
+          description: Its commit's checks; on getRelease only.
+    ReleaseNotes:
+      type: object
+      required: [tag, sha, markdown, generated, merges, more, since]
+      properties:
+        tag: { type: string }
+        sha: { type: string }
+        markdown: { type: string }
+        generated: { type: boolean }
+        merges: { type: [integer, "null"], description: "Generated: the merges listed (at most 500)." }
+        more: { type: [integer, "null"], description: "Generated: the merges past 500." }
+        since: { type: [string, "null"], description: "Generated: the release they start from; null from the start." }
+    Deployment:
+      type: object
+      required: [id, repo, environment, sha, release, state, url, description, created_by, created_at]
+      properties:
+        id: { type: string }
+        repo: { type: string }
+        environment: { type: string }
+        sha: { type: string }
+        release: { type: [string, "null"] }
+        state: { type: string, enum: [in_progress, success, failure] }
+        url: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
     HookEvent:
       type: string
-      enum: [push, branch.opened, merged]
-      description: "`branch.opened`: the first push of a branch. `push`: any push through the door that moves or deletes a branch. `merged`: a Pando merge landed a branch."
+      enum: [push, branch.opened, merged, tag]
+      description: "`branch.opened`: the first push of a branch. `push`: any push through the door that moves or deletes a branch. `merged`: a Pando merge landed a branch; a buildkite hook builds main's merge commit (`merge_commit`) on main (`main_branch`). `tag`: a tag pushed, moved or deleted (or made by publishing a release): `tag` is its name, `head` its commit (zeros when deleted)."
     Hook:
       type: object
       required: [id, type, events, active, created_at]

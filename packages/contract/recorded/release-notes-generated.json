@@ -1,0 +1,14 @@
+{
+  "schema": "ReleaseNotes",
+  "route": "GET .../releases/{tag}/notes?generate=1",
+  "status": 200,
+  "body": {
+    "tag": "v0.1.0",
+    "sha": "25a329895820520c88780697b0b6ce474319d542",
+    "markdown": "## Changes\n\n- Add the missing page (`feat-c`) by rel-muw5rrqb, closes #2\n- Speed up the gate (`feat-b`) by rel-muw5rrqb, closes #1\n- Add feature A (`feat-a`) by rel-muw5rrqb\n",
+    "generated": true,
+    "merges": 3,
+    "more": 0,
+    "since": null
+  }
+}

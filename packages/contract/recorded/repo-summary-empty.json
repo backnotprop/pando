@@ -1,0 +1,17 @@
+{
+  "schema": "RepoSummary",
+  "route": "GET .../repos/{repo}/summary (empty)",
+  "status": 200,
+  "body": {
+    "repo": "rel-empty-muw5rrqb",
+    "main": {
+      "branch": "main",
+      "sha": null,
+      "title": null,
+      "state": "not_built",
+      "checks": null,
+      "build": null
+    },
+    "latest_release": null
+  }
+}

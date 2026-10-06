@@ -1,0 +1,24 @@
+{
+  "schema": "RepoSummary",
+  "route": "GET .../repos/{repo}/summary (nothing reported)",
+  "status": 200,
+  "body": {
+    "repo": "rel-muw5rrqb",
+    "main": {
+      "branch": "main",
+      "sha": "6696bd12dbd2d91e3a5dfa657ea9b6104bbafba3",
+      "title": "first",
+      "state": "not_built",
+      "checks": {
+        "sha": "6696bd12dbd2d91e3a5dfa657ea9b6104bbafba3",
+        "state": "success",
+        "required": [],
+        "missing": [],
+        "statuses": [],
+        "checks_unknown": null
+      },
+      "build": null
+    },
+    "latest_release": null
+  }
+}

@@ -70,6 +70,18 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **A person's sessions page reads 50 at a time,** across the repositories you both can open.
 - **A repository cannot be named `sessions`:** `/<login>/sessions` is a person's sessions.
 
+## Releases
+
+- **One release file: at most 100 MB** (100,000,000 bytes). That is Cloudflare's limit on one upload to a Worker on the Free and Pro plans (200 MB on Business). Larger files would need uploading in parts, which is not built.
+- **At most 20 files per release.** Pando's number; GitHub allows 1,000.
+- **A file's name:** letters, digits, `.`, `_`, `+` and `-`, starting with a letter or digit; at most 200 characters.
+- **Generated notes list at most 500 merges** since the previous release; more says "and N more". Pando's number.
+- **Notes: at most 100,000 characters.** Pando's number.
+- **A release's title: at most 200 characters.**
+- **Releases list 30 a page,** 100 at most. Deployments the same.
+- **Builds of main share your CI's minutes:** every merge adds one build. On Buildkite's free plan, all builds share about 1,000 job minutes a month.
+- **Tags pushed while a push's record failed** are in the repository but not in Pando's list until pushed again or named by a release.
+
 ## Hooks
 
 - **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.
@@ -93,7 +105,7 @@ Pando's side:
 - **Webhook bodies up to 5 MiB;** a signature is good for 5 minutes.
 - **A build's clone token reads one repo for 24 to 25 hours,** which lets Buildkite's Retry work for a day after the push. Anyone who can see the pipeline in Buildkite can see it on a job's Environment tab.
 - **A status token posts checks on its one commit for 24 hours.** Other hook deliveries' read tokens last 30 minutes.
-- **Only branch pushes start builds.** A merge into main does not, so main's merge commits carry no check of their own.
+- **A pipeline builds each branch push and main's merge commit at each merge,** so every merge adds one build. A pipeline added before this builds pushes only; add it again to build merges.
 
 Buildkite's free plan, after its 30-day trial (Buildkite's numbers, read 2026-10-03):
 

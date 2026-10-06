@@ -47,7 +47,7 @@ usage: pando <command> [args]
   pando org remove <org> <login | email> | leave <org>            take someone out (owners), or leave
   pando mac broker [--dry-run]                                    load Pando.app's broker (before FSKit mounts)
   pando ci connect --org <slug> | status | disconnect --org <slug>   a monorepo's Buildkite connection [--monorepo <owner/name>]
-  pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>   the pipeline a push starts
+  pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>   the pipeline pushes and merges start
   pando ci build list [--pipeline p] [--branch b] [--state s]     builds, newest first
   pando ci build view | log | rebuild | cancel <build>            one build: its jobs, a job's log [--job j] [--follow]
   pando ci job retry <build> <job>                                run a job again
@@ -56,6 +56,11 @@ usage: pando <command> [args]
   pando mirror on | off [<project>]                               turn mirroring on or pause it, or one project's (owners)
   pando mirror retry [<project>...]                               try again now, with the wait reset (owners)
   pando mirror connect                                            set it up: opens the repository's Settings (GitHub needs a browser)
+  pando release list | view [<tag>]                               a project's releases, newest first; one with its notes [--repo <path>]
+  pando release create <tag> [--generate] [--title t] [--notes n] [--draft]   tag main and publish it (checks green, or --force)
+  pando release create <tag> <file>...                            with files: a draft, its files, then published
+  pando release upload <tag> <file>... | download [<tag>]         a release's files (checked by SHA-256) [--pattern p] [--dir d]
+  pando release publish <tag> [--force] | delete <tag>            publish a draft; delete one (its tag stays)
   pando credential create --name <sandbox> | list | revoke <id>   credentials that act as you
   pando hook list | create <url> | delete <id>                    a repo's web hooks [--repo <path>] (owners write)
   pando hook deliveries <id> | redeliver <delivery-id>            what a hook sent; send one again
@@ -462,9 +467,9 @@ pando ci pipeline add <repo> <pipeline> | list | remove <repo> <pipeline>
 | `connect --org <slug>` | Connects a Buildkite organization to the repository. It prints the webhook URL and token to put in Buildkite, and the steps. The token is shown once, only on a terminal. |
 | `status` | The connections, the last event Pando received, and each pipeline with its last build. |
 | `disconnect --org <slug>` | Removes the connection. Its builds leave Pando; its checks stay. |
-| `pipeline add <repo> <pipeline>` | Owners only. Each push to a branch of the repo then starts a build of that Buildkite pipeline. |
+| `pipeline add <repo> <pipeline>` | Owners only. Each push to a branch of the repo, and each merge into its main, then starts a build of that Buildkite pipeline. A merge builds main's new merge commit, on main. |
 | `pipeline list` | Which pipeline each repo starts. |
-| `pipeline remove <repo> <pipeline>` | Owners only. Pushes stop starting that pipeline. |
+| `pipeline remove <repo> <pipeline>` | Owners only. Pushes and merges stop starting that pipeline. |
 
 | Flag | What it does |
 | --- | --- |
@@ -533,6 +538,45 @@ Only in a build Pando started. Posts a check on the build's commit, using `PANDO
 | `--target-url <url>` | A link for the check. Default: `BUILDKITE_BUILD_URL`. |
 | `--description <text>` | A short line for the check. |
 
+## Releases
+
+A release is a tag on a project's main, with notes and files. See [Releases](/releases/).
+
+### pando release
+
+```sh
+pando release list | view [<tag>]
+pando release create <tag> [<file>...] [--generate] [--title t] [--notes n | --notes-file f] [--target <sha>] [--draft] [--force]
+pando release publish <tag> [--force]
+pando release upload <tag> <file>...
+pando release download [<tag>] [--pattern p] [--dir d]
+pando release delete <tag> [--yes]
+```
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | Releases, newest first: tag, title, draft or published (and forced), commit, when. |
+| `view [<tag>]` | One release (default: the latest published): its state, commit, who published it, its commit's checks, its files and its notes. |
+| `create <tag> [<file>...]` | Tags main (or `--target`, a commit on main) and publishes it. With files, it makes a draft, uploads them, then publishes. Refused while the commit's required checks are red or missing, unless `--force`. |
+| `publish <tag>` | Publishes a draft, by the same rule. From then on git can't move or delete its tag. |
+| `upload <tag> <file>...` | Adds files to a release, each at most 100 MB, 20 a release. A name sent again replaces the file. |
+| `download [<tag>]` | Writes a release's files (default: the latest's) into the current folder, each checked against its SHA-256. |
+| `delete <tag>` | Deletes the release and its files. Its tag stays, and git can move or delete it again. Asks first; `--yes` for scripts. |
+
+| Flag | What it does |
+| --- | --- |
+| `--generate` | With `create`: write the notes from the branches merged since the last release, after `--notes`, if any. |
+| `--title <text>` | With `create`: its title. Default: the tag. |
+| `--notes <text>`, `--notes-file <file>` | With `create`: its notes, in Markdown (`-` reads standard input). |
+| `--target <sha>` | With `create`: the commit on main to release. Default: main, or the tag's commit when the tag exists. |
+| `--draft` | With `create`: keep it a draft. |
+| `--force` | With `create` and `publish`: publish past red or missing required checks. The release says it was forced. |
+| `--pattern <pattern>` | With `download`: only files whose names match, such as `pando-darwin-*`. |
+| `--dir <folder>` | With `download`: where to write the files. Default: the current folder. |
+| `--repo <path>` | The project. Default: the one you are in, or the only one. |
+| `--json` | Print the API's answer: [list](/api/releases/listReleases/), [view](/api/releases/getRelease/), [create](/api/releases/createRelease/), [publish](/api/releases/publishRelease/). |
+| `--monorepo <owner/name>` | The repository. Default: the one you are in. |
+
 ## Hooks
 
 ### pando hook
@@ -555,7 +599,7 @@ A repo's web hooks: on a push, a new branch or a merge, Pando POSTs JSON to a UR
 
 | Flag | What it does |
 | --- | --- |
-| `--event <event>` | With `create`: `push`, `branch.opened` or `merged`. Repeat it. Default: all three. |
+| `--event <event>` | With `create`: `push`, `branch.opened`, `merged` or `tag`. Repeat it. Default: all four. |
 | `--app <slug>` | With `create`: the CI service behind the URL (`github-actions`, `circleci`, ...), shown on the checks its builds post. |
 | `--secret-file <file>` | With `create`: read the secret from the file, or from standard input with `-`. |
 | `--since <seq>` | With `redeliver`: send again every delivery after this seq. |

@@ -16,7 +16,7 @@ import (
 const hookUsage = "pando hook list | create <url> [--event e] [--app a] [--secret-file f] | delete <id> | deliveries <id> | redeliver <delivery-id> | redeliver <hook-id> --since <seq>   [--repo <path>] [--monorepo <owner/name>] [--json]"
 
 // Hook is `pando hook`: a repo's web hooks, which POST signed JSON to a URL
-// on a push, a new branch or a merge, and their deliveries. Buildkite hooks
+// on a push, a new branch, a merge or a tag, and their deliveries. Buildkite hooks
 // are made with pando ci pipeline; they show here too. Writes need an owner.
 func Hook(e *Env, args []string) error {
 	usage := UsageError{hookUsage}
@@ -25,7 +25,7 @@ func Hook(e *Env, args []string) error {
 	}
 	fs := flags("hook")
 	var events multi
-	fs.Var(&events, "event", "create: push, branch.opened or merged (repeat it; default all three)")
+	fs.Var(&events, "event", "create: push, branch.opened, merged or tag (repeat it; default all four)")
 	app := fs.String("app", "", "create: the CI service behind the URL (github-actions, circleci, ...), shown on the checks it posts")
 	secretFile := fs.String("secret-file", "", "create: read the signing secret from this file (- for standard input); else it is asked for with no echo")
 	since := fs.Int64("since", -1, "redeliver: send again every delivery of the hook after this seq")

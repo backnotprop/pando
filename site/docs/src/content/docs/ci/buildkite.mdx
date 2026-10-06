@@ -105,7 +105,7 @@ If Buildkite keeps its own token instead of yours, run `pando ci disconnect --or
 pando ci pipeline add projects/web <pipeline-slug> --monorepo <owner/name>
 ```
 
-Each push to a branch of `projects/web` now starts a build. Push a branch and watch the check appear on the branch's page in the web app, and in `pando branch list`.
+Each push to a branch of `projects/web` now starts a build, and so does each merge: Pando builds main's new merge commit, on main, so main's checks are its own. Push a branch and watch the check appear on the branch's page in the web app, and in `pando branch list`. After a merge, the project's page shows main's build (see [Releases](/releases/#mains-build)).
 
 To make Merge wait for it, require the check named by the step's `key` (see [Checks and CI](/ci/)):
 
@@ -121,6 +121,6 @@ To make Merge wait for it, require the check named by the step's `key` (see [Che
 | The job waits and never starts | the build's page in Buildkite | the queue key in the YAML does not match a hosted queue in the pipeline's cluster |
 | The job fails at `git fetch` with 401 | the job's log in Buildkite | a build started in Buildkite rather than by a push, or a Retry more than 25 hours after the push; push again, or [rebuild it through the API](/api/ci/rebuildCiBuild/), which gives fresh tokens |
 
-Only pushes to branches start builds. A merge into main does not, so main's merge commits carry no check of their own.
+A pipeline added before merges were built starts builds for pushes only. Remove it and add it again (`pando ci pipeline remove`, then `add`) to build merges too.
 
 See [Limits](/limits/#ci-with-buildkite) for Buildkite's free plan and Pando's own numbers.

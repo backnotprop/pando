@@ -277,14 +277,14 @@ func ciPipeline(e *Env, args []string) error {
 		return nil
 	}
 	if len(same) > 0 {
-		e.printf("%s already starts %s/%s on each push (hook %s).\n", repo.Path, slug, pipeline, same[0].ID)
+		e.printf("%s already starts %s/%s on each push and merge (hook %s).\n", repo.Path, slug, pipeline, same[0].ID)
 		return nil
 	}
 	k, err := h.AddBuildkiteHook(e.Ctx, full, repo.Name, slug, pipeline)
 	if err != nil {
 		return ownerOnly(err, full, "add a pipeline")
 	}
-	e.printf("%s: each push to a branch now starts a build of %s/%s in Buildkite (hook %s).\n", repo.Path, slug, pipeline, k.ID)
+	e.printf("%s: each push to a branch, and each merge into main, now starts a build of %s/%s in Buildkite (hook %s).\n", repo.Path, slug, pipeline, k.ID)
 	e.printf("The build's env has PANDO_CLONE_URL, PANDO_READ_TOKEN (clone with it) and PANDO_STATUS_TOKEN.\n")
 	e.printf("A step with a key is a check of that name. To make one required, in .pando/pando.toml:\n")
 	e.printf("  [repos.%q]\n  required_checks = [\"ci\"]\n", repo.Path)

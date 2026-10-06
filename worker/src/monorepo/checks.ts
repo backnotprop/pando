@@ -94,6 +94,19 @@ export function combine(sha: string | null, req: Required, all: StatusRecord[]):
   return { sha, state, required, missing, statuses, checks_unknown: null };
 }
 
+/** A commit's state where a build state is shown: combine()'s, or "not_built" when nothing reported on it. */
+export type BuildState = Checks["state"] | "not_built";
+
+/**
+ * The build state a page shows (the project page's main): a commit with no
+ * statuses and no required checks reads "not_built", never green. The merge
+ * gate and the release gate keep combine()'s state (success there), so a repo
+ * with no CI still merges as before.
+ */
+export function buildState(c: Checks): BuildState {
+  return c.state === "success" && c.statuses.length === 0 ? "not_built" : c.state;
+}
+
 /**
  * Required checks as the monorepo object keeps them (C3): read from
  * pando.toml only when the object has none, which is after a merge or main's

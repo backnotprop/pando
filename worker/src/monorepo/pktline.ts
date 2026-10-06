@@ -251,8 +251,8 @@ export function parseReport(bytes: Uint8Array, caps: Set<string>): PushReport {
   return report;
 }
 
-/** Refs from a smart HTTP v0 advertisement (`info/refs?service=...`). */
-export function parseAdvertisement(bytes: Uint8Array): Map<string, string> {
+/** Refs from a smart HTTP v0 advertisement (`info/refs?service=...`). `peeled`: keep an annotated tag's `refs/tags/<t>^{}` line (its commit). */
+export function parseAdvertisement(bytes: Uint8Array, peeled = false): Map<string, string> {
   const refs = new Map<string, string>();
   let section = 0;
   let first = true;
@@ -279,7 +279,7 @@ export function parseAdvertisement(bytes: Uint8Array): Map<string, string> {
     const sha = entry.slice(0, sp);
     const ref = entry.slice(sp + 1);
 
-    if (ref === "capabilities^{}" || ref.endsWith("^{}")) continue;
+    if (ref === "capabilities^{}" || (ref.endsWith("^{}") && !peeled)) continue;
     refs.set(ref, sha);
   }
 

@@ -3,49 +3,49 @@
   "route": "GET .../repos/{repo}/summary",
   "status": 200,
   "body": {
-    "repo": "rel-muw5ff12",
+    "repo": "rel-muw5kvc3",
     "main": {
       "branch": "main",
-      "sha": "225b8c1f7d8f5c536e302130121dd6d4977c9964",
+      "sha": "d16557bb22b47b266c4d4ea597e0c87fa4c03dac",
       "title": "Add feature A",
       "state": "success",
       "checks": {
-        "sha": "225b8c1f7d8f5c536e302130121dd6d4977c9964",
+        "sha": "d16557bb22b47b266c4d4ea597e0c87fa4c03dac",
         "state": "success",
         "required": [],
         "missing": [],
         "statuses": [
           {
-            "sha": "225b8c1f7d8f5c536e302130121dd6d4977c9964",
+            "sha": "d16557bb22b47b266c4d4ea597e0c87fa4c03dac",
             "context": "ci",
             "state": "success",
             "target_url": null,
             "description": null,
             "creator": "app:buildkite",
             "app": "buildkite",
-            "created_at": "2026-10-06T03:58:46.078Z"
+            "created_at": "2026-10-06T04:03:02.223Z"
           }
         ],
         "checks_unknown": null
       },
       "build": {
-        "id": "cib_2af65b8421c6504a",
+        "id": "cib_872d7ba6838bfa88",
         "service": "buildkite",
-        "connection": "m_47b80b1129fcae92--cic_125844e7ccd3",
+        "connection": "m_d74266e27b8d74e1--cic_6e0591b2feb2",
         "pipeline": "p",
         "number": 142,
-        "repo": "rel-muw5ff12",
+        "repo": "rel-muw5kvc3",
         "repo_path": ".",
-        "sha": "225b8c1f7d8f5c536e302130121dd6d4977c9964",
+        "sha": "d16557bb22b47b266c4d4ea597e0c87fa4c03dac",
         "branch": "main",
         "message": "Merge feat-a: Add feature A",
         "state": "passed",
         "service_state": "passed",
         "web_url": "https://buildkite.com/o/p/builds/142",
-        "pushed_by": "rel-muw5ff12",
-        "created_at": "2026-10-06T03:57:46.073Z",
-        "started_at": "2026-10-06T03:57:47.073Z",
-        "finished_at": "2026-10-06T03:58:36.073Z",
+        "pushed_by": "rel-muw5kvc3",
+        "created_at": "2026-10-06T04:02:02.218Z",
+        "started_at": "2026-10-06T04:02:03.218Z",
+        "finished_at": "2026-10-06T04:02:52.218Z",
         "duration_s": 49,
         "rebuilt_from": null
       }

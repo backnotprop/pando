@@ -5,16 +5,16 @@
   "body": {
     "deployments": [
       {
-        "id": "dep_75e1b07cdb0168e9",
-        "repo": "rel-muw5ff12",
+        "id": "dep_97314f1c6242b07a",
+        "repo": "rel-muw5kvc3",
         "environment": "pando-dev",
-        "sha": "10462c5910031cb95ef04d59e495f5796101f087",
+        "sha": "ce20c3394942fdd710c523aeddc98e2706ad1920",
         "release": "v0.2.0",
         "state": "success",
         "url": "https://pando-dev.example.invalid",
         "description": "deploy.sh",
-        "created_by": "rel-b-muw5ff12",
-        "created_at": "2026-10-06T03:59:11.542Z"
+        "created_by": "rel-b-muw5kvc3",
+        "created_at": "2026-10-06T04:03:32.821Z"
       }
     ]
   }

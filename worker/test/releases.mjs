@@ -77,6 +77,13 @@ const waitFor = async (pred, ms = 20_000) => {
   return null;
 };
 
+/** The user's Go module and build caches, as `go env` names them. */
+const goCaches = () => {
+  const [GOMODCACHE, GOCACHE, GOPATH] = spawnSync("go", ["env", "GOMODCACHE", "GOCACHE", "GOPATH"], { encoding: "utf8" }).stdout.trim().split("\n");
+
+  return { GOMODCACHE, GOCACHE, GOPATH };
+};
+
 /** An event socket that collects frames. */
 function socket(path, secret) {
   const frames = [];
@@ -516,6 +523,42 @@ try {
   const hz = await (await fetch(`${URL_}/healthz`, { headers: { accept: "application/json" } })).json();
   check("/healthz still answers ok (the docs' Status page reads it); as JSON it names the version, and the commit when deployed with --tag <sha>", up === "ok\n" && hz.ok === true && /^[0-9a-f-]{36}$/.test(hz.version ?? "") && hz.commit === null, JSON.stringify(hz));
 
+  // ── 8. Pando releasing Pando: tools/release.sh on a throwaway monorepo, then the docs' install command ──
+  if (process.platform === "darwin") {
+    const P = `rel-mono-${id}`;
+    r = await call("POST", "/v1/monorepos", S, { name: P, kind: "monorepo" });
+
+    if (r.status === 201) tw.add(`${O}/${P}`);
+    r = await call("POST", `/v1/monorepos/${O}/${P}/repos`, S, { path: "projects/pando" });
+    const purl = r.json?.clone_url;
+    check("a monorepo with Pando's code at projects/pando", r.status === 201 && r.json?.name === "projects-pando");
+    // Its main: the cli's source and the script, as on projects/pando's main.
+    const code = join(work, "pando-code");
+    const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+    mkdirSync(join(code, "tools"), { recursive: true });
+    spawnSync("cp", ["-R", join(repoRoot, "cli"), join(code, "cli")]);
+    spawnSync("cp", [join(repoRoot, "tools/release.sh"), join(code, "tools/release.sh")]);
+    git(["init", "-q"], code);
+    git(["add", "-A"], code);
+    git(["commit", "-qm", "the cli"], code);
+    check("its main pushed", git(["push", "-q", purl, "main"], code).status === 0);
+    const run = spawnSync(join(code, "tools/release.sh"), ["v0.1.0", "--force"], {
+      cwd: code, encoding: "utf8", timeout: 600_000,
+      // Go's caches stay the user's own (not the test HOME's), so nothing is downloaded again.
+      env: { ...pandoEnv, ...goCaches(), PATH: `${work}:${process.env.PATH}`, PANDO_RELEASE_MONOREPO: `${O}/${P}`, PANDO_RELEASE_REPO: "projects/pando" },
+    });
+    check("tools/release.sh builds four binaries and publishes v0.1.0 with them", run.status === 0 && run.stdout.includes("Published v0.1.0") && (run.stdout.match(/^Uploaded /gm) ?? []).length === 5, said(run));
+    const pbase = `/v1/monorepos/${O}/${P}/repos/projects-pando`;
+    r = await call("GET", `${pbase}/releases/v0.1.0`, S);
+    check("the release: its commit is main's, five files", r.json?.sha === sha(code) && r.json.files.map((f) => f.name).join() === "SHA256SUMS,pando-darwin-amd64,pando-darwin-arm64,pando-linux-amd64,pando-linux-arm64" && r.json.files.every((f) => f.size > 0 && f.size < 100_000_000));
+    await call("PATCH", pbase, S, { releases_public: true });
+    // The docs' install command, without signing in (the platform names as uname gives them on this Mac).
+    const bin2 = join(work, "installed", "pando");
+    mkdirSync(join(work, "installed"));
+    const install = spawnSync("sh", ["-c", `curl -fsSL -o "${bin2}" "${URL_}${pbase}/releases/latest/files/pando-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && chmod +x "${bin2}" && "${bin2}" help`], { encoding: "utf8", env: { ...pandoEnv } });
+    check("the install command downloads this Mac's pando from the latest release, and it runs", install.status !== null && /pando release create <tag>/.test(install.stderr), said(install));
+  }
+
   cmd = pando(["help"]);
   check("pando help lists pando release", /pando release list \| view/.test(cmd.stderr) && /pando release create <tag>/.test(cmd.stderr), said(cmd));
 } catch (err) {
@@ -523,6 +566,8 @@ try {
 } finally {
   check("this run's repositories are deleted", await tw.cleanup());
   server.close();
+  // Anything read-only under the test's folder (a Go cache) is made writable first.
+  spawnSync("chmod", ["-R", "u+w", work]);
   rmSync(work, { recursive: true, force: true });
 }
 

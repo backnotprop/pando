@@ -1,6 +1,6 @@
 // The deployed check: one agent with the default model (GLM-5.3 Flash) on a
 // throwaway repository on a deployed Pando, through Pando's own launch
-// route. It reports the container's start, how the workspace held the
+// route, on a branch named for the change (fix-readme-spelling). It reports the container's start, how the workspace held the
 // branch, the model calls and their price, and the agent.updated states it
 // saw; then it stops the session, revokes its credential and deletes the
 // repository. It costs real money (under a cent): run it by hand.
@@ -68,6 +68,9 @@ const full = `${me.login}/${name}`;
 
 let launchedAt = 0;
 
+/** The session's number once Pando took the launch (201); a refused launch made none. */
+let launched = null;
+
 let made = false;
 
 const frames = [];
@@ -102,19 +105,23 @@ try {
   });
 
   launchedAt = Date.now();
-  r = await call("POST", `/v1/monorepos/${full}/agents`, { prompt: "README.md has a spelling mistake on its last line. Fix it, commit with a short message, push your branch, then merge it with the merge tool. Then say in one sentence what you did." });
+  r = await call("POST", `/v1/monorepos/${full}/agents`, {
+    branch: "fix-readme-spelling",
+    prompt: "README.md has a spelling mistake on its last line. Fix it, commit with a short message, push your branch, then merge it with the merge tool. Then say in one sentence what you did.",
+  });
   say(`launch: ${r.status} ${JSON.stringify(r.json)}`);
 
   if (r.status !== 201) throw new Error("the launch was refused");
+  launched = r.json.number;
 
   do {
     await sleep(2000);
-    r = await call("GET", `/v1/monorepos/${full}/agents/1`);
+    r = await call("GET", `/v1/monorepos/${full}/agents/${launched}`);
   } while (r.json?.status === "working" && Date.now() - launchedAt < 600_000);
 
   say(`end: ${Math.round((Date.now() - launchedAt) / 1000)} s after the launch, ${JSON.stringify(r.json)}`);
 
-  const tr = (await call("GET", `/v1/monorepos/${full}/agents/1/transcript`)).json?.messages ?? [];
+  const tr = (await call("GET", `/v1/monorepos/${full}/agents/${launched}/transcript`)).json?.messages ?? [];
   const usage = { input: 0, cache_read: 0, output: 0, calls: 0 };
   let firstSandbox = null;
   let lastCall = null;
@@ -151,13 +158,14 @@ try {
 } finally {
   ws?.close();
 
-  if (launchedAt) {
-    const s = await call("POST", `/v1/monorepos/${full}/agents/1/stop`);
+  // Only a launch Pando took has a session to stop and a credential to revoke.
+  if (launched !== null) {
+    const s = await call("POST", `/v1/monorepos/${full}/agents/${launched}/stop`);
     say(`stop: ${s.status} ${s.json?.status ?? ""}`);
     const creds = (await call("GET", "/v1/user/credentials")).json?.credentials ?? [];
-    const cred = creds.find((c) => c.name === "cloud-1" && Date.parse(c.created_at) >= launchedAt - 60_000);
+    const cred = creds.find((c) => c.name === `cloud-${launched}` && Date.parse(c.created_at) >= launchedAt - 60_000);
     const v = cred ? await call("DELETE", `/v1/user/credentials/${cred.id}`) : { status: "none found" };
-    say(`revoke cloud-1: ${v.status}`);
+    say(`revoke cloud-${launched}: ${v.status}`);
   }
 
   if (made) {

@@ -10,15 +10,12 @@ import { Markdown } from "../routes/$owner/$name/-issues/Markdown";
 import { Avatar } from "../ui/Avatar";
 import { CheckIcon, Chevron } from "../ui/Icons";
 import { Leaf } from "../ui/Leaf";
+import { clock as hhmm } from "../ui/time";
 import { failedVerb, foldParts, presentVerb, type StepWords, stepWords } from "./rules";
 import type { ConversationItem, PromptItem, StepItem } from "./shape";
 
 /** A kept output's lines shown before "Show all". */
 const OUT_LINES = 12;
-
-const clockTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-
-const hhmm = (at: number) => clockTime.format(at);
 
 const lineCls = "flex min-w-0 items-center gap-[7px] text-[13px] leading-5 text-ash";
 

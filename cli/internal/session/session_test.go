@@ -71,7 +71,7 @@ func TestReadPieceCap(t *testing.T) {
 
 func TestReadPieceDroppedLinesStillMoveOn(t *testing.T) {
 	p := writeFile(t, "{\"type\":\"response_item\",\"payload\":{\"type\":\"reasoning\"}}\n")
-	got, _ := ReadPiece(p, 0, PieceMax, func(b []byte) ([]byte, bool, error) { return Trim(b, noRedact) })
+	got, _ := ReadPiece(p, 0, PieceMax, func(b []byte) ([]byte, bool, error) { return Trim(Codex, b, noRedact) })
 	if len(got.Lines) != 0 || got.Next != int64(len("{\"type\":\"response_item\",\"payload\":{\"type\":\"reasoning\"}}\n")) {
 		t.Fatalf("a reasoning line is read and not sent; the end still moves: %+v", got)
 	}
@@ -84,7 +84,7 @@ func TestTrim(t *testing.T) {
 	sig := strings.Repeat("aB3+", 60)
 	long := strings.Repeat("é", 40000) // 80,000 bytes
 	line := `{"type":"assistant","n":12345678901234567890,"message":{"content":[{"type":"thinking","thinking":"hidden","signature":"` + sig + `"},{"type":"text","text":"shown <b>"},{"type":"image","source":"` + img + `"}],"big":"` + long + `"}}`
-	out, keep, err := Trim([]byte(line), noRedact)
+	out, keep, err := Trim(ClaudeCode, []byte(line), noRedact)
 	if err != nil || !keep {
 		t.Fatal(keep, err)
 	}
@@ -101,8 +101,72 @@ func TestTrim(t *testing.T) {
 	case len(s) > 70000:
 		t.Errorf("a string over 64 KB is cut (%d bytes)", len(s))
 	}
-	if _, keep, _ := Trim([]byte("not json"), noRedact); keep {
+	if _, keep, _ := Trim(ClaudeCode, []byte("not json"), noRedact); keep {
 		t.Error("a line that is not JSON is not sent")
+	}
+}
+
+// An agent's own ids are kept as written: they pair a tool call with its result. A token anywhere else still goes.
+func TestIdsAreNotSecrets(t *testing.T) {
+	r, err := NewRedactor("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := "toolu_01Xq7RbT9kLmN3pVw2ZcYd8F"
+	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"` + tok + `","content":"key ` + tok + `"}]}}`
+	out, _, err := Trim(ClaudeCode, []byte(line), r.Redact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"tool_use_id":"`+tok+`"`) || strings.Count(string(out), tok) != 1 {
+		t.Errorf("the id stays, the same run in text goes: %s", out)
+	}
+}
+
+// Only the conversation leaves the machine: each agent's own bookkeeping (the signed-in email, the system prompt, the
+// skills, the instructions, account ids) stays home, and so does a record kind not listed.
+func TestOnlyTheConversationIsSent(t *testing.T) {
+	cases := []struct {
+		program, line string
+		sent          bool
+		has, lost     []string
+	}{
+		{ClaudeCode, `{"type":"user","cwd":"/w","message":{"role":"user","content":"Placeholder"}}`, true, []string{"Placeholder", `"cwd":"/w"`}, nil},
+		{ClaudeCode, `{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"ok"}]}}`, true, []string{`"model":"m"`}, nil},
+		{ClaudeCode, `{"type":"attachment","attachment":{"type":"session_context","context":{"email":"a@b.c"}}}`, false, nil, nil},
+		{ClaudeCode, `{"type":"attachment","attachment":{"type":"prompt_snapshot","systemPrompt":["You are"]}}`, false, nil, nil},
+		{ClaudeCode, `{"type":"cost-state","totalCostUSD":1}`, false, nil, nil},
+		{ClaudeCode, `{"type":"some-new-kind"}`, false, nil, nil},
+		{Codex, `{"type":"session_meta","payload":{"id":"t1","cwd":"/w","timestamp":"x","creator_account_id":"acct","base_instructions":{"text":"You are"},"source":{"subagent":{"thread_spawn":{"parent_thread_id":"p1"}}},"git":{"branch":"b","repository_url":"git@x:y"}}}`, true, []string{`"id":"t1"`, `"cwd":"/w"`, `"parent_thread_id":"p1"`, `"branch":"b"`}, []string{"acct", "You are", "repository_url"}},
+		{Codex, `{"type":"turn_context","payload":{"turn_id":"u","cwd":"/w","model":"gpt-6","timezone":"Z","workspace_roots":["/Users/x"]}}`, true, []string{`"model":"gpt-6"`}, []string{"timezone", "/Users/x"}},
+		{Codex, `{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"skills"}]}}`, false, nil, nil},
+		{Codex, `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>
+<cwd>/w</cwd>"}]}}`, false, nil, nil},
+		{Codex, `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /w"},{"type":"input_text","text":"Placeholder"}]}}`, true, []string{"Placeholder"}, []string{"AGENTS.md"}},
+		{Codex, `{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"{}"}}`, true, []string{`"name":"exec"`}, nil},
+		{Codex, `{"type":"world_state","payload":{"state":{}}}`, false, nil, nil},
+		{Codex, `{"type":"event_msg","payload":{"type":"token_count"}}`, false, nil, nil},
+		{Pi, `{"type":"session","id":"p","cwd":"/w"}`, true, nil, nil},
+		{Pi, `{"type":"thinking_level_change","thinkingLevel":"high"}`, false, nil, nil},
+		{OpenCode, `{"type":"assistant","id":"m","seq":2,"data":{}}`, true, nil, nil},
+		{OpenCode, `{"type":"idle","id":"m","seq":3,"data":{}}`, false, nil, nil},
+	}
+	for _, c := range cases {
+		out, keep, err := Trim(c.program, []byte(c.line), noRedact)
+		if err != nil || keep != c.sent {
+			t.Errorf("%s %s: sent %v, want %v (%v)", c.program, c.line[:40], keep, c.sent, err)
+			continue
+		}
+		for _, w := range c.has {
+			if !strings.Contains(string(out), w) {
+				t.Errorf("%s: %q is kept: %s", c.program, w, out)
+			}
+		}
+		for _, w := range c.lost {
+			if strings.Contains(string(out), w) {
+				t.Errorf("%s: %q stays home: %s", c.program, w, out)
+			}
+		}
 	}
 }
 

@@ -20,18 +20,16 @@ import { button, Refusal } from "../../../../ui/controls";
 import { NotFoundPage } from "../../../../ui/pages";
 import { branchLink, codeBlobLink, codeLink, issueLink, sessionsLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
+import { clock } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
 import { SessionTalk } from "./Talk";
-import { clockTime, span } from "./Row";
-
-const dateTime = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+import { dayClock, sameDay, span } from "./Row";
 
 /** "Oct 4, 09:12 to 11:22, 2 h 10 min" (the end's date only when it is another day). */
 function when(s: Session): string {
   if (!s.started_at || !s.last_at) return "";
-  const sameDay = s.started_at.slice(0, 10) === s.last_at.slice(0, 10);
 
-  return `${dateTime.format(Date.parse(s.started_at))} to ${sameDay ? clockTime(s.last_at) : dateTime.format(Date.parse(s.last_at))}, ${span(s.started_at, s.last_at)}`;
+  return `${dayClock(s.started_at)} to ${sameDay(s.started_at, s.last_at) ? clock(s.last_at) : dayClock(s.last_at)}, ${span(s.started_at, s.last_at)}`;
 }
 
 const sep = <span aria-hidden="true" className="text-ash"> · </span>;
@@ -85,7 +83,7 @@ function CommitList({ commits, paths }: { commits: readonly SessionCommit[]; pat
             )}
             <span className="text-bark">{c.title}</span>
             <span className="col-start-2 flex flex-wrap gap-x-2.5 text-[12.5px] text-ash">
-              <span>{clockTime(c.committed_at)}</span>
+              <span>{clock(c.committed_at)}</span>
               {c.on_main ? <span>on main</span> : null}
               <CommitChecks repo={c.repo} sha={c.sha} />
             </span>
@@ -215,7 +213,7 @@ function Deleted({ s, paths }: { s: Extract<NonNullable<ReturnType<typeof useSes
     <>
       <h1 className="text-[26px] leading-8 tracking-[-.018em]">Session deleted</h1>
       <p className="mt-2 text-[14px] text-bark-dim">
-        Deleted by <span className="font-semibold text-bark">{s.deleted_by}</span>, {dateTime.format(Date.parse(s.deleted_at))}. Its prompts, answers and tool calls are gone.
+        Deleted by <span className="font-semibold text-bark">{s.deleted_by}</span>, {dayClock(s.deleted_at)}. Its prompts, answers and tool calls are gone.
       </p>
       {s.commits.length ? (
         <section aria-label="Commits that name it" className="mt-8 max-w-[640px]">

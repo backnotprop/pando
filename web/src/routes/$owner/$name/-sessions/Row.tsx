@@ -11,7 +11,7 @@ import { AgentMark, agentAndModel, modelName } from "../../../../ui/AgentMark";
 import { Avatar } from "../../../../ui/Avatar";
 import { branchLink, issueLink, sessionLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
-import { ago, useNow } from "../../../../ui/time";
+import { ago, clock, useNow } from "../../../../ui/time";
 
 /**
  * The table: mark, lead, issue, agent, who, commits, time, as the Agents table sizes its columns. `numbered` puts the
@@ -26,7 +26,7 @@ export const sessionTable = (numbered = false) =>
 // the issue) sit above it.
 const ROW = "relative col-span-full grid grid-cols-subgrid items-center min-h-[46px] border-t border-rule-faint px-1 text-[13.5px] text-bark-dim phone:gap-y-0.5 phone:py-2.5 [&>span]:pointer-events-none [&_a]:pointer-events-auto";
 
-const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const monthDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
 /** "12 min", "2 h 10 min", "1 d 3 h": a span on the clock, idle time included (DETERMINISM.md row 8). */
 export function span(fromIso: string, toIso: string): string {
@@ -49,24 +49,28 @@ export function commitsText(commits: Session["commits"]): string {
   return `${commits.length} commit${commits.length === 1 ? "" : "s"}${on ? `, ${on} on main` : ""}`;
 }
 
-export const clockTime = (iso: string) => time.format(Date.parse(iso));
+/** "Oct 4, 09:12": a day and its time (the time through the shared clock). */
+export const dayClock = (iso: string) => `${monthDay.format(Date.parse(iso))}, ${clock(iso)}`;
+
+/** Whether two times fall on the same day, in the browser's zone. */
+export const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
 
 /** Active: "active · 2 min ago"; else its start and span, "14:31 · 12 min". */
 export function When({ s }: { s: Session }) {
-  const clock = useNow();
+  const now = useNow();
 
   if (s.state === "active" && s.last_at) {
     return (
       <span className="inline-flex items-center gap-1.5 text-bark">
         <span aria-hidden="true" className="inline-block size-[9px] rounded-full border-2 border-bark-dim bg-bark" />
-        active · {ago(s.last_at, clock)}
+        active · {ago(s.last_at, now)}
       </span>
     );
   }
 
   return (
     <span className="text-ash">
-      {s.started_at ? clockTime(s.started_at) : ""}
+      {s.started_at ? clock(s.started_at) : ""}
       {s.started_at && s.last_at ? ` · ${span(s.started_at, s.last_at)}` : ""}
     </span>
   );

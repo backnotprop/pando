@@ -108,3 +108,19 @@ on pando-dev (the release script defaults to ramos/pando, projects/pando,
 repo name projects-pando). The deployment's release is filled in by the
 server when a published release sits at $S. The version_metadata binding
 needs no new resource; the first deploy with this branch adds it.
+- Stage 6 (6bccdd7): site/docs Releases page, Get started's install command
+  (from ramos/pando projects/pando's latest release; works once v0.1.0 is
+  published there and its switch is on), release limits, pando release in
+  the CLI page, the changelog. New Buildkite hooks default to push and
+  merged (pando ci pipeline add, the CI tab's Add pipeline); hooks made
+  before keep push only (the docs say to add the pipeline again).
+- Final run on 6bccdd7: releases.mjs 99/99, e2e.mjs 94/94, ci.mjs 112/112,
+  hooks.mjs 22/22, vitest 107/107, contract 159/159, lint clean, docs check
+  clean, web tsc clean. Dev server stopped.
+- Waiting: the owner's look at research/design/pando-ui-2026-10-03/releases/
+  INDEX.html, then the web build (Releases tab, release page, strip,
+  Settings switch, Routes in packages/contract/src/routes.ts, a Playwright
+  slice).
+- Not built (after the cut, as decided): Cloudflare's own CI runner, "Deploy
+  this release", CI uploading files with its token, the deployments strip,
+  mirroring tags to GitHub (a gap for the mirror lane), `pando version`.

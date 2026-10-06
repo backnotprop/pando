@@ -6,20 +6,20 @@
     "tags": [
       {
         "name": "v0.0.2",
-        "sha": "d16557bb22b47b266c4d4ea597e0c87fa4c03dac",
+        "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
         "annotated": true,
-        "created_by": "rel-muw5kvc3",
-        "created_at": "2026-10-06T04:03:04.239Z",
-        "updated_at": "2026-10-06T04:03:04.239Z",
+        "created_by": "rel-muw5rrqb",
+        "created_at": "2026-10-06T04:08:26.336Z",
+        "updated_at": "2026-10-06T04:08:26.336Z",
         "frozen": false
       },
       {
         "name": "v0.0.1",
-        "sha": "d16557bb22b47b266c4d4ea597e0c87fa4c03dac",
+        "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
         "annotated": false,
-        "created_by": "rel-muw5kvc3",
-        "created_at": "2026-10-06T04:03:04.239Z",
-        "updated_at": "2026-10-06T04:03:04.239Z",
+        "created_by": "rel-muw5rrqb",
+        "created_at": "2026-10-06T04:08:26.336Z",
+        "updated_at": "2026-10-06T04:08:26.336Z",
         "frozen": false
       }
     ]

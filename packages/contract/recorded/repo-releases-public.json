@@ -3,18 +3,18 @@
   "route": "GET .../repos/{repo} (the switch on)",
   "status": 200,
   "body": {
-    "monorepo": "rel-muw5kvc3/rel-muw5kvc3",
-    "name": "rel-muw5kvc3",
+    "monorepo": "rel-muw5rrqb/rel-muw5rrqb",
+    "name": "rel-muw5rrqb",
     "path": ".",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8867/rel-muw5kvc3/rel-muw5kvc3.git",
+    "clone_url": "http://localhost:8867/rel-muw5rrqb/rel-muw5rrqb.git",
     "required_checks": [
       "ci"
     ],
     "checks_unknown": null,
-    "created_at": "2026-10-06T04:02:51.912Z",
-    "created_by": "rel-muw5kvc3",
+    "created_at": "2026-10-06T04:08:14.787Z",
+    "created_by": "rel-muw5rrqb",
     "releases_public": true
   }
 }

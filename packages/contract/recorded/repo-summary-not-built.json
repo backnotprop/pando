@@ -3,14 +3,14 @@
   "route": "GET .../repos/{repo}/summary (nothing reported)",
   "status": 200,
   "body": {
-    "repo": "rel-muw5kvc3",
+    "repo": "rel-muw5rrqb",
     "main": {
       "branch": "main",
-      "sha": "d235163410f9a47b77ece051156f0debeeac1792",
+      "sha": "6696bd12dbd2d91e3a5dfa657ea9b6104bbafba3",
       "title": "first",
       "state": "not_built",
       "checks": {
-        "sha": "d235163410f9a47b77ece051156f0debeeac1792",
+        "sha": "6696bd12dbd2d91e3a5dfa657ea9b6104bbafba3",
         "state": "success",
         "required": [],
         "missing": [],

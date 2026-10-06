@@ -7,17 +7,26 @@
     "kind": "issue",
     "status": "waiting",
     "reason": null,
-    "repo": "agents-s4-muviwfbq",
+    "repo": "agents-s4-muvmv313",
     "branch": "1-the-readme-has-a-typo",
     "program": "pi",
     "model": "scripted",
     "issue": 1,
-    "launched_by": "agents-s4-muviwfbq",
+    "launched_by": "agents-s4-muvmv313",
     "machine": "cloud-1",
     "workspace": "mount",
     "awaiting_checks": true,
     "first_message": null,
-    "created_at": "2026-10-05T17:28:00.920Z",
-    "updated_at": "2026-10-05T17:28:09.333Z"
+    "created_at": "2026-10-05T19:18:56.944Z",
+    "updated_at": "2026-10-05T19:19:06.154Z",
+    "branch_facts": {
+      "state": "open",
+      "ahead": 0,
+      "stale": true,
+      "merged_at": null,
+      "checks": "missing"
+    },
+    "issue_title": "The README has a typo",
+    "issue_state": "open"
   }
 }

@@ -70,7 +70,23 @@ test("agents, piece 2: Address with agent on an issue, its Agents block, live to
     await expect(agents).toContainText(`ann-${id} on cloud-1`);
     // Live: the agent's comment as Ann from cloud-1, its merge, and the issue closing, with no reload.
     await expect(page.getByText("Fixed the typo.")).toBeVisible({ timeout: 180_000 });
-    await expect(page.getByRole("status", { name: "State" })).toHaveText("Closed", { timeout: 60_000 });
+
+    // The comment is posted just before the merge; Pando closes the issue about a second after the merge
+    // lands. A merge Pando refused (the agent's tool retries a 503, Artifacts busy) never closes it: say
+    // what the merge step answered.
+    const merged = async () => {
+      const t = await (await page.request.get(`/v1/monorepos/${full}/agents/1/transcript`)).json();
+      const parts = t.messages.flatMap((m: { parts: { type: string; name?: string; text?: string }[] }) => m.parts);
+
+      return parts.findLast((p: { type: string; name?: string }) => p.type === "tool-result" && p.name === "merge")?.text ?? "no merge step yet";
+    };
+
+    try {
+      await expect(page.getByRole("status", { name: "State" })).toHaveText("Closed", { timeout: 60_000 });
+    } catch (error) {
+      throw new Error(`the issue did not close; the merge step answered: ${await merged()}`, { cause: error });
+    }
+
     await expect(page.getByRole("region", { name: "Development" })).toContainText("1-the-readme-has-a-typo");
     await expect(page.getByRole("button", { name: "Address with agent" })).toHaveCount(0);
     expect(errors).toEqual([]);

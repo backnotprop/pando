@@ -163,9 +163,9 @@ try {
     const s = await call("POST", `/v1/monorepos/${full}/agents/${launched}/stop`);
     say(`stop: ${s.status} ${s.json?.status ?? ""}`);
     const creds = (await call("GET", "/v1/user/credentials")).json?.credentials ?? [];
-    const cred = creds.find((c) => c.name === "cloud-1" && Date.parse(c.created_at) >= launchedAt - 60_000);
+    const cred = creds.find((c) => c.name === `cloud-${launched}` && Date.parse(c.created_at) >= launchedAt - 60_000);
     const v = cred ? await call("DELETE", `/v1/user/credentials/${cred.id}`) : { status: "none found" };
-    say(`revoke cloud-1: ${v.status}`);
+    say(`revoke cloud-${launched}: ${v.status}`);
   }
 
   if (made) {

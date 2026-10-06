@@ -9,7 +9,7 @@
 // so nothing of this machine's own agents is read. Credentials are never printed. It deletes its monorepo.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -294,6 +294,41 @@ sys.exit(os.waitstatus_to_exitcode(status))
   addRow.run("msg_streaming", ocHead.id, "assistant", lastSeq + 3, Date.now(), Date.now(), JSON.stringify({ time: { created: Date.now() }, model: { id: "big-pickle", providerID: "opencode" }, content: [{ type: "text", text: "Placeholder answer, still streaming" }] }));
   const ocId = sessionId("opencode", ocHead.id);
 
+  // Claude Code in the worktree and Codex in the repository folder, from their own fixtures, each with bookkeeping the
+  // agent also writes (an email, instructions, about 60 KB): only the conversation is sent.
+  const pad = "Placeholder instructions text. ".repeat(2000);
+
+  const moved = (name, folder, agoMs) => {
+    const raw = fixture(name).replaceAll("/fixture/repo", folder).split("\n").filter(Boolean);
+    const last = Math.max(...raw.map((l) => Date.parse(JSON.parse(l).timestamp)));
+
+    return raw.map((l) => shift(l, Date.now() - agoMs - last));
+  };
+
+  // Claude Code names its folder, and writes cwd, from the resolved path (/private/var/... on a Mac).
+  const wtReal = realpathSync(wt);
+  const ccLines = moved("claude-code.jsonl", wtReal, 90_000);
+  const ccAgent = JSON.parse(ccLines[0]).sessionId;
+  const ccDir = join(HOME, ".claude", "projects", wtReal.replace(/[^A-Za-z0-9]/g, "-"));
+  const ccBook = { type: "attachment", cwd: wtReal, sessionId: ccAgent, timestamp: JSON.parse(ccLines[0]).timestamp, attachment: { type: "session_context", context: { email: "person@example.com", text: pad } } };
+  mkdirSync(ccDir, { recursive: true });
+  writeFileSync(join(ccDir, `${ccAgent}.jsonl`), [ccLines[0], JSON.stringify(ccBook), ...ccLines.slice(1)].join("\n") + "\n");
+  const ccId = sessionId("claude-code", ccAgent);
+  const cxLines = moved("codex.jsonl", mono, 100_000);
+  const cxAgent = JSON.parse(cxLines[0]).payload.id;
+  const cxDir = join(HOME, ".codex", "sessions", "2026", "10", "06");
+  const at0 = JSON.parse(cxLines[0]).timestamp;
+
+  const cxBook = [
+    { timestamp: at0, type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: `# AGENTS.md instructions for ${mono} person@example.com ${pad}` }] } },
+    { timestamp: at0, type: "world_state", payload: { full: true, state: { home: "/Users/person", text: pad } } },
+  ];
+
+  mkdirSync(cxDir, { recursive: true });
+  writeFileSync(join(cxDir, `rollout-2026-10-06T07-53-09-${cxAgent}.jsonl`), [cxLines[0], ...cxBook.map((b) => JSON.stringify(b)), ...cxLines.slice(1)].join("\n") + "\n");
+  const cxId = sessionId("codex", cxAgent);
+  const conversationBytes = (lines) => Buffer.byteLength(lines.join("\n"));
+
   // A session elsewhere on this machine: never sent.
   const otherHead = { ...piHead, id: "elsewhere-1", cwd: join(work, "not-pando") };
   writeFileSync(join(piDir, "elsewhere.jsonl"), [JSON.stringify(otherHead), ...piLines.slice(1, 4).map((l) => shift(l, piShift))].join("\n") + "\n");
@@ -315,8 +350,28 @@ sys.exit(os.waitstatus_to_exitcode(status))
   });
 
   check("and the OpenCode V2 session from the repository folder", ocView?.repo === null && ocView.branch === null && ocView.prompts === 2 && ocView.end === lastSeq, `${ocView?.end} vs ${lastSeq}`);
+
+  const ccView = await waitFor(async () => {
+    const v = (await call("GET", `/v1/monorepos/${full}/sessions/${ccId}`, S)).json;
+
+    return v?.prompts === 2 ? v : null;
+  });
+
+  check("and the Claude Code session from the worktree, with its model", ccView?.repo === "projects-app" && ccView.branch === "fix-login" && ccView.models?.[0]?.model === "claude-haiku-4-5-20251001", JSON.stringify(ccView ?? {}).slice(0, 200));
+  check("Claude Code's own bookkeeping (the email, 60 KB) stays home: only the conversation is stored", ccView?.bytes > 0 && ccView.bytes < conversationBytes(ccLines) + 2_000, `${ccView?.bytes} vs ${conversationBytes(ccLines)}`);
+
+  const cxView = await waitFor(async () => {
+    const v = (await call("GET", `/v1/monorepos/${full}/sessions/${cxId}`, S)).json;
+
+    return v?.prompts === 2 ? v : null;
+  });
+
+  check("and the Codex session from the repository folder, with its model", cxView?.repo === null && cxView.models?.[0]?.model === "gpt-6-sol", JSON.stringify(cxView ?? {}).slice(0, 200));
+  check("Codex's instructions and world state stay home: only the conversation is stored", cxView?.bytes > 0 && cxView.bytes < conversationBytes(cxLines) + 2_000, `${cxView?.bytes} vs ${conversationBytes(cxLines)}`);
+  r = await call("GET", `/v1/monorepos/${full}/sessions/${cxId}/entries`, S);
+  check("no instructions, email or home folder in what is read", !/AGENTS\.md|person@example\.com|\/Users\/person/.test(JSON.stringify(r.json)) && r.json?.entries?.some((e) => e.kind === "prompt"), "");
   r = await call("GET", `/v1/monorepos/${full}/sessions`, S);
-  check("only these two: the session in another folder is never sent", r.json?.sessions?.length === 2, `${r.json?.sessions?.length}`);
+  check("only these four: the session in another folder is never sent", r.json?.sessions?.length === 4, `${r.json?.sessions?.length}`);
   db.prepare("UPDATE session_message SET data = ? WHERE id = ?").run(JSON.stringify({ time: { created: Date.now(), completed: Date.now() }, model: { id: "big-pickle", providerID: "opencode" }, content: [{ type: "text", text: "Placeholder answer, done" }] }), "msg_streaming");
 
   const ocDone = await waitFor(async () => {

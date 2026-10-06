@@ -1,5 +1,6 @@
 // Recorded agent sessions for the web's e2e and shots: the sessions recorded for the Worker's tests
-// (worker/test/sessions/fixtures: Pi 0.85.1 and OpenCode V2 2.0.22, placeholder prompts in scratch folders), each
+// (worker/test/sessions/fixtures: Claude Code 2.1.290, Codex 0.160.0, Pi 0.85.1 and OpenCode V2 2.0.22, placeholder
+// prompts in scratch folders, the first two through the machine's own filter), each
 // appended through a machine's credential as `pando sync` sends them, with its agent's own id changed and its times
 // moved so it reads as recorded when the story needs it. Commits that name them are pushed through the git door.
 import { createHash } from "node:crypto";
@@ -8,7 +9,7 @@ import { BASE, type JsonValue } from "./seed";
 
 const FIXTURES = new URL("../../worker/test/sessions/fixtures/", import.meta.url);
 
-export type Fixture = "pi" | "opencode";
+export type Fixture = "claude-code" | "codex" | "pi" | "opencode";
 
 /** A session's id, as the Worker, the hook and `pando sync` derive it. */
 export function sessionId(program: string, agentId: string): string {
@@ -59,10 +60,13 @@ export async function recordSession(secret: string, full: string, fx: Fixture, a
   const lines = readFileSync(new URL(`${fx}.jsonl`, FIXTURES), "utf8").split("\n").filter(Boolean);
   const by = Date.now() - endsAgoMs - Math.max(...lines.map(timeOf));
 
+  // The agent's own id where each agent writes it: Claude Code on every record, Codex in its first line's payload.
   const moved = lines.map((l, i) => {
     const o = JSON.parse(shift(l, by));
 
-    if (i === 0) o.id = agentId;
+    if (fx === "claude-code") o.sessionId = agentId;
+    else if (fx === "codex" && i === 0) o.payload.id = agentId;
+    else if (i === 0) o.id = agentId;
 
     return JSON.stringify(o);
   });

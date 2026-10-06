@@ -70,11 +70,11 @@ async function seed(page: Page, browser: Browser): Promise<Story> {
   const anaMbp = await machine(anaPage, "ana-mbp", "Ana Lopes");
   const where = (branch: string | null) => ({ repo: branch ? "projects-pando" : null, branch });
 
-  const s1 = await recordSession(sandbox.secret, full, "pi", "pi-refresh-1", where("refresh-margin"), 3 * H);
+  const s1 = await recordSession(sandbox.secret, full, "claude-code", "cc-refresh-1", where("refresh-margin"), 3 * H);
   const s4 = await recordSession(sandbox.secret, full, "opencode", "ses_refresh_2", where("refresh-margin"), 2 * H);
   const folder = await recordSession(sandbox.secret, full, "opencode", "ses_folder_1", where(null), 5 * H);
   const quiet = await recordSession(sandbox.secret, full, "opencode", "ses_folder_2", where(null), 6 * H);
-  const anaActive = await recordSession(anaMbp.secret, full, "pi", "pi-rate-1", where("rate-limit"), 2 * 60_000);
+  const anaActive = await recordSession(anaMbp.secret, full, "codex", "codex-rate-1", where("rate-limit"), 2 * 60_000);
 
   await recordSession(sandbox.secret, full, "pi", "pi-docs-1", where("docs-sync"), 26 * H);
 
@@ -141,7 +141,7 @@ test("the Sessions tab: one line per session under day headers, Active and Inact
 
   await expect(row).toContainText("refresh-margin");
   await expect(row).toContainText("#1");
-  await expect(row).toContainText("Pi, GPT-5.5");
+  await expect(row).toContainText("Claude Code, Haiku 4.5");
   await expect(row).toContainText("ramos");
   await expect(row).toContainText("2 commits, 2 on main");
   await expect(today.locator(`li[data-session="${s.quiet}"]`)).toContainText("repository folder");
@@ -180,7 +180,7 @@ test("a session's page: header, its conversation, Remove turn and Delete asked o
   await expect(talk.locator("[data-prompt]")).toHaveCount(2);
   await expect(talk.locator("[data-prompt]").first()).toContainText("Prompt 1");
   await expect(talk.locator("[data-prompt]").first()).toContainText("Placeholder task: create a file a.txt");
-  await expect(talk.getByText("Pi, GPT-5.5").first()).toBeVisible();
+  await expect(talk.getByText("Claude Code, Haiku 4.5").first()).toBeVisible();
   // Remove turn: asked once, then gone for every member; a line keeps its place and the next prompt its number.
   await talk.locator("[data-prompt]").nth(1).getByRole("button", { name: "Remove turn" }).click();
   await expect(page.getByText("Remove prompt 2 and its answers?")).toBeVisible();

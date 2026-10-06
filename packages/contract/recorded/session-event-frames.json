@@ -6,19 +6,19 @@
     {
       "type": "event",
       "seq": 1,
-      "at": "2026-10-05T05:13:21.672Z",
+      "at": "2026-10-06T01:17:00.948Z",
       "kind": "session.started",
       "collection": "sessions",
       "key": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
       "op": "upsert",
       "repo": "projects-a",
-      "actor": "se-a-muusno1y",
+      "actor": "se-a-muvznk0x",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
         "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
         "state": "active",
-        "person": "se-a-muusno1y",
+        "person": "se-a-muvznk0x",
         "machine": "ana-mbp",
         "program": "pi",
         "models": [
@@ -31,8 +31,8 @@
         "branch": "fix-login",
         "parent": null,
         "subagents": 0,
-        "started_at": "2026-10-05T05:12:13.566Z",
-        "last_at": "2026-10-05T05:12:16.015Z",
+        "started_at": "2026-10-06T01:15:52.822Z",
+        "last_at": "2026-10-06T01:15:55.271Z",
         "prompts": 1,
         "tool_calls": 1,
         "images": 0,
@@ -40,25 +40,30 @@
         "bytes": 2003,
         "end": 2003,
         "removed": [],
-        "commits": []
+        "commits": [],
+        "lead": {
+          "repo": "projects-a",
+          "branch": "fix-login"
+        },
+        "issues": []
       }
     },
     {
       "type": "event",
       "seq": 2,
-      "at": "2026-10-05T05:13:21.688Z",
+      "at": "2026-10-06T01:17:00.973Z",
       "kind": "session.updated",
       "collection": "sessions",
       "key": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
       "op": "upsert",
       "repo": "projects-a",
-      "actor": "se-a-muusno1y",
+      "actor": "se-a-muvznk0x",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
         "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
         "state": "active",
-        "person": "se-a-muusno1y",
+        "person": "se-a-muvznk0x",
         "machine": "ana-mbp",
         "program": "pi",
         "models": [
@@ -71,8 +76,8 @@
         "branch": "fix-login",
         "parent": null,
         "subagents": 0,
-        "started_at": "2026-10-05T05:12:13.566Z",
-        "last_at": "2026-10-05T05:12:21.660Z",
+        "started_at": "2026-10-06T01:15:52.822Z",
+        "last_at": "2026-10-06T01:16:00.916Z",
         "prompts": 2,
         "tool_calls": 1,
         "images": 0,
@@ -80,26 +85,32 @@
         "bytes": 3663,
         "end": 3663,
         "removed": [],
-        "commits": []
+        "commits": [],
+        "lead": {
+          "repo": "projects-a",
+          "branch": "fix-login"
+        },
+        "issues": []
       }
     },
     {
       "type": "event",
       "seq": 8,
-      "at": "2026-10-05T05:13:23.198Z",
+      "at": "2026-10-06T01:17:02.454Z",
       "kind": "session.deleted",
       "collection": "sessions",
       "key": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
       "op": "delete",
       "repo": null,
-      "actor": "se-a-muusno1y",
+      "actor": "se-a-muvznk0x",
       "machine": null,
       "agent": null,
       "row": {
         "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
         "state": "deleted",
-        "deleted_by": "se-a-muusno1y",
-        "deleted_at": "2026-10-05T05:13:23.198Z"
+        "deleted_by": "se-a-muvznk0x",
+        "deleted_at": "2026-10-06T01:17:02.454Z",
+        "commits": []
       }
     }
   ]

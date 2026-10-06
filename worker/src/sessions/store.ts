@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS session_commits (
   title TEXT NOT NULL, committed_at TEXT NOT NULL, on_main INTEGER NOT NULL DEFAULT 0, gone INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (session, repo, sha));
 CREATE INDEX IF NOT EXISTS session_commits_branch ON session_commits (repo, branch);
+CREATE INDEX IF NOT EXISTS session_commits_sha ON session_commits (repo, sha);
 CREATE TABLE IF NOT EXISTS session_removals (
   session TEXT NOT NULL, prompt INTEGER NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL,
   PRIMARY KEY (session, prompt))
@@ -142,6 +143,9 @@ export interface SessionView {
   end: number;
   removed: RemovedTurn[];
   commits: SessionCommit[];
+  /** The branch its row leads with: the branch of its earliest commit, else where it ran (DETERMINISM.md row 23). */
+  lead: { repo: string | null; branch: string | null };
+  issues: SessionIssue[];
 }
 
 export interface DeletedView {
@@ -149,6 +153,8 @@ export interface DeletedView {
   state: "deleted";
   deleted_by: string;
   deleted_at: string;
+  /** The commits that name it: git keeps their lines (no model: it went with the session). */
+  commits: SessionCommit[];
 }
 
 export interface PieceRow {
@@ -167,7 +173,16 @@ export interface PieceRow {
 
 export interface SessionPage {
   sessions: SessionView[];
+  /** For the same filters, either state. */
+  counts: { active: number; inactive: number };
   next_cursor: string | null;
+}
+
+/** An issue linked to the branch a session leads with (DETERMINISM.md row 26), lowest number first. */
+export interface SessionIssue {
+  number: number;
+  title: string;
+  state: string;
 }
 
 export interface PiecePage {
@@ -215,12 +230,26 @@ export interface PieceReread {
   redactions: number;
 }
 
+/** One commit on main naming a person's session, for the graph: when, which agent, which session. */
+export interface PersonCommit {
+  repo: string;
+  sha: string;
+  at: string;
+  /** Written only from a checked SessionStart (append). */
+  program: Program;
+  session: string;
+}
+
 export interface SessionFilters {
   person: string | null;
   program: string | null;
   repo: string | null;
   branch: string | null;
   state: "active" | "inactive" | null;
+  /** "yes": some commit reached main; "no": none did. */
+  main: "yes" | "no" | null;
+  /** Only sessions whose last record is before this time (Settings' Delete sessions counts them). */
+  before?: string | null;
   cursor: string | null;
   limit: number;
 }
@@ -267,6 +296,10 @@ export interface StoreHooks {
 function gone(id: string): never {
   throw new HttpError(410, "session_deleted", `session ${id} was deleted; nothing more is recorded for it`);
 }
+
+/** The model in force in a commit row's session at its commit's time, as SQL over the row's alias. */
+const modelAt = (alias: string) =>
+  `(SELECT m.model FROM session_model_changes m WHERE m.session = ${alias}.session AND m.at <= ${alias}.committed_at ORDER BY m.at DESC LIMIT 1)`;
 
 export class SessionStore {
   constructor(
@@ -374,8 +407,11 @@ export class SessionStore {
   }
 
   private view(s: SessionRow): SessionView | DeletedView {
-    if (s.deleted_at) return { id: s.id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at };
+    if (s.deleted_at) return { id: s.id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at, commits: this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r)) };
     const active = s.last_at !== null && Date.now() - Date.parse(s.last_at) < ACTIVE_MS;
+    const commits = this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r));
+    const first = commits.find((c) => c.branch !== null);
+    const lead = first ? { repo: first.repo, branch: first.branch } : { repo: s.repo, branch: s.branch };
 
     return {
       id: s.id,
@@ -398,8 +434,17 @@ export class SessionStore {
       bytes: s.bytes,
       end: s.end_cursor,
       removed: this.rows<{ prompt: number; by: string; at: string }>("SELECT prompt, by, at FROM session_removals WHERE session = ? ORDER BY prompt", s.id),
-      commits: this.commitRows("c.session = ?", s.id).map((r) => this.commitOf(r)),
+      commits,
+      lead,
+      issues: lead.repo && lead.branch ? this.issuesOf(lead.repo, lead.branch) : [],
     };
+  }
+
+  private issuesOf(repo: string, branch: string): SessionIssue[] {
+    return this.rows<SessionIssue & Row>(
+      "SELECT DISTINCT i.number, i.title, i.state FROM issue_links l JOIN issues i ON i.number = l.issue WHERE l.repo = ? AND l.branch = ? ORDER BY i.number",
+      repo, branch,
+    );
   }
 
   get(id: string): SessionView | DeletedView {
@@ -430,7 +475,18 @@ export class SessionStore {
       args.push(f.repo, f.repo);
     }
 
+    if (f.before) {
+      where.push("last_at < ?");
+      args.push(f.before);
+    }
+
+    if (f.main !== null) where.push(`id ${f.main === "yes" ? "IN" : "NOT IN"} (SELECT session FROM session_commits WHERE on_main = 1)`);
     const since = new Date(Date.now() - ACTIVE_MS).toISOString();
+
+    const counts = this.row<{ active: number; inactive: number }>(
+      `SELECT COALESCE(SUM(last_at > ?), 0) AS active, COALESCE(SUM(last_at <= ?), 0) AS inactive FROM sessions WHERE ${where.join(" AND ")}`,
+      since, since, ...args,
+    )!;
 
     if (f.state === "active") {
       where.push("last_at > ?");
@@ -453,6 +509,7 @@ export class SessionStore {
     return {
       // SAFETY: deleted rows are excluded by the query, so every view is a SessionView.
       sessions: page.map((r) => this.view(r) as SessionView),
+      counts,
       next_cursor: rows.length > f.limit && last ? `${last.last_at}|${last.id}` : null,
     };
   }
@@ -480,6 +537,11 @@ export class SessionStore {
   /** Every piece, for a reindex or a turn's removal. */
   allPieces(id: string): PieceRow[] {
     return this.pieces(id, 0, Number.MAX_SAFE_INTEGER).pieces;
+  }
+
+  /** When the answering model changed, oldest first: each answer's model is the last change at or before it. */
+  modelChanges(id: string): { at: string; model: string }[] {
+    return this.rows<{ at: string; model: string } & Row>("SELECT at, model FROM session_model_changes WHERE session = ? ORDER BY at", id);
   }
 
   /** Removed turns, as the reader places their marks. */
@@ -510,7 +572,11 @@ export class SessionStore {
 
     if (!s) throw new HttpError(404, "not_found", `no session ${id}`);
 
-    if (s.deleted_at) return { id, state: "deleted", deleted_by: s.deleted_by ?? "", deleted_at: s.deleted_at };
+    if (s.deleted_at) {
+      // SAFETY: view() answers a DeletedView for a row with deleted_at.
+      return this.view(s) as DeletedView;
+    }
+
     this.mayChange(s, login, owner);
     const t = now();
 
@@ -520,10 +586,41 @@ export class SessionStore {
        last_at = NULL, model = NULL, prompts = 0, tool_calls = 0, images = 0, redactions = 0, bytes = 0, deleted_by = ?, deleted_at = ? WHERE id = ?`,
       login, t, id,
     );
-    const view: DeletedView = { id, state: "deleted", deleted_by: login, deleted_at: t };
+    const view: DeletedView = { id, state: "deleted", deleted_by: login, deleted_at: t, commits: this.commitRows("c.session = ?", id).map((r) => this.commitOf(r)) };
     this.hooks.publish({ kind: "session.deleted", collection: "sessions", key: id, op: "delete", repo: s.repo, actor: login, machine: null, agent: null, row: view, topics: ["sessions", `session:${id}`] });
 
     return view;
+  }
+
+  /**
+   * Delete many at once (Settings): the caller's own, or with `everyone` (an owner only) everybody's, in one project
+   * (its repo's name; null: anywhere) whose last record is older than `before` (null: any age). Each as `delete` does.
+   */
+  deleteMany(login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null): string[] {
+    if (everyone && !owner) throw new HttpError(403, "owner_only", "only an owner can delete everyone's sessions");
+    const where = ["deleted_at IS NULL"];
+    const args: SqlStorageValue[] = [];
+
+    if (!everyone) {
+      where.push("person = ?");
+      args.push(login);
+    }
+
+    if (repo !== null) {
+      where.push("repo = ?");
+      args.push(repo);
+    }
+
+    if (before !== null) {
+      where.push("last_at < ?");
+      args.push(before);
+    }
+
+    const ids = this.rows<{ id: string }>(`SELECT id FROM sessions WHERE ${where.join(" AND ")}`, ...args).map((r) => r.id);
+
+    for (const id of ids) this.delete(id, login, owner);
+
+    return ids;
   }
 
   /** Check a turn may be removed by this person; its prompt must exist and not be removed already. */
@@ -598,12 +695,19 @@ export class SessionStore {
     return view;
   }
 
-  /** Commit rows with the model in force at each commit's time (DETERMINISM.md row 22): the last change at or before it. */
+  /**
+   * Commit rows, oldest first: by committer time, then (git's times are whole seconds) the branch's own order, then sha.
+   * Each with its model (DETERMINISM.md row 22): the model in force in its session when it was committed, the last change
+   * at or before it, and only when every session naming the commit had that same model. Sessions that disagree, or one
+   * whose model is not known (deleted, or none recorded yet), leave it with none, in every view.
+   */
   private commitRows(where: string, ...args: SqlStorageValue[]): CommitRow[] {
     return this.rows<CommitRow>(
       `SELECT c.session, c.repo, c.sha, c.line, c.branch, c.ord, c.title, c.committed_at, c.on_main,
-              (SELECT m.model FROM session_model_changes m WHERE m.session = c.session AND m.at <= c.committed_at ORDER BY m.at DESC LIMIT 1) AS model
-       FROM session_commits c WHERE ${where} AND (c.gone = 0 OR c.on_main = 1) ORDER BY c.committed_at, c.sha LIMIT 500`,
+              CASE WHEN EXISTS (SELECT 1 FROM session_commits o WHERE o.repo = c.repo AND o.sha = c.sha AND o.session != c.session
+                                AND (o.gone = 0 OR o.on_main = 1) AND ${modelAt("o")} IS NOT ${modelAt("c")})
+                   THEN NULL ELSE ${modelAt("c")} END AS model
+       FROM session_commits c WHERE ${where} AND (c.gone = 0 OR c.on_main = 1) ORDER BY c.committed_at, COALESCE(c.ord, -1) DESC, c.sha LIMIT 500`,
       ...args,
     );
   }
@@ -703,13 +807,21 @@ export class SessionStore {
       .sort((a, b) => (a[1][0].ord ?? 0) - (b[1][0].ord ?? 0))
       .map(([sha, list]) => {
         const lines = [...list].sort((a, b) => a.line - b.line);
-        const models = new Set(lines.map((r) => r.model));
 
-        // No model when its sessions disagree or one is not known: nothing shown rests on a guess.
-        return { sha, sessions: lines.map((r) => numbers.get(r.session) ?? 0), model: models.size === 1 ? lines[0].model : null };
+        // Every row of a commit carries the same model, none when its sessions disagree (commitRows).
+        return { sha, sessions: lines.map((r) => numbers.get(r.session) ?? 0), model: lines[0].model };
       });
 
     return { sessions, commits };
+  }
+
+  /** A person's commits on main that name their own sessions, since a time: the profile graph's agent marks. */
+  personCommitsOnMain(login: string, since: string): PersonCommit[] {
+    return this.rows<PersonCommit & Row>(
+      `SELECT c.repo, c.sha, MIN(c.committed_at) AS at, s.program, MIN(c.session) AS session FROM session_commits c JOIN sessions s ON s.id = c.session
+       WHERE s.person = ? AND s.deleted_at IS NULL AND c.on_main = 1 AND c.committed_at >= ? GROUP BY c.repo, c.sha, s.program`,
+      login, since,
+    );
   }
 
   private publish(kind: "session.started" | "session.updated", view: SessionView): void {

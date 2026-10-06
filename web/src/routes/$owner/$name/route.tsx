@@ -13,7 +13,7 @@ import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Lnk } from "../../../ui/controls";
 import { Page, Title } from "../../../ui/pages";
-import { agentsLink, blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { agentsLink, blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, sessionsLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -85,6 +85,9 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
     return number ? [ci, { label: pipeline, link: ciPipelineLink(full, pipeline), wide: true }, { label: `#${number}` }] : [ci, { label: pipeline }];
   }
+
+  // sessions / session
+  if (kind === "sessions" && parts.length) return [{ label: "sessions", link: sessionsLink(full) }, { label: "session" }];
 
   return kind ? [{ label: kind }] : [];
 }

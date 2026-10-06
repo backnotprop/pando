@@ -17,10 +17,10 @@ removed).
 | --- | --- |
 | 0. Prove three things | done, accepted by pando-ops 2026-10-05 |
 | 1. Server: store and read | done, reported 2026-10-05. Claude Code and Codex fixtures wait on the owner's fixture logins |
-| 2. Machine: capture | done, reported; waiting for the gate (and for cloud-agents to land, then a merge of main) |
-| 3. Linking | done, reported; waiting for the gate |
-| 4. Web | waits for the owner's approval of the final screens |
-| 5. Docs, limits, recorded fixtures | not started |
+| 2. Machine: capture | done, landed (main bdf147c) |
+| 3. Linking | done, landed with stage 2 (main bdf147c) |
+| 4. Web | built and tested, the conversation wired after main ce9335b |
+| 5. Docs, limits, recorded fixtures | docs and limits done; Claude Code and Codex fixtures wait for the owner's logins |
 
 ## Stage 0 findings (2026-10-05)
 
@@ -338,6 +338,67 @@ stand-in `pi` and `opencode` commit, push, numbering, the model per commit
 and its ambiguity, a force-pushed rewrite, the merge reaching main). The
 issues (40), events (68) and profile (39) suites pass against these changes;
 profile needs `--var WORKOS_API_BASE:http://127.0.0.1:8870` on my ports.
+
+## Stage 4: the web
+
+Built from sessions/INDEX.html's top ("After the owner's second look") and "What gets built", with the owner's
+decisions relayed 2026-10-05.
+
+- `web/src/routes/$owner/$name/-sessions/`: `Row.tsx` (the one-line row, the same everywhere; a phone's second
+  line), `List.tsx` (the repository's tab: Active and Inactive, Person, Agent, Branch, Reached main, Group: Day or
+  Branch, "Latest activity"), `Session.tsx` (the session page: header, Delete asked once, its commits with their own
+  checks, the files in its commits, Not shown, the deleted stub), `Person.tsx` (/{login}/sessions and the profile's
+  latest five), `BranchTab.tsx` (the branch's Sessions tab and the Overview's numbers). Routes:
+  `sessions/index.tsx`, `sessions/$id.tsx`, `$owner/sessions.tsx`, `settings/sessions.tsx`.
+- `web/src/ui/AgentMark.tsx` and `web/src/ui/marks/` (the five SVGs unchanged, with SOURCES.md). Claude and Codex are
+  CSS masks of their files; OpenCode's two shapes and Pi's ten cells are drawn as their files draw them (OpenCode's
+  file has a mask of its own that a CSS mask drops).
+- The profile graph: `GraphAgents` in `-profile/Graph.tsx` (By week: a lane; By day: a mark on each square, the
+  shade at its corners), the switch on the header row, remembered in local storage (`pando-graph-agents`).
+- Server additions for the web: each session's `lead` (its earliest commit's branch, else where it ran) and `issues`;
+  `counts` and the filters `main` and `older_than_days` on the list; `GET .../sessions/{id}/files`; the deleted stub's
+  `commits`; `model_changes` with the conversation's first page; `GET /v1/users/{login}/sessions` (the repositories
+  both people can open, with `counts` and `repositories`) and `GET /v1/users/{login}/session-marks?tz=` (the tie rule
+  in `worker/src/sessions/marks.ts`, unit-tested); `DELETE .../sessions?repo=&older_than_days=&everyone=1`; a
+  machine's `kind`. The repository name `sessions` is reserved (400 `reserved_name` at creation and rename).
+- The conversation (after main ce9335b brought `web/src/conversation`): `-sessions/fromSession.ts` turns the entries
+  into the shared component's items; `-sessions/Talk.tsx` draws `Conversation` in the page from prompt 1 (not `Thread`,
+  which follows the end of a live chat), More reads the next page, and `promptAction` gives its person or an owner
+  Remove turn, asked once. A deleted session (by this page or a `session.deleted` frame) puts its stub in the session's
+  query and does not read its entries or files again (they answer 410). The repository tabs read Code, Issues, Agents,
+  Sessions.
+- Web e2e: `web/e2e/sessions.spec.ts` with `sessions-seed.ts` (projects `sessions` and `sessions-shots`), on ports
+  8869 and 8870: `PANDO_E2E_PORT=8869 PANDO_E2E_INSPECTOR_PORT=9369 npx playwright test --project=sessions`.
+  It needs `worker/.dev.vars` with `WORKOS_API_BASE=http://127.0.0.1:8870` and local `PANDO_STATUS_SECRET`,
+  `WORKOS_API_KEY` values (any random ones; this worktree has them). The shots go to
+  `research/design/pando-ui-2026-10-03/sessions/built/` with its INDEX.html.
+
+## A session's commits: order and model (pando-ops' gate, 2026-10-05)
+
+A gate run failed "the session lists its commits ... not on main yet" once: the Pi commit and the amended commit were
+made in the same second, and the list sorted by committer time then sha, so the random sha decided. And the session's
+own list showed the amended commit's model from its own session, while the branch showed none (the other session
+disagreed). Now `commitRows` (store.ts) holds both rules for every view: oldest first by committer time, then the
+branch's own order (`ord`, 0 the newest), then sha; and a commit's model only when every session naming it had the same
+one. sessions-cli.mjs makes the three commits in one second (GIT_COMMITTER_DATE) so the tie happens every run, and checks
+the order and that neither session's own list shows a model for the commit they disagree on.
+
+## Stage 5: docs, limits, fixtures
+
+- User docs: `site/docs/src/content/docs/sessions.mdx` (Agent sessions), a sessions part in `privacy.mdx` and
+  `limits.mdx`. The site builds and `nimbus-docs check` passes. `pando help` lists the session commands; `cli.mdx`
+  carries the same block.
+- Limits sent to pando-ops for the board: 8,000,000 bytes per piece; 64 KB per string and 200-character encoded runs
+  trimmed; one piece per session every 30 s (at once after a commit names it), folders looked at every 5 s; Active = a
+  record in the last 30 min; 250 newest commits of a branch read for Pando-Session; 500 commits listed per session,
+  files from its first 50; about 2 MB of lines per conversation page; 200 entries on a person's not-recorded list; 50
+  folders per machine report; 50 sessions per page of a person's sessions; repository name `sessions` reserved.
+- Fixtures: Pi 0.85.1 and OpenCode 2.0.22 sessions are recorded (`worker/test/sessions/fixtures/`). Claude Code and
+  Codex wait for the owner to log those agents into the fixture folders (`CLAUDE_CONFIG_DIR=$HOME/.pando-fixtures/claude
+  claude`, then /login; `CODEX_HOME=$HOME/.pando-fixtures/codex codex login`).
+- The existing web slices on this branch: 1, 2, 4, 5, 7 pass; 3 (a Buildkite job's log on the build page) and 6 (the
+  big push: Artifacts answers "internal error" or "Network connection lost") fail the same way on main 5a82dd1, run in
+  a temporary worktree on these ports. Not this branch's.
 
 ## Decisions taken here, and why
 

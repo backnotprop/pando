@@ -8,8 +8,11 @@ import { HttpError, now } from "../http";
 import { isRecord, isText, type Json } from "../parse";
 import { accounts } from "../accounts/auth";
 import { bad, jsonBody } from "../accounts/org-routes";
-import { monorepoRef } from "../monorepo/names";
-import type { UserApp } from "../monorepo/api";
+import { monorepoRef, validNamespace } from "../monorepo/names";
+import { monorepoStub } from "../monorepo/session";
+import { unwrap } from "./append";
+import { dayIn, sundayOf, winners } from "./marks";
+import type { UserApp, UserContext } from "../monorepo/api";
 import { PROGRAMS } from "./ids";
 
 /** At most this many exclusions per person, and stores per machine: a person's own list, kept short. */
@@ -94,20 +97,85 @@ export function sessionUserRoutes(users: UserApp): void {
 
   users.get("/v1/user/session-machines", async (c) => {
     const rows = await c.env.ACCOUNTS_DB.prepare(
-      "SELECT s.credential_id, c.name, s.recording, s.stores, s.updated_at FROM session_machines s JOIN credentials c ON c.id = s.credential_id WHERE s.login = ?1 AND c.revoked_at IS NULL ORDER BY c.name",
+      "SELECT s.credential_id, c.name, c.kind, s.recording, s.stores, s.updated_at FROM session_machines s JOIN credentials c ON c.id = s.credential_id WHERE s.login = ?1 AND c.revoked_at IS NULL ORDER BY c.name",
     )
       .bind(c.get("auth").user.login)
-      .all<{ credential_id: string; name: string; recording: number; stores: string; updated_at: string }>();
+      .all<{ credential_id: string; name: string; kind: string; recording: number; stores: string; updated_at: string }>();
 
     return c.json({
       machines: rows.results.map((r) => ({
         credential_id: r.credential_id,
         machine: r.name,
+        kind: r.kind,
         recording: r.recording === 1,
         // SAFETY: PUT /v1/user/session-machine is the only writer: JSON of checked {program, path, found} objects.
         stores: JSON.parse(r.stores) as { program: "claude-code" | "codex" | "pi" | "opencode"; path: string; found: string }[],
         updated_at: r.updated_at,
       })),
     } satisfies typeof Contract.SessionMachines.Encoded);
+  });
+}
+
+/** A page of a person's sessions across repositories, at most. */
+const PERSON_PAGE_MAX = 50;
+
+/** The graph's window: 53 weeks and a day, as the contributions read. */
+const MARKS_WINDOW_MS = 372 * 86_400_000;
+
+/** A person's sessions and the graph's agent marks, in the repositories the viewer and the person can both open. */
+export function sessionPersonRoutes(users: UserApp): void {
+  const person = async (c: UserContext) => {
+    const login = c.req.param("login")?.toLowerCase() ?? "";
+
+    if (!validNamespace(login) || !(await accounts(c.env).getUser(login))) throw new HttpError(404, "not_found", `no person ${login}`);
+
+    return { login, shared: await accounts(c.env).sharedMonorepos(login, c.get("auth").user.login) };
+  };
+
+  users.get("/v1/users/:login/sessions", async (c) => {
+    const { login, shared } = await person(c);
+    const limit = Number(c.req.query("limit") ?? 30);
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > PERSON_PAGE_MAX) bad(`limit: 1 to ${PERSON_PAGE_MAX}`);
+    const cursor = c.req.query("cursor") ?? null;
+    const q = (k: string) => c.req.query(k) ?? null;
+    const state = q("state");
+    const main = q("main");
+
+    if (state !== null && state !== "active" && state !== "inactive") bad("state: active or inactive");
+
+    if (main !== null && main !== "yes" && main !== "no") bad("main: yes or no");
+    const only = q("monorepo");
+
+    const pages = await Promise.all(
+      shared
+        .filter((m) => only === null || m.full_name === only)
+        .map(async (m) => ({ m, page: unwrap(await monorepoStub(c.env, m.id).sessionList({ person: login, program: q("agent"), repo: null, branch: null, state, main, cursor, limit })) })),
+    );
+
+    const all = pages
+      .flatMap(({ m, page }) => page.sessions.map((session) => ({ monorepo: { id: m.id, full_name: m.full_name }, session })))
+      .sort((a, b) => (b.session.last_at ?? "").localeCompare(a.session.last_at ?? "") || b.session.id.localeCompare(a.session.id));
+
+    const page = all.slice(0, limit);
+    const last = page.at(-1)?.session;
+    const more = all.length > limit || pages.some((p) => p.page.next_cursor !== null);
+    const counts = { active: pages.reduce((n, p) => n + p.page.counts.active, 0), inactive: pages.reduce((n, p) => n + p.page.counts.inactive, 0) };
+
+    return c.json({ sessions: page, counts, repositories: shared.map((m) => m.full_name), next_cursor: more && last ? `${last.last_at}|${last.id}` : null } satisfies typeof Contract.PersonSessions.Encoded);
+  });
+
+  users.get("/v1/users/:login/session-marks", async (c) => {
+    const { login, shared } = await person(c);
+    const tz = Number(c.req.query("tz") ?? 0);
+
+    if (!Number.isInteger(tz) || tz < -720 || tz > 840) bad("tz: minutes east of UTC, -720 to 840");
+    const since = new Date(Date.now() - MARKS_WINDOW_MS).toISOString();
+    const commits = (await Promise.all(shared.map(async (m) => unwrap(await monorepoStub(c.env, m.id).sessionPersonCommits(login, since))))).flat();
+
+    return c.json({
+      days: winners(commits, (x) => dayIn(x.at, tz)),
+      weeks: winners(commits, (x) => sundayOf(dayIn(x.at, tz))),
+    } satisfies typeof Contract.SessionMarks.Encoded);
   });
 }

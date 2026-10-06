@@ -129,9 +129,34 @@ export const branchLink = (full: string, repoPath: string, branch: string, files
         search: files ? { tab: "files" } : {},
       });
 
+/** A branch's Sessions tab. */
+export const branchSessionsLink = (full: string, repoPath: string, branch: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: { tab: "sessions" } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch }, search: { tab: "sessions" } });
+
 /** A code file's bytes (the Worker's raw route; members only). */
 export const codeRawHref = (full: string, repoPath: string, path: string, ref: string | null) =>
   `/${full}${repoPath === "." ? "" : `/projects/${project(repoPath)}`}/raw/${path.split("/").map(encodeURIComponent).join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
+
+/** The Sessions tab's filters in the address (`?state=inactive&agent=codex&branch=projects-web:fix-login&main=yes&group=branch`). */
+export interface SessionsSearch {
+  state?: string;
+  person?: string;
+  agent?: string;
+  branch?: string;
+  main?: string;
+  group?: string;
+}
+
+/** A repository's Sessions tab, with filters (only those set). */
+export const sessionsLink = (full: string, search: SessionsSearch = {}) => linkOptions({ to: "/$owner/$name/sessions", params: split(full), search });
+
+/** A recorded session's page. */
+export const sessionLink = (full: string, id: string) => linkOptions({ to: "/$owner/$name/sessions/$id", params: { ...split(full), id } });
+
+/** A person's sessions, in the repositories the viewer can open too. */
+export const personSessionsLink = (login: string) => linkOptions({ to: "/$owner/sessions", params: { owner: login } });
 
 export type AppLink =
   | ReturnType<typeof ownerLink>
@@ -152,7 +177,11 @@ export type AppLink =
   | ReturnType<typeof codeBlobLink>
   | ReturnType<typeof codeHistoryLink>
   | ReturnType<typeof branchesLink>
-  | ReturnType<typeof branchLink>;
+  | ReturnType<typeof branchLink>
+  | ReturnType<typeof branchSessionsLink>
+  | ReturnType<typeof sessionsLink>
+  | ReturnType<typeof sessionLink>
+  | ReturnType<typeof personSessionsLink>;
 
 /** A monorepo's own project: the one named after it (projects/pando in ramos/pando); lists put it first and leave its name off. */
 export const isHomeProject = (repoPath: string | null, monorepoName: string) => repoPath?.split("/").pop() === monorepoName;

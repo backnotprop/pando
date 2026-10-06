@@ -1057,6 +1057,17 @@ export class Accounts {
     return { shown: shown.results, orgs: orgs.results.map((o) => ({ ...o, created: o.created === 1 })) };
   }
 
+  /** The monorepos `viewer` can open that `person` can open too: where the viewer sees the person's agent sessions. */
+  async sharedMonorepos(person: string, viewer: string): Promise<{ id: string; full_name: string }[]> {
+    const opens = (n: number) => VIEWER_OPENS.replaceAll("?1", `?${n}`);
+
+    return (await this.read<{ id: string; full_name: string }>(
+      this.db.withSession("first-unconstrained"),
+      `SELECT m.id, m.owner || '/' || m.name AS full_name FROM monorepos m WHERE ${opens(1)} AND ${opens(2)} ORDER BY m.id`,
+      viewer, person,
+    )).results;
+  }
+
   private async orgRow(login: string, viewer: string): Promise<OrgRow | null> {
     return this.row<OrgRow>(`SELECT ${ORG_COLS} FROM orgs o WHERE o.login = ?1`, login, viewer);
   }

@@ -18,7 +18,10 @@ export const SessionModel = Schema.Struct({ model: Schema.String, answers: Count
 /** A removed turn's mark: its prompt number, who removed it, when. */
 export const SessionRemoved = Schema.Struct({ prompt: Count, by: Schema.String, at: Timestamp });
 
-/** One of a session's commits: where it is, and the model in force in the session when it was committed (null: unknown). */
+/**
+ * One of a session's commits: where it is, and the model in force in the session when it was committed. Null when that
+ * is unknown, or when the sessions naming the commit disagree: the same in every view.
+ */
 export const SessionCommit = Schema.Struct({
   repo: RepoName,
   sha: Sha,
@@ -28,6 +31,8 @@ export const SessionCommit = Schema.Struct({
   on_main: Schema.Boolean,
   model: Schema.NullOr(Schema.String),
 });
+
+export interface SessionCommit extends Schema.Schema.Type<typeof SessionCommit> {}
 
 /**
  * A recorded session. `state` is active while it has a record from the last 30 minutes. `repo` and `branch` are where
@@ -53,8 +58,15 @@ export const Session = Schema.Struct({
   bytes: Count,
   end: Count,
   removed: Schema.Array(SessionRemoved),
-  /** Its pushed commits, oldest first (at most 500): those whose message has its Pando-Session line. */
+  /**
+   * Its pushed commits (at most 500), those whose message has its Pando-Session line: oldest first by committer time;
+   * within one second, the branch's own order, then sha.
+   */
   commits: Schema.Array(SessionCommit),
+  /** The branch its row leads with: its earliest commit's branch, else where it ran (both null: the repository folder). */
+  lead: Schema.Struct({ repo: Schema.NullOr(RepoName), branch: Schema.NullOr(Schema.String) }),
+  /** Issues linked to that branch, lowest number first. */
+  issues: Schema.Array(Schema.Struct({ number: Count, title: Schema.String, state: Schema.String })),
 });
 
 export interface Session extends Schema.Schema.Type<typeof Session> {}
@@ -65,13 +77,19 @@ export const SessionDeleted = Schema.Struct({
   state: Schema.Literal("deleted"),
   deleted_by: Schema.String,
   deleted_at: Timestamp,
+  /** The commits that name it: their lines stay in git. */
+  commits: Schema.Array(SessionCommit),
 });
+
+export interface SessionDeleted extends Schema.Schema.Type<typeof SessionDeleted> {}
 
 /** GET .../sessions/{id}: a session, or its stub. */
 export const SessionAny = Schema.Union([Session, SessionDeleted]);
 
 export const SessionList = Schema.Struct({
   sessions: Schema.Array(Session),
+  /** For the same filters, in either state. */
+  counts: Schema.Struct({ active: Count, inactive: Count }),
   next_cursor: Schema.NullOr(Schema.String),
 });
 
@@ -93,10 +111,14 @@ export const SessionEntry = Schema.Struct({
   by: Schema.NullOr(Schema.String),
 });
 
+export interface SessionEntry extends Schema.Schema.Type<typeof SessionEntry> {}
+
 /** A page of the conversation; pass `next_cursor` back as `from` for the next. */
 export const SessionEntries = Schema.Struct({
   entries: Schema.Array(SessionEntry),
   next_cursor: Schema.NullOr(Count),
+  /** When the answering model changed, oldest first (on the first page): an answer's model is the last at or before it. */
+  model_changes: Schema.Array(Schema.Struct({ at: Timestamp, model: Schema.String })),
 });
 
 /**
@@ -109,6 +131,8 @@ export const BranchSessions = Schema.Struct({
   commits: Schema.Array(Schema.Struct({ sha: Sha, sessions: Schema.Array(Count), model: Schema.NullOr(Schema.String) })),
 });
 
+export interface BranchSessions extends Schema.Schema.Type<typeof BranchSessions> {}
+
 /** GET /v1/user/session-exclusions: what the person does not record (project null: the whole repository). */
 export const SessionExclusions = Schema.Struct({
   exclusions: Schema.Array(Schema.Struct({ monorepo: Schema.String, monorepo_id: Schema.String, project: Schema.NullOr(Schema.String) })),
@@ -119,5 +143,29 @@ export const SessionStore = Schema.Struct({ program: SessionProgram, path: Schem
 
 /** GET /v1/user/session-machines: each of the person's machines, as it last reported its recording. */
 export const SessionMachines = Schema.Struct({
-  machines: Schema.Array(Schema.Struct({ credential_id: Schema.String, machine: Schema.String, recording: Schema.Boolean, stores: Schema.Array(SessionStore), updated_at: Timestamp })),
+  machines: Schema.Array(Schema.Struct({ credential_id: Schema.String, machine: Schema.String, kind: Schema.String, recording: Schema.Boolean, stores: Schema.Array(SessionStore), updated_at: Timestamp })),
 });
+
+/** GET .../sessions/{id}/files: the files its commits changed (at most its first 50 commits are read). */
+export const SessionFiles = Schema.Struct({
+  files: Schema.Array(Schema.Struct({ repo: RepoName, repo_path: Schema.String, path: Schema.String })),
+});
+
+/** GET /v1/users/{login}/sessions: a person's sessions in the repositories the viewer can open too, latest activity first. */
+export const PersonSessions = Schema.Struct({
+  sessions: Schema.Array(Schema.Struct({ monorepo: Schema.Struct({ id: Schema.String, full_name: Schema.String }), session: Session })),
+  /** For the same filters, in either state. */
+  counts: Schema.Struct({ active: Count, inactive: Count }),
+  /** The repositories searched: those you both can open. */
+  repositories: Schema.Array(Schema.String),
+  next_cursor: Schema.NullOr(Schema.String),
+});
+
+/** One day's (or week's, from its Sunday) agent: the one behind most of the person's commits on main naming their sessions. */
+export const SessionMark = Schema.Struct({ date: Schema.String, program: SessionProgram, commits: Count });
+
+/** GET /v1/users/{login}/session-marks?tz=: the profile graph's agent marks, by day and by week, in the viewer's zone. */
+export const SessionMarks = Schema.Struct({ days: Schema.Array(SessionMark), weeks: Schema.Array(SessionMark) });
+
+/** DELETE .../sessions?repo=&older_than_days=&everyone=1: how many were deleted, at once and for good. */
+export const SessionsDeleted = Schema.Struct({ deleted: Count });

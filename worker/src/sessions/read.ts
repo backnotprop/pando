@@ -3,6 +3,9 @@
 // from the pieces), and a delete (the pieces gone from R2 at once).
 import type { Env } from "../env";
 import { HttpError, now } from "../http";
+import { withRepo } from "../monorepo/artifacts";
+import { changedFiles } from "../monorepo/diff";
+import { commitReader } from "../monorepo/graph";
 import { monorepoStub } from "../monorepo/session";
 import { unwrap } from "./append";
 import { linesOf, parsePiece, type Carry, type Entry } from "./parse";
@@ -16,6 +19,8 @@ export const PAGE_BYTES = 2_000_000;
 export interface EntryPage {
   entries: Entry[];
   next_cursor: number | null;
+  /** When the answering model changed, oldest first (on the first page only). */
+  model_changes: { at: string; model: string }[];
 }
 
 interface Removal {
@@ -72,7 +77,7 @@ export async function readEntries(env: Env, monorepoId: string, id: string, from
 
   for (const p of page.pieces) entries.push(...(await pieceEntries(env, src, p, removals)));
 
-  return { entries, next_cursor: page.next };
+  return { entries, next_cursor: page.next, model_changes: from === 0 ? unwrap(await stub.sessionModelChanges(id)) : [] };
 }
 
 /**
@@ -163,4 +168,54 @@ export async function deleteSession(env: Env, monorepoId: string, id: string, lo
   await deletePrefix(env.BLOBS, piecePrefix(monorepoId, id));
 
   return view;
+}
+
+/** One file a session's commits changed, in its repo (`repo_path`: the repo's folder in the repository). */
+export interface SessionFile {
+  repo: string;
+  repo_path: string;
+  path: string;
+}
+
+/** At most this many of a session's commits are read for their files: one Artifacts walk each. */
+export const FILES_COMMITS_MAX = 50;
+
+/** The files in a session's commits (DETERMINISM.md: exact, read from git), each commit against its first parent. */
+export async function sessionFiles(env: Env, monorepoId: string, id: string): Promise<{ files: SessionFile[] }> {
+  const stub = monorepoStub(env, monorepoId);
+  const view = unwrap(await stub.sessionGet(id));
+
+  if (view.state === "deleted") return { files: [] };
+  const byRepo = new Map<string, string[]>();
+
+  for (const c of view.commits.slice(0, FILES_COMMITS_MAX)) byRepo.set(c.repo, [...(byRepo.get(c.repo) ?? []), c.sha]);
+  const out = new Map<string, SessionFile>();
+
+  for (const [name, shas] of byRepo) {
+    const r = await stub.getRepo(name);
+
+    if (!r) continue;
+    await withRepo(env, r.artifacts_name, async (repo) => {
+      const read = commitReader(repo);
+
+      for (const sha of shas) {
+        const c = await read(sha);
+
+        if (!c.parents[0]) continue;
+
+        for (const f of await changedFiles(repo, (await read(c.parents[0])).tree, c.tree)) out.set(`${name}\n${f.path}`, { repo: name, repo_path: r.path, path: f.path });
+      }
+    });
+  }
+
+  return { files: [...out.values()].sort((a, b) => a.repo_path.localeCompare(b.repo_path) || a.path.localeCompare(b.path)) };
+}
+
+/** Delete many at once (Settings): the index first, then each session's pieces from R2. */
+export async function deleteSessions(env: Env, monorepoId: string, login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null): Promise<{ deleted: number }> {
+  const ids = unwrap(await monorepoStub(env, monorepoId).sessionDeleteMany(login, owner, everyone, repo, before));
+
+  for (const id of ids) await deletePrefix(env.BLOBS, piecePrefix(monorepoId, id));
+
+  return { deleted: ids.length };
 }

@@ -11,10 +11,10 @@
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "ee3a2d91b313bb0fc001f7dee7ca1137b6af9978",
+            "sha": "f97a26cb1ca83d0376e12bb9f385cbbd30dacc29",
             "branch": "fix-login",
             "title": "from codex",
-            "committed_at": "2026-10-05T05:12:55.000Z",
+            "committed_at": "2026-10-06T01:17:22.000Z",
             "on_main": false,
             "model": null
           }
@@ -27,10 +27,10 @@
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "2e9b898529025bfb8e271aa09fc162c335e58990",
+            "sha": "508c5356fa964f5608f771743bc443a2ceeb6636",
             "branch": "fix-login",
             "title": "from claude",
-            "committed_at": "2026-10-05T05:12:56.000Z",
+            "committed_at": "2026-10-06T01:17:23.000Z",
             "on_main": false,
             "model": null
           }
@@ -43,10 +43,10 @@
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "2e9b898529025bfb8e271aa09fc162c335e58990",
+            "sha": "508c5356fa964f5608f771743bc443a2ceeb6636",
             "branch": "fix-login",
             "title": "from claude",
-            "committed_at": "2026-10-05T05:12:56.000Z",
+            "committed_at": "2026-10-06T01:17:23.000Z",
             "on_main": false,
             "model": null
           }
@@ -59,10 +59,10 @@
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "541406cf39b4fb5bd14a6463782c01998b1662ef",
+            "sha": "ec0e7539416415f869ac9beeb11c97c835b27e1b",
             "branch": "fix-login",
             "title": "nested",
-            "committed_at": "2026-10-05T05:12:56.000Z",
+            "committed_at": "2026-10-06T01:17:24.000Z",
             "on_main": false,
             "model": null
           }
@@ -75,10 +75,10 @@
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "cd19351a5a27c0960272f8eec08bee92d4ec00df",
+            "sha": "b015cc3e4ae33550e1267165b3cc0c432264bc98",
             "branch": "fix-login",
             "title": "moved folder",
-            "committed_at": "2026-10-05T05:12:56.000Z",
+            "committed_at": "2026-10-06T01:17:24.000Z",
             "on_main": false,
             "model": null
           }
@@ -90,7 +90,7 @@
         "session": {
           "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
           "state": "active",
-          "person": "scli-muusmxby",
+          "person": "scli-muvznqr3",
           "machine": "scli-box",
           "program": "pi",
           "models": [
@@ -103,8 +103,8 @@
           "branch": "fix-login",
           "parent": null,
           "subagents": 0,
-          "started_at": "2026-10-05T05:11:48.934Z",
-          "last_at": "2026-10-05T05:11:57.028Z",
+          "started_at": "2026-10-06T01:16:16.350Z",
+          "last_at": "2026-10-06T01:16:24.444Z",
           "prompts": 2,
           "tool_calls": 1,
           "images": 0,
@@ -115,42 +115,47 @@
           "commits": [
             {
               "repo": "projects-app",
-              "sha": "384aad175def20c697a32dfa5e9039f499a3d0e7",
+              "sha": "9d060b59a145d7695fde8efc3295340a3af68d8e",
               "branch": "fix-login",
               "title": "Placeholder: from the Pi session",
-              "committed_at": "2026-10-05T05:12:58.000Z",
+              "committed_at": "2026-10-06T01:17:25.000Z",
               "on_main": false,
               "model": "gpt-5.5"
             },
             {
               "repo": "projects-app",
-              "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+              "sha": "7a3bf80d17f719af50bcfebed3040d8d43ef04d7",
               "branch": "fix-login",
               "title": "Placeholder: from Pi, amended in OpenCode",
-              "committed_at": "2026-10-05T05:12:58.000Z",
+              "committed_at": "2026-10-06T01:17:25.000Z",
               "on_main": false,
-              "model": "gpt-5.5"
+              "model": null
             }
-          ]
+          ],
+          "lead": {
+            "repo": "projects-app",
+            "branch": "fix-login"
+          },
+          "issues": []
         },
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "384aad175def20c697a32dfa5e9039f499a3d0e7",
+            "sha": "9d060b59a145d7695fde8efc3295340a3af68d8e",
             "branch": "fix-login",
             "title": "Placeholder: from the Pi session",
-            "committed_at": "2026-10-05T05:12:58.000Z",
+            "committed_at": "2026-10-06T01:17:25.000Z",
             "on_main": false,
             "model": "gpt-5.5"
           },
           {
             "repo": "projects-app",
-            "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+            "sha": "7a3bf80d17f719af50bcfebed3040d8d43ef04d7",
             "branch": "fix-login",
             "title": "Placeholder: from Pi, amended in OpenCode",
-            "committed_at": "2026-10-05T05:12:58.000Z",
+            "committed_at": "2026-10-06T01:17:25.000Z",
             "on_main": false,
-            "model": "gpt-5.5"
+            "model": null
           }
         ]
       },
@@ -160,7 +165,7 @@
         "session": {
           "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
           "state": "active",
-          "person": "scli-muusmxby",
+          "person": "scli-muvznqr3",
           "machine": "scli-box",
           "program": "opencode",
           "models": [
@@ -173,8 +178,8 @@
           "branch": null,
           "parent": null,
           "subagents": 0,
-          "started_at": "2026-10-05T05:10:50.972Z",
-          "last_at": "2026-10-05T05:12:57.053Z",
+          "started_at": "2026-10-06T01:15:18.386Z",
+          "last_at": "2026-10-06T01:17:24.446Z",
           "prompts": 2,
           "tool_calls": 2,
           "images": 0,
@@ -185,31 +190,36 @@
           "commits": [
             {
               "repo": "projects-app",
-              "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+              "sha": "7a3bf80d17f719af50bcfebed3040d8d43ef04d7",
               "branch": "fix-login",
               "title": "Placeholder: from Pi, amended in OpenCode",
-              "committed_at": "2026-10-05T05:12:58.000Z",
+              "committed_at": "2026-10-06T01:17:25.000Z",
               "on_main": false,
-              "model": "big-pickle"
+              "model": null
             }
-          ]
+          ],
+          "lead": {
+            "repo": "projects-app",
+            "branch": "fix-login"
+          },
+          "issues": []
         },
         "commits": [
           {
             "repo": "projects-app",
-            "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+            "sha": "7a3bf80d17f719af50bcfebed3040d8d43ef04d7",
             "branch": "fix-login",
             "title": "Placeholder: from Pi, amended in OpenCode",
-            "committed_at": "2026-10-05T05:12:58.000Z",
+            "committed_at": "2026-10-06T01:17:25.000Z",
             "on_main": false,
-            "model": "big-pickle"
+            "model": null
           }
         ]
       }
     ],
     "commits": [
       {
-        "sha": "d199e1005e866ecb64ffc62507f0689a17e15017",
+        "sha": "7a3bf80d17f719af50bcfebed3040d8d43ef04d7",
         "sessions": [
           6,
           7
@@ -217,28 +227,28 @@
         "model": null
       },
       {
-        "sha": "384aad175def20c697a32dfa5e9039f499a3d0e7",
+        "sha": "9d060b59a145d7695fde8efc3295340a3af68d8e",
         "sessions": [
           6
         ],
         "model": "gpt-5.5"
       },
       {
-        "sha": "cd19351a5a27c0960272f8eec08bee92d4ec00df",
+        "sha": "b015cc3e4ae33550e1267165b3cc0c432264bc98",
         "sessions": [
           5
         ],
         "model": null
       },
       {
-        "sha": "541406cf39b4fb5bd14a6463782c01998b1662ef",
+        "sha": "ec0e7539416415f869ac9beeb11c97c835b27e1b",
         "sessions": [
           4
         ],
         "model": null
       },
       {
-        "sha": "2e9b898529025bfb8e271aa09fc162c335e58990",
+        "sha": "508c5356fa964f5608f771743bc443a2ceeb6636",
         "sessions": [
           3,
           2
@@ -246,7 +256,7 @@
         "model": null
       },
       {
-        "sha": "ee3a2d91b313bb0fc001f7dee7ca1137b6af9978",
+        "sha": "f97a26cb1ca83d0376e12bb9f385cbbd30dacc29",
         "sessions": [
           1
         ],

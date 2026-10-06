@@ -95,6 +95,11 @@ export async function remove(route: { method: "DELETE"; path: string }): Promise
   await send(route.path, { method: route.method, headers: { accept: "application/json" } });
 }
 
+/** A PUT whose answer is 204 (no body): a list replaced whole. */
+export async function put(route: { method: "PUT"; path: string }, body: JsonBody): Promise<void> {
+  await send(route.path, { method: route.method, headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
+}
+
 /** POST JSON where some refusals are answers, not failures (a merge's 409 and 412): either decoded body. */
 export async function postOrRefused<A, I, B, J>(
   ok: Schema.Codec<A, I>,

@@ -4,7 +4,9 @@
 //   GET    /sessions/on-branch?repo=&branch=  a branch's sessions, numbered by their earliest commit there, and its commits' numbers
 //   GET    /sessions/{id}                     one session (its `end` is where the next piece starts)
 //   GET    /sessions/{id}/entries?from=       a page of its conversation, parsed on read
+//   GET    /sessions/{id}/files               the files its commits changed (each against its first parent)
 //   DELETE /sessions/{id}                     at once and for good: its person or an owner
+//   DELETE /sessions?repo=&older_than_days=&everyone=1   many at once: yours, or everyone's (owners)
 //   DELETE /sessions/{id}/prompts/{n}         remove prompt n's turn, leaving a mark: its person or an owner
 //   POST   /sessions/{id}/reindex             rebuild its numbers from the stored pieces
 import type { Context, Hono } from "hono";
@@ -16,7 +18,7 @@ import { isOneOf, isRecord, isText, parseJson, type Json } from "../parse";
 import { appendPiece, unwrap } from "./append";
 import { PROGRAMS, SESSION_ID_RE } from "./ids";
 import { pieceText } from "./pieces";
-import { deleteSession, readEntries, reindex, removeTurn } from "./read";
+import { deleteSession, deleteSessions, readEntries, reindex, removeTurn, sessionFiles } from "./read";
 import { LIST_MAX, type SessionFilters, type SessionStart } from "./store";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
@@ -66,8 +68,15 @@ function filtersOf(c: C): SessionFilters {
 
   if (limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
   const person = q("person");
+  const main = q("main");
 
-  return { person: person === "@me" ? c.get("identity").login : person, program: q("agent"), repo: q("repo"), branch: q("branch"), state, cursor: q("cursor"), limit };
+  if (main !== null && main !== "yes" && main !== "no") bad("main: yes or no");
+  const days = q("older_than_days");
+  const older = days === null ? null : Number(days);
+
+  if (older !== null && (!Number.isInteger(older) || older < 0 || older > 3650)) bad("older_than_days: 0 to 3650");
+
+  return { person: person === "@me" ? c.get("identity").login : person, program: q("agent"), repo: q("repo"), branch: q("branch"), state, main, before: older === null ? null : new Date(Date.now() - older * 86_400_000).toISOString(), cursor: q("cursor"), limit };
 }
 
 export function sessionRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void {
@@ -89,6 +98,17 @@ export function sessionRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>):
     return c.json(view satisfies typeof Contract.Session.Encoded);
   });
 
+  api.delete(base, async (c) => {
+    const who = c.get("identity");
+    const days = c.req.query("older_than_days");
+    const n = days === undefined ? null : Number(days);
+
+    if (n !== null && (!Number.isInteger(n) || n < 0 || n > 3650)) bad("older_than_days: 0 to 3650");
+    const before = n === null ? null : new Date(Date.now() - n * 86_400_000).toISOString();
+
+    return c.json((await deleteSessions(c.env, c.get("m"), who.login, who.role === "owner", c.req.query("everyone") === "1", c.req.query("repo") ?? null, before)) satisfies typeof Contract.SessionsDeleted.Encoded);
+  });
+
   api.get(base, async (c) => c.json(unwrap(await c.get("stub").sessionList(filtersOf(c))) satisfies typeof Contract.SessionList.Encoded));
 
   // Before /sessions/:id, which would take "on-branch" for an id.
@@ -100,6 +120,8 @@ export function sessionRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>):
   });
 
   api.get(one, async (c) => c.json(unwrap(await c.get("stub").sessionGet(idOf(c))) satisfies typeof Contract.SessionAny.Encoded));
+
+  api.get(`${one}/files`, async (c) => c.json((await sessionFiles(c.env, c.get("m"), idOf(c))) satisfies typeof Contract.SessionFiles.Encoded));
 
   api.get(`${one}/entries`, async (c) => c.json((await readEntries(c.env, c.get("m"), idOf(c), cursorParam(c, "from", 0))) satisfies typeof Contract.SessionEntries.Encoded));
 

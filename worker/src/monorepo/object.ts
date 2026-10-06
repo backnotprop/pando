@@ -1321,8 +1321,16 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.sessions.allPieces(id));
   }
 
+  sessionModelChanges(id: string) {
+    return this.guard(() => this.sessions.modelChanges(id));
+  }
+
   sessionRemovals(id: string) {
     return this.guard(() => this.sessions.removals(id));
+  }
+
+  sessionDeleteMany(login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null) {
+    return this.guard(() => this.sessions.deleteMany(login, owner, everyone, repo, before));
   }
 
   sessionDelete(id: string, login: string, owner: boolean) {
@@ -1335,6 +1343,10 @@ export class MonorepoObject extends DurableObject<Env> {
 
   sessionRemoveTurn(id: string, mark: TurnMark, rewritten: RewrittenPiece[], by: string) {
     return this.guard(() => this.sessions.removeTurn(id, mark, rewritten, by));
+  }
+
+  sessionPersonCommits(login: string, since: string) {
+    return this.guard(() => this.sessions.personCommitsOnMain(login, since));
   }
 
   sessionsOnMain(repo: string, refs: SessionCommitRef[]): void {

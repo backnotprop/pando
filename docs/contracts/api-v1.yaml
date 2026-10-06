@@ -3892,7 +3892,7 @@ components:
     Name:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered."
+      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered. Reserved, because /{owner}/{name} would be one of Pando's own pages: sessions (a person's recorded agent sessions). Creating or renaming to one answers 400 `reserved_name`."
     Login:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"
@@ -5081,7 +5081,7 @@ components:
           items: { type: object, required: [prompt, by, at], properties: { prompt: { type: integer }, by: { type: string }, at: { type: string, format: date-time } } }
         commits:
           type: array
-          description: Its pushed commits, oldest first, at most 500.
+          description: "Its pushed commits, oldest first by committer time; within one second, the branch's own order, then sha. At most 500."
           items: { $ref: "#/components/schemas/SessionCommit" }
     SessionCommit:
       type: object
@@ -5093,7 +5093,7 @@ components:
         title: { type: string }
         committed_at: { type: string, format: date-time }
         on_main: { type: boolean }
-        model: { type: [string, "null"], description: "The model in force in the session at the commit's time." }
+        model: { type: [string, "null"], description: "The model in force in the session at the commit's time; null when the sessions naming the commit disagree or one has none, the same in every view." }
     BranchSessions:
       type: object
       required: [sessions, commits]
@@ -5113,12 +5113,13 @@ components:
           items: { type: object, required: [sha, sessions, model], properties: { sha: { type: string }, sessions: { type: array, items: { type: integer } }, model: { type: [string, "null"] } } }
     SessionDeleted:
       type: object
-      required: [id, state, deleted_by, deleted_at]
+      required: [id, state, deleted_by, deleted_at, commits]
       properties:
         id: { type: string }
         state: { type: string, enum: [deleted] }
         deleted_by: { type: string }
         deleted_at: { type: string, format: date-time }
+        commits: { type: array, description: "The commits that name it; their lines stay in git.", items: { $ref: "#/components/schemas/SessionCommit" } }
     SessionList:
       type: object
       required: [sessions, next_cursor]
@@ -5141,10 +5142,14 @@ components:
         by: { type: [string, "null"], description: "A removed turn: who removed it." }
     SessionEntries:
       type: object
-      required: [entries, next_cursor]
+      required: [entries, next_cursor, model_changes]
       properties:
         entries: { type: array, items: { $ref: "#/components/schemas/SessionEntry" } }
         next_cursor: { type: [integer, "null"] }
+        model_changes:
+          type: array
+          description: "When the answering model changed, oldest first (on the first page only): an answer's model is the last change at or before it."
+          items: { type: object, required: [at, model], properties: { at: { type: string, format: date-time }, model: { type: string } } }
     SessionExclusions:
       type: object
       required: [exclusions]

@@ -1,0 +1,112 @@
+{
+  "schema": "PersonSessions",
+  "route": "GET /v1/users/{login}/sessions",
+  "status": 200,
+  "body": {
+    "sessions": [
+      {
+        "monorepo": {
+          "id": "m_d5f420b4c7ce3b51",
+          "full_name": "scli-muvznqr3/scli-muvznqr3"
+        },
+        "session": {
+          "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+          "state": "active",
+          "person": "scli-muvznqr3",
+          "machine": "scli-box",
+          "program": "opencode",
+          "models": [
+            {
+              "model": "big-pickle",
+              "answers": 5
+            }
+          ],
+          "repo": null,
+          "branch": null,
+          "parent": null,
+          "subagents": 0,
+          "started_at": "2026-10-06T01:15:18.386Z",
+          "last_at": "2026-10-06T01:17:24.446Z",
+          "prompts": 2,
+          "tool_calls": 2,
+          "images": 0,
+          "redactions": 1,
+          "bytes": 4531,
+          "end": 40,
+          "removed": [],
+          "commits": [],
+          "lead": {
+            "repo": null,
+            "branch": null
+          },
+          "issues": []
+        }
+      },
+      {
+        "monorepo": {
+          "id": "m_d5f420b4c7ce3b51",
+          "full_name": "scli-muvznqr3/scli-muvznqr3"
+        },
+        "session": {
+          "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+          "state": "active",
+          "person": "scli-muvznqr3",
+          "machine": "scli-box",
+          "program": "pi",
+          "models": [
+            {
+              "model": "gpt-5.5",
+              "answers": 3
+            }
+          ],
+          "repo": "projects-app",
+          "branch": "fix-login",
+          "parent": null,
+          "subagents": 0,
+          "started_at": "2026-10-06T01:16:16.350Z",
+          "last_at": "2026-10-06T01:16:24.444Z",
+          "prompts": 2,
+          "tool_calls": 1,
+          "images": 0,
+          "redactions": 2,
+          "bytes": 3689,
+          "end": 3717,
+          "removed": [],
+          "commits": [
+            {
+              "repo": "projects-app",
+              "sha": "9d060b59a145d7695fde8efc3295340a3af68d8e",
+              "branch": "fix-login",
+              "title": "Placeholder: from the Pi session",
+              "committed_at": "2026-10-06T01:17:25.000Z",
+              "on_main": true,
+              "model": "gpt-5.5"
+            },
+            {
+              "repo": "projects-app",
+              "sha": "c8ddf5e54bd8f85500bc57e2410b85ff34ddd2ff",
+              "branch": "fix-login",
+              "title": "Placeholder: rewritten",
+              "committed_at": "2026-10-06T01:17:28.000Z",
+              "on_main": true,
+              "model": "gpt-5.5"
+            }
+          ],
+          "lead": {
+            "repo": "projects-app",
+            "branch": "fix-login"
+          },
+          "issues": []
+        }
+      }
+    ],
+    "counts": {
+      "active": 2,
+      "inactive": 0
+    },
+    "repositories": [
+      "scli-muvznqr3/scli-muvznqr3"
+    ],
+    "next_cursor": null
+  }
+}

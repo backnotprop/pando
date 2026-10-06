@@ -4,10 +4,10 @@
 // A monorepo is `owner/name` (NAMESPACES.md): the name is unique within its
 // owner, and a permanent id keys everything stored (objects, Artifacts, R2,
 // queues). Monorepos made before namespaces keep their old name as their id.
-import { RESERVED_NAMESPACES } from "@pando/contract/names";
+import { RESERVED_NAMESPACES, RESERVED_REPOSITORY_NAMES } from "@pando/contract/names";
 import { hasControl } from "../http";
 
-export { RESERVED_NAMESPACES };
+export { RESERVED_NAMESPACES, RESERVED_REPOSITORY_NAMES };
 
 export const ZERO = "0".repeat(40);
 

@@ -13,7 +13,7 @@ import { meQuery, monoreposQuery, openBranchesQuery, reposQuery } from "../api/q
 import { Avatar } from "./Avatar";
 import { Caret } from "./dropdown";
 import { CheckIcon, Mark } from "./Icons";
-import { type AppLink, monoLink, ownerLink, repoLink } from "./paths";
+import { type AppLink, monoLink, ownerLink, personSessionsLink, repoLink } from "./paths";
 import { MenuHeading, menuHeading, MenuLink, MenuPopup, MenuRule, menuItem } from "./menu";
 import { EXACT } from "./TabBar";
 import { MODES, type Mode, setTheme, type Theme, THEMES, useThemeChoice } from "./theme";
@@ -189,6 +189,7 @@ function NameMenu() {
       </Menu.Trigger>
       <MenuPopup align="end" offset={10}>
         <MenuLink link={ownerLink(me.login)}>Your profile</MenuLink>
+        <MenuLink link={personSessionsLink(me.login)}>Your sessions</MenuLink>
         <MenuRule />
         <MenuHeading>Your organizations</MenuHeading>
         {orgs.map((o) => (

@@ -3,49 +3,49 @@
   "route": "GET .../repos/{repo}/summary",
   "status": 200,
   "body": {
-    "repo": "rel-muw4hmx3",
+    "repo": "rel-muw4momx",
     "main": {
       "branch": "main",
-      "sha": "78d18b24641bac7d87fe37d733f08a2323f29683",
+      "sha": "b0b7b1d54892226172df09b320cc59ffa106bb31",
       "title": "Add feature A",
       "state": "success",
       "checks": {
-        "sha": "78d18b24641bac7d87fe37d733f08a2323f29683",
+        "sha": "b0b7b1d54892226172df09b320cc59ffa106bb31",
         "state": "success",
         "required": [],
         "missing": [],
         "statuses": [
           {
-            "sha": "78d18b24641bac7d87fe37d733f08a2323f29683",
+            "sha": "b0b7b1d54892226172df09b320cc59ffa106bb31",
             "context": "ci",
             "state": "success",
             "target_url": null,
             "description": null,
             "creator": "app:buildkite",
             "app": "buildkite",
-            "created_at": "2026-10-06T03:32:30.049Z"
+            "created_at": "2026-10-06T03:36:24.853Z"
           }
         ],
         "checks_unknown": null
       },
       "build": {
-        "id": "cib_c78ca9727723ab56",
+        "id": "cib_fc7bcc6a431083fc",
         "service": "buildkite",
-        "connection": "m_4e9d6ad526cd165a--cic_86a207e92bfc",
+        "connection": "m_a2e4be844af030e0--cic_603d2340c6bf",
         "pipeline": "p",
         "number": 142,
-        "repo": "rel-muw4hmx3",
+        "repo": "rel-muw4momx",
         "repo_path": ".",
-        "sha": "78d18b24641bac7d87fe37d733f08a2323f29683",
+        "sha": "b0b7b1d54892226172df09b320cc59ffa106bb31",
         "branch": "main",
         "message": "Merge feat-a: Add feature A",
         "state": "passed",
         "service_state": "passed",
         "web_url": "https://buildkite.com/o/p/builds/142",
-        "pushed_by": "rel-muw4hmx3",
-        "created_at": "2026-10-06T03:31:30.041Z",
-        "started_at": "2026-10-06T03:31:31.041Z",
-        "finished_at": "2026-10-06T03:32:20.041Z",
+        "pushed_by": "rel-muw4momx",
+        "created_at": "2026-10-06T03:35:24.848Z",
+        "started_at": "2026-10-06T03:35:25.848Z",
+        "finished_at": "2026-10-06T03:36:14.848Z",
         "duration_s": 49,
         "rebuilt_from": null
       }

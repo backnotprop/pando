@@ -21,7 +21,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeError, retryResetFetch } from "./errors.mjs";
+import { fileURLToPath } from "node:url";
+import { describeError, isConnectionReset, retryResetFetch } from "./errors.mjs";
 import { request } from "./http.mjs";
 
 retryResetFetch();
@@ -52,7 +53,16 @@ const check = (name, ok, detail = "") => {
   console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`));
 };
 
-const call = (method, path, secret, body, headers = {}) => request(URL_, method, path, { secret, body, headers, redirect: "manual" });
+/**
+ * One API call. wrangler dev closes idle keep-alive connections, and a request sent on one never reached it
+ * (record.mjs makes the same call), so a reset is sent again once, whatever the method.
+ */
+const call = (method, path, secret, body, headers = {}) =>
+  request(URL_, method, path, { secret, body, headers, redirect: "manual" }).catch((err) => {
+    if (!isConnectionReset(err)) throw err;
+
+    return request(URL_, method, path, { secret, body, headers, redirect: "manual" });
+  });
 
 const waitFor = async (pred, ms = 20_000) => {
   const end = Date.now() + ms;
@@ -367,6 +377,41 @@ try {
   check("and git can delete it now", push.status === 0 && git(["ls-remote", url, "refs/tags/v0.1.0"], src).stdout.trim() === "");
   check("release events on the stream: created, updated, published, deleted", !!(await waitFor(() => ["release.created", "release.updated", "release.published", "release.deleted"].every((k) => sock.events().some((e) => e.kind === k)))));
   record("release-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=kind:release.* (WebSocket)", 101, sock.events().filter((e) => e.kind.startsWith("release.")));
+
+  // ── 5. pando release, the cli ──
+  const bin = join(work, "pando");
+  const built = spawnSync("go", ["build", "-buildvcs=false", "-o", bin, "./cmd/pando"], { cwd: fileURLToPath(new URL("../../cli", import.meta.url)), encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" } });
+  check("the cli builds", built.status === 0, built.stderr?.slice(0, 200));
+  const pandoEnv = { ...env, PANDO_HOME: join(work, "pando-home") };
+  const pando = (args, input) => spawnSync(bin, args, { cwd: work, env: pandoEnv, encoding: "utf8", input });
+  const said = (x) => scrub(`${x.stdout}${x.stderr}`).trim().slice(0, 300);
+  let cmd = pando(["login", "--server", URL_, "--with-credential"], `${S}\n`);
+  check("pando login --with-credential", cmd.status === 0, said(cmd));
+  const mono = ["--monorepo", `${O}/${M}`];
+  cmd = pando(["release", "list", ...mono]);
+  check("pando release list: newest first, with their state", cmd.status === 0 && /TAG\s+TITLE\s+STATE\s+COMMIT\s+WHEN/.test(cmd.stdout) && cmd.stdout.indexOf("v0.3.0") < cmd.stdout.indexOf("v0.2.0") && /v0\.3\.0\s+v0\.3\.0\s+published \(forced\)/.test(cmd.stdout), said(cmd));
+  cmd = pando(["release", "create", "v0.4.0", "--generate", ...mono]);
+  check("pando release create refuses on a missing required check, and says how to go on", cmd.status !== 0 && cmd.stderr.includes("checks are missing") && cmd.stderr.includes("pando release publish v0.4.0 --force"), said(cmd));
+  cmd = pando(["release", "create", "v0.4.0", "--generate", "--force", "--title", "Fourth", ...mono]);
+  check("pando release create --force publishes and says so", cmd.status === 0 && cmd.stdout.includes("Published v0.4.0") && cmd.stdout.includes("forced"), said(cmd));
+  cmd = pando(["release", "view", ...mono]);
+  check("pando release view: the latest, with its notes", cmd.status === 0 && cmd.stdout.startsWith("v0.4.0  Fourth") && cmd.stdout.includes("No branches were merged since v0.3.0."), said(cmd));
+  cmd = pando(["release", "view", "v0.4.0", "--json", ...mono]);
+  check("pando release view --json: the API's answer", cmd.status === 0 && JSON.parse(cmd.stdout).tag === "v0.4.0" && JSON.parse(cmd.stdout).checks?.state === "missing");
+  cmd = pando(["release", "create", "v0.5.0", "--draft", "--notes", "Draft notes", ...mono]);
+  check("pando release create --draft", cmd.status === 0 && cmd.stdout.startsWith("Draft v0.5.0"), said(cmd));
+  const head5 = JSON.parse(pando(["release", "view", "v0.5.0", "--json", ...mono]).stdout).sha;
+  cmd = pando(["release", "publish", "v0.5.0", ...mono]);
+  check("pando release publish refuses while the check is missing", cmd.status !== 0 && cmd.stderr.includes("--force"), said(cmd));
+  await call("POST", `${base}/statuses/${head5}`, S, { state: "success", context: "ci" });
+  cmd = pando(["release", "publish", "v0.5.0", ...mono]);
+  check("and publishes once it is green", cmd.status === 0 && cmd.stdout.startsWith("Published v0.5.0 at") && !cmd.stdout.includes("forced"), said(cmd));
+  cmd = pando(["release", "delete", "v0.5.0", ...mono]);
+  check("pando release delete asks first (no terminal: needs --yes)", cmd.status !== 0 && cmd.stderr.includes("--yes"), said(cmd));
+  cmd = pando(["release", "delete", "v0.5.0", "--yes", ...mono]);
+  check("pando release delete --yes", cmd.status === 0 && cmd.stdout.includes("Deleted release v0.5.0") && (await call("GET", rel("v0.5.0"), S)).status === 404, said(cmd));
+  cmd = pando(["help"]);
+  check("pando help lists pando release", /pando release list \| view/.test(cmd.stderr) && /pando release create <tag>/.test(cmd.stderr), said(cmd));
 } catch (err) {
   check("no unexpected error", false, describeError(err));
 } finally {

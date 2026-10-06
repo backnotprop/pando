@@ -3,14 +3,14 @@
   "route": "GET .../repos/{repo}/summary (nothing reported)",
   "status": 200,
   "body": {
-    "repo": "rel-muw4hmx3",
+    "repo": "rel-muw4momx",
     "main": {
       "branch": "main",
-      "sha": "b2fc417cddc1c5b24b4aac5f9ef16b7826d8802c",
+      "sha": "790a394c495fb1ac259ec89946bfcaaa5222cbaf",
       "title": "first",
       "state": "not_built",
       "checks": {
-        "sha": "b2fc417cddc1c5b24b4aac5f9ef16b7826d8802c",
+        "sha": "790a394c495fb1ac259ec89946bfcaaa5222cbaf",
         "state": "success",
         "required": [],
         "missing": [],

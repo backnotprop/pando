@@ -542,11 +542,13 @@ try {
     git(["add", "-A"], code);
     git(["commit", "-qm", "the cli"], code);
     check("its main pushed", git(["push", "-q", purl, "main"], code).status === 0);
+
     const run = spawnSync(join(code, "tools/release.sh"), ["v0.1.0", "--force"], {
       cwd: code, encoding: "utf8", timeout: 600_000,
       // Go's caches stay the user's own (not the test HOME's), so nothing is downloaded again.
       env: { ...pandoEnv, ...goCaches(), PATH: `${work}:${process.env.PATH}`, PANDO_RELEASE_MONOREPO: `${O}/${P}`, PANDO_RELEASE_REPO: "projects/pando" },
     });
+
     check("tools/release.sh builds four binaries and publishes v0.1.0 with them", run.status === 0 && run.stdout.includes("Published v0.1.0") && (run.stdout.match(/^Uploaded /gm) ?? []).length === 5, said(run));
     const pbase = `/v1/monorepos/${O}/${P}/repos/projects-pando`;
     r = await call("GET", `${pbase}/releases/v0.1.0`, S);

@@ -58,7 +58,7 @@ When this machine records agent sessions, `~/.pando/sessions.toml` holds whether
 
 ## Agent sessions
 
-A recorded session ([Agent sessions](/sessions)) is kept as it was sent, after its secrets were removed on your machine and checked again on the server: in R2, in pieces, under the repository's id. The repository's Durable Object keeps an index of it: who recorded it, from which machine, the agent, the models that answered, where it ran, its commits, and counts. Every member of the repository can read it. Your list of what is not recorded is kept in D1 with your account, and each machine's last report of its recording (on or off, and the folders it reads) beside its credential.
+A recorded session ([Agent sessions](/sessions)) is kept as it was sent: its conversation records only ([What is sent](/sessions#what-is-sent)), after its secrets were removed on your machine and checked again on the server: in R2, in pieces, under the repository's id. The repository's Durable Object keeps an index of it: who recorded it, from which machine, the agent, the models that answered, where it ran, its commits, and counts. Every member of the repository can read it. Your list of what is not recorded is kept in D1 with your account, and each machine's last report of its recording (on or off, and the folders it reads) beside its credential.
 
 - Deleting a session removes its pieces from R2 at once. The index keeps who deleted it and when, and the commits that name it, since git keeps their `Pando-Session` lines.
 - Removing a turn writes the session's pieces again without that turn's lines.

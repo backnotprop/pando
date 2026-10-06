@@ -16,11 +16,11 @@ removed).
 | Stage | State |
 | --- | --- |
 | 0. Prove three things | done, accepted by pando-ops 2026-10-05 |
-| 1. Server: store and read | done, reported 2026-10-05. Claude Code and Codex fixtures wait on the owner's fixture logins |
+| 1. Server: store and read | done, reported 2026-10-05 |
 | 2. Machine: capture | done, landed (main bdf147c) |
 | 3. Linking | done, landed with stage 2 (main bdf147c) |
 | 4. Web | built and tested, the conversation wired after main ce9335b |
-| 5. Docs, limits, recorded fixtures | docs and limits done; Claude Code and Codex fixtures wait for the owner's logins |
+| 5. Docs, limits, recorded fixtures | done; all four agents' fixtures recorded |
 
 ## Stage 0 findings (2026-10-05)
 
@@ -382,6 +382,26 @@ disagreed). Now `commitRows` (store.ts) holds both rules for every view: oldest 
 branch's own order (`ord`, 0 the newest), then sha; and a commit's model only when every session naming it had the same
 one. sessions-cli.mjs makes the three commits in one second (GIT_COMMITTER_DATE) so the tie happens every run, and checks
 the order and that neither session's own list shows a model for the commit they disagree on.
+
+## Only the conversation is sent (pando-ops, 2026-10-06)
+
+Recording the Claude Code and Codex fixtures with the default logins showed that both agents write their own records
+into a session: Claude Code the signed-in email (`session_context`), the whole system prompt (`prompt_snapshot`) and the
+skills list; Codex its base instructions and account ids (`session_meta`), the person's AGENTS.md and skills
+(`developer` messages), `world_state` with home paths, and `<environment_context>` as a user message. `pando sync` sent
+whole lines, so these went to the server. Now `cli/internal/session/sent.go` keeps, per agent, only the record types the
+conversation needs (what trajectory draws, Pando's pass reads, and the folder), cuts Codex's `session_meta` and
+`turn_context` to the fields read, and drops the rest before the secret check. A new record kind stays home until listed.
+The docs page's "What is sent" lists them.
+
+Also found: the token rule redacted the agents' own ids (`toolu_…`, `msg_…`), which pairs a tool call with its result;
+the values of id fields (`idKeys` in trim.go) are now kept as written.
+
+Fixtures: `worker/test/sessions/fixtures/claude-code.jsonl` (Claude Code 2.1.290, Haiku 4.5) and `codex.jsonl` (Codex
+0.160.0, gpt-6-sol), recorded in scratch git folders with the Pi fixture's two placeholder prompts and one commit, then
+`go run ./cmd/session-fixture <program> <file> <scratch folder>` (cli/): the same Trim, the real secret check, the scratch
+folder replaced by `/fixture/repo`. sessions.mjs checks every fixture carries no email (but Claude's co-author
+noreply), home folder or instructions text.
 
 ## Stage 5: docs, limits, fixtures
 

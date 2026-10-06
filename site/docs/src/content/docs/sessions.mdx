@@ -23,8 +23,18 @@ pando session status     what this machine records, where it reads from, and wha
 
 - **Only sessions inside a Pando folder** on this machine: a project's worktree, or the repository's own folder. A session anywhere else is never read past the folder it names.
 - **Only new lines.** `pando sync` reads what each agent wrote since last time and sends it. It keeps how far it got, never the session's text.
+- **Only the conversation**, never the agent's own records about you ([What is sent](#what-is-sent)).
 - **Secrets are removed on your machine first:** the Pando credential, the values of environment variables whose names look secret, the values in `.env` and `.dev.vars` files in the repository folder and its worktrees, everything betterleaks' rules find, private keys, passwords in URLs, `NAME=value` pairs with a secret-looking name, and long random tokens. A removed value shows as **redacted**. If the check cannot run, nothing is sent. Pando checks again on the server for common token formats.
 - **Not kept:** the agent's reasoning, images ("Image, not kept"), and long encoded strings.
+
+## What is sent
+
+Only the conversation. Each agent also writes its own records into a session (your account's email, its system prompt, your instructions, the skills it has), and those stay on your machine. Pando sends these record types and nothing else; a type an agent adds later stays home until Pando lists it.
+
+- **Claude Code:** `user` and `assistant` records (your prompts, its answers, tool calls and their results). Not sent: `attachment` records (the signed-in email, the system prompt, the skills list, the date), and its queue, cost and mode records.
+- **Codex:** `response_item` records (prompts, answers, tool calls and their results), except `developer` and `system` messages and the `<environment_context>` and AGENTS.md instructions it adds to a turn; from `session_meta`, only its id, time, folder, version, branch and parent thread; from `turn_context`, only its model and folder. Not sent: `world_state`, `event_msg`, token counts, and the account ids and instructions in `session_meta`.
+- **Pi:** the `session` header (its id and folder), `message` records, and model changes. Not sent: thinking-level changes and anything else.
+- **OpenCode 2:** the session's id, folder, parent and version, then `user`, `assistant` and `shell` rows. Not sent: idle and compaction rows, and every other table (OpenCode keeps instructions and accounts there).
 
 ## Where agents keep sessions
 

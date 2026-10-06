@@ -1,6 +1,7 @@
 // Agent sessions, end to end (stage 1: store and read): real wrangler dev, its local D1, Durable Objects and R2, and
 // the real Artifacts service for the monorepo. Fixtures are sessions recorded for this test in scratch folders with
-// placeholder prompts (test/sessions/fixtures): Pi 0.85.1 and OpenCode V2 2.0.22 (rows as `pando sync` reads them).
+// placeholder prompts (test/sessions/fixtures): Pi 0.85.1, OpenCode V2 2.0.22 (rows as `pando sync` reads them), and
+// Claude Code 2.1.290 and Codex 0.160.0 (through the machine's own filter, cli/cmd/session-fixture).
 //
 //   npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to <dir>
 //   npx wrangler dev --port 8869 --inspector-port 9369 --persist-to <dir> --var FEED_TICK_MS:500
@@ -288,6 +289,33 @@ try {
   check("the socket saw the deletes", live.frames.filter((f) => f.kind === "session.deleted").length === 2, "");
   const frames = ["session.started", "session.updated", "session.deleted"].map((k) => live.frames.find((f) => f.kind === k));
   record("session-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=sessions (WebSocket)", 101, frames);
+
+  // ── Claude Code and Codex: sessions the agents wrote themselves (placeholder prompts), as `pando sync` sends them ──
+  // The committed copies came through the machine's own filter (cli/cmd/session-fixture): the conversation only.
+  for (const name of ["claude-code.jsonl", "codex.jsonl", "pi.jsonl", "opencode.jsonl"]) {
+    const text = fixture(name);
+    const emails = [...text.matchAll(/[\w.+-]+@[\w-]+\.[a-z]{2,}/g)].flatMap((m) => (m[0] === "noreply@anthropic.com" ? [] : [m[0]]));
+    const marks = ["/Users/", "/home/", "AGENTS.md", "CLAUDE.md", "environment_context", "systemPrompt", "base_instructions", "skill"].filter((w) => text.includes(w));
+    check(`the ${name} fixture carries no email, home folder or instructions`, emails.length === 0 && marks.length === 0, `${emails.length} emails, ${marks.join(" ")}`);
+  }
+
+  const agents = [
+    { program: "claude-code", file: "claude-code.jsonl", agentOf: (l) => l.sessionId, model: "claude-haiku-4-5-20251001" },
+    { program: "codex", file: "codex.jsonl", agentOf: (l) => l.payload?.id, model: "gpt-6-sol" },
+  ];
+
+  for (const a of agents) {
+    const text = recent(fixture(a.file), 2 * 60_000);
+    const agentId = a.agentOf(JSON.parse(text.split("\n")[0]));
+    const path = `${mb}/sessions/${sessionId(a.program, agentId)}`;
+    r = await piece(path, A, { program: a.program, agent_id: agentId, repo: "projects-a", branch: "fix-login", parent: null }, 0, Buffer.byteLength(text), text);
+    check(`${a.program}: the whole session lands, with two prompts, its tool calls and its model`, r.status === 200 && r.json?.prompts === 2 && r.json?.tool_calls >= 1 && r.json?.models?.[0]?.model === a.model, `${r.status} ${r.json?.prompts} ${r.json?.tool_calls} ${JSON.stringify(r.json?.models ?? r.json?.error)}`);
+    const read = (await call("GET", `${path}/entries`, B)).json?.entries ?? [];
+    const shown = read.filter((e) => e.kind === "prompt").map((e) => e.text);
+    check(`${a.program}: its prompts are the typed ones, nothing the agent added`, shown.length === 2 && shown.every((t) => t.startsWith("Placeholder")), shown.map((t) => t.slice(0, 20)).join(" | "));
+    check(`${a.program}: its tool call is paired with its result`, read.some((e) => e.kind === "tool" && e.result && e.ok !== false), read.map((e) => e.kind).join(","));
+    check(`${a.program}: its answers are in place`, read.filter((e) => e.kind === "answer").length >= 2, `${read.filter((e) => e.kind === "answer").length}`);
+  }
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

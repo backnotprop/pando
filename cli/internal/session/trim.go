@@ -29,6 +29,13 @@ var (
 // list (Claude Code and Pi thinking blocks, OpenCode reasoning parts), or a line whose payload is one (Codex).
 var reasoning = map[string]bool{"thinking": true, "redacted_thinking": true, "reasoning": true, "agent_reasoning": true, "agent_reasoning_raw_content": true}
 
+// idKeys: the fields where the agents write their own ids, never a secret.
+var idKeys = map[string]bool{
+	"id": true, "uuid": true, "parentUuid": true, "leafUuid": true, "parentId": true, "sessionId": true, "session_id": true,
+	"promptId": true, "requestId": true, "tool_use_id": true, "call_id": true, "toolCallId": true, "turn_id": true,
+	"responseId": true, "thread_id": true, "parent_thread_id": true,
+}
+
 func typeOf(v any) string {
 	if m, ok := v.(map[string]any); ok {
 		if t, ok := m["type"].(string); ok {
@@ -38,10 +45,11 @@ func typeOf(v any) string {
 	return ""
 }
 
-// Trim reads one line of an agent's session and returns what may leave the machine: every string redacted, long
-// opaque strings replaced by a marker, strings cut at 64 KB, reasoning dropped. keep is false for a line that is all
-// reasoning, or not JSON. An error means redaction could not run: the line, and the piece, stay home.
-func Trim(line []byte, redact func(string) (string, error)) (out []byte, keep bool, err error) {
+// Trim reads one line of an agent's session and returns what may leave the machine: the conversation's records only
+// (sent.go), every string redacted, long opaque strings replaced by a marker, strings cut at 64 KB, reasoning dropped.
+// keep is false for a record that stays home, a line that is all reasoning, or not JSON. An error means redaction
+// could not run: the line, and the piece, stay home.
+func Trim(program string, line []byte, redact func(string) (string, error)) (out []byte, keep bool, err error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	dec.UseNumber()
 	var v any
@@ -49,9 +57,10 @@ func Trim(line []byte, redact func(string) (string, error)) (out []byte, keep bo
 		return nil, false, nil
 	}
 	top, _ := v.(map[string]any)
-	if reasoning[typeOf(top["payload"])] {
+	if top, keep = conversation(program, top); !keep || reasoning[typeOf(top["payload"])] {
 		return nil, false, nil
 	}
+	v = top
 	v, err = walk(v, redact)
 	if err != nil {
 		return nil, false, err
@@ -91,6 +100,12 @@ func walk(v any, redact func(string) (string, error)) (any, error) {
 		return out, nil
 	case map[string]any:
 		for k, e := range x {
+			if s, ok := e.(string); ok && idKeys[k] {
+				// An agent's own id (toolu_01…, a message's, a call's) is long and random by design: it pairs a tool
+				// call with its result, so it is kept as written.
+				x[k] = cut(s, stringMax)
+				continue
+			}
 			w, err := walk(e, redact)
 			if err != nil {
 				return nil, err

@@ -284,7 +284,10 @@ func (r *Runner) tail(ctx context.Context, id string, h Header) (*Tail, bool) {
 	return t, !t.Deleted
 }
 
-func (r *Runner) line(raw []byte) ([]byte, bool, error) { return Trim(raw, r.redactor.Redact) }
+// lines is what one agent's lines go through before they leave: Trim, with this machine's redaction.
+func (r *Runner) lines(program string) func([]byte) ([]byte, bool, error) {
+	return func(raw []byte) ([]byte, bool, error) { return Trim(program, raw, r.redactor.Redact) }
+}
 
 func (r *Runner) file(ctx context.Context, h Header, parent string, repoRule []string, nudged map[string]bool) {
 	id := ID(h.Program, h.AgentID)
@@ -314,7 +317,7 @@ func (r *Runner) file(ctx context.Context, h Header, parent string, repoRule []s
 	if parent != "" {
 		start.Parent = &parent
 	}
-	r.send(ctx, id, t, start, func(at int64) (Piece, error) { return ReadPiece(h.File, at, PieceMax, r.line) })
+	r.send(ctx, id, t, start, func(at int64) (Piece, error) { return ReadPiece(h.File, at, PieceMax, r.lines(h.Program)) })
 	if t.Fingerprint == "" && t.Offset > 0 {
 		t.Fingerprint, _ = Fingerprint(h.File)
 	}
@@ -348,7 +351,7 @@ func (r *Runner) openCode(ctx context.Context, st Store, repoRule []string, nudg
 			p := ID(OpenCode, s.ParentID)
 			start.Parent = &p
 		}
-		r.send(ctx, id, t, start, func(at int64) (Piece, error) { return OpenCodePiece(db, s, at, PieceMax, r.line) })
+		r.send(ctx, id, t, start, func(at int64) (Piece, error) { return OpenCodePiece(db, s, at, PieceMax, r.lines(OpenCode)) })
 	}
 }
 

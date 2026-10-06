@@ -1515,7 +1515,8 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks", async (c) => {
   const type = b.type;
 
   if (type !== "web" && type !== "buildkite") bad("type is web or buildkite");
-  const events = b.events ?? (type === "web" ? EVENTS : ["push"]);
+  // A Buildkite hook builds each push, and main's merge commit at each merge (releases-2026-10-04, approved).
+  const events = b.events ?? (type === "web" ? EVENTS : ["push", "merged"]);
 
   if (!Array.isArray(events) || !events.length || !events.every(isHookEvent)) bad(`events: some of ${EVENTS.join(", ")}`);
   let url: string | null = null;

@@ -235,7 +235,7 @@ try {
       type: "buildkite",
       buildkite: { organization: "pando", pipeline: "ci", api_url: `http://127.0.0.1:${hookPort}/buildkite/builds` },
     });
-    check("the owner registers a buildkite hook (local stand-in for the API)", r.status === 201 && r.json?.events?.join() === "push", `${r.status} ${scrub(r.text).slice(0, 200)}`);
+    check("the owner registers a buildkite hook (local stand-in for the API): it builds pushes and merges", r.status === 201 && r.json?.events?.join() === "push,merged", `${r.status} ${scrub(r.text).slice(0, 200)}`);
     r = await call("POST", `/v1/monorepos/${O}/${M}/repos/${repoName}/hooks`, A, { type: "buildkite", buildkite: { organization: "o", pipeline: "p", api_url: "https://evil.example/" } });
     check("a buildkite api_url off this machine is refused", r.status === 400);
   }

@@ -3390,7 +3390,7 @@ paths:
                 events:
                   type: array
                   items: { $ref: "#/components/schemas/HookEvent" }
-                  description: Default `[push, branch.opened, merged, tag]` for web, `[push]` for buildkite.
+                  description: Default `[push, branch.opened, merged, tag]` for web, `[push, merged]` for buildkite (a merge builds main's merge commit).
                 buildkite:
                   type: object
                   required: [organization, pipeline]

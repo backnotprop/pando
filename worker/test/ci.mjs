@@ -605,7 +605,7 @@ try {
   cmd = pando(["ci", "pipeline", "add", M, "p2", "--monorepo", MO]);
   let hooks2 = await bkHooks();
   check("pando ci pipeline add <repo> <pipeline> (owner): a buildkite hook for the connected organization",
-    cmd.status === 0 && hooks2.some((h) => h.buildkite?.organization === "o" && h.buildkite?.pipeline === "p2") && /each push to a branch now starts a build of o\/p2/.test(cmd.stdout), scrub(cmd.stderr).trim());
+    cmd.status === 0 && hooks2.some((h) => h.buildkite?.organization === "o" && h.buildkite?.pipeline === "p2") && /each push to a branch, and each merge into main, now starts a build of o\/p2/.test(cmd.stdout), scrub(cmd.stderr).trim());
   cmd = pando(["ci", "pipeline", "add", M, "p2", "--monorepo", MO]);
   check("adding it again adds nothing", cmd.status === 0 && /already starts/.test(cmd.stdout) && (await bkHooks()).length === hooks2.length);
   cmd = pando(["ci", "pipeline", "list", "--monorepo", MO]);

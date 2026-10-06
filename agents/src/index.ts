@@ -5,7 +5,8 @@
 
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "./env";
-import type { AgentsRpc, SessionSpec, SessionState, TranscriptMessage } from "./protocol";
+import { listModels } from "./models";
+import type { AgentsRpc, ModelInfo, SessionSpec, SessionState, TranscriptMessage } from "./protocol";
 
 export { AgentSession } from "./session";
 
@@ -52,6 +53,10 @@ export class AgentsApi extends WorkerEntrypoint<Env> implements AgentsRpc {
     if (!m || request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("not found\n", { status: 404 });
 
     return this.#session(decodeURIComponent(m[1]), Number(m[2])).fetch(request);
+  }
+
+  models(): ModelInfo[] {
+    return listModels(this.env);
   }
 
   /** Waits until the session's runs settle. The tests' driver uses it. */

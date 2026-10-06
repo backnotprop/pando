@@ -7,7 +7,7 @@
 # engine in a VM, for the containers and FUSE; never FUSE on the Mac), runs
 # the local server on PORT, INSPECTOR and STATE (defaults 8863, 9363,
 # agents/.state), then session.mjs, the same session after a full restart,
-# launch.mjs, tools.mjs, scope.mjs, issue.mjs, live.mjs, continue.mjs, review.mjs and assistant.mjs. Afterwards it stops the server, stops Colima only if it
+# launch.mjs, existing-branch.mjs, tools.mjs, scope.mjs, issue.mjs, live.mjs, continue.mjs, review.mjs and assistant.mjs; then Pando's Worker alone (serve.sh start-alone) for absent.mjs. Afterwards it stops the server, stops Colima only if it
 # started it, and puts the Docker context back. One line per suite; exit 1
 # when any failed. Logs: $STATE/gate-*.log and $STATE/wrangler.log.
 set -uo pipefail
@@ -55,6 +55,7 @@ else
   failed=1
 fi
 suite "launch (stage 2)" launch node "$here/test/launch.mjs"
+suite "existing branch" existing node "$here/test/existing-branch.mjs"
 suite "tools (stage 3)" tools node "$here/test/tools.mjs"
 suite "credential scope" scope node "$here/test/scope.mjs"
 suite "address an issue (stage 4)" issue node "$here/test/issue.mjs"
@@ -62,4 +63,12 @@ suite "live view (stage 5)" live node "$here/test/live.mjs"
 suite "continue (stage 6)" continue node "$here/test/continue.mjs"
 suite "review with agent (stage 7)" review node "$here/test/review.mjs"
 suite "the assistant (stage 8)" assistant node "$here/test/assistant.mjs"
+# Pando's Worker without pando-agents, as its web e2e runs it.
+"$here/test/serve.sh" stop >/dev/null 2>&1
+if "$here/test/serve.sh" start-alone >/dev/null; then
+  suite "without pando-agents" absent node "$here/test/absent.mjs"
+else
+  echo "FAIL  without pando-agents: the server did not start ($AGENTS_STATE/wrangler.log)"
+  failed=1
+fi
 exit "$failed"

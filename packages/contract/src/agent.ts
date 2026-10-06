@@ -28,8 +28,8 @@ export const AgentSession = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
   /** The project it works in. */
   repo: RepoName,
-  /** Its branch, made off main when it was launched. */
-  branch: Schema.String,
+  /** Its branch, named by a person or from its issue; null for an assistant's chat until the person names one. */
+  branch: Schema.NullOr(Schema.String),
   /** The agent program: `pi` (Pi Durable). */
   program: Schema.String,
   /** The model's id, such as `@cf/zai-org/glm-5.3-flash`. */
@@ -46,14 +46,42 @@ export const AgentSession = Schema.Struct({
   awaiting_checks: Schema.Boolean,
   created_at: Timestamp,
   updated_at: Timestamp,
+  /** In a list: the title of the issue it addresses, as it reads now (null when that issue is gone). */
+  /** An assistant's chat: its first message, cut at 200 characters (the Chats list); null for other kinds. */
+  first_message: Schema.NullOr(Schema.String),
+  issue_title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** In a list: that issue's state now. */
+  issue_state: Schema.optionalKey(Schema.NullOr(Schema.Literals(["open", "closed"]))),
+  /** In a list (GET .../agents, .../assistant): its branch as Pando knows it now; null while the branch is not made yet. */
+  branch_facts: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        state: Schema.Literals(["open", "merged"]),
+        /** Commits on the branch not on main; 0 once merged; null while not computed. */
+        ahead: Schema.NullOr(Count),
+        /** True while `ahead` is not yet for the current main and head (computed off the request): show no count. */
+        stale: Schema.Boolean,
+        merged_at: Schema.NullOr(Timestamp),
+        /** The branch head's combined checks (Checks.state). */
+        checks: Schema.Literals(["success", "pending", "failure", "error", "missing", "unknown"]),
+      }),
+    ),
+  ),
 });
 
 export interface AgentSession extends Schema.Schema.Type<typeof AgentSession> {}
+
+/** GET .../agents/models: the models a session may use here. */
+export const AgentModels = Schema.Struct({ models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) });
+
+export interface AgentModels extends Schema.Schema.Type<typeof AgentModels> {}
 
 /** GET .../agents: newest first; pass `next_before` back as `before` for the page after. */
 export const AgentSessionList = Schema.Struct({
   sessions: Schema.Array(AgentSession),
   next_before: Schema.NullOr(Count),
+  /** For the same filters, in every state: all of them, working now, waiting (for a person or for checks). */
+  counts: Schema.Struct({ all: Count, working: Count, waiting: Count }),
 });
 
 export interface AgentSessionList extends Schema.Schema.Type<typeof AgentSessionList> {}
@@ -96,3 +124,31 @@ export type AgentLiveFrame = typeof AgentLiveFrame.Type;
 export const AgentTranscript = Schema.Struct({ messages: Schema.Array(AgentMessage) });
 
 export interface AgentTranscript extends Schema.Schema.Type<typeof AgentTranscript> {}
+
+/** Small words a branch name does not end on. */
+const TRAILING_SMALL = /(-(a|an|and|at|by|for|from|in|of|on|or|the|to|with))+$/;
+
+/** Title words a branch name keeps, at most. */
+const NAME_MAX = 30;
+
+/**
+ * The branch's name (owner, 2026-10-05: "a new branch has to have a semantic
+ * name ... derived from the issue"): the issue's number and its title's first
+ * words, lower case, cut at a word up to 30 characters: 41-login-page-flashes-white.
+ * It becomes the worktree folder on every machine. The server makes it, and
+ * Address with agent shows it before it is sent. worker/src/agents/issue.ts
+ * keeps the same rule (the Worker takes types only from here, M5).
+ */
+export function issueBranchName(n: number, title: string): string {
+  let words = "";
+
+  for (const w of title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+    if (words && words.length + 1 + w.length > NAME_MAX) break;
+    words = words ? `${words}-${w}` : w.slice(0, NAME_MAX);
+  }
+
+  // A name does not end on a small word ("41-login-page-flashes-white", not "...-white-in").
+  words = words.replace(TRAILING_SMALL, "");
+
+  return words ? `${n}-${words}` : String(n);
+}

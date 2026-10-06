@@ -51,3 +51,8 @@ export const issuesSearch = Schema.toStandardSchemaV1(
 
 /** New issue: `?project=projects-pando` fills its Project. */
 export const newIssueSearch = Schema.toStandardSchemaV1(Schema.Struct({ project: Schema.optionalKey(Schema.String) }));
+
+/** The Agents tab: its filters, kept in the address (`?status=working&person=ana&kind=issue`). */
+export const agentsSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({ status: Schema.optionalKey(Schema.String), person: Schema.optionalKey(Schema.String), kind: Schema.optionalKey(Schema.String) }),
+);

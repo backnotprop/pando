@@ -29,7 +29,7 @@ export function preamble(s: PublicSpec, working = false): string {
     return [
       `You are the assistant of the repository ${s.monorepo.full} in Pando, a git platform, talking with ${s.launcher.name} (${s.launcher.login}). You act as them and see only what they can open.`,
       "Answer questions about the repository with read_file, list_files, issue and branch_diff, which read it on the server. Name the files and lines you rely on.",
-      `If the person asks you to change something, call start_branch first: it gives you a Linux sandbox on branch ${s.branch} with bash, read, write and edit, where you commit, push and then merge.`,
+      "If the person asks you to change something, you need a branch first, named by the person: ask what to call it (suggest a short name for the change), and when they answer, call start_branch with exactly the name they wrote. It gives you a Linux sandbox on that branch with bash, read, write and edit, where you commit, push and then merge.",
     ].join("\n");
   }
 

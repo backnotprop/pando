@@ -3,7 +3,8 @@
 //   GET   /assistant, POST /assistant the caller's own chats with the repository assistant (assistant.ts)
 //   POST  /issues/{n}/agent           "Address with agent" (issue.ts)
 //   POST  /agents/review              "Review with agent" on a branch (review.ts)
-//   POST  /agents                     launch one: {prompt, repo?, branch?, model?}
+//   GET   /agents/models              the models a session may use
+//   POST  /agents                     launch one: {prompt, branch, repo?, model?}
 //   GET   /agents/{n}                 one session
 //   GET   /agents/{n}/transcript      its transcript, from its object in pando-agents
 //   GET   /agents/{n}/live            the live view's socket (Upgrade: websocket): the transcript as it grows
@@ -25,8 +26,8 @@ import type { ApiVars } from "../monorepo/api";
 import { hashToken, newToken } from "../monorepo/session";
 import type { Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json, type JsonObject } from "../parse";
-import { DEFAULT_MODEL, type SessionKind, type SessionSpec } from "../../../agents/src/protocol";
-import type { AgentView } from "./store";
+import { DEFAULT_MODEL, type SessionKind, type SessionSpec, WORKERS_AI_MODELS } from "../../../agents/src/protocol";
+import type { AgentFilters, AgentView } from "./store";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
 
@@ -36,7 +37,7 @@ const LIST_DEFAULT = 30;
 
 const LIST_MAX = 100;
 
-const BRANCH = /^(?!main$)(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,200}$/;
+export const BRANCH = /^(?!main$)(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,200}$/;
 
 function unwrap<T>(o: Outcome<T>): T {
   if (o.ok) return o.value;
@@ -70,12 +71,60 @@ function numberOf(c: C): number {
 }
 
 /** The pando-agents binding, or a plain 503 where it is not set up. */
-function agentsOf(c: C): NonNullable<Env["AGENTS"]> {
+/**
+ * A call to pando-agents. Only launching, a session's transcript and live
+ * socket, sending and stopping need it; every list and count is Pando's own.
+ * Unbound or unreachable, it is a clear refusal (503 agents_unavailable),
+ * never a 500.
+ */
+async function callAgents<T>(c: C, call: (agents: NonNullable<Env["AGENTS"]>) => T | Promise<T>): Promise<T> {
   const a = c.env.AGENTS;
 
   if (!a) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
 
-  return a;
+  try {
+    return await call(a);
+  } catch (error) {
+    console.error(`pando-agents: ${error instanceof Error ? error.message : String(error)}`);
+
+    throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents cannot be reached right now; try again in a moment");
+  }
+}
+
+/** Refuses a launch before anything is made when pando-agents cannot be reached (Address with agent makes a branch first). */
+export async function agentsReachable(c: C): Promise<void> {
+  await callAgents(c, (a) => a.models());
+}
+
+const NUMBER = /^[1-9][0-9]{0,8}$/;
+
+/** A list's filters from the address (?before, ?limit, ?issue, ?status, ?person, ?kind); `chatsOf` for the assistant's list. */
+export function filtersOf(c: C, chatsOf: string | null): AgentFilters {
+  const q = (k: string) => c.req.query(k);
+  const limit = Number(q("limit") ?? LIST_DEFAULT);
+
+  const num = (k: string) => {
+    const v = q(k);
+
+    if (v !== undefined && !NUMBER.test(v)) bad(`${k}: a number`);
+
+    return v === undefined ? null : Number(v);
+  };
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
+  const status = q("status") ?? null;
+
+  if (status !== null && status !== "working" && status !== "waiting") bad("status: working or waiting");
+  const kind = q("kind") ?? null;
+
+  if (kind !== null && kind !== "task" && kind !== "issue" && kind !== "review") bad("kind: task, issue or review");
+
+  const repo = q("repo");
+  const branch = q("branch");
+
+  if ((repo === undefined) !== (branch === undefined)) bad("repo and branch: both, or neither");
+
+  return { before: num("before"), limit, issue: num("issue"), branch: repo && branch ? { repo, name: branch } : null, status, person: q("person") ?? null, kind, chatsOf };
 }
 
 /** Session n as the caller may see it: the assistant's chats are their person's alone (404 for anyone else). */
@@ -89,8 +138,11 @@ async function sessionOf(c: C, n: number): Promise<AgentView> {
 
 /** The session's state, recorded as failed with this reason. */
 async function failed(c: C, s: AgentView, reason: string): Promise<AgentView> {
-  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch, repo: s.repo, sandbox: "stopped", updated_at: now() })) ?? s;
+  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo, sandbox: "stopped", updated_at: now() })) ?? s;
 }
+
+/** A chat's first message as its Chats list keeps it. */
+const FIRST_MESSAGE_MAX = 200;
 
 export interface LaunchInput {
   kind: SessionKind;
@@ -106,12 +158,16 @@ export interface LaunchInput {
  * its object. Shared by POST /agents and the issue's "Address with agent".
  */
 export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
-  const agents = agentsOf(c);
+  const agents = c.env.AGENTS;
+
+  if (!agents) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
+
+  await agentsReachable(c);
   const info = c.get("info");
   const identity = c.get("identity");
   const repos = await c.get("stub").listRepos();
   const repo = input.repo === null ? (repos.length === 1 ? repos[0] : bad("repo: which project the agent works in")) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
-  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo.name, branch: input.branch, model: input.model, issue: input.issue }, identity));
+  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo.name, branch: input.branch, model: input.model, issue: input.issue, first_message: input.kind === "chat" ? input.prompt.slice(0, FIRST_MESSAGE_MAX) : null }, identity));
   const secret = newToken();
   const cred = await accounts(c.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox", monorepo_id: info.id });
 
@@ -122,7 +178,7 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
     kind: input.kind,
     monorepo: { id: info.id, full: info.full_name, kind: info.kind },
     repo: { name: repo.name, path: repo.path },
-    branch: session.branch,
+    branch: session.branch ?? "",
     model: input.model,
     launcher: { login: identity.login, name: identity.name ?? identity.login, email: identity.email ?? `${identity.login}@users.pando.invalid` },
     credential: { id: cred.id, name: cred.name, secret },
@@ -145,16 +201,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
   const one = `${base}/:n`;
 
   api.get(base, async (c) => {
-    const limit = Number(c.req.query("limit") ?? LIST_DEFAULT);
-    const before = c.req.query("before");
-    const issue = c.req.query("issue");
-
-    if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
-
-    if (before !== undefined && !/^[1-9][0-9]{0,8}$/.test(before)) bad("before: a session number");
-
-    if (issue !== undefined && !/^[1-9][0-9]{0,8}$/.test(issue)) bad("issue: an issue number");
-    const page = await c.get("stub").agentList(before === undefined ? null : Number(before), limit, issue === undefined ? null : Number(issue));
+    const page = await c.get("stub").agentList(filtersOf(c, null));
 
     return c.json(unwrap(page) satisfies typeof Contract.AgentSessionList.Encoded);
   });
@@ -162,7 +209,10 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
   api.post(base, async (c) => {
     const b = await bodyOf(c);
 
-    if (b.branch !== undefined && (!isText(b.branch) || !BRANCH.test(b.branch))) bad("branch: a branch name other than main");
+    // A person names the branch (owner, 2026-10-05): Pando never invents one for a task.
+    if (b.branch === undefined) throw new HttpError(400, "branch_required", "branch: name the branch for the change (an existing one is used as it is)");
+
+    if (!isText(b.branch) || !BRANCH.test(b.branch)) bad("branch: a branch name other than main");
 
     if (b.model !== undefined && !isText(b.model)) bad("model: a model id");
 
@@ -172,12 +222,20 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
       kind: "task",
       prompt: promptOf(b.prompt),
       repo: isText(b.repo) ? b.repo : null,
-      branch: isText(b.branch) ? b.branch : null,
+      branch: b.branch,
       model: isText(b.model) ? b.model : DEFAULT_MODEL,
       issue: null,
     };
 
     return c.json((await launch(c, input)) satisfies typeof Contract.AgentSession.Encoded, 201);
+  });
+
+  // The models a session may use here (registered before /agents/:n).
+  // The models a session may use here: pando-agents' list (a test server adds its scripted one), else the Workers AI ones Pando knows.
+  api.get(`${base}/models`, async (c) => {
+    const models = c.env.AGENTS ? await callAgents(c, (a) => a.models()).catch(() => WORKERS_AI_MODELS) : WORKERS_AI_MODELS;
+
+    return c.json({ models: [...models] } satisfies typeof Contract.AgentModels.Encoded);
   });
 
   api.get(one, async (c) => c.json((await sessionOf(c, numberOf(c))) satisfies typeof Contract.AgentSession.Encoded));
@@ -187,7 +245,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
 
     await sessionOf(c, n);
 
-    return c.json({ messages: await agentsOf(c).transcript(c.get("m"), n) } satisfies typeof Contract.AgentTranscript.Encoded);
+    return c.json({ messages: await callAgents(c, (a) => a.transcript(c.get("m"), n)) } satisfies typeof Contract.AgentTranscript.Encoded);
   });
 
   api.get(`${one}/live`, async (c) => {
@@ -196,7 +254,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") throw new HttpError(426, "upgrade_required", "open this with a WebSocket");
     await sessionOf(c, n);
 
-    return agentsOf(c).fetch(new Request(`http://pando-agents/live/${encodeURIComponent(c.get("m"))}/${n}`, c.req.raw));
+    return callAgents(c, (a) => a.fetch(new Request(`http://pando-agents/live/${encodeURIComponent(c.get("m"))}/${n}`, c.req.raw)));
   });
 
   api.post(`${one}/messages`, async (c) => {
@@ -205,7 +263,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
 
     if (s.launched_by !== c.get("identity").login) throw new HttpError(403, "not_launcher", `only ${s.launched_by}, who started it, can send it messages`);
     const prompt = promptOf((await bodyOf(c)).prompt);
-    const state = await agentsOf(c).send(c.get("m"), n, prompt);
+    const state = await callAgents(c, (a) => a.send(c.get("m"), n, prompt));
 
     return c.json(((await c.get("stub").agentReport(state)) ?? s) satisfies typeof Contract.AgentSession.Encoded);
   });
@@ -216,7 +274,7 @@ export function agentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): v
     const who = c.get("identity");
 
     if (s.launched_by !== who.login && who.role !== "owner") throw new HttpError(403, "not_launcher", `only ${s.launched_by}, who started it, or an owner can stop it`);
-    const state = await agentsOf(c).stop(c.get("m"), n, `stopped by ${who.login}`);
+    const state = await callAgents(c, (a) => a.stop(c.get("m"), n, `stopped by ${who.login}`));
 
     return c.json(((await c.get("stub").agentReport(state)) ?? s) satisfies typeof Contract.AgentSession.Encoded);
   });

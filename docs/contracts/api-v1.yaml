@@ -1697,6 +1697,9 @@ paths:
       parameters:
         - { name: before, in: query, description: "A page's `next_before`.", schema: { type: integer } }
         - { name: issue, in: query, description: "Only the sessions addressing this issue.", schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string, enum: [working, waiting] } }
+        - { name: person, in: query, description: "Who started it (a login).", schema: { type: string } }
+        - { name: kind, in: query, description: "What it started from.", schema: { type: string, enum: [task, issue, review] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
@@ -1705,9 +1708,10 @@ paths:
       summary: Launch an agent session acting as the caller
       description: |
         Mints a sandbox credential for the caller named after the session
-        (`cloud-<n>`), records the session, and starts it with the prompt on a
-        new branch (`agent/<n>` unless `branch` names one). `repo` may be left
-        out in a plain repository. A session that cannot start is answered
+        (`cloud-<n>`), records the session, and starts it with the prompt on
+        the branch named: made off main when it is new, used as it is when it
+        exists. Pando never invents a name: without `branch`, 400
+        `branch_required`. `repo` may be left out in a plain repository. A session that cannot start is answered
         `failed` with its reason, and its credential is revoked.
       tags: [agents]
       requestBody:
@@ -1716,11 +1720,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [prompt]
+              required: [prompt, branch]
               properties:
                 prompt: { type: string, maxLength: 65536 }
                 repo: { type: string }
-                branch: { type: string }
+                branch: { type: string, description: "The branch's name, named for the change." }
                 model: { type: string, default: "@cf/zai-org/glm-5.3-flash" }
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
@@ -1735,8 +1739,9 @@ paths:
       operationId: addressIssueWithAgent
       summary: Address with agent
       description: |
-        Makes the branch `agent/<n>-<the title's words>` off main (a number
-        after it when that exists), titled as the issue and linked to it, so
+        Makes the branch `<n>-<the title's first words, up to 30 characters>`
+        (or `branch` when given) off main, or uses it as it is when it exists,
+        titled as the issue and linked to it, so
         merging it closes the issue; then launches a session acting as the
         caller, told the issue's title, body and comments and `prompt` when
         given. 409 `issue_closed` for a closed issue.
@@ -1750,6 +1755,7 @@ paths:
                 prompt: { type: string, maxLength: 65536 }
                 repo: { type: string }
                 model: { type: string }
+                branch: { type: string }
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "409": { $ref: "#/components/responses/Error" }
@@ -1818,6 +1824,20 @@ paths:
       responses:
         "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/models:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: agentModels
+      summary: The models a session may use here
+      tags: [agents]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [models], properties: { models: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } } } }
   /v1/monorepos/{owner}/{monorepo}/agents/{n}:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -4979,14 +4999,14 @@ components:
     AgentSession:
       type: object
       description: packages/contract/src/agent.ts is the exact shape.
-      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, awaiting_checks, created_at, updated_at]
+      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, awaiting_checks, first_message, created_at, updated_at]
       properties:
         number: { type: integer }
         kind: { type: string, enum: [task, issue, review, chat] }
         status: { type: string, enum: [working, waiting, failed, stopped] }
         reason: { type: [string, "null"] }
         repo: { type: string }
-        branch: { type: string }
+        branch: { type: [string, "null"], description: "Named by a person or from its issue; null for an assistant's chat until the person names one." }
         program: { type: string, description: "pi" }
         model: { type: string }
         issue: { type: [integer, "null"] }
@@ -4994,14 +5014,23 @@ components:
         machine: { type: string, description: "The session's credential, cloud-<n>." }
         workspace: { type: [string, "null"], enum: [mount, clone, null] }
         awaiting_checks: { type: boolean, description: "Its merge waits for required checks still running; Pando tells it when they are green." }
+        first_message: { type: [string, "null"], description: "An assistant's chat: its first message, cut at 200 characters; null for other kinds." }
+        branch_facts:
+          type: [object, "null"]
+          description: In a list only. Its branch now (state, ahead, merged_at, checks); null while the branch is not made yet.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AgentSessionList:
       type: object
-      required: [sessions, next_before]
+      required: [sessions, next_before, counts]
       properties:
         sessions: { type: array, items: { $ref: "#/components/schemas/AgentSession" } }
         next_before: { type: [integer, "null"] }
+        counts:
+          type: object
+          description: For the same filters, in every state.
+          properties: { all: { type: integer }, working: { type: integer }, waiting: { type: integer } }
+          required: [all, working, waiting]
     AgentTranscript:
       type: object
       required: [messages]

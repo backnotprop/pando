@@ -1,8 +1,8 @@
 // "Address with agent" on an issue (owner, 2026-10-04: "more generic depending
 // on issue not always a fix"), members only:
-//   POST /v1/monorepos/{owner}/{name}/issues/{n}/agent   {prompt?, repo?, model?}
+//   POST /v1/monorepos/{owner}/{name}/issues/{n}/agent   {prompt?, repo?, model?, branch?}
 //
-// It makes the branch agent/<n>-<the title's words> off main, titled as the
+// It makes the branch <n>-<the title's words> (or the name given) off main, titled as the
 // issue and linked to it, so merging the branch closes the issue, and
 // launches a session acting as the caller with a prompt built from the issue
 // (its title, body and comments, and what the person added). The session
@@ -18,7 +18,7 @@ import type { Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json } from "../parse";
 import type { IssueView, TimelineView } from "../issues/store";
 import { DEFAULT_MODEL } from "../../../agents/src/protocol";
-import { launch } from "./routes";
+import { agentsReachable, BRANCH, launch } from "./routes";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
 
@@ -33,19 +33,37 @@ function bad(message: string): never {
   throw new HttpError(400, "bad_request", message);
 }
 
-/** The branch's name: agent/<n>- and the title's first words, lower case. */
-export function issueBranch(n: number, title: string): string {
-  const words = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
-    .replace(/-+$/, "");
-
-  return words ? `agent/${n}-${words}` : `agent/${n}`;
-}
 
 /** What the agent is told: the issue as people wrote it, then how Pando works for it. */
+/** Small words a branch name does not end on. */
+const TRAILING_SMALL = /(-(a|an|and|at|by|for|from|in|of|on|or|the|to|with))+$/;
+
+/** Title words a branch name keeps, at most. */
+const NAME_MAX = 30;
+
+/**
+ * The branch's name (owner, 2026-10-05: "a new branch has to have a semantic
+ * name ... derived from the issue"): the issue's number and its title's first
+ * words, lower case, cut at a word up to 30 characters: 41-login-page-flashes-white.
+ * It becomes the worktree folder on every machine. The server makes it, and
+ * Address with agent shows it before it is sent.
+ * The contract's issueBranchName is the same rule, for the web (the Worker
+ * takes types only from the contract, M5).
+ */
+function issueBranchName(n: number, title: string): string {
+  let words = "";
+
+  for (const w of title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+    if (words && words.length + 1 + w.length > NAME_MAX) break;
+    words = words ? `${words}-${w}` : w.slice(0, NAME_MAX);
+  }
+
+  // A name does not end on a small word ("41-login-page-flashes-white", not "...-white-in").
+  words = words.replace(TRAILING_SMALL, "");
+
+  return words ? `${n}-${words}` : String(n);
+}
+
 export function issuePrompt(full: string, issue: IssueView, comments: TimelineView[], branch: string, extra: string | null): string {
   const said = comments.flatMap((x) => (x.kind === "comment" && x.comment.body ? [`${x.comment.author}${x.comment.machine ? `, ${x.comment.machine}` : ""}:\n${x.comment.body}`] : []));
 
@@ -78,6 +96,8 @@ export function issueAgentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }
 
     if (body.repo !== undefined && !isText(body.repo)) bad("repo: a project's name");
 
+    if (body.branch !== undefined && (!isText(body.branch) || !BRANCH.test(body.branch))) bad("branch: a branch name other than main");
+
     const stub = c.get("stub");
     const issue = unwrap(await stub.issueGet(Number(n)));
 
@@ -85,18 +105,17 @@ export function issueAgentRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }
     const repos = await stub.listRepos();
     const name = isText(body.repo) ? body.repo : (issue.project ?? (repos.length === 1 ? repos[0].name : bad("repo: which project the agent works in (the issue names none)")));
     const repo = repos.find((r) => r.name === name) ?? bad(`no repo ${name}`);
-    // A branch already there (an earlier agent on this issue) gets a number after the name.
-    const base = issueBranch(issue.number, issue.title);
-    let branch = base;
+    // The name the person gave, else the issue's. One that exists is used as it is (another agent's, or theirs);
+    // a new one is made off main.
+    const branch = isText(body.branch) ? body.branch : issueBranchName(issue.number, issue.title);
 
-    for (let i = 2; ; i++) {
-      try {
-        await createBranch(c, repo, branch, repo.default_branch, issue.title, `Addresses #${issue.number}.`);
-        break;
-      } catch (err) {
-        if (!(err instanceof HttpError) || err.code !== "branch_exists") throw err;
-        branch = `${base}-${i}`;
-      }
+    // Nothing is made (no branch, no link) when the agent could not start.
+    await agentsReachable(c);
+
+    try {
+      await createBranch(c, repo, branch, repo.default_branch, issue.title, `Addresses #${issue.number}.`);
+    } catch (err) {
+      if (!(err instanceof HttpError) || err.code !== "branch_exists") throw err;
     }
 
     unwrap(await stub.issueUpdate(issue.number, { link: [{ repo: repo.name, branch }] }, c.get("identity")));

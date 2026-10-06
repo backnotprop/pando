@@ -6,7 +6,7 @@
 // `issue:<n>` when it addresses one).
 
 import { HttpError, now } from "../http";
-import type { ObjectInfo, StreamEvent } from "../monorepo/types";
+import type { Checks, ObjectInfo, StreamEvent } from "../monorepo/types";
 import type { SessionKind, SessionState, Status } from "../../../agents/src/protocol";
 
 export const AGENTS_SCHEMA = `
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   number INTEGER PRIMARY KEY, kind TEXT NOT NULL, repo TEXT NOT NULL, branch TEXT NOT NULL, model TEXT NOT NULL,
   issue INTEGER, launched_by TEXT NOT NULL, machine TEXT NOT NULL, credential_id TEXT,
   status TEXT NOT NULL, reason TEXT, workspace TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  awaiting_checks INTEGER NOT NULL DEFAULT 0);
+  awaiting_checks INTEGER NOT NULL DEFAULT 0, first_message TEXT);
 CREATE INDEX IF NOT EXISTS agent_sessions_issue ON agent_sessions (issue, number) WHERE issue IS NOT NULL;
 CREATE INDEX IF NOT EXISTS agent_sessions_branch ON agent_sessions (repo, branch, number)`;
 
@@ -37,6 +37,7 @@ interface AgentRow {
   created_at: string;
   updated_at: string;
   awaiting_checks: number;
+  first_message: string | null;
 }
 
 /** A session as the API shows it (Contract.AgentSession). */
@@ -46,7 +47,8 @@ export interface AgentView {
   status: Status;
   reason: string | null;
   repo: string;
-  branch: string;
+  /** null: a chat before it names its branch. */
+  branch: string | null;
   program: string;
   model: string;
   issue: number | null;
@@ -55,23 +57,57 @@ export interface AgentView {
   workspace: "mount" | "clone" | null;
   /** Its merge was refused while required checks were still running; Pando tells it when they are green. */
   awaiting_checks: boolean;
+  /** A chat's first message, its first 200 characters (the Chats list); null for other kinds. */
+  first_message: string | null;
   created_at: string;
   updated_at: string;
+  /** In a list: its branch as Pando knows it now; null while the branch is not made yet. */
+  branch_facts?: BranchFacts | null;
+  /** In a list: the title of the issue it addresses, as it reads now. */
+  issue_title?: string | null;
+  issue_state?: "open" | "closed" | null;
 }
 
-/** A page of sessions, newest first (Contract.AgentSessionList). */
+/** What a list row shows of its branch: exact, from the branch's record. */
+export interface BranchFacts {
+  state: "open" | "merged";
+  ahead: number | null;
+  /** True while `ahead` is not for the current main and head (computed off the request). */
+  stale: boolean;
+  merged_at: string | null;
+  checks: Checks["state"];
+}
+
+/** A page of sessions, newest first, and the counts for the same filters (Contract.AgentSessionList). */
 export interface AgentPage {
   sessions: AgentView[];
   next_before: number | null;
+  counts: { all: number; working: number; waiting: number };
+}
+
+/** What GET .../agents and GET .../assistant filter by; null: any. */
+export interface AgentFilters {
+  before: number | null;
+  limit: number;
+  issue: number | null;
+  /** A project's branch: the sessions on it (a branch page's reviews). */
+  branch: { repo: string; name: string } | null;
+  status: "working" | "waiting" | null;
+  person: string | null;
+  kind: "task" | "issue" | "review" | null;
+  /** A login: that person's chats (GET .../assistant); null: the Agents tab (no chats). */
+  chatsOf: string | null;
 }
 
 export interface AgentInput {
   kind: SessionKind;
   repo: string;
-  /** null: agent/<number>. */
+  /** The branch it works on; null only for a chat, which names one later (start_branch). */
   branch: string | null;
   model: string;
   issue: number | null;
+  /** A chat's first message (kept cut, for its person's Chats list). */
+  first_message: string | null;
 }
 
 export interface AgentHost {
@@ -86,9 +122,9 @@ export function machineName(number: number): string {
 
 function view(r: AgentRow): AgentView {
   return {
-    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch, program: PROGRAM, model: r.model,
+    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch || null, program: PROGRAM, model: r.model,
     issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, awaiting_checks: r.awaiting_checks === 1,
-    created_at: r.created_at, updated_at: r.updated_at,
+    first_message: r.first_message, created_at: r.created_at, updated_at: r.updated_at,
   };
 }
 
@@ -114,11 +150,11 @@ export class AgentStore {
   create(input: AgentInput, login: string): AgentView {
     const number = (this.sql.exec<{ n: number | null }>("SELECT MAX(number) AS n FROM agent_sessions").one().n ?? 0) + 1;
     const at = now();
-    const branch = input.branch ?? (input.kind === "chat" ? `assistant/${number}` : `agent/${number}`);
+    const branch = input.branch ?? "";
 
     this.sql.exec(
-      "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)",
-      number, input.kind, input.repo, branch, input.model, input.issue, login, machineName(number), at, at,
+      "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, first_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)",
+      number, input.kind, input.repo, branch, input.model, input.issue, login, machineName(number), input.first_message, at, at,
     );
     this.publish(this.must(number), login);
 
@@ -139,29 +175,51 @@ export class AgentStore {
 
   /**
    * Newest first; `before` a number to page back. The Agents tab's list
-   * (`chatsOf` null) leaves out the assistant's chats, optionally only the
-   * sessions addressing `issue`; `chatsOf` a login lists that person's chats.
+   * (`chatsOf` null) leaves out the assistant's chats; `chatsOf` a login lists
+   * that person's chats instead. The counts are for the same filters in
+   * every state (the bar's "All 9 · Working 2 · Waiting 2").
    */
-  list(before: number | null, limit: number, issue: number | null, chatsOf: string | null = null): AgentPage {
-    const from = before ?? Number.MAX_SAFE_INTEGER;
+  list(f: AgentFilters): AgentPage {
+    const where: string[] = [];
+    const args: SqlStorageValue[] = [];
 
-    const rows = (
-      chatsOf === null
-        ? this.sql.exec<AgentRow & Record<string, SqlStorageValue>>(
-            "SELECT * FROM agent_sessions WHERE number < ? AND kind != 'chat' AND (? IS NULL OR issue = ?) ORDER BY number DESC LIMIT ?",
-            from, issue, issue, limit + 1,
-          )
-        : this.sql.exec<AgentRow & Record<string, SqlStorageValue>>(
-            "SELECT * FROM agent_sessions WHERE number < ? AND kind = 'chat' AND launched_by = ? ORDER BY number DESC LIMIT ?",
-            from, chatsOf, limit + 1,
-          )
-    ).toArray();
+    const add = (sql: string, ...v: SqlStorageValue[]) => {
+      where.push(sql);
+      args.push(...v);
+    };
 
-    const more = rows.length > limit;
-    const page = rows.slice(0, limit);
+    if (f.chatsOf === null) add("kind != 'chat'");
+    else add("kind = 'chat' AND launched_by = ?", f.chatsOf);
 
-    return { sessions: page.map(view), next_before: more ? (page.at(-1)?.number ?? null) : null };
+    if (f.issue !== null) add("issue = ?", f.issue);
+
+    if (f.branch !== null) add("repo = ? AND branch = ?", f.branch.repo, f.branch.name);
+
+    if (f.person !== null) add("launched_by = ?", f.person);
+
+    if (f.kind !== null) add("kind = ?", f.kind);
+    const counted = where.join(" AND ");
+    const counts = { all: 0, working: 0, waiting: 0 };
+
+    for (const r of this.sql.exec<{ status: Status; n: number }>(`SELECT status, COUNT(*) AS n FROM agent_sessions WHERE ${counted} GROUP BY status`, ...args)) {
+      counts.all += r.n;
+
+      if (r.status === "working" || r.status === "waiting") counts[r.status] += r.n;
+    }
+
+    if (f.status !== null) add("status = ?", f.status);
+    add("number < ?", f.before ?? Number.MAX_SAFE_INTEGER);
+
+    const rows = this.sql
+      .exec<AgentRow & Record<string, SqlStorageValue>>(`SELECT * FROM agent_sessions WHERE ${where.join(" AND ")} ORDER BY number DESC LIMIT ?`, ...args, f.limit + 1)
+      .toArray();
+
+    const more = rows.length > f.limit;
+    const page = rows.slice(0, f.limit);
+
+    return { sessions: page.map(view), next_before: more ? (page.at(-1)?.number ?? null) : null, counts };
   }
+
 
   /** A session's state as its object reports it. A report older than the one kept changes nothing. */
   report(state: SessionState): AgentView | null {
@@ -170,12 +228,12 @@ export class AgentStore {
     if (!r || state.updated_at < r.updated_at) return null;
 
     this.sql.exec(
-      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), updated_at = ? WHERE number = ?",
-      state.status, state.reason ?? null, state.workspace ?? null, state.updated_at, state.number,
+      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), branch = COALESCE(NULLIF(?, ''), branch), updated_at = ? WHERE number = ?",
+      state.status, state.reason ?? null, state.workspace ?? null, state.branch, state.updated_at, state.number,
     );
     const next = this.must(state.number);
 
-    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace) this.publish(next, null);
+    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace || next.branch !== r.branch) this.publish(next, null);
 
     return view(next);
   }
@@ -199,26 +257,32 @@ export class AgentStore {
     return this.sql.exec("SELECT 1 FROM agent_sessions WHERE repo = ? AND branch = ? AND awaiting_checks = 1 LIMIT 1", repo, branch).toArray().length > 0;
   }
 
-  /** The sessions waiting for (repo, branch)'s checks, no longer waiting: their numbers. */
+  /**
+   * The sessions waiting for (repo, branch)'s checks, no longer waiting: the
+   * numbers of those still running to tell. A stopped or failed one stops
+   * waiting but is not told: telling it would wake it (two agents can share
+   * a branch, and the person stopped this one).
+   */
   takeAwaiting(repo: string, branch: string): number[] {
-    const numbers = this.sql
-      .exec<{ number: number }>("UPDATE agent_sessions SET awaiting_checks = 0 WHERE repo = ? AND branch = ? AND awaiting_checks = 1 RETURNING number", repo, branch)
-      .toArray()
-      .map((r) => r.number);
+    const rows = this.sql
+      .exec<{ number: number; status: string }>("UPDATE agent_sessions SET awaiting_checks = 0 WHERE repo = ? AND branch = ? AND awaiting_checks = 1 RETURNING number, status", repo, branch)
+      .toArray();
 
-    for (const n of numbers) this.publish(this.must(n), null);
+    for (const r of rows) this.publish(this.must(r.number), null);
 
-    return numbers;
+    return rows.filter((r) => r.status === "working" || r.status === "waiting").map((r) => r.number);
   }
 
   private publish(r: AgentRow, actor: string | null): void {
-    const topics = ["agents", `agent:${r.number}`];
+    // A chat is its person's alone: its updates go only to its own topic, and never carry its words.
+    const chat = r.kind === "chat";
+    const topics = chat ? [`agent:${r.number}`] : ["agents", `agent:${r.number}`];
 
     if (r.issue !== null) topics.push(`issue:${r.issue}`);
 
     this.host.publish({
       kind: "agent.updated", collection: "agents", key: String(r.number), op: "upsert", repo: r.repo,
-      actor, machine: actor ? null : r.machine, agent: null, number: r.number, row: view(r), topics,
+      actor, machine: actor ? null : r.machine, agent: null, number: r.number, row: { ...view(r), first_message: null }, topics,
     });
   }
 }

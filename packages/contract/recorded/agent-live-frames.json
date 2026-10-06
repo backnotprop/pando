@@ -16,7 +16,7 @@
               "text": "Show the live view.\n> bash {\"command\":\"echo first\"}\n> bash {\"command\":\"sleep 3; echo after-a-while\"}\n> read {\"path\":\"README.md\"}"
             }
           ],
-          "at": 1791178976808
+          "at": 1791221305554
         },
         {
           "id": "11",
@@ -24,15 +24,15 @@
           "parts": [
             {
               "type": "tool-call",
-              "id": "tool:1791178976813:llbltmejxzp",
+              "id": "tool:1791221305563:ke320nxt36",
               "name": "bash",
               "arguments": "{\"command\":\"echo first\"}"
             }
           ],
-          "at": 1791178976813,
+          "at": 1791221305563,
           "stop_reason": "toolUse",
           "usage": {
-            "input": 1626,
+            "input": 1628,
             "cache_read": 0,
             "output": 8
           }
@@ -49,13 +49,13 @@
           "parts": [
             {
               "type": "tool-result",
-              "id": "tool:1791178976813:llbltmejxzp",
+              "id": "tool:1791221305563:ke320nxt36",
               "name": "bash",
               "text": "first\n",
               "error": false
             }
           ],
-          "at": 1791178982730
+          "at": 1791221312496
         }
       ]
     },
@@ -69,16 +69,16 @@
           "parts": [
             {
               "type": "tool-call",
-              "id": "tool:1791178982734:8kdithwfyrd",
+              "id": "tool:1791221312500:6zqlq9gl4jp",
               "name": "bash",
               "arguments": "{\"command\":\"sleep 3; echo after-a-while\"}"
             }
           ],
-          "at": 1791178982734,
+          "at": 1791221312500,
           "stop_reason": "toolUse",
           "usage": {
-            "input": 1642,
-            "cache_read": 1626,
+            "input": 1644,
+            "cache_read": 1628,
             "output": 12
           }
         }
@@ -94,13 +94,13 @@
           "parts": [
             {
               "type": "tool-result",
-              "id": "tool:1791178982734:8kdithwfyrd",
+              "id": "tool:1791221312500:6zqlq9gl4jp",
               "name": "bash",
               "text": "after-a-while\n",
               "error": false
             }
           ],
-          "at": 1791178985852
+          "at": 1791221315651
         }
       ]
     },
@@ -114,16 +114,16 @@
           "parts": [
             {
               "type": "tool-call",
-              "id": "tool:1791178985855:kiiphchiq4i",
+              "id": "tool:1791221315654:264836hwg3h",
               "name": "read",
               "arguments": "{\"path\":\"README.md\"}"
             }
           ],
-          "at": 1791178985855,
+          "at": 1791221315654,
           "stop_reason": "toolUse",
           "usage": {
-            "input": 1664,
-            "cache_read": 1642,
+            "input": 1666,
+            "cache_read": 1644,
             "output": 7
           }
         }
@@ -139,13 +139,13 @@
           "parts": [
             {
               "type": "tool-result",
-              "id": "tool:1791178985855:kiiphchiq4i",
+              "id": "tool:1791221315654:264836hwg3h",
               "name": "read",
               "text": "# Live\n",
               "error": false
             }
           ],
-          "at": 1791178986389
+          "at": 1791221316557
         }
       ]
     },
@@ -162,11 +162,11 @@
               "text": "Finished.\n# Live\n"
             }
           ],
-          "at": 1791178986392,
+          "at": 1791221316560,
           "stop_reason": "stop",
           "usage": {
-            "input": 1680,
-            "cache_read": 1664,
+            "input": 1682,
+            "cache_read": 1666,
             "output": 5
           }
         }

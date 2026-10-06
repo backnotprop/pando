@@ -32,7 +32,7 @@ const t = await makeRepo("agents-live", { "README.md": "# Live\n" });
 
 try {
   const prompt = ["Show the live view.", tool("bash", { command: "echo first" }), tool("bash", { command: "sleep 3; echo after-a-while" }), tool("read", { path: "README.md" })].join("\n");
-  let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted" });
+  let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted", branch: "live-view" });
   check("launched", r.status === 201, r.status);
   const live = open(`/v1/monorepos/${t.full}/agents/1/live`, t.secret);
   await untilSettled(t, 1);

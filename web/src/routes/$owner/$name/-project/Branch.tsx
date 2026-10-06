@@ -26,6 +26,7 @@ import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
 import { BranchSessionsTab, SessionNumbers } from "../-sessions/BranchTab";
 import { useMonorepo } from "../-frame/heads";
 import { loadColourViews } from "../-code/coloured";
+import { ReviewAgents, ReviewWithAgent } from "../-agents/ReviewAgent";
 import { BranchIssues } from "../-issues/BranchIssues";
 import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
@@ -476,7 +477,8 @@ function Overview({ repo, b, commits, total, reviews, live, on }: { repo: Repo; 
         <SectionHead title="Commits" count={total} />
         {commits.length ? <Commits commits={commits} on={on} /> : <Empty>No commits ahead of main.</Empty>}
         <div className="mt-10">
-          <SectionHead title="Reviews" />
+          <SectionHead title="Reviews" right={b.state === "merged" ? null : <ReviewWithAgent repo={repo} branch={b.name} />} />
+          <ReviewAgents repo={repo} branch={b.name} />
           <Reviews reviews={reviews} />
         </div>
       </section>

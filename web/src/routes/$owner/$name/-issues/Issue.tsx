@@ -14,11 +14,13 @@ import { fallback, useRows } from "../../../../live/rows";
 import { button, field, Refusal } from "../../../../ui/controls";
 import { Chevron } from "../../../../ui/Icons";
 import { DoneIcon, NotPlannedIcon, OpenIcon, ReopenIcon } from "../../../../ui/IssueIcons";
+import { Leaf } from "../../../../ui/Leaf";
 import { MenuPopup, menuItem } from "../../../../ui/menu";
 import { newIssueLink, ownerLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
+import { AddressAgent } from "../-agents/AddressAgent";
 import { Editor } from "./Editor";
 import { useMe } from "./parts";
 import { type FactChange, IssueSidebar } from "./Sidebar";
@@ -51,6 +53,7 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
   const clock = useNow();
   const [title, setTitle] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [addressing, setAddressing] = useState(false);
 
   const save = async () => {
     if (title === null || !title.trim() || title.trim() === issue.title) {
@@ -77,6 +80,12 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
             <span className="ml-2 text-ash">#{issue.number}</span>
           </h1>
           <div className="flex flex-none gap-2.5 phone:hidden">
+            {issue.state === "open" ? (
+              <button type="button" className={`${button("quiet")} gap-2`} onClick={() => setAddressing(true)}>
+                <Leaf state="idle" size={16} />
+                Address with agent
+              </button>
+            ) : null}
             <button type="button" className={button("quiet")} onClick={() => setTitle(issue.title)}>
               Edit
             </button>
@@ -103,6 +112,7 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
         </form>
       )}
       <Refusal error={error} />
+      <AddressAgent issue={issue} open={addressing} onClose={() => setAddressing(false)} />
       <div className="mt-3.5 flex items-center gap-3 text-[14px] text-bark-dim phone:flex-wrap phone:gap-x-2.5 phone:gap-y-2 phone:text-[13.5px]">
         <StateChip issue={issue} />
         <span>

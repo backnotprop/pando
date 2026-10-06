@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/agents (no branch)",
+  "status": 400,
+  "body": {
+    "error": {
+      "code": "branch_required",
+      "message": "branch: name the branch for the change (an existing one is used as it is)"
+    }
+  }
+}

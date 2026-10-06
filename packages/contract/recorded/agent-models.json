@@ -1,0 +1,17 @@
+{
+  "schema": "AgentModels",
+  "route": "GET /v1/monorepos/{owner}/{monorepo}/agents/models",
+  "status": 200,
+  "body": {
+    "models": [
+      {
+        "id": "@cf/zai-org/glm-5.3-flash",
+        "name": "GLM-5.3 Flash"
+      },
+      {
+        "id": "scripted",
+        "name": "Scripted (tests)"
+      }
+    ]
+  }
+}

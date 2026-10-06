@@ -27,6 +27,8 @@ import { Route as OwnerNameSettingsRouteImport } from './routes/$owner/$name/set
 import { Route as OrgsOrgIndexRouteImport } from './routes/orgs/$org/index'
 import { Route as OrgsOrgPeopleRouteImport } from './routes/orgs/$org/people'
 import { Route as OrgsOrgSettingsRouteImport } from './routes/orgs/$org/settings'
+import { Route as OwnerNameAgentsIndexRouteImport } from './routes/$owner/$name/agents/index'
+import { Route as OwnerNameAgentsNRouteImport } from './routes/$owner/$name/agents/$n'
 import { Route as OwnerNameBlobSplatRouteImport } from './routes/$owner/$name/blob/$'
 import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$name/branches/index'
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
@@ -137,6 +139,16 @@ const OrgsOrgSettingsRoute = OrgsOrgSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => OrgsOrgRouteRoute,
+} as any)
+const OwnerNameAgentsIndexRoute = OwnerNameAgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
+const OwnerNameAgentsNRoute = OwnerNameAgentsNRouteImport.update({
+  id: '/agents/$n',
+  path: '/agents/$n',
+  getParentRoute: () => OwnerNameRouteRoute,
 } as any)
 const OwnerNameBlobSplatRoute = OwnerNameBlobSplatRouteImport.update({
   id: '/blob/$',
@@ -268,6 +280,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/': typeof OwnerNameIndexRoute
   '/orgs/$org/': typeof OrgsOrgIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
+  '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -275,6 +288,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/sessions/$id': typeof OwnerNameSessionsIdRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/agents/': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
@@ -305,6 +319,7 @@ export interface FileRoutesByTo {
   '/orgs/$org/settings': typeof OrgsOrgSettingsRoute
   '/$owner/$name': typeof OwnerNameIndexRoute
   '/orgs/$org': typeof OrgsOrgIndexRoute
+  '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -312,6 +327,7 @@ export interface FileRoutesByTo {
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/sessions/$id': typeof OwnerNameSessionsIdRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/agents': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues': typeof OwnerNameIssuesIndexRoute
@@ -346,6 +362,7 @@ export interface FileRoutesById {
   '/$owner/$name/': typeof OwnerNameIndexRoute
   '/orgs/$org/': typeof OrgsOrgIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectRouteRouteWithChildren
+  '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
@@ -353,6 +370,7 @@ export interface FileRoutesById {
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
   '/$owner/$name/sessions/$id': typeof OwnerNameSessionsIdRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/agents/': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
@@ -388,6 +406,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/'
     | '/orgs/$org/'
     | '/$owner/$name/projects/$project'
+    | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -395,6 +414,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/issues/new'
     | '/$owner/$name/sessions/$id'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/agents/'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
     | '/$owner/$name/issues/'
@@ -425,6 +445,7 @@ export interface FileRouteTypes {
     | '/orgs/$org/settings'
     | '/$owner/$name'
     | '/orgs/$org'
+    | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -432,6 +453,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/issues/new'
     | '/$owner/$name/sessions/$id'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/agents'
     | '/$owner/$name/branches'
     | '/$owner/$name/ci'
     | '/$owner/$name/issues'
@@ -465,6 +487,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/'
     | '/orgs/$org/'
     | '/$owner/$name/projects/$project'
+    | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
     | '/$owner/$name/history/$'
@@ -472,6 +495,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/issues/new'
     | '/$owner/$name/sessions/$id'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/agents/'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
     | '/$owner/$name/issues/'
@@ -626,6 +650,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/orgs/$org/settings'
       preLoaderRoute: typeof OrgsOrgSettingsRouteImport
       parentRoute: typeof OrgsOrgRouteRoute
+    }
+    '/$owner/$name/agents/': {
+      id: '/$owner/$name/agents/'
+      path: '/agents'
+      fullPath: '/$owner/$name/agents/'
+      preLoaderRoute: typeof OwnerNameAgentsIndexRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
+    '/$owner/$name/agents/$n': {
+      id: '/$owner/$name/agents/$n'
+      path: '/agents/$n'
+      fullPath: '/$owner/$name/agents/$n'
+      preLoaderRoute: typeof OwnerNameAgentsNRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
     }
     '/$owner/$name/blob/$': {
       id: '/$owner/$name/blob/$'
@@ -806,6 +844,7 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameSettingsRoute: typeof OwnerNameSettingsRoute
   OwnerNameIndexRoute: typeof OwnerNameIndexRoute
   OwnerNameProjectsProjectRouteRoute: typeof OwnerNameProjectsProjectRouteRouteWithChildren
+  OwnerNameAgentsNRoute: typeof OwnerNameAgentsNRoute
   OwnerNameBlobSplatRoute: typeof OwnerNameBlobSplatRoute
   OwnerNameBranchesSplatRoute: typeof OwnerNameBranchesSplatRoute
   OwnerNameHistorySplatRoute: typeof OwnerNameHistorySplatRoute
@@ -813,6 +852,7 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameIssuesNewRoute: typeof OwnerNameIssuesNewRoute
   OwnerNameSessionsIdRoute: typeof OwnerNameSessionsIdRoute
   OwnerNameTreeSplatRoute: typeof OwnerNameTreeSplatRoute
+  OwnerNameAgentsIndexRoute: typeof OwnerNameAgentsIndexRoute
   OwnerNameBranchesIndexRoute: typeof OwnerNameBranchesIndexRoute
   OwnerNameCiIndexRoute: typeof OwnerNameCiIndexRoute
   OwnerNameIssuesIndexRoute: typeof OwnerNameIssuesIndexRoute
@@ -829,6 +869,7 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameIndexRoute: OwnerNameIndexRoute,
   OwnerNameProjectsProjectRouteRoute:
     OwnerNameProjectsProjectRouteRouteWithChildren,
+  OwnerNameAgentsNRoute: OwnerNameAgentsNRoute,
   OwnerNameBlobSplatRoute: OwnerNameBlobSplatRoute,
   OwnerNameBranchesSplatRoute: OwnerNameBranchesSplatRoute,
   OwnerNameHistorySplatRoute: OwnerNameHistorySplatRoute,
@@ -836,6 +877,7 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameIssuesNewRoute: OwnerNameIssuesNewRoute,
   OwnerNameSessionsIdRoute: OwnerNameSessionsIdRoute,
   OwnerNameTreeSplatRoute: OwnerNameTreeSplatRoute,
+  OwnerNameAgentsIndexRoute: OwnerNameAgentsIndexRoute,
   OwnerNameBranchesIndexRoute: OwnerNameBranchesIndexRoute,
   OwnerNameCiIndexRoute: OwnerNameCiIndexRoute,
   OwnerNameIssuesIndexRoute: OwnerNameIssuesIndexRoute,

@@ -17,15 +17,11 @@ import type { ApiVars } from "../monorepo/api";
 import type { Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json } from "../parse";
 import { DEFAULT_MODEL } from "../../../agents/src/protocol";
-import { launch } from "./routes";
+import { filtersOf, launch } from "./routes";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
 
 const PROMPT_MAX = 65536;
-
-const LIST_DEFAULT = 30;
-
-const LIST_MAX = 100;
 
 function unwrap<T>(o: Outcome<T>): T {
   if (o.ok) return o.value;
@@ -40,13 +36,7 @@ export function assistantRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>
   const base = "/v1/monorepos/:o/:m/assistant";
 
   api.get(base, async (c: C) => {
-    const limit = Number(c.req.query("limit") ?? LIST_DEFAULT);
-    const before = c.req.query("before");
-
-    if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX) bad(`limit: 1 to ${LIST_MAX}`);
-
-    if (before !== undefined && !/^[1-9][0-9]{0,8}$/.test(before)) bad("before: a session number");
-    const page = await c.get("stub").agentList(before === undefined ? null : Number(before), limit, null, c.get("identity").login);
+    const page = await c.get("stub").agentList(filtersOf(c, c.get("identity").login));
 
     return c.json(unwrap(page) satisfies typeof Contract.AgentSessionList.Encoded);
   });

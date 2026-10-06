@@ -53,7 +53,7 @@ try {
   check("the person's own machine credential still opens both", r.status === 200, r.status);
 
   // A launch writes the scope.
-  r = await call("POST", `/v1/monorepos/${a.full}/agents`, a.secret, { prompt: "ok", model: "scripted" });
+  r = await call("POST", `/v1/monorepos/${a.full}/agents`, a.secret, { prompt: "ok", model: "scripted", branch: "scoped" });
   check("a launch", r.status === 201, r.status);
   const row = d1(`SELECT monorepo_id FROM credentials WHERE login = '${a.login}' AND name = 'cloud-1'`)[0];
   check("its credential is limited to its repository", row?.monorepo_id === a.monorepoId, JSON.stringify(row));

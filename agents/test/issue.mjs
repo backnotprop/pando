@@ -21,7 +21,7 @@ const t = await makeRepo("agents-s4", {
   ".pando/pando.toml": '[repos."."]\nrequired_checks = ["ci/test"]\n',
 });
 
-const BRANCH = "agent/1-the-readme-has-a-typo";
+const BRANCH = "1-the-readme-has-a-typo";
 
 try {
   const body = [
@@ -41,7 +41,7 @@ try {
   // ── Address with agent ──
   r = await call("POST", `/v1/monorepos/${t.full}/issues/1/agent`, t.secret, { model: "scripted" });
   record("agent-issue-launched.json", "AgentSession", "POST /v1/monorepos/{owner}/{monorepo}/issues/{n}/agent", r.status, r.json);
-  check("Address with agent: 201, kind issue, #1, on agent/1-the-readme-has-a-typo", r.status === 201 && r.json?.kind === "issue" && r.json?.issue === 1 && r.json?.branch === BRANCH, scrub(JSON.stringify(r.json)));
+  check("Address with agent: 201, kind issue, #1, on 1-the-readme-has-a-typo", r.status === 201 && r.json?.kind === "issue" && r.json?.issue === 1 && r.json?.branch === BRANCH, scrub(JSON.stringify(r.json)));
 
   r = await call("GET", `/v1/monorepos/${t.full}/issues/1/timeline`, t.secret);
   const linked = r.json.items.find((x) => x.kind === "linked");
@@ -69,9 +69,9 @@ try {
   r = await call("GET", `/v1/monorepos/${t.full}/agents?issue=2`, t.secret);
   check("and none for another issue", r.json?.sessions?.length === 0);
 
-  // A second agent on the same issue gets its own branch.
+  // A second agent on the same issue works on the same branch; stopped, it is not told when the checks go green.
   r = await call("POST", `/v1/monorepos/${t.full}/issues/1/agent`, t.secret, { model: "scripted", prompt: "Look only." });
-  check("a second agent on #1 gets agent/1-the-readme-has-a-typo-2", r.status === 201 && r.json?.branch === `${BRANCH}-2`, r.json?.branch);
+  check("a second agent on #1 works on the same branch, as it is", r.status === 201 && r.json?.branch === BRANCH, r.json?.branch);
   await untilSession(t, 2, (s) => s?.status !== "working");
   await call("POST", `/v1/monorepos/${t.full}/agents/2/stop`, t.secret);
 

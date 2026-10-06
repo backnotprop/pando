@@ -15,11 +15,11 @@ const t = await makeRepo("agents-s6", { "README.md": "# Continue\n" });
 try {
   const prompt = [
     "Start, push one change, and leave some work unpushed.",
-    tool("bash", { command: "echo pushed > pushed.txt && git add pushed.txt && git commit -qm 'Pushed change' && git push -q origin agent/1 2>&1; echo pushed=$?" }),
+    tool("bash", { command: "echo pushed > pushed.txt && git add pushed.txt && git commit -qm 'Pushed change' && git push -q origin keep-work 2>&1; echo pushed=$?" }),
     tool("bash", { command: "echo local > local-commit.txt && git add local-commit.txt && git commit -qm 'Committed, not pushed' && echo 'not committed' > notes.txt && (sleep 1000 >/dev/null 2>&1 & echo $! > /root/background.pid) ; echo done" }),
   ].join("\n");
 
-  let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted" });
+  let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted", branch: "keep-work" });
   check("launched", r.status === 201, r.status);
   r = await untilSettled(t, 1);
   check("the first run ends", r.json?.status === "waiting", JSON.stringify(r.json));
@@ -45,10 +45,10 @@ try {
   check("no processes came back", /no-processes/.test(out), out);
   check("the transcript is whole: both prompts and the message", msgs.filter((m) => m.role === "user").length === 2 && msgs.filter((m) => m.role === "tool").length === 3);
 
-  r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: tool("bash", { command: "git push -q origin agent/1 2>&1; echo pushed=$?" }) });
+  r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, t.secret, { prompt: tool("bash", { command: "git push -q origin keep-work 2>&1; echo pushed=$?" }) });
   await untilSettled(t, 1);
   const pushed = (await results(t, 1)).filter((m) => m.role === "tool").at(-1)?.parts[0]?.text ?? "";
-  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/agent%2F1/commits`, t.secret);
+  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/keep-work/commits`, t.secret);
   check("it carries on: the restored commit is pushed", /pushed=0/.test(pushed) && JSON.stringify(r.json).includes("Committed, not pushed"), pushed);
 } catch (error) {
   check("the run reached its end", false, scrub(error.stack ?? error));

@@ -39,13 +39,19 @@ try {
   const prompt = [
     "Fix the README typo and push.",
     tool("edit", { path: "README.md", edits: [{ oldText: "tpyo", newText: "typo" }] }),
-    tool("bash", { command: "git commit -qam 'Fix the README typo' && git push -q origin agent/1 2>&1; echo pushed=$?" }),
+    tool("bash", { command: "git commit -qam 'Fix the README typo' && git push -q origin fix-readme-typo 2>&1; echo pushed=$?" }),
   ].join("\n");
 
   let r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted" });
+  record("error-400-branch-required.json", "ErrorBody", "POST /v1/monorepos/{owner}/{monorepo}/agents (no branch)", r.status, r.json);
+  check("a launch with no branch name is refused (400 branch_required): Pando never invents one", r.status === 400 && r.json?.error?.code === "branch_required", JSON.stringify(r.json));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents/models`, t.secret);
+  record("agent-models.json", "AgentModels", "GET /v1/monorepos/{owner}/{monorepo}/agents/models", r.status, r.json);
+  check("the models: GLM-5.3 Flash, and the scripted one on this test server", r.json?.models?.map((m) => m.id).join(",") === "@cf/zai-org/glm-5.3-flash,scripted", JSON.stringify(r.json));
+  r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted", branch: "fix-readme-typo" });
 
   record("agent-launched.json", "AgentSession", "POST /v1/monorepos/{owner}/{monorepo}/agents", r.status, r.json);
-  check("launch: 201, session #1 working on agent/1 as cloud-1, acting as the person", r.status === 201 && r.json?.number === 1 && r.json?.status === "working" && r.json?.branch === "agent/1" && r.json?.machine === "cloud-1" && r.json?.launched_by === t.login && r.json?.program === "pi", scrub(JSON.stringify(r.json)));
+  check("launch: 201, session #1 working on fix-readme-typo as cloud-1, acting as the person", r.status === 201 && r.json?.number === 1 && r.json?.status === "working" && r.json?.branch === "fix-readme-typo" && r.json?.machine === "cloud-1" && r.json?.launched_by === t.login && r.json?.program === "pi", scrub(JSON.stringify(r.json)));
 
   r = await untilSettled(t, 1);
   record("agent.json", "AgentSession", "GET /v1/monorepos/{owner}/{monorepo}/agents/{n}", r.status, r.json);
@@ -56,7 +62,7 @@ try {
   check("the transcript: the prompt, two tool calls and results, the answer", r.status === 200 && r.json.messages.length >= 6 && /pushed=0/.test(lastTool(r.json)), lastTool(r.json));
 
   r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches`, t.secret);
-  check("Pando lists agent/1", JSON.stringify(r.json).includes('"agent/1"'));
+  check("Pando lists fix-readme-typo", JSON.stringify(r.json).includes('"fix-readme-typo"'));
   r = await call("GET", `/v1/monorepos/${t.full}/machines`, t.secret);
   check("Machines shows cloud-1, a sandbox", /"cloud-1"/.test(JSON.stringify(r.json)) && /sandbox/.test(JSON.stringify(r.json)), scrub(JSON.stringify(r.json)).slice(0, 300));
   r = await call("GET", "/v1/user/credentials", t.secret);
@@ -71,6 +77,13 @@ try {
   r = await call("GET", `/v1/monorepos/${t.full}/agents`, b);
   record("agents.json", "AgentSessionList", "GET /v1/monorepos/{owner}/{monorepo}/agents", r.status, r.json);
   check("every member sees the repository's sessions", r.status === 200 && r.json.sessions.length === 1 && r.json.next_before === null);
+  check("the list counts by state, and carries the branch's facts", r.json?.counts?.all === 1 && r.json.counts.waiting === 1 && r.json.counts.working === 0 && r.json.sessions[0].branch_facts?.state === "open" && (r.json.sessions[0].branch_facts.stale || r.json.sessions[0].branch_facts.ahead === 1), JSON.stringify({ counts: r.json?.counts, facts: r.json?.sessions?.[0]?.branch_facts }));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?status=working`, b);
+  check("filtered by state: none working", r.json?.sessions?.length === 0 && r.json.counts.all === 1);
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?person=${t.login}-b`, b);
+  check("filtered by person: none started by the other member", r.json?.sessions?.length === 0 && r.json.counts.all === 0);
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?kind=task&status=waiting`, b);
+  check("filtered by what started it and state: the task", r.json?.sessions?.length === 1);
   r = await call("POST", `/v1/monorepos/${t.full}/agents/1/messages`, b, { prompt: "do something else" });
   record("error-403-agent.json", "ErrorBody", "POST /v1/monorepos/{owner}/{monorepo}/agents/{n}/messages (not the launcher)", r.status, r.json);
   check("only the person who launched it sends it messages (403 not_launcher)", r.status === 403 && r.json?.error?.code === "not_launcher", JSON.stringify(r.json));

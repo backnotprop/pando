@@ -45,14 +45,14 @@ try {
     tool("list_files", {}),
     tool("read_file", { path: "README.md" }),
     tool("edit", { path: "README.md", edits: [{ oldText: "tpyo", newText: "typo" }] }),
-    tool("bash", { command: "git commit -qam 'Fix the README typo' -m 'Fixes #1' && git push -q origin agent/1 2>&1; echo pushed=$?" }),
+    tool("bash", { command: "git commit -qam 'Fix the README typo' -m 'Fixes #1' && git push -q origin fix-readme 2>&1; echo pushed=$?" }),
     tool("branch_diff", {}),
-    tool("comment_issue", { number: 1, body: "Fixed on agent/1." }),
+    tool("comment_issue", { number: 1, body: "Fixed on fix-readme." }),
     tool("post_review", { verdict: "comment", body: "One line changed; nothing else touched." }),
     tool("merge", {}),
   ].join("\n");
 
-  r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted" });
+  r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { prompt, model: "scripted", branch: "fix-readme" });
   check("launched", r.status === 201, scrub(JSON.stringify(r.json)));
   r = await untilSettled(t, 1);
   check("the run ends, waiting", r.json?.status === "waiting", JSON.stringify(r.json));
@@ -69,20 +69,22 @@ try {
 
   r = await call("GET", `/v1/monorepos/${t.full}/issues/1/timeline`, t.secret);
   const comment = r.json.items.find((x) => x.kind === "comment")?.comment;
-  check("the comment is the person's, from cloud-1", comment?.author === t.login && comment?.machine === "cloud-1" && comment?.body === "Fixed on agent/1.", JSON.stringify(comment));
-  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/agent%2F1/reviews`, t.secret);
+  check("the comment is the person's, from cloud-1", comment?.author === t.login && comment?.machine === "cloud-1" && comment?.body === "Fixed on fix-readme.", JSON.stringify(comment));
+  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/fix-readme/reviews`, t.secret);
   const review = r.json?.reviews?.[0];
-  check("the review is on agent/1, as the person", review?.verdict === "comment" && JSON.stringify(review).includes(t.login), scrub(JSON.stringify(review)));
+  check("the review is on fix-readme, as the person", review?.verdict === "comment" && JSON.stringify(review).includes(t.login), scrub(JSON.stringify(review)));
 
   // The check goes green: Pando tells the session, which merges (stage 4's issue.mjs follows that message itself).
-  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/agent%2F1`, t.secret);
+  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/fix-readme`, t.secret);
   const head = r.json?.head;
   r = await call("POST", `/v1/monorepos/${t.full}/repos/${t.name}/statuses/${head}`, t.secret, { state: "success", context: "ci/test" });
   check("ci/test is green on the branch head", r.status === 201 || r.status === 200, r.status);
   const merged = await untilMerged(t);
-  check("merge goes through Pando's normal route and closes #1", merged?.name === "merge" && !merged.error && /Merged agent\/1 into main \(merge commit [0-9a-f]{12}, closing #1\)/.test(merged.text), merged?.text);
-  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/agent%2F1`, t.secret);
-  check("agent/1 is merged, by the person, from cloud-1", r.json?.state === "merged" && r.json?.merged_by === t.login && r.json?.merged_machine === "cloud-1", scrub(JSON.stringify({ state: r.json?.state, by: r.json?.merged_by, machine: r.json?.merged_machine })));
+  check("merge goes through Pando's normal route and closes #1", merged?.name === "merge" && !merged.error && /Merged fix-readme into main \(merge commit [0-9a-f]{12}, closing #1\)/.test(merged.text), merged?.text);
+  r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches/fix-readme`, t.secret);
+  check("fix-readme is merged, by the person, from cloud-1", r.json?.state === "merged" && r.json?.merged_by === t.login && r.json?.merged_machine === "cloud-1", scrub(JSON.stringify({ state: r.json?.state, by: r.json?.merged_by, machine: r.json?.merged_machine })));
+  r = await call("GET", `/v1/monorepos/${t.full}/agents/1`, t.secret);
+  check("the session itself says its branch is merged (its page)", r.json?.branch_facts?.state === "merged", JSON.stringify(r.json?.branch_facts));
   r = await untilClosed(t, 1);
   check("issue #1 is closed by the merge", r.json?.state === "closed", r.json?.state);
 } catch (error) {

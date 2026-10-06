@@ -36,7 +36,7 @@ import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
-import { AGENTS_SCHEMA, AgentStore, type AgentInput } from "../agents/store";
+import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput, type AgentView } from "../agents/store";
 import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
@@ -421,6 +421,10 @@ export class MonorepoObject extends DurableObject<Env> {
     // Added before any deploy, for local states made earlier on the branch.
     if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "awaiting_checks")) {
       this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN awaiting_checks INTEGER NOT NULL DEFAULT 0");
+    }
+
+    if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "first_message")) {
+      this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN first_message TEXT");
     }
 
     this.issues.seedLabels();
@@ -1188,12 +1192,41 @@ export class MonorepoObject extends DurableObject<Env> {
     return this.guard(() => this.agents.credentialOf(number));
   }
 
+  /** One session, with its branch's facts and its issue's title now (its page). */
   agentGet(number: number) {
-    return this.guard(() => this.agents.get(number));
+    return this.guard(() => this.withFacts(this.agents.get(number)));
   }
 
-  agentList(before: number | null, limit: number, issue: number | null, chatsOf: string | null = null) {
-    return this.guard(() => this.agents.list(before, limit, issue, chatsOf));
+  /** An issue's title and state now, or null when it is gone. */
+  private issueNow(n: number): { title: string; state: "open" | "closed" } | null {
+    return this.row<{ title: string; state: "open" | "closed" }>("SELECT title, state FROM issues WHERE number = ?", n);
+  }
+
+  /** A session with its branch's facts now (state, commits ahead, merge, checks) and its issue's title and state. */
+  private withFacts(v: AgentView): AgentView {
+    const b = v.branch === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
+
+    v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
+
+    if (v.issue !== null) {
+      const issue = this.issueNow(v.issue);
+
+      v.issue_title = issue?.title ?? null;
+      v.issue_state = issue?.state ?? null;
+    }
+
+    return v;
+  }
+
+  /** A page of sessions, each with its facts now. */
+  agentList(f: AgentFilters) {
+    return this.guard(() => {
+      const page = this.agents.list(f);
+
+      page.sessions = page.sessions.map((v) => this.withFacts(v));
+
+      return page;
+    });
   }
 
   agentReport(state: SessionState) {

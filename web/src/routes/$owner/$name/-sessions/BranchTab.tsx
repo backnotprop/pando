@@ -10,10 +10,8 @@ import { useState } from "react";
 import { AgentMark, agentAndModel } from "../../../../ui/AgentMark";
 import { sessionLink } from "../../../../ui/paths";
 import { useMonorepo } from "../-frame/heads";
-import { Person, When } from "./Row";
+import { dayClock, Person, When } from "./Row";
 import { CommitChecks } from "./Session";
-
-const time = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
 /** A session's number in a small box, as the Overview and the tab show it. */
 export const Num = ({ n }: { n: number }) => (
@@ -92,7 +90,7 @@ function SessionLine({ n, id, s, commits, repo, merged, open: first }: { n: numb
           </>
         ) : (
           <>
-            <span className="col-span-2 text-ash phone:hidden">{s ? `Session deleted by ${s.deleted_by}, ${time.format(Date.parse(s.deleted_at))}` : "No record of this session here"}</span>
+            <span className="col-span-2 text-ash phone:hidden">{s ? `Session deleted by ${s.deleted_by}, ${dayClock(s.deleted_at)}` : "No record of this session here"}</span>
             {disclosure}
             <span />
           </>

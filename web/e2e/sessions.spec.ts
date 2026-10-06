@@ -115,8 +115,20 @@ test.beforeAll(async ({ browser }) => {
   await context.close();
 });
 
+// Errors in the page or its console fail a test (a 401, 404 or 409 is a page's own answer, drawn as such).
+let errors: string[] = [];
+
 test.beforeEach(async ({ page }) => {
+  errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => {
+    if (m.type() === "error" && !/status of (401|404|409)/.test(m.text())) errors.push(m.text());
+  });
   await signIn(page, ramos);
+});
+
+test.afterEach(() => {
+  expect(errors).toEqual([]);
 });
 
 test("the Sessions tab: one line per session under day headers, Active and Inactive, filters", async ({ page }) => {
@@ -149,7 +161,7 @@ test("the Sessions tab: one line per session under day headers, Active and Inact
   await expect(page.getByRole("list", { name: "refresh-margin" }).locator("li[data-session]")).toHaveCount(2);
 });
 
-test("a session's page: header, its commits with their own checks, files in its commits, delete asked once", async ({ page }) => {
+test("a session's page: header, its conversation, Remove turn and Delete asked once, its commits with their own checks, files in its commits", async ({ page }) => {
   const s = story!;
 
   await page.goto(`/${s.full}/sessions`);
@@ -162,6 +174,22 @@ test("a session's page: header, its commits with their own checks, files in its 
   await expect(commits.getByRole("listitem").first()).toContainText("Refresh the token before the request");
   await expect(commits.getByRole("listitem").first()).toContainText("no checks on this commit");
   await expect(page.getByRole("region", { name: "Files in its commits" })).toContainText("projects/pando/web/client.ts");
+  // The conversation, from prompt 1: the shared component, fed from the session's entries.
+  const talk = page.getByRole("region", { name: "Conversation" });
+
+  await expect(talk.locator("[data-prompt]")).toHaveCount(2);
+  await expect(talk.locator("[data-prompt]").first()).toContainText("Prompt 1");
+  await expect(talk.locator("[data-prompt]").first()).toContainText("Placeholder task: create a file a.txt");
+  await expect(talk.getByText("Pi, GPT-5.5").first()).toBeVisible();
+  // Remove turn: asked once, then gone for every member; a line keeps its place and the next prompt its number.
+  await talk.locator("[data-prompt]").nth(1).getByRole("button", { name: "Remove turn" }).click();
+  await expect(page.getByText("Remove prompt 2 and its answers?")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(talk.getByText(/Prompt 2 and its answers were removed by ramos/)).toBeVisible();
+  await expect(talk.locator("[data-prompt]")).toHaveCount(1);
+  await expect(talk).not.toContainText("Placeholder: reply with the single word ok.");
+  await page.reload();
+  await expect(talk.getByText(/Prompt 2 and its answers were removed by ramos/)).toBeVisible();
   await page.getByRole("button", { name: "Delete session" }).click();
   await expect(page.getByText("Delete this session?")).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Delete session" }).click();

@@ -81,6 +81,8 @@ export const SessionDeleted = Schema.Struct({
   commits: Schema.Array(SessionCommit),
 });
 
+export interface SessionDeleted extends Schema.Schema.Type<typeof SessionDeleted> {}
+
 /** GET .../sessions/{id}: a session, or its stub. */
 export const SessionAny = Schema.Union([Session, SessionDeleted]);
 
@@ -108,6 +110,8 @@ export const SessionEntry = Schema.Struct({
   ok: Schema.NullOr(Schema.Boolean),
   by: Schema.NullOr(Schema.String),
 });
+
+export interface SessionEntry extends Schema.Schema.Type<typeof SessionEntry> {}
 
 /** A page of the conversation; pass `next_cursor` back as `from` for the next. */
 export const SessionEntries = Schema.Struct({

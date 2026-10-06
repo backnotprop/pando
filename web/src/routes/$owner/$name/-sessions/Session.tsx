@@ -13,7 +13,7 @@ import { useState } from "react";
 import { get, isMissing } from "../../../../api/client";
 import { branchQuery } from "../../../../api/projects";
 import { meQuery, reposQuery } from "../../../../api/queries";
-import { deleteSession, sessionFilesQuery, sessionQuery, sessionsKey } from "../../../../api/sessions";
+import { deleteSession, sessionFilesQuery, sessionGone, sessionQuery, sessionsKey } from "../../../../api/sessions";
 import { AgentMark, agentAndModel } from "../../../../ui/AgentMark";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Refusal } from "../../../../ui/controls";
@@ -21,6 +21,7 @@ import { NotFoundPage } from "../../../../ui/pages";
 import { branchLink, codeBlobLink, codeLink, issueLink, sessionsLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { useMonorepo } from "../-frame/heads";
+import { SessionTalk } from "./Talk";
 import { clockTime, span } from "./Row";
 
 const dateTime = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -173,9 +174,11 @@ function DeleteSession({ id, commits, person }: { id: string; commits: number; p
     setBusy(true);
 
     try {
-      await deleteSession(monorepo, id);
-      await qc.invalidateQueries({ queryKey: sessionsKey(monorepo) });
-      void navigate(sessionsLink(monorepo.full));
+      const row = await deleteSession(monorepo, id);
+
+      await navigate(sessionsLink(monorepo.full));
+
+      if (row.state === "deleted") sessionGone(qc, monorepo, row);
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
       setBusy(false);
@@ -308,7 +311,7 @@ export function SessionPage({ id }: { id: string }) {
         {mayDelete ? <DeleteSession id={s.id} commits={s.commits.length} person={s.person} /> : null}
       </header>
       <div className="mt-8 grid grid-cols-[minmax(0,1fr)_320px] items-start gap-14 narrow:grid-cols-[minmax(0,1fr)_260px] phone:grid-cols-[minmax(0,1fr)] phone:gap-8">
-        <section aria-label="Conversation" data-conversation className="min-w-0 phone:order-2" />
+        <SessionTalk s={s} mayRemove={mayDelete} />
         <aside className="min-w-0 phone:order-1">
           {s.commits.length ? (
             <section aria-label="Commits">

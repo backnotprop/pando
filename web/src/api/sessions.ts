@@ -1,8 +1,8 @@
 // Recorded agent sessions' reads and writes. Keys sit under ["m", owner, name, "sessions"]; a session.* frame on the
 // page's socket reads them again (live/rows.ts). A person's sessions and the graph's marks key under ["u", login].
-import { type Login, type RepoName, Routes } from "@pando/contract";
-import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
-import { get, put, remove } from "./client";
+import { type Login, type RepoName, Routes, type SessionDeleted } from "@pando/contract";
+import { infiniteQueryOptions, keepPreviousData, type QueryClient, queryOptions } from "@tanstack/react-query";
+import { get, put, remove, write } from "./client";
 import type { MonorepoRef } from "./names";
 
 export const sessionsKey = (m: MonorepoRef) => ["m", m.owner, m.name, "sessions"] as const;
@@ -77,8 +77,25 @@ export const branchSessionsQuery = (m: MonorepoRef, repo: RepoName, branch: stri
     },
   });
 
-export async function deleteSession(m: MonorepoRef, id: string): Promise<void> {
-  await remove(Routes.deleteSession(m.owner, m.name, id));
+/** Deletes a session; the answer is its stub. */
+export async function deleteSession(m: MonorepoRef, id: string) {
+  return await write(Routes.deleteSession(m.owner, m.name, id));
+}
+
+/** Sessions' lists and pages read again. */
+export function sessionsChanged(qc: QueryClient, m: MonorepoRef): void {
+  void qc.invalidateQueries({ queryKey: sessionsKey(m) });
+}
+
+/**
+ * A session was deleted: its page shows the stub at once, and its conversation and files are not read again (they are
+ * gone, and the server answers 410). The rest read again.
+ */
+export function sessionGone(qc: QueryClient, m: MonorepoRef, row: SessionDeleted): void {
+  const at = sessionsKey(m).length;
+
+  qc.setQueryData(sessionQuery(m, row.id).queryKey, row);
+  void qc.invalidateQueries({ queryKey: sessionsKey(m), predicate: (q) => !(q.queryKey[at] === "id" && q.queryKey[at + 1] === row.id) });
 }
 
 export async function removeTurn(m: MonorepoRef, id: string, n: number): Promise<void> {

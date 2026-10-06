@@ -26,3 +26,21 @@ projects/pando/worktrees/releases). The design: research/plans/releases-2026-10-
 ## Log
 
 - 2026-10-05: merged main (1126be9) into `releases` (206c47a).
+- Stage 1 (server and contract): the merged hook builds main's merge commit
+  on main (hooks.ts buildTarget; its status token and PANDO_HEAD, PANDO_BRANCH,
+  PANDO_STATUS_URL are for the merge commit). "Not built": checks.ts
+  buildState(), used only by GET .../repos/{r}/summary; combine() is
+  unchanged, so the merge gate still reads a commit with no statuses and no
+  required checks as success (a repo with no CI merges as before). Tags:
+  recorded by the door (door.ts peelTags: one info/refs read per push with
+  tags, annotated tags peeled from the `^{}` lines), listed (GET tags),
+  tag.created and tag.deleted on the stream, hook event `tag` (web hooks
+  default to all four events now). The freeze rule is in checkPush
+  (releases/store.ts frozenRefusals); it bites once releases exist (stage 2).
+  Tests: worker/test/releases.mjs 23 of 23; hooks.mjs 22 of 22; ci.mjs 112 of
+  112; contract 149 of 149. The project page strip waits for stage 4's mocks.
+- Gap for the mirror lane: tags are not mirrored to GitHub (mirror SPEC 2.4
+  mirrors main only).
+- Gap: a tag push whose record fails is not kept for the reconcile
+  (markUnrecorded keeps branches only); the tag stays in Artifacts and
+  GET tags does not show it until it is pushed again or a release names it.

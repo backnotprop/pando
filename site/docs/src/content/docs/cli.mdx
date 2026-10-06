@@ -555,7 +555,7 @@ A repo's web hooks: on a push, a new branch or a merge, Pando POSTs JSON to a UR
 
 | Flag | What it does |
 | --- | --- |
-| `--event <event>` | With `create`: `push`, `branch.opened` or `merged`. Repeat it. Default: all three. |
+| `--event <event>` | With `create`: `push`, `branch.opened`, `merged` or `tag`. Repeat it. Default: all four. |
 | `--app <slug>` | With `create`: the CI service behind the URL (`github-actions`, `circleci`, ...), shown on the checks its builds post. |
 | `--secret-file <file>` | With `create`: read the secret from the file, or from standard input with `-`. |
 | `--since <seq>` | With `redeliver`: send again every delivery after this seq. |

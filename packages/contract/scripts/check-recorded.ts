@@ -95,6 +95,11 @@ import {
   Profile,
   Contributions,
   ContributionPeriod,
+  RepoSummary,
+  TagList,
+  Release,
+  ReleaseList,
+  ReleaseNotes,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -194,6 +199,11 @@ const decoders = {
   SessionList: refuses(SessionList),
   SessionExclusions: refuses(SessionExclusions),
   SessionMachines: refuses(SessionMachines),
+  RepoSummary: refuses(RepoSummary),
+  TagList: refuses(TagList),
+  Release: refuses(Release),
+  ReleaseList: refuses(ReleaseList),
+  ReleaseNotes: refuses(ReleaseNotes),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

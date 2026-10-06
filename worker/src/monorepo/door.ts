@@ -5,7 +5,7 @@
 
 import type { Env } from "../env";
 import { agentHeader, credential, errorJson, HttpError, toErrorResponse } from "../http";
-import { gitRequest, listRefs, withRepo } from "./artifacts";
+import { gitRequest, listRefs, tagCommits, withRepo } from "./artifacts";
 import { concat, drain, parseReport, pkt, readCommandSection, refusal, statusReport, type RefCommand } from "./pktline";
 import { isBusy, LEASE_MS } from "./gate";
 import { wholeThinTrees } from "./thinpack";
@@ -603,7 +603,7 @@ async function receivePack(
       if (delay > 0) await new Promise((r) => setTimeout(r, Math.min(delay, 10_000)));
 
       if (env.DOOR_TEST === "1" && req.headers.get("x-pando-test-record-fail") === "1") throw new Error("door test: the record failed");
-      await stub.recordPush(repo.name, identity, accepted, {}, origin);
+      await stub.recordPush(repo.name, identity, accepted, {}, origin, await peelTags(env, repo, accepted));
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
 
@@ -640,6 +640,27 @@ async function withWholeTrees(env: Env, repo: RepoRecord, body: Uint8Array, pack
     console.warn(`writing ${repo.artifacts_name}'s pushed trees whole failed: ${err instanceof Error ? err.message : String(err)}`);
 
     return null;
+  }
+}
+
+/**
+ * The commits a push's new tags name (an annotated tag peeled), read once
+ * from Artifacts' refs when the push has tags. When the read fails the tags
+ * are recorded without commits; the tags list reads them later.
+ */
+async function peelTags(env: Env, repo: RepoRecord, accepted: RefCommand[]): Promise<Record<string, string>> {
+  const names = accepted.flatMap((c) => (c.ref.startsWith("refs/tags/") && c.new !== ZERO ? [c.ref.slice(10)] : []));
+
+  if (!names.length) return {};
+
+  try {
+    const tags = await tagCommits(env, repo);
+
+    return Object.fromEntries(names.flatMap((n) => (tags.has(n) ? [[n, tags.get(n)!.commit]] : [])));
+  } catch (err) {
+    console.warn(`peeling ${repo.name}'s new tags failed: ${err instanceof Error ? err.message : String(err)}`);
+
+    return {};
   }
 }
 

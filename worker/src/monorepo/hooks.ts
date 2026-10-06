@@ -22,7 +22,7 @@ import { deliveryReadToken, withRepo } from "./artifacts";
 import { CI_READ_REUSE_MS, CI_READ_TTL_S, pandoBuildEnv } from "../ci/buildkite";
 import { mintStatusToken, type StatusClaims } from "../ci/statustoken";
 import { commitReader, compareWith } from "./graph";
-import { ZERO } from "./names";
+import { DEFAULT_BRANCH, ZERO } from "./names";
 import type { RepoEvent } from "./types";
 import { pool } from "./views";
 
@@ -68,13 +68,29 @@ function hookConfig(h: HookRow): HookConfig {
   return { organization: text(c.organization), pipeline: text(c.pipeline), api_url: text(c.api_url), app: text(c.app) };
 }
 
-/** The events a hook receives, from its stored JSON list. */
 /** The events a hook can take. */
-export const EVENTS: HookEvent[] = ["push", "branch.opened", "merged"];
+export const EVENTS: HookEvent[] = ["push", "branch.opened", "merged", "tag"];
 
 /** One of them: a request's, or a stored hook's read back from its JSON column. */
 export function isHookEvent(v: Json): v is HookEvent {
-  return v === "push" || v === "branch.opened" || v === "merged";
+  return v === "push" || v === "branch.opened" || v === "merged" || v === "tag";
+}
+
+/** What a CI builds: one commit, on one branch. */
+export interface BuildTarget {
+  commit: string;
+  branch: string;
+}
+
+/**
+ * The commit and branch a CI builds for an event: a merge builds main's new
+ * merge commit on main (the commit people get), never the branch head again;
+ * everything else builds its head on its own branch (a tag: its commit, on the tag's name).
+ */
+export function buildTarget(p: RepoEvent): BuildTarget {
+  if (p.event === "merged" && p.merge_commit) return { commit: p.merge_commit, branch: p.main_branch ?? DEFAULT_BRANCH };
+
+  return { commit: p.head, branch: p.branch };
 }
 
 function hookEvents(h: HookRow): HookEvent[] {
@@ -85,9 +101,12 @@ function hookEvents(h: HookRow): HookEvent[] {
 
 /** The delivery's status token, or null when PANDO_STATUS_SECRET is not set or there is no commit. */
 async function statusToken(env: Env, hook: HookRow, p: StoredPayload): Promise<{ token: string; expires_at: string } | null> {
-  if (!env.PANDO_STATUS_SECRET || !p.monorepo_id || !/^[0-9a-f]{40}$/.test(p.head)) return null;
+  // A Buildkite build reports on the commit it builds (a merge: main's merge commit); a web hook's token is for the head it is sent.
+  const sha = hook.type === "buildkite" ? buildTarget(p).commit : p.head;
+
+  if (!env.PANDO_STATUS_SECRET || !p.monorepo_id || !/^[0-9a-f]{40}$/.test(sha)) return null;
   const app = hook.type === "buildkite" ? "buildkite" : hookConfig(hook).app;
-  const claims: Omit<StatusClaims, "x"> = { m: p.monorepo_id, r: p.repo, s: p.head, a: app, h: hook.id };
+  const claims: Omit<StatusClaims, "x"> = { m: p.monorepo_id, r: p.repo, s: sha, a: app, h: hook.id };
 
   return mintStatusToken(env.PANDO_STATUS_SECRET, claims);
 }
@@ -177,13 +196,13 @@ export function hookView(h: HookRow) {
   };
 }
 
-function urls(p: StoredPayload) {
+function urls(p: StoredPayload, statusSha = p.head) {
   const repoBase = `${p.origin}/v1/monorepos/${p.monorepo}/repos/${p.repo}`;
 
   return {
     clone_url: p.plain ? `${p.origin}/${p.monorepo}.git` : `${p.origin}/${p.monorepo}/${p.repo}.git`,
     diff_url: `${repoBase}/branches/${encodeURIComponent(p.branch)}/diff?format=patch`,
-    status_url: `${repoBase}/statuses/${p.head}`,
+    status_url: `${repoBase}/statuses/${statusSha}`,
   };
 }
 
@@ -206,7 +225,8 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
   try {
     const read = await token(hook.type === "buildkite" ? "ci" : "web");
     const status = await statusToken(env, hook, p);
-    const u = urls(p);
+    const target = buildTarget(p);
+    const u = urls(p, hook.type === "buildkite" ? target.commit : p.head);
 
     if (due !== undefined) note({ post_wait_ms: Math.max(0, Date.now() - due) }); // from the row being due to the POST leaving
 
@@ -254,13 +274,13 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
       `https://api.buildkite.com/v2/organizations/${encodeURIComponent(config.organization ?? "")}/pipelines/${encodeURIComponent(config.pipeline ?? "")}/builds`;
 
     const body = JSON.stringify({
-      commit: p.head,
-      branch: p.branch,
-      message: p.title ?? `${p.event} ${p.branch}`,
+      commit: target.commit,
+      branch: target.branch,
+      message: p.event === "merged" ? `Merge ${p.branch}${p.title ? `: ${p.title}` : ""}` : (p.title ?? `${p.event} ${p.branch}`),
       author: { name: p.pusher ?? "" },
       env: pandoBuildEnv({
         clone_url: u.clone_url, read_token: read.token, status_url: u.status_url, status_token: status?.token ?? null,
-        monorepo: p.monorepo, repo: p.repo, branch: p.branch, head: p.head, delivery: deliveryId, seq: p.seq ?? null,
+        monorepo: p.monorepo, repo: p.repo, branch: target.branch, head: target.commit, delivery: deliveryId, seq: p.seq ?? null,
       }),
       // How Pando's Buildkite webhook (ci/) maps the build back: this monorepo, this repo, this delivery.
       meta_data: { pando_delivery: deliveryId, pando_monorepo: p.monorepo_id ?? "", pando_repo: p.repo },

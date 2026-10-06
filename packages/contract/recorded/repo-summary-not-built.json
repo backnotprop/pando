@@ -1,0 +1,24 @@
+{
+  "schema": "RepoSummary",
+  "route": "GET .../repos/{repo}/summary (nothing reported)",
+  "status": 200,
+  "body": {
+    "repo": "rel-muw4d9nh",
+    "main": {
+      "branch": "main",
+      "sha": "d5f4da234394eec0d75280a32fec18cd613432f0",
+      "title": "first",
+      "state": "not_built",
+      "checks": {
+        "sha": "d5f4da234394eec0d75280a32fec18cd613432f0",
+        "state": "success",
+        "required": [],
+        "missing": [],
+        "statuses": [],
+        "checks_unknown": null
+      },
+      "build": null
+    },
+    "latest_release": null
+  }
+}

@@ -12,6 +12,7 @@ import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
 import { sessionPersonRoutes, sessionUserRoutes } from "../sessions/user-routes";
 import { agentRoutes } from "../agents/routes";
+import { tagRoutes } from "../releases/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
 import { assistantRoutes } from "../agents/assistant";
@@ -1572,6 +1573,10 @@ api.post("/v1/monorepos/:o/:m/repos/:r/hooks/deliveries/:id/redeliver", async (c
 // ── CI (ci/routes.ts): the CI tab's reads and actions, and connections ──
 
 ciRoutes(api);
+
+// ── Builds of main, tags and releases (releases/routes.ts) ──
+
+tagRoutes(api);
 
 // ── Mirror to GitHub (mirror/routes.ts) ──
 

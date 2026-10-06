@@ -242,7 +242,7 @@ export const Hook = Schema.Struct({
   id: Schema.String,
   type: Schema.Literals(["web", "buildkite"]),
   url: Schema.NullOr(Schema.String),
-  events: Schema.Array(Schema.Literals(["push", "branch.opened", "merged"])),
+  events: Schema.Array(Schema.Literals(["push", "branch.opened", "merged", "tag"])),
   buildkite: Schema.NullOr(Schema.Struct({ organization: Schema.String, pipeline: Schema.String })),
   /** The app its status tokens stamp: buildkite for a buildkite hook, a web hook's own app, or null. */
   app: Schema.NullOr(Schema.String),

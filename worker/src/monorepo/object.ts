@@ -44,6 +44,8 @@ import {
   IssueStore, type BranchWord, type IssueFilters, type IssueInput, type IssuePatch, type IssueWho, type ReactionContent,
 } from "../issues/store";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
+import { ReleaseStore, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
+import type { BuildView } from "../ci/store";
 import type { Json } from "../parse";
 import type {
   BranchRecord,
@@ -312,6 +314,17 @@ function fail(status: number, code: string, message: string, extra?: RefusalExtr
   throw new HttpError(status, code, message, extra);
 }
 
+/** A project's main as its page shows it (GET .../repos/{r}/summary): checks are combined by the Worker, which knows the required list. */
+export interface MainSummary {
+  branch: string;
+  sha: string | null;
+  title: string | null;
+  statuses: StatusRecord[];
+  /** The newest build on main, whatever its commit. */
+  build: BuildView | null;
+  latest_release: ReleaseView | null;
+}
+
 /** checkPush's answer: the refs it refuses, and whether the repo keeps pushes not yet recorded. */
 export interface PushCheck {
   refused: PushVerdict[];
@@ -365,6 +378,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private sessions: SessionStore;
   private agents: AgentStore;
   private mirror: MirrorOut;
+  /** Tags and releases (releases/store.ts). */
+  private releases: ReleaseStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -395,6 +410,7 @@ export class MonorepoObject extends DurableObject<Env> {
     });
     this.sessions = new SessionStore(this.sql, { publish: (e) => this.publish(e) });
     this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
+    this.releases = new ReleaseStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
@@ -513,6 +529,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.metaApply.ensureSchema();
     this.ci.ensureSchema();
     this.mirror?.ensureSchema();
+    this.releases?.ensureSchema();
   }
 
   private rows<T extends Row>(query: string, ...args: SqlStorageValue[]): T[] {
@@ -830,7 +847,11 @@ export class MonorepoObject extends DurableObject<Env> {
     const r = this.repoRow(repo);
     const main = `refs/heads/${r?.default_branch ?? DEFAULT_BRANCH}`;
 
-    const refused = commands.flatMap((c) => (c.ref === main && c.old !== ZERO ? [{ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }] : []));
+    const refused = [
+      ...commands.flatMap((c) => (c.ref === main && c.old !== ZERO ? [{ ref: c.ref, reason: `${main.slice(11)} is protected; push a branch and merge it (pando merge)` }] : [])),
+      // A published release's tag stays where it is (releases/store.ts).
+      ...this.releases.frozenRefusals(repo, commands),
+    ];
 
     if (!refused.length && r) this.scheduleRefsCheck(repo, checkEveryMs ?? REFS_CHECK_MS);
     const kept = this.rows<{ id: number }>("SELECT id FROM unrecorded WHERE repo = ? LIMIT 1", repo).length > 0;
@@ -889,8 +910,10 @@ export class MonorepoObject extends DurableObject<Env> {
     updates: RefCommand[],
     made: { title?: string | null; description?: string | null } = {},
     origin: string | null = null,
+    tagCommits: Record<string, string> = {},
   ): RepoEvent[] {
-    const events: RepoEvent[] = [];
+    // Tags (refs/tags/*), with the commits the door peeled them to.
+    const events: RepoEvent[] = this.releases.recordTags(repo, identity, updates, tagCommits);
     const refs = updates.filter((u) => u.ref.startsWith("refs/heads/"));
 
     for (const u of refs) {
@@ -1702,7 +1725,7 @@ export class MonorepoObject extends DurableObject<Env> {
       [{
         event: "merged", repo: a.repo, branch: a.branch, ref: `refs/heads/${a.branch}`, before: out.old, head,
         base: out.mergeBase, author: b?.creator ?? null, pusher: a.identity.login, title: b?.title ?? null,
-        description: b?.description ?? null, merge_commit: out.sha, seq: mergedSeq || null,
+        description: b?.description ?? null, merge_commit: out.sha, main_branch: r.default_branch, seq: mergedSeq || null,
         machine: a.identity.credential_name, agent: a.identity.agent ?? null,
       }],
       a.origin,
@@ -2679,6 +2702,75 @@ export class MonorepoObject extends DurableObject<Env> {
 
   ciRateWait(connection: string, ms: number): void {
     this.ci.rateWait(connection, ms);
+  }
+
+  // ── Builds of main, tags and releases (releases/store.ts) ────────────────
+
+  /** A project's main for its page: the commit, its title, its statuses and the newest build on main, and the latest release. */
+  mainSummary(repo: string): MainSummary | null {
+    const r = this.repoRow(repo);
+
+    if (!r) return null;
+    const head = this.row<{ sha: string | null; title: string | null }>("SELECT default_head AS sha, default_head_title AS title FROM repos WHERE name = ?", repo);
+    const sha = head?.sha ?? null;
+
+    return {
+      branch: r.default_branch,
+      sha,
+      title: head?.title ?? null,
+      statuses: sha ? this.statuses(repo, sha) : [],
+      build: this.ci.builds({ repo, branch: r.default_branch, limit: 1, cursor: null }).builds[0] ?? null,
+      latest_release: this.releases.latest(repo),
+    };
+  }
+
+  tagList(repo: string): TagView[] {
+    return this.releases.tags(repo);
+  }
+
+  tagGet(repo: string, name: string): TagView | null {
+    return this.releases.tag(repo, name);
+  }
+
+  tagSetCommits(repo: string, commits: Record<string, string>): void {
+    this.releases.setTagCommits(repo, commits);
+  }
+
+  /** Tags Pando made (a release's) or found in Artifacts unrecorded: recorded, with their events and hook deliveries. */
+  recordTags(repo: string, identity: Identity | null, commands: RefCommand[], commits: Record<string, string>, origin: string | null): void {
+    this.queueDeliveries(this.releases.recordTags(repo, identity, commands, commits), origin);
+  }
+
+  releaseList(repo: string, limit: number, cursor: string | null): Promise<Outcome<ReleasesPage>> {
+    return this.guard(() => this.releases.releases(repo, limit, cursor));
+  }
+
+  releaseGet(repo: string, tag: string): ReleaseView | null {
+    return this.releases.release(repo, tag);
+  }
+
+  releaseLatest(repo: string): ReleaseView | null {
+    return this.releases.latest(repo);
+  }
+
+  releaseCreate(repo: string, r: { tag: string; sha: string; title: string; notes: string }, identity: Identity): Promise<Outcome<ReleaseView>> {
+    return this.guard(() => this.releases.createRelease(repo, r, identity));
+  }
+
+  releaseUpdate(repo: string, tag: string, patch: { title?: string; notes?: string }, identity: Identity): Promise<Outcome<ReleaseView>> {
+    return this.guard(() => this.releases.updateRelease(repo, tag, patch, identity));
+  }
+
+  releasePublish(repo: string, tag: string, forced: boolean, identity: Identity): Promise<Outcome<ReleaseView>> {
+    return this.guard(() => this.releases.publishDraft(repo, tag, forced, identity));
+  }
+
+  releaseDelete(repo: string, tag: string, identity: Identity): Promise<Outcome<string>> {
+    return this.guard(() => this.releases.deleteRelease(repo, tag, identity));
+  }
+
+  releaseNotes(repo: string, sha: string, tag: string): GeneratedNotes {
+    return this.releases.generateNotes(repo, sha, tag);
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

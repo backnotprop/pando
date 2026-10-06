@@ -77,7 +77,7 @@ export interface BranchRecord {
   facts_at?: string | null;
 }
 
-export type HookEvent = "push" | "branch.opened" | "merged";
+export type HookEvent = "push" | "branch.opened" | "merged" | "tag";
 
 /** An event before it is fanned out to hooks; `base` is filled in by the Worker. */
 export interface RepoEvent {
@@ -94,6 +94,10 @@ export interface RepoEvent {
   title: string | null;
   description: string | null;
   merge_commit?: string;
+  /** merged: the branch it landed on (main), whose new commit is `merge_commit`. A CI builds that commit on that branch. */
+  main_branch?: string;
+  /** tag: the tag's name (`v0.1.0`); `head` is its commit (an annotated tag peeled), or zeros when it was deleted. */
+  tag?: string;
   /** The pusher's credential name (the machine), and the agent if one said so. */
   machine?: string | null;
   agent?: string | null;

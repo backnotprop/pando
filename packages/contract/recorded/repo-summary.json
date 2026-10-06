@@ -1,0 +1,55 @@
+{
+  "schema": "RepoSummary",
+  "route": "GET .../repos/{repo}/summary",
+  "status": 200,
+  "body": {
+    "repo": "rel-muw4d9nh",
+    "main": {
+      "branch": "main",
+      "sha": "232b0c5320e8e801a8863145733abed4e823106a",
+      "title": "Add feature A",
+      "state": "success",
+      "checks": {
+        "sha": "232b0c5320e8e801a8863145733abed4e823106a",
+        "state": "success",
+        "required": [],
+        "missing": [],
+        "statuses": [
+          {
+            "sha": "232b0c5320e8e801a8863145733abed4e823106a",
+            "context": "ci",
+            "state": "success",
+            "target_url": null,
+            "description": null,
+            "creator": "app:buildkite",
+            "app": "buildkite",
+            "created_at": "2026-10-06T03:29:07.619Z"
+          }
+        ],
+        "checks_unknown": null
+      },
+      "build": {
+        "id": "cib_fb3c9d7ee9ff2bce",
+        "service": "buildkite",
+        "connection": "m_855005cb39dcd965--cic_b87ab61532c5",
+        "pipeline": "p",
+        "number": 142,
+        "repo": "rel-muw4d9nh",
+        "repo_path": ".",
+        "sha": "232b0c5320e8e801a8863145733abed4e823106a",
+        "branch": "main",
+        "message": "Merge feat-a: Add feature A",
+        "state": "passed",
+        "service_state": "passed",
+        "web_url": "https://buildkite.com/o/p/builds/142",
+        "pushed_by": "rel-muw4d9nh",
+        "created_at": "2026-10-06T03:28:07.610Z",
+        "started_at": "2026-10-06T03:28:08.610Z",
+        "finished_at": "2026-10-06T03:28:57.610Z",
+        "duration_s": 49,
+        "rebuilt_from": null
+      }
+    },
+    "latest_release": null
+  }
+}

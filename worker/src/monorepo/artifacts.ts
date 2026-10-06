@@ -189,6 +189,21 @@ export async function listRefs(env: Env, repo: ArtifactsRef, source: TokenSource
   return parseAdvertisement(new Uint8Array(bytes));
 }
 
+/** Every tag (`v0.1.0`): what its ref points at (`object`) and the commit it names (an annotated tag peeled). One info/refs read. */
+export async function tagCommits(env: Env, repo: ArtifactsRef, source: TokenSource = "object"): Promise<Map<string, { object: string; commit: string }>> {
+  const res = await gitRequest(env, repo, "/info/refs?service=git-upload-pack", "read", { method: "GET" }, source);
+
+  if (!res.ok) throw new HttpError(502, "artifacts", `Artifacts answered ${res.status} listing refs`);
+  const refs = parseAdvertisement(new Uint8Array(await timeArtifacts("http GET info/refs (body)", repo.artifacts_name, () => res.arrayBuffer())), true);
+  const out = new Map<string, { object: string; commit: string }>();
+
+  for (const [ref, sha] of refs) {
+    if (ref.startsWith("refs/tags/") && !ref.endsWith("^{}")) out.set(ref.slice(10), { object: sha, commit: refs.get(`${ref}^{}`) ?? sha });
+  }
+
+  return out;
+}
+
 export function branchesOf(refs: Map<string, string>): Map<string, string> {
   const out = new Map<string, string>();
 

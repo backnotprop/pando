@@ -12,6 +12,7 @@ import { Machine } from "./repo.ts";
 import { IssueComment, IssueRow, Label, Reactions, TimelineItem } from "./issue.ts";
 import { Session, SessionDeleted } from "./session.ts";
 import { AgentSession } from "./agent.ts";
+import { Release, Tag } from "./release.ts";
 
 /** What every event frame carries: its place in the stream, its key, and who did it (null when no person did). */
 const envelope = {
@@ -192,6 +193,18 @@ export const AgentEvent = Schema.Struct({
   row: AgentSession,
 });
 
+/** A tag recorded (pushed, moved, or made by publishing a release) or deleted: on topic `kind:tag.created` or `kind:tag.deleted`. */
+export const TagEvent = Schema.Union([
+  Schema.Struct({ ...envelope, kind: Schema.Literal("tag.created"), collection: Schema.Literal("tags"), op: Schema.Literal("upsert"), row: Tag.pipe(Schema.fieldsAssign({ repo: RepoName })) }),
+  Schema.Struct({ ...envelope, kind: Schema.Literal("tag.deleted"), collection: Schema.Literal("tags"), op: Schema.Literal("delete"), row: Schema.Struct({ repo: RepoName, name: Schema.String }) }),
+]);
+
+/** A release made, edited, published or deleted. */
+export const ReleaseEvent = Schema.Union([
+  Schema.Struct({ ...envelope, kind: Schema.Literals(["release.created", "release.updated", "release.published"]), collection: Schema.Literal("releases"), op: Schema.Literal("upsert"), row: Release }),
+  Schema.Struct({ ...envelope, kind: Schema.Literal("release.deleted"), collection: Schema.Literal("releases"), op: Schema.Literal("delete"), row: Schema.Struct({ repo: RepoName, tag: Schema.String }) }),
+]);
+
 /** The row kinds the web subscribes to, each a `kind:<kind>` topic. */
 export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection", "mirror.updated", "agent.updated"] as const;
 
@@ -210,6 +223,8 @@ export const MonorepoEventFrame = Schema.Union([
   MirrorEvent,
   SessionEvent,
   AgentEvent,
+  TagEvent,
+  ReleaseEvent,
   /** The replay after `since` is done; keep the highest `seq` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), seq: Count }),
   /** More was missed than the stream replays: refetch what is on screen, then reconnect from `seq`. */

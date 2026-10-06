@@ -9,8 +9,10 @@ import { type BranchEventRow, type CiBuild, type CiBuildDetail, type CiJob, deco
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
+import { applyAgentRow } from "../api/agents";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import { mirrorQuery } from "../api/mirror";
+import { sessionGone, sessionsChanged } from "../api/sessions";
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
@@ -154,6 +156,17 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     case "issue.updated":
     case "label.updated":
       applyIssueFrame(qc, m, f);
+      break;
+    case "session.started":
+    case "session.updated":
+      // A session started or grew: its lists and its page read again (they are small; a session sends at most a piece per 30 s).
+      sessionsChanged(qc, m);
+      break;
+    case "session.deleted":
+      sessionGone(qc, m, f.row);
+      break;
+    case "agent.updated":
+      applyAgentRow(qc, m, f.row);
       break;
     case "mirror.updated":
       // A run ended or a setting changed: Settings reads its section again (the event's row has no paths or counts behind).

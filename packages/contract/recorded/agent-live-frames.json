@@ -1,0 +1,176 @@
+{
+  "schema": "AgentLiveFrame[]",
+  "route": "GET /v1/monorepos/{owner}/{monorepo}/agents/{n}/live (WebSocket)",
+  "status": 101,
+  "body": [
+    {
+      "type": "messages",
+      "from": 0,
+      "messages": [
+        {
+          "id": "7",
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Show the live view.\n> bash {\"command\":\"echo first\"}\n> bash {\"command\":\"sleep 3; echo after-a-while\"}\n> read {\"path\":\"README.md\"}"
+            }
+          ],
+          "at": 1791227962032
+        },
+        {
+          "id": "11",
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "tool-call",
+              "id": "tool:1791227962037:su98rcvzsrq",
+              "name": "bash",
+              "arguments": "{\"command\":\"echo first\"}"
+            }
+          ],
+          "at": 1791227962037,
+          "stop_reason": "toolUse",
+          "usage": {
+            "input": 1628,
+            "cache_read": 0,
+            "output": 8
+          }
+        }
+      ]
+    },
+    {
+      "type": "messages",
+      "from": 2,
+      "messages": [
+        {
+          "id": "13",
+          "role": "tool",
+          "parts": [
+            {
+              "type": "tool-result",
+              "id": "tool:1791227962037:su98rcvzsrq",
+              "name": "bash",
+              "text": "first\n",
+              "error": false
+            }
+          ],
+          "at": 1791227969058
+        }
+      ]
+    },
+    {
+      "type": "messages",
+      "from": 3,
+      "messages": [
+        {
+          "id": "15",
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "tool-call",
+              "id": "tool:1791227969061:pyt20hakdr",
+              "name": "bash",
+              "arguments": "{\"command\":\"sleep 3; echo after-a-while\"}"
+            }
+          ],
+          "at": 1791227969061,
+          "stop_reason": "toolUse",
+          "usage": {
+            "input": 1644,
+            "cache_read": 1628,
+            "output": 12
+          }
+        }
+      ]
+    },
+    {
+      "type": "messages",
+      "from": 4,
+      "messages": [
+        {
+          "id": "17",
+          "role": "tool",
+          "parts": [
+            {
+              "type": "tool-result",
+              "id": "tool:1791227969061:pyt20hakdr",
+              "name": "bash",
+              "text": "after-a-while\n",
+              "error": false
+            }
+          ],
+          "at": 1791227972220
+        }
+      ]
+    },
+    {
+      "type": "messages",
+      "from": 5,
+      "messages": [
+        {
+          "id": "19",
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "tool-call",
+              "id": "tool:1791227972223:xout6597i5j",
+              "name": "read",
+              "arguments": "{\"path\":\"README.md\"}"
+            }
+          ],
+          "at": 1791227972223,
+          "stop_reason": "toolUse",
+          "usage": {
+            "input": 1666,
+            "cache_read": 1644,
+            "output": 7
+          }
+        }
+      ]
+    },
+    {
+      "type": "messages",
+      "from": 6,
+      "messages": [
+        {
+          "id": "21",
+          "role": "tool",
+          "parts": [
+            {
+              "type": "tool-result",
+              "id": "tool:1791227972223:xout6597i5j",
+              "name": "read",
+              "text": "# Live\n",
+              "error": false
+            }
+          ],
+          "at": 1791227972322
+        }
+      ]
+    },
+    {
+      "type": "messages",
+      "from": 7,
+      "messages": [
+        {
+          "id": "23",
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Finished.\n# Live\n"
+            }
+          ],
+          "at": 1791227972324,
+          "stop_reason": "stop",
+          "usage": {
+            "input": 1682,
+            "cache_read": 1666,
+            "output": 5
+          }
+        }
+      ]
+    }
+  ]
+}

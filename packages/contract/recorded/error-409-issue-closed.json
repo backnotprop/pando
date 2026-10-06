@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/issues/{n}/agent (a closed issue)",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "issue_closed",
+      "message": "#1 is closed"
+    }
+  }
+}

@@ -5,6 +5,7 @@
 // (-frame/heads.tsx).
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, notFound, Outlet, redirect, useMatches } from "@tanstack/react-router";
+import { Assistant } from "./-agents/Assistant";
 import { useEffect, useState } from "react";
 import { isMissing } from "../../../api/client";
 import { monorepoRef } from "../../../api/names";
@@ -12,7 +13,7 @@ import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Lnk } from "../../../ui/controls";
 import { Page, Title } from "../../../ui/pages";
-import { blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, tabLink, treeLink } from "../../../ui/paths";
+import { agentsLink, blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, sessionsLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -54,6 +55,9 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   const [kind = "", ...parts] = rest;
   const repoPath = plain ? "." : `projects/${parts[0] ?? ""}`;
 
+  // agents / #9
+  if (kind === "agents" && parts[0]) return [{ label: "agents", link: agentsLink(full), wide: true }, { label: `#${parts[0]}` }];
+
   // issues / #34, issues / new
   if (kind === "issues" && parts[0]) return [{ label: "issues", link: issuesLink(full), wide: true }, { label: parts[0] === "new" ? "new" : `#${parts[0]}` }];
 
@@ -81,6 +85,9 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
     return number ? [ci, { label: pipeline, link: ciPipelineLink(full, pipeline), wide: true }, { label: `#${number}` }] : [ci, { label: pipeline }];
   }
+
+  // sessions / session
+  if (kind === "sessions" && parts.length) return [{ label: "sessions", link: sessionsLink(full) }, { label: "session" }];
 
   return kind ? [{ label: kind }] : [];
 }
@@ -140,7 +147,10 @@ function MonorepoFrame() {
           </p>
         </>
       ) : (
-        <Outlet />
+        <>
+          <Outlet />
+          <Assistant />
+        </>
       )}
     </Page>
   );

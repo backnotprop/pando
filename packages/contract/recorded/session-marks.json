@@ -1,0 +1,21 @@
+{
+  "schema": "SessionMarks",
+  "route": "GET /v1/users/{login}/session-marks?tz=0",
+  "status": 200,
+  "body": {
+    "days": [
+      {
+        "date": "2026-10-06",
+        "program": "pi",
+        "commits": 2
+      }
+    ],
+    "weeks": [
+      {
+        "date": "2026-10-04",
+        "program": "pi",
+        "commits": 2
+      }
+    ]
+  }
+}

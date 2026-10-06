@@ -1,0 +1,23 @@
+{
+  "schema": "AgentSession",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/agents/{n}/stop",
+  "status": 200,
+  "body": {
+    "number": 1,
+    "kind": "task",
+    "status": "stopped",
+    "reason": "stopped by agents-s2-muvmtauk",
+    "repo": "agents-s2-muvmtauk",
+    "branch": "fix-readme-typo",
+    "program": "pi",
+    "model": "scripted",
+    "issue": null,
+    "launched_by": "agents-s2-muvmtauk",
+    "machine": "cloud-1",
+    "workspace": "mount",
+    "awaiting_checks": false,
+    "first_message": null,
+    "created_at": "2026-10-05T19:17:33.144Z",
+    "updated_at": "2026-10-05T19:17:42.322Z"
+  }
+}

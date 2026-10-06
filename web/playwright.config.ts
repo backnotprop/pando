@@ -70,6 +70,9 @@ export default defineConfig({
     { name: "org-shots", testMatch: /orgs-shots\.spec\.ts/ },
     { name: "mirror", testMatch: /mirror\.spec\.ts/ },
     { name: "profile-shots", testMatch: /profile-shots\.spec\.ts/ },
+    // Recorded agent sessions (the sessions lane): the checks, and the built pages' shots for the owner's look.
+    { name: "sessions", testMatch: /sessions\.spec\.ts/, grepInvert: /shots of the built pages/ },
+    { name: "sessions-shots", testMatch: /sessions\.spec\.ts/, grep: /shots of the built pages/ },
   ],
   webServer: [
     { command: "node e2e/workos.ts", url: `http://127.0.0.1:${STANDIN_PORT}/healthz`, reuseExistingServer: false },

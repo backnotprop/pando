@@ -17,6 +17,8 @@ export const ErrorBody = Schema.Struct({
     paths: Schema.optionalKey(Schema.Array(Schema.String)),
     checks: Schema.optionalKey(Checks),
     current: Schema.optionalKey(Schema.Union([Issue, IssueComment])),
+    /** 409 not_at_end on a session's piece: where the session ends; resume from there. */
+    end: Schema.optionalKey(Schema.Int),
   }),
 });
 

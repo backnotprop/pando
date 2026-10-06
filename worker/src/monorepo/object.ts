@@ -34,6 +34,10 @@ import { closeLogins } from "../sockets";
 import { verdictOf, type FeedEvent, type Key, type NeedRow, type NeedState, type PushNumbers, type Summary } from "../feed/shape";
 import type { JoinData } from "../feed/object";
 import { ISSUES_SCHEMA, statements } from "../issues/schema";
+import type { SessionCommitRef } from "../sessions/commits";
+import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
+import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput, type AgentView } from "../agents/store";
+import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
 import {
@@ -357,6 +361,9 @@ export class MonorepoObject extends DurableObject<Env> {
   /** CI (ci/store.ts): connections, pipelines, builds, jobs and their checks. */
   private ci: CiStore;
   private issues: IssueStore;
+  /** Agent sessions (sessions/store.ts): the index; the pieces are in R2. */
+  private sessions: SessionStore;
+  private agents: AgentStore;
   private mirror: MirrorOut;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -386,6 +393,8 @@ export class MonorepoObject extends DurableObject<Env> {
       branchWord: (repo, branch) => this.branchWord(repo, branch),
       summaryChanged: () => this.feed.scheduleSummary(),
     });
+    this.sessions = new SessionStore(this.sql, { publish: (e) => this.publish(e) });
+    this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
@@ -404,6 +413,20 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
 
     for (const stmt of statements(ISSUES_SCHEMA)) this.sql.exec(stmt);
+
+    for (const stmt of statements(SESSIONS_SCHEMA)) this.sql.exec(stmt);
+
+    for (const stmt of statements(AGENTS_SCHEMA)) this.sql.exec(stmt);
+
+    // Added before any deploy, for local states made earlier on the branch.
+    if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "awaiting_checks")) {
+      this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN awaiting_checks INTEGER NOT NULL DEFAULT 0");
+    }
+
+    if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "first_message")) {
+      this.sql.exec("ALTER TABLE agent_sessions ADD COLUMN first_message TEXT");
+    }
+
     this.issues.seedLabels();
     // Added for the web: who merged from where (credential name) and as which agent.
     const cols = this.rows<{ name: string }>("PRAGMA table_info(merges)").map((c) => c.name);
@@ -1151,6 +1174,65 @@ export class MonorepoObject extends DurableObject<Env> {
     });
   }
 
+  // ── Agent sessions (agents/store.ts; routes in agents/routes.ts) ─────────
+
+  agentCreate(input: AgentInput, identity: Identity) {
+    return this.guard(() => {
+      if (!this.repoRow(input.repo)) throw new HttpError(400, "bad_request", `no repo ${input.repo}`);
+
+      return this.agents.create(input, identity.login);
+    });
+  }
+
+  agentSetCredential(number: number, credentialId: string): void {
+    this.agents.setCredential(number, credentialId);
+  }
+
+  agentCredential(number: number) {
+    return this.guard(() => this.agents.credentialOf(number));
+  }
+
+  /** One session, with its branch's facts and its issue's title now (its page). */
+  agentGet(number: number) {
+    return this.guard(() => this.withFacts(this.agents.get(number)));
+  }
+
+  /** An issue's title and state now, or null when it is gone. */
+  private issueNow(n: number): { title: string; state: "open" | "closed" } | null {
+    return this.row<{ title: string; state: "open" | "closed" }>("SELECT title, state FROM issues WHERE number = ?", n);
+  }
+
+  /** A session with its branch's facts now (state, commits ahead, merge, checks) and its issue's title and state. */
+  private withFacts(v: AgentView): AgentView {
+    const b = v.branch === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
+
+    v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
+
+    if (v.issue !== null) {
+      const issue = this.issueNow(v.issue);
+
+      v.issue_title = issue?.title ?? null;
+      v.issue_state = issue?.state ?? null;
+    }
+
+    return v;
+  }
+
+  /** A page of sessions, each with its facts now. */
+  agentList(f: AgentFilters) {
+    return this.guard(() => {
+      const page = this.agents.list(f);
+
+      page.sessions = page.sessions.map((v) => this.withFacts(v));
+
+      return page;
+    });
+  }
+
+  agentReport(state: SessionState) {
+    return this.agents.report(state);
+  }
+
   // ── Issues (issues/store.ts; routes in issues/routes.ts) ─────────────────
 
   issueCreate(input: IssueInput, identity: Identity, key: string | null) {
@@ -1207,6 +1289,76 @@ export class MonorepoObject extends DurableObject<Env> {
 
   labelDelete(name: string, identity: Identity) {
     return this.guard(() => this.issues.deleteLabel(name, issueWho(identity)));
+  }
+
+  // ── Agent sessions (sessions/): the Worker parses and stores pieces in R2; these keep the index ──
+
+  sessionEnd(id: string, login: string | null) {
+    return this.guard(() => this.sessions.end(id, login));
+  }
+
+  sessionAppend(id: string, at: number, next: number, start: SessionStart, by: Sender, piece: PieceRecord) {
+    return this.guard(() => this.sessions.append(id, at, next, start, by, piece));
+  }
+
+  sessionGet(id: string) {
+    return this.guard(() => this.sessions.get(id));
+  }
+
+  sessionList(f: SessionFilters) {
+    return this.guard(() => this.sessions.list(f));
+  }
+
+  sessionSource(id: string) {
+    return this.guard(() => this.sessions.source(id));
+  }
+
+  sessionPieces(id: string, from: number, budget: number) {
+    return this.guard(() => this.sessions.pieces(id, from, budget));
+  }
+
+  sessionAllPieces(id: string) {
+    return this.guard(() => this.sessions.allPieces(id));
+  }
+
+  sessionModelChanges(id: string) {
+    return this.guard(() => this.sessions.modelChanges(id));
+  }
+
+  sessionRemovals(id: string) {
+    return this.guard(() => this.sessions.removals(id));
+  }
+
+  sessionDeleteMany(login: string, owner: boolean, everyone: boolean, repo: string | null, before: string | null) {
+    return this.guard(() => this.sessions.deleteMany(login, owner, everyone, repo, before));
+  }
+
+  sessionDelete(id: string, login: string, owner: boolean) {
+    return this.guard(() => this.sessions.delete(id, login, owner));
+  }
+
+  sessionMayRemove(id: string, prompt: number, login: string, owner: boolean) {
+    return this.guard(() => this.sessions.mayRemove(id, prompt, login, owner));
+  }
+
+  sessionRemoveTurn(id: string, mark: TurnMark, rewritten: RewrittenPiece[], by: string) {
+    return this.guard(() => this.sessions.removeTurn(id, mark, rewritten, by));
+  }
+
+  sessionPersonCommits(login: string, since: string) {
+    return this.guard(() => this.sessions.personCommitsOnMain(login, since));
+  }
+
+  sessionsOnMain(repo: string, refs: SessionCommitRef[]): void {
+    this.sessions.onMain(repo, refs);
+  }
+
+  sessionsOnBranch(repo: string, branch: string) {
+    return this.guard(() => this.sessions.branchSessions(repo, branch));
+  }
+
+  sessionReindex(id: string, read: PieceReread[]) {
+    return this.guard(() => this.sessions.reindex(id, read));
   }
 
   /** A merge's commits read late (facts job merge_refs): the issues they name get a merge_referenced item. */
@@ -1275,9 +1427,31 @@ export class MonorepoObject extends DurableObject<Env> {
     // The branches at this commit have new checks and gate state: their full rows go out (combine() is the one rule).
     for (const b of this.rows<{ name: string }>("SELECT name FROM branches WHERE repo = ? AND head = ? AND deleted_at IS NULL", repo, sha)) {
       this.publishBranchRow(repo, b.name);
+      this.checksGreenForAgents(repo, b.name);
     }
 
     return status;
+  }
+
+  /** Agent sessions waiting for this branch's checks hear when they are green, and merge (agents/store.ts). */
+  private checksGreenForAgents(repo: string, branch: string): void {
+    if (!this.agents.isAwaiting(repo, branch)) return;
+
+    if (this.branchRows(repo, { names: [branch], state: "open" }).branches[0]?.checks.state !== "success") return;
+
+    for (const n of this.agents.takeAwaiting(repo, branch)) {
+      this.ctx.waitUntil(this.tellAgent(n, `[Pando] The required checks on ${branch} are green now. Merge it with the merge tool.`));
+    }
+  }
+
+  private async tellAgent(number: number, prompt: string): Promise<void> {
+    try {
+      const state = await this.env.AGENTS?.send(this.info()!.id, number, prompt);
+
+      if (state) this.agents.report(state);
+    } catch (err) {
+      console.warn(`agent ${number}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   statuses(repo: string, sha: string): StatusRecord[] {
@@ -1360,6 +1534,8 @@ export class MonorepoObject extends DurableObject<Env> {
     }
 
     if (checks && checks.state !== "success" && !a.force) {
+      // An agent session's merge waits for checks still running: Pando tells it when they are green.
+      if (checks.state === "pending" || checks.state === "missing") this.agents.awaitChecks(a.identity.credential_id, a.repo, a.branch);
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });
     }
 
@@ -2135,6 +2311,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
     // The branch's commit links, for this head and main only (as ahead and behind are).
     if (f.issue_refs) this.issues.setLinks({ repo, branch: name }, "commit", f.issue_refs, null);
+
+    // The agent sessions its own commits name (sessions/commits.ts).
+    if (f.session_commits) this.sessions.linkBranch(repo, name, f.session_commits);
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     this.publishBranchRow(repo, name, required);
 

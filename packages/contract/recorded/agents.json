@@ -1,0 +1,40 @@
+{
+  "schema": "AgentSessionList",
+  "route": "GET /v1/monorepos/{owner}/{monorepo}/agents",
+  "status": 200,
+  "body": {
+    "sessions": [
+      {
+        "number": 1,
+        "kind": "task",
+        "status": "waiting",
+        "reason": null,
+        "repo": "agents-s2-muvmtauk",
+        "branch": "fix-readme-typo",
+        "program": "pi",
+        "model": "scripted",
+        "issue": null,
+        "launched_by": "agents-s2-muvmtauk",
+        "machine": "cloud-1",
+        "workspace": "mount",
+        "awaiting_checks": false,
+        "first_message": null,
+        "created_at": "2026-10-05T19:17:33.144Z",
+        "updated_at": "2026-10-05T19:17:41.395Z",
+        "branch_facts": {
+          "state": "open",
+          "ahead": 1,
+          "stale": false,
+          "merged_at": null,
+          "checks": "success"
+        }
+      }
+    ],
+    "next_before": null,
+    "counts": {
+      "all": 1,
+      "working": 0,
+      "waiting": 1
+    }
+  }
+}

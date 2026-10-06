@@ -74,6 +74,16 @@ export const LaptopIcon = (p: Props) => (
   </svg>
 );
 
+/** A terminal: Settings' Sessions. */
+export const TerminalIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M4.5 6.5 6.5 8.25 4.5 10M8 10h3" />
+    </g>
+  </svg>
+);
+
 export const ChatIcon = (p: Props) => (
   <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
     <path

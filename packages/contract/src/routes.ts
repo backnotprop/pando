@@ -2,6 +2,7 @@
 // GET, and the schema of its 200 body. Names are api-v1.yaml's operationIds.
 // Path segments are encoded here, so callers pass plain values; a branch's
 // `/` is sent as %2F.
+import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
@@ -16,6 +17,7 @@ import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { GithubChoices, GithubRepos, Mirror, MirrorQueued, MirrorSaved } from "./mirror.ts";
 import { NeedsPage } from "./needs.ts";
 import { HeadList, InviteList, InviteResult, MachineList, MemberList, MonorepoCreated, Repo, RepoList, WorktreeList } from "./repo.ts";
+import { BranchSessions, PersonSessions, Session, SessionAny, SessionEntries, SessionExclusions, SessionFiles, SessionList, SessionMachines, SessionMarks, SessionsDeleted } from "./session.ts";
 import { CredentialList, Me, SignedOut } from "./user.ts";
 
 const query = (params: URLSearchParams): string => {
@@ -121,7 +123,8 @@ export const monorepoFeedSocketPath = (owner: Login, name: MonorepoName, feedSin
 /**
  * A monorepo's event socket for row updates (open it with `Upgrade: websocket`): `topics` such as
  * `kind:branch.updated` or `repo:<repo>` (at most 10; ROW_KINDS lists the row kinds), `issues` (every issue and
- * label event) or `issue:<n>` (one issue's), `since` the highest `seq` seen.
+ * label event) or `issue:<n>` (one issue's), `agents` (every agent session's) or `agent:<n>` (one session's), `since`
+ * the highest `seq` seen.
  */
 export const monorepoEventsSocketPath = (owner: Login, name: MonorepoName, topics: readonly string[], since: number | null): string => {
   const params = new URLSearchParams({ topics: topics.join(",") });
@@ -572,3 +575,178 @@ export const chooseGithubInstallation = (owner: Login, name: MonorepoName) => ({
 
 /** The address a browser goes to, to connect GitHub (or to authorize creating repositories). */
 export const mirrorConnectPath = (owner: Login, name: MonorepoName, purpose: "connect" | "create" = "connect"): string => `${mirrorBase(owner, name)}/connect?purpose=${purpose}`;
+
+// ── Cloudflare-run agents (agent.ts) ──
+
+const agentsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/agents`;
+
+/** The Agents tab's filters (a state, who started it, what it started from), or an issue's agents. */
+export interface AgentFilters {
+  issue?: number;
+  /** With branch: the sessions on that project's branch. */
+  repo?: string;
+  branch?: string;
+  status?: "working" | "waiting";
+  person?: Login;
+  kind?: "task" | "issue" | "review";
+}
+
+/** GET .../agents: newest first; `before` is a page's next_before; `issue` only the sessions addressing it. */
+export const listAgents = (owner: Login, name: MonorepoName, page: { before?: number; limit?: number } & AgentFilters = {}) => {
+  const params = new URLSearchParams();
+
+  if (page.issue !== undefined) params.set("issue", String(page.issue));
+
+  if (page.repo !== undefined) params.set("repo", page.repo);
+
+  if (page.branch !== undefined) params.set("branch", page.branch);
+
+  if (page.status !== undefined) params.set("status", page.status);
+
+  if (page.person !== undefined) params.set("person", page.person);
+
+  if (page.kind !== undefined) params.set("kind", page.kind);
+
+  if (page.before !== undefined) params.set("before", String(page.before));
+
+  if (page.limit !== undefined) params.set("limit", String(page.limit));
+
+  return { path: `${agentsBase(owner, name)}${query(params)}`, response: AgentSessionList };
+};
+
+/** GET .../agents/models: the models a session may use here (a test server adds its scripted one). */
+export const agentModels = (owner: Login, name: MonorepoName) => ({ path: `${agentsBase(owner, name)}/models`, response: AgentModels });
+
+/** POST .../agents {prompt, branch, repo?, model?} (201): launch a session acting as the caller, on the branch named (an existing one is used as it is); 400 branch_required without one. */
+export const launchAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: agentsBase(owner, name), response: AgentSession }) as const;
+
+/**
+ * POST .../issues/{n}/agent {prompt?, repo?, model?} (201): "Address with agent". Makes agent/<n>-<title words> off
+ * main, linked to the issue, and launches a session on it. 409 `issue_closed` for a closed issue.
+ */
+export const addressIssueWithAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${monorepoBase(owner, name)}/issues/${n}/agent`, response: AgentSession }) as const;
+
+/** POST .../agents/review {branch, repo?, prompt?, model?} (201): "Review with agent" on a branch. */
+export const reviewWithAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${agentsBase(owner, name)}/review`, response: AgentSession }) as const;
+
+/** GET .../assistant: the caller's own chats with the repository assistant, newest first. */
+export const listChats = (owner: Login, name: MonorepoName, page: { before?: number } = {}) => ({
+  path: `${monorepoBase(owner, name)}/assistant${page.before === undefined ? "" : `?before=${page.before}`}`,
+  response: AgentSessionList,
+});
+
+/** POST .../assistant {prompt, repo?, model?} (201): a new chat. Follow-ups: sendAgent; its transcript and socket: agentTranscript, agentLivePath. */
+export const newChat = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${monorepoBase(owner, name)}/assistant`, response: AgentSession }) as const;
+
+/** GET .../agents/{n}. */
+export const getAgent = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}`, response: AgentSession });
+
+/** GET .../agents/{n}/transcript. */
+export const agentTranscript = (owner: Login, name: MonorepoName, n: number) => ({ path: `${agentsBase(owner, name)}/${n}/transcript`, response: AgentTranscript });
+
+/** The live view's socket for session n (open it with `Upgrade: websocket`; frames are AgentLiveFrame). */
+export const agentLivePath = (owner: Login, name: MonorepoName, n: number): string => `${agentsBase(owner, name)}/${n}/live`;
+
+/** POST .../agents/{n}/messages {prompt}: a follow-up, from the person who launched it (403 `not_launcher` for others). */
+export const sendAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${agentsBase(owner, name)}/${n}/messages`, response: AgentSession }) as const;
+
+/** POST .../agents/{n}/stop: its launcher or an owner. */
+export const stopAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${agentsBase(owner, name)}/${n}/stop`, response: AgentSession }) as const;
+
+// ── Recorded agent sessions (worker/src/sessions) ──
+
+const sessionsBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/sessions`;
+
+/** The Sessions tab's filters. */
+export interface SessionFilters {
+  state?: "active" | "inactive";
+  person?: string;
+  agent?: string;
+  repo?: string;
+  branch?: string;
+  /** "yes": some commit reached main; "no": none. */
+  main?: "yes" | "no";
+  /** Only those whose last record is older (Settings' Delete sessions). */
+  olderThanDays?: number;
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET .../sessions: by latest activity, newest first, with Active and Inactive counts for the same filters. */
+export const listSessions = (owner: Login, name: MonorepoName, f: SessionFilters = {}) => {
+  const params = new URLSearchParams();
+
+  for (const [k, v] of [["state", f.state], ["person", f.person], ["agent", f.agent], ["repo", f.repo], ["branch", f.branch], ["main", f.main], ["cursor", f.cursor]] as const) {
+    if (v !== undefined) params.set(k, v);
+  }
+
+  if (f.limit !== undefined) params.set("limit", String(f.limit));
+
+  if (f.olderThanDays !== undefined) params.set("older_than_days", String(f.olderThanDays));
+
+  return { path: `${sessionsBase(owner, name)}${query(params)}`, response: SessionList };
+};
+
+/** GET .../sessions/{id}: a session, or its stub when deleted. */
+export const getSession = (owner: Login, name: MonorepoName, id: string) => ({ path: `${sessionsBase(owner, name)}/${encodeURIComponent(id)}`, response: SessionAny });
+
+/** GET .../sessions/{id}/entries?from=: a page of its conversation. */
+export const sessionEntries = (owner: Login, name: MonorepoName, id: string, from = 0) => ({
+  path: `${sessionsBase(owner, name)}/${encodeURIComponent(id)}/entries${from ? `?from=${from}` : ""}`,
+  response: SessionEntries,
+});
+
+/** GET .../sessions/{id}/files: the files its commits changed. */
+export const sessionFiles = (owner: Login, name: MonorepoName, id: string) => ({ path: `${sessionsBase(owner, name)}/${encodeURIComponent(id)}/files`, response: SessionFiles });
+
+/** GET .../sessions/on-branch: a branch's numbered sessions and its commits' numbers. */
+export const branchSessions = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({
+  path: `${sessionsBase(owner, name)}/on-branch${query(new URLSearchParams({ repo, branch }))}`,
+  response: BranchSessions,
+});
+
+/** DELETE .../sessions/{id}: at once and for good (its person or an owner); answers its stub. */
+export const deleteSession = (owner: Login, name: MonorepoName, id: string) => ({ method: "DELETE", path: `${sessionsBase(owner, name)}/${encodeURIComponent(id)}`, response: SessionAny }) as const;
+
+/** DELETE .../sessions/{id}/prompts/{n}: remove a turn, leaving its mark. */
+export const removeSessionTurn = (owner: Login, name: MonorepoName, id: string, n: number) =>
+  ({ method: "DELETE", path: `${sessionsBase(owner, name)}/${encodeURIComponent(id)}/prompts/${n}`, response: Session }) as const;
+
+/** DELETE .../sessions?repo=&older_than_days=&everyone=1: many at once. */
+export const deleteSessions = (owner: Login, name: MonorepoName, f: { repo?: string; olderThanDays?: number; everyone?: boolean }) => {
+  const params = new URLSearchParams();
+
+  if (f.repo !== undefined) params.set("repo", f.repo);
+
+  if (f.olderThanDays !== undefined) params.set("older_than_days", String(f.olderThanDays));
+
+  if (f.everyone) params.set("everyone", "1");
+
+  return { method: "DELETE", path: `${sessionsBase(owner, name)}${query(params)}`, response: SessionsDeleted } as const;
+};
+
+/** GET /v1/users/{login}/sessions: a person's sessions in the repositories you both can open. */
+export const personSessions = (login: Login, page: { cursor?: string; limit?: number; state?: string; agent?: string; main?: string; monorepo?: string } = {}) => {
+  const params = new URLSearchParams();
+
+  for (const [k, v] of [["state", page.state], ["agent", page.agent], ["main", page.main], ["monorepo", page.monorepo]] as const) {
+    if (v !== undefined) params.set(k, v);
+  }
+
+  if (page.cursor !== undefined) params.set("cursor", page.cursor);
+
+  if (page.limit !== undefined) params.set("limit", String(page.limit));
+
+  return { path: `/v1/users/${encodeURIComponent(login)}/sessions${query(params)}`, response: PersonSessions };
+};
+
+/** GET /v1/users/{login}/session-marks?tz=: the profile graph's agent marks. */
+export const sessionMarks = (login: Login, tz: number) => ({ path: `/v1/users/${encodeURIComponent(login)}/session-marks?tz=${tz}`, response: SessionMarks });
+
+/** GET /v1/user/session-exclusions and PUT it (204). */
+export const sessionExclusions = { path: "/v1/user/session-exclusions", response: SessionExclusions };
+
+export const setSessionExclusions = { method: "PUT", path: "/v1/user/session-exclusions" } as const;
+
+/** GET /v1/user/session-machines: each of your machines, as it last reported its recording. */
+export const sessionMachines = { path: "/v1/user/session-machines", response: SessionMachines };

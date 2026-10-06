@@ -219,6 +219,33 @@ tags:
       The door records each pushed branch's head and, on its first push, its
       author (the user). Then it delivers the `branch.opened` and `push`
       hooks.
+  - name: sessions
+    description: |
+      Agent sessions: one conversation between a person and a coding agent
+      (Claude Code, Codex, Pi, OpenCode V2), recorded by `pando sync` on the
+      person's machine after secrets are removed there, and stored as sent, in
+      pieces in R2. Every member reads them as they are recorded; nothing on
+      them is written by a model. The server parses on read with
+      letta-ai/trajectory 0.4.3, plus a pass of its own for the model of each
+      answer.
+
+      **Appending.** A piece is whole lines, at most 8,000,000 bytes, sent
+      with where it starts (`at`) and where the next starts (`next`) in the
+      sender's own cursor: a byte offset in the agent's file, or the last row
+      read for OpenCode. It is taken only when `at` is the session's end; any
+      other start is 409 `not_at_end` with `end`, which the sender resumes
+      from. A deleted session answers 410 `session_deleted`: send nothing more.
+
+  - name: agents
+    description: |
+      Cloudflare-run agents: a session launched from Pando runs in its own
+      Durable Object in the Worker pando-agents, with a Linux sandbox whose
+      workspace is the session's branch. It acts as the person who launched
+      it, through a sandbox credential minted for it (`cloud-<n>`, the
+      session's machine); revoking that credential cuts it off. Its state is
+      only what is known exactly (working, waiting, failed, stopped), and
+      every change is an `agent.updated` event. Without pando-agents the
+      routes answer 503 `agents_unavailable`.
   - name: issues
     description: |
       Issues, as on GitHub: one list per monorepo, numbered `#1`, `#2`, ...
@@ -1659,6 +1686,226 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReactionsAnswer" }
+  /v1/monorepos/{owner}/{monorepo}/agents:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listAgents
+      summary: The repository's agent sessions, newest first
+      tags: [agents]
+      parameters:
+        - { name: before, in: query, description: "A page's `next_before`.", schema: { type: integer } }
+        - { name: issue, in: query, description: "Only the sessions addressing this issue.", schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string, enum: [working, waiting] } }
+        - { name: person, in: query, description: "Who started it (a login).", schema: { type: string } }
+        - { name: kind, in: query, description: "What it started from.", schema: { type: string, enum: [task, issue, review] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
+    post:
+      operationId: launchAgent
+      summary: Launch an agent session acting as the caller
+      description: |
+        Mints a sandbox credential for the caller named after the session
+        (`cloud-<n>`), records the session, and starts it with the prompt on
+        the branch named: made off main when it is new, used as it is when it
+        exists. Pando never invents a name: without `branch`, 400
+        `branch_required`. `repo` may be left out in a plain repository. A session that cannot start is answered
+        `failed` with its reason, and its credential is revoked.
+      tags: [agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt, branch]
+              properties:
+                prompt: { type: string, maxLength: 65536 }
+                repo: { type: string }
+                branch: { type: string, description: "The branch's name, named for the change." }
+                model: { type: string, default: "@cf/zai-org/glm-5.3-flash" }
+      responses:
+        "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/issues/{n}/agent:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: addressIssueWithAgent
+      summary: Address with agent
+      description: |
+        Makes the branch `<n>-<the title's first words, up to 30 characters>`
+        (or `branch` when given) off main, or uses it as it is when it exists,
+        titled as the issue and linked to it, so
+        merging it closes the issue; then launches a session acting as the
+        caller, told the issue's title, body and comments and `prompt` when
+        given. 409 `issue_closed` for a closed issue.
+      tags: [agents]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt: { type: string, maxLength: 65536 }
+                repo: { type: string }
+                model: { type: string }
+                branch: { type: string }
+      responses:
+        "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/assistant:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listChats
+      summary: The caller's own chats with the repository assistant, newest first
+      tags: [agents]
+      parameters:
+        - { name: before, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSessionList" } } } }
+    post:
+      operationId: newChat
+      summary: A new chat with the repository assistant
+      description: |
+        One session (kind chat) per conversation, per person. It answers from
+        Pando's read tools with the caller's access and no sandbox; asked for
+        a change, it starts its own branch `assistant/<n>` and works as a task
+        does. A chat is its person's alone: not in GET .../agents, and 404 to
+        anyone else. Follow-ups, the transcript, the socket and Stop are the
+        agents routes'.
+      tags: [agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, maxLength: 65536 }
+                repo: { type: string }
+                model: { type: string }
+      responses:
+        "201": { description: Started, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+  /v1/monorepos/{owner}/{monorepo}/agents/review:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    post:
+      operationId: reviewWithAgent
+      summary: Review with agent
+      description: |
+        Launches a session (kind review) acting as the caller on an existing
+        branch: it reads the branch, may run its tests in its sandbox, and
+        posts one review (comment or request_changes, never approve). It has
+        no tool that writes a file, merges or comments on an issue.
+      tags: [agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [branch]
+              properties:
+                branch: { type: string }
+                repo: { type: string }
+                prompt: { type: string, maxLength: 65536 }
+                model: { type: string }
+      responses:
+        "201": { description: Launched, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/models:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: agentModels
+      summary: The models a session may use here
+      tags: [agents]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [models], properties: { models: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } } } }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getAgent
+      summary: One agent session
+      tags: [agents]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/transcript:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: agentTranscript
+      summary: Its transcript, oldest first
+      tags: [agents]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentTranscript" } } } }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/live:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: agentLive
+      summary: The live view's socket (Upgrade, websocket)
+      description: |
+        Frames are `{type: "messages", from, messages}`: the transcript from
+        message `from` on. The first starts at 0; later ones append. The
+        session's state comes as agent.updated on the event socket.
+      tags: [agents]
+      responses:
+        "101": { description: Switching to the WebSocket }
+        "426": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/messages:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: sendAgent
+      summary: A follow-up, from the person who launched it
+      description: Taken after the current run when one is going. 403 `not_launcher` for anyone else.
+      tags: [agents]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [prompt], properties: { prompt: { type: string } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/agents/{n}/stop:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: stopAgent
+      summary: Abort the run and stop the sandbox (its launcher or an owner)
+      description: The transcript and the branch stay; a later message starts it again.
+      tags: [agents]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/labels:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -1732,6 +1979,229 @@ paths:
         "204": { description: Deleted. }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/user/session-exclusions:
+    get:
+      operationId: getSessionExclusions
+      summary: The repositories and projects you do not record, on every machine you sign in on
+      tags: [sessions]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionExclusions" }
+    put:
+      operationId: setSessionExclusions
+      summary: Replace that list (at most 200)
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [exclusions]
+              properties:
+                exclusions:
+                  type: array
+                  items: { type: object, required: [monorepo], properties: { monorepo: { type: string, description: "owner/name" }, project: { type: [string, "null"], description: "A project's path; null: the whole repository." } } }
+      responses:
+        "204": { description: Saved. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/user/session-machine:
+    put:
+      operationId: reportSessionMachine
+      summary: This machine (the calling credential) says whether it records sessions and which stores it reads
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recording, stores]
+              properties:
+                recording: { type: boolean }
+                stores: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/SessionStore" } }
+      responses:
+        "204": { description: Saved. }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/user/session-machines:
+    get:
+      operationId: listSessionMachines
+      summary: Each of your machines, as it last reported its recording (Settings)
+      tags: [sessions]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMachines" }
+  /v1/monorepos/{owner}/{monorepo}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listSessions
+      summary: Sessions by last activity, newest first (deleted ones are not listed)
+      tags: [sessions]
+      parameters:
+        - { name: person, in: query, description: "A login, or `@me`.", schema: { type: string } }
+        - { name: agent, in: query, schema: { type: string, enum: [claude-code, codex, pi, opencode] } }
+        - { name: repo, in: query, schema: { type: string } }
+        - { name: branch, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionList" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/on-branch:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: getBranchSessions
+      summary: A branch's sessions, numbered 1, 2, 3 by their earliest commit there, and each commit's session numbers
+      description: |
+        A commit links to a session by a `Pando-Session:` line anywhere in
+        its message, read from the branch's own commits (at most 250) with its
+        facts after each push, and from the commits that reach main. A
+        rewritten commit drops out. A commit's model is the one in force in
+        the session at its commit time, and null when its sessions disagree.
+        Sessions that ran in the branch's worktree with no commit there yet
+        follow, with no number.
+      tags: [sessions]
+      parameters:
+        - { name: repo, in: query, required: true, schema: { type: string } }
+        - { name: branch, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BranchSessions" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string, pattern: "^s_[0-9A-HJKMNP-TV-Z]{26}$" } }
+    get:
+      operationId: getSession
+      summary: One session, or the stub a deleted one leaves (who deleted it, when)
+      tags: [sessions]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/Session" }, { $ref: "#/components/schemas/SessionDeleted" }] }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSession
+      summary: Delete at once and for good (its person or an owner); its pieces leave R2 now
+      tags: [sessions]
+      responses:
+        "200":
+          description: Its stub.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionDeleted" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/{id}/pieces:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, description: "s_ and the first 128 bits of SHA-256(\"<program>:<agent's own id>\") in Crockford base32.", schema: { type: string } }
+    post:
+      operationId: appendSessionPiece
+      summary: Append whole lines at the session's end (the first piece makes it)
+      description: |
+        Header `Pando-Session`: JSON `{program, agent_id, repo, branch, parent}`
+        (`repo` and `branch` null in the repository's own folder; `parent` a
+        session id or null). `Content-Encoding: gzip` is optional. Only the
+        session's own person adds to it.
+      tags: [sessions]
+      parameters:
+        - { name: at, in: query, required: true, schema: { type: integer, minimum: 0 } }
+        - { name: next, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: { type: string }
+      responses:
+        "200":
+          description: The session now; its `end` is `next`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/{id}/entries:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getSessionEntries
+      summary: A page of the conversation, parsed on read, about 2 MB of lines at a time
+      tags: [sessions]
+      parameters:
+        - { name: from, in: query, description: "A `next_cursor` (0: the beginning).", schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEntries" }
+        "410": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/{id}/prompts/{n}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    delete:
+      operationId: removeSessionTurn
+      summary: Remove prompt n's turn (its person or an owner); a mark keeps its number, who and when
+      description: |
+        Every line from the prompt up to the next prompt (or up to now, for
+        the last) is cut from the stored pieces by its own time.
+      tags: [sessions]
+      responses:
+        "200":
+          description: The session now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/sessions/{id}/reindex:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: reindexSession
+      summary: Read every stored piece again and rebuild the session's numbers (how a parser fix reaches stored sessions)
+      tags: [sessions]
+      responses:
+        "200":
+          description: The session now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
   /v1/monorepos/{owner}/{monorepo}/members:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -3422,7 +3892,7 @@ components:
     Name:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9._]|-(?!-)){0,38}$"
-      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered."
+      description: "A monorepo name, unique within its owner: lower-case letters, digits, `.`, `_`, `-`; starts with a letter or digit; no `--`; at most 39 characters. Input in any case is lowered. Reserved, because /{owner}/{name} would be one of Pando's own pages: sessions (a person's recorded agent sessions). Creating or renaming to one answers 400 `reserved_name`."
     Login:
       type: string
       pattern: "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$"
@@ -4526,6 +4996,47 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/TimelineItem" } }
         total: { type: integer }
         next_cursor: { type: [string, "null"] }
+    AgentSession:
+      type: object
+      description: packages/contract/src/agent.ts is the exact shape.
+      required: [number, kind, status, reason, repo, branch, program, model, issue, launched_by, machine, workspace, awaiting_checks, first_message, created_at, updated_at]
+      properties:
+        number: { type: integer }
+        kind: { type: string, enum: [task, issue, review, chat] }
+        status: { type: string, enum: [working, waiting, failed, stopped] }
+        reason: { type: [string, "null"] }
+        repo: { type: string }
+        branch: { type: [string, "null"], description: "Named by a person or from its issue; null for an assistant's chat until the person names one." }
+        program: { type: string, description: "pi" }
+        model: { type: string }
+        issue: { type: [integer, "null"] }
+        launched_by: { type: string }
+        machine: { type: string, description: "The session's credential, cloud-<n>." }
+        workspace: { type: [string, "null"], enum: [mount, clone, null] }
+        awaiting_checks: { type: boolean, description: "Its merge waits for required checks still running; Pando tells it when they are green." }
+        first_message: { type: [string, "null"], description: "An assistant's chat: its first message, cut at 200 characters; null for other kinds." }
+        branch_facts:
+          type: [object, "null"]
+          description: In a list only. Its branch now (state, ahead, merged_at, checks); null while the branch is not made yet.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentSessionList:
+      type: object
+      required: [sessions, next_before, counts]
+      properties:
+        sessions: { type: array, items: { $ref: "#/components/schemas/AgentSession" } }
+        next_before: { type: [integer, "null"] }
+        counts:
+          type: object
+          description: For the same filters, in every state.
+          properties: { all: { type: integer }, working: { type: integer }, waiting: { type: integer } }
+          required: [all, working, waiting]
+    AgentTranscript:
+      type: object
+      required: [messages]
+      description: Messages with parts (text, thinking, tool-call, tool-result); packages/contract/src/agent.ts.
+      properties:
+        messages: { type: array, items: { type: object } }
     IssueList:
       type: object
       required: [issues, counts, next_cursor]
@@ -4539,3 +5050,132 @@ components:
             open: { type: integer }
             closed: { type: integer }
         next_cursor: { type: [string, "null"] }
+    Session:
+      type: object
+      description: "No title: who, which agent and model, where, when. Active while it has a record from the last 30 minutes."
+      required: [id, state, person, machine, program, models, repo, branch, parent, subagents, started_at, last_at, prompts, tool_calls, images, redactions, bytes, end, removed, commits]
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [active, inactive] }
+        person: { type: string }
+        machine: { type: string }
+        program: { type: string, enum: [claude-code, codex, pi, opencode] }
+        models:
+          type: array
+          description: Most answers first, then the latest used.
+          items: { type: object, required: [model, answers], properties: { model: { type: string }, answers: { type: integer } } }
+        repo: { type: [string, "null"] }
+        branch: { type: [string, "null"] }
+        parent: { type: [string, "null"] }
+        subagents: { type: integer }
+        started_at: { type: [string, "null"], format: date-time }
+        last_at: { type: [string, "null"], format: date-time }
+        prompts: { type: integer }
+        tool_calls: { type: integer }
+        images: { type: integer }
+        redactions: { type: integer }
+        bytes: { type: integer }
+        end: { type: integer, description: "Where the next piece starts." }
+        removed:
+          type: array
+          items: { type: object, required: [prompt, by, at], properties: { prompt: { type: integer }, by: { type: string }, at: { type: string, format: date-time } } }
+        commits:
+          type: array
+          description: "Its pushed commits, oldest first by committer time; within one second, the branch's own order, then sha. At most 500."
+          items: { $ref: "#/components/schemas/SessionCommit" }
+    SessionCommit:
+      type: object
+      required: [repo, sha, branch, title, committed_at, on_main, model]
+      properties:
+        repo: { type: string }
+        sha: { type: string }
+        branch: { type: [string, "null"] }
+        title: { type: string }
+        committed_at: { type: string, format: date-time }
+        on_main: { type: boolean }
+        model: { type: [string, "null"], description: "The model in force in the session at the commit's time; null when the sessions naming the commit disagree or one has none, the same in every view." }
+    BranchSessions:
+      type: object
+      required: [sessions, commits]
+      properties:
+        sessions:
+          type: array
+          items:
+            type: object
+            required: [number, id, session, commits]
+            properties:
+              number: { type: [integer, "null"] }
+              id: { type: string }
+              session: { description: "The session, its deleted stub, or null when no record of it is here." }
+              commits: { type: array, items: { $ref: "#/components/schemas/SessionCommit" } }
+        commits:
+          type: array
+          items: { type: object, required: [sha, sessions, model], properties: { sha: { type: string }, sessions: { type: array, items: { type: integer } }, model: { type: [string, "null"] } } }
+    SessionDeleted:
+      type: object
+      required: [id, state, deleted_by, deleted_at, commits]
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [deleted] }
+        deleted_by: { type: string }
+        deleted_at: { type: string, format: date-time }
+        commits: { type: array, description: "The commits that name it; their lines stay in git.", items: { $ref: "#/components/schemas/SessionCommit" } }
+    SessionList:
+      type: object
+      required: [sessions, next_cursor]
+      properties:
+        sessions: { type: array, items: { $ref: "#/components/schemas/Session" } }
+        next_cursor: { type: [string, "null"] }
+    SessionEntry:
+      type: object
+      required: [id, at, kind, text, prompt, tool, input, result, ok, by]
+      properties:
+        id: { type: string }
+        at: { type: [string, "null"], format: date-time }
+        kind: { type: string, enum: [prompt, note, answer, tool, image, agent_message, removed] }
+        text: { type: [string, "null"] }
+        prompt: { type: [integer, "null"] }
+        tool: { type: [string, "null"] }
+        input: { type: [string, "null"], description: "The first 2 KB." }
+        result: { type: [string, "null"], description: "The first 2 KB." }
+        ok: { type: [boolean, "null"] }
+        by: { type: [string, "null"], description: "A removed turn: who removed it." }
+    SessionEntries:
+      type: object
+      required: [entries, next_cursor, model_changes]
+      properties:
+        entries: { type: array, items: { $ref: "#/components/schemas/SessionEntry" } }
+        next_cursor: { type: [integer, "null"] }
+        model_changes:
+          type: array
+          description: "When the answering model changed, oldest first (on the first page only): an answer's model is the last change at or before it."
+          items: { type: object, required: [at, model], properties: { at: { type: string, format: date-time }, model: { type: string } } }
+    SessionExclusions:
+      type: object
+      required: [exclusions]
+      properties:
+        exclusions:
+          type: array
+          items: { type: object, required: [monorepo, monorepo_id, project], properties: { monorepo: { type: string }, monorepo_id: { type: string }, project: { type: [string, "null"] } } }
+    SessionStore:
+      type: object
+      required: [program, path, found]
+      properties:
+        program: { type: string, enum: [claude-code, codex, pi, opencode] }
+        path: { type: string }
+        found: { type: string, description: "default, environment, commit hook or paths add" }
+    SessionMachines:
+      type: object
+      required: [machines]
+      properties:
+        machines:
+          type: array
+          items:
+            type: object
+            required: [credential_id, machine, recording, stores, updated_at]
+            properties:
+              credential_id: { type: string }
+              machine: { type: string }
+              recording: { type: boolean }
+              stores: { type: array, items: { $ref: "#/components/schemas/SessionStore" } }
+              updated_at: { type: string, format: date-time }

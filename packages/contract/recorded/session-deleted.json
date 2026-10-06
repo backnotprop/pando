@@ -1,0 +1,12 @@
+{
+  "schema": "SessionAny",
+  "route": "GET .../sessions/{id} (deleted: its stub)",
+  "status": 200,
+  "body": {
+    "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+    "state": "deleted",
+    "deleted_by": "se-a-muvznk0x",
+    "deleted_at": "2026-10-06T01:17:02.458Z",
+    "commits": []
+  }
+}

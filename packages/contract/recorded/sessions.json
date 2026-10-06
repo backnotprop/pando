@@ -1,0 +1,78 @@
+{
+  "schema": "SessionList",
+  "route": "GET .../sessions",
+  "status": 200,
+  "body": {
+    "sessions": [
+      {
+        "id": "s_1GS59WTPG9E4ZM2N9Y0XC6924W",
+        "state": "active",
+        "person": "se-a-muvznk0x",
+        "machine": "ana-mbp",
+        "program": "pi",
+        "models": [
+          {
+            "model": "gpt-5.5",
+            "answers": 6891
+          }
+        ],
+        "repo": "projects-a",
+        "branch": "fix-login",
+        "parent": null,
+        "subagents": 0,
+        "started_at": "2026-10-06T01:15:52.822Z",
+        "last_at": "2026-10-06T20:24:00.916Z",
+        "prompts": 4595,
+        "tool_calls": 2297,
+        "images": 0,
+        "redactions": 1,
+        "bytes": 7505156,
+        "end": 7505184,
+        "removed": [],
+        "commits": [],
+        "lead": {
+          "repo": "projects-a",
+          "branch": "fix-login"
+        },
+        "issues": []
+      },
+      {
+        "id": "s_7PTS6SV6CBX3D1ER4QTKEXWV9N",
+        "state": "inactive",
+        "person": "se-b-muvznk0x",
+        "machine": "bo-mbp",
+        "program": "opencode",
+        "models": [
+          {
+            "model": "big-pickle",
+            "answers": 4
+          }
+        ],
+        "repo": null,
+        "branch": null,
+        "parent": null,
+        "subagents": 0,
+        "started_at": "2026-10-06T00:31:55.621Z",
+        "last_at": "2026-10-06T00:32:01.680Z",
+        "prompts": 2,
+        "tool_calls": 2,
+        "images": 0,
+        "redactions": 0,
+        "bytes": 4244,
+        "end": 37,
+        "removed": [],
+        "commits": [],
+        "lead": {
+          "repo": null,
+          "branch": null
+        },
+        "issues": []
+      }
+    ],
+    "counts": {
+      "active": 1,
+      "inactive": 1
+    },
+    "next_cursor": null
+  }
+}

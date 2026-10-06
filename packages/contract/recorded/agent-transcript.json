@@ -1,0 +1,103 @@
+{
+  "schema": "AgentTranscript",
+  "route": "GET /v1/monorepos/{owner}/{monorepo}/agents/{n}/transcript",
+  "status": 200,
+  "body": {
+    "messages": [
+      {
+        "id": "7",
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "Fix the README typo and push.\n> edit {\"path\":\"README.md\",\"edits\":[{\"oldText\":\"tpyo\",\"newText\":\"typo\"}]}\n> bash {\"command\":\"git commit -qam 'Fix the README typo' && git push -q origin fix-readme-typo 2>&1; echo pushed=$?\"}"
+          }
+        ],
+        "at": 1791227853151
+      },
+      {
+        "id": "11",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "tool-call",
+            "id": "tool:1791227853157:z8auftwn64o",
+            "name": "edit",
+            "arguments": "{\"path\":\"README.md\",\"edits\":[{\"oldText\":\"tpyo\",\"newText\":\"typo\"}]}"
+          }
+        ],
+        "at": 1791227853157,
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1655,
+          "cache_read": 0,
+          "output": 18
+        }
+      },
+      {
+        "id": "13",
+        "role": "tool",
+        "parts": [
+          {
+            "type": "tool-result",
+            "id": "tool:1791227853157:z8auftwn64o",
+            "name": "edit",
+            "text": "Successfully replaced 1 block(s) in README.md.",
+            "error": false
+          }
+        ],
+        "at": 1791227859973
+      },
+      {
+        "id": "15",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "tool-call",
+            "id": "tool:1791227859975:2ez241o4yd4",
+            "name": "bash",
+            "arguments": "{\"command\":\"git commit -qam 'Fix the README typo' && git push -q origin fix-readme-typo 2>&1; echo pushed=$?\"}"
+          }
+        ],
+        "at": 1791227859975,
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1692,
+          "cache_read": 1655,
+          "output": 29
+        }
+      },
+      {
+        "id": "17",
+        "role": "tool",
+        "parts": [
+          {
+            "type": "tool-result",
+            "id": "tool:1791227859975:2ez241o4yd4",
+            "name": "bash",
+            "text": "remote: Processing objects: 100% (3/3)        \npushed=0\n",
+            "error": false
+          }
+        ],
+        "at": 1791227861140
+      },
+      {
+        "id": "19",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "Finished.\nremote: Processing objects: 100% (3/3)        \npushed=0\n"
+          }
+        ],
+        "at": 1791227861145,
+        "stop_reason": "stop",
+        "usage": {
+          "input": 1742,
+          "cache_read": 1692,
+          "output": 17
+        }
+      }
+    ]
+  }
+}

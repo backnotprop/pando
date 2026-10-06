@@ -9,6 +9,12 @@ import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from 
 import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
 import { issueRoutes } from "../issues/routes";
+import { sessionRoutes } from "../sessions/routes";
+import { sessionPersonRoutes, sessionUserRoutes } from "../sessions/user-routes";
+import { agentRoutes } from "../agents/routes";
+import { issueAgentRoutes } from "../agents/issue";
+import { reviewAgentRoutes } from "../agents/review";
+import { assistantRoutes } from "../agents/assistant";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
@@ -33,6 +39,7 @@ import {
   validMonorepoName,
   validNamespace,
   validRepoPath,
+  RESERVED_REPOSITORY_NAMES,
   ZERO,
 } from "./names";
 import type { MonorepoObject } from "./object";
@@ -323,6 +330,8 @@ users.post("/v1/monorepos", async (c) => {
   const name = isText(b.name) ? b.name.toLowerCase() : null;
 
   if (!validMonorepoName(name)) bad("name: letters, digits, '.', '_', '-'; starts with a letter or digit; no '--'; at most 39 characters");
+
+  if (RESERVED_REPOSITORY_NAMES.has(name)) throw new HttpError(400, "reserved_name", `${name} is reserved: /{owner}/${name} is one of Pando's own pages`);
   const kind = b.kind ?? "monorepo";
 
   if (kind !== "monorepo" && kind !== "repo") bad("kind is monorepo or repo");
@@ -379,6 +388,10 @@ users.post("/v1/monorepos", async (c) => {
 orgRoutes(users);
 
 profileRoutes(users);
+
+sessionUserRoutes(users);
+
+sessionPersonRoutes(users);
 
 api.route("/", users);
 
@@ -463,6 +476,8 @@ api.patch("/v1/monorepos/:o/:m", async (c) => {
   const to = monorepoRef(b.owner === undefined ? info.owner : String(b.owner), b.name === undefined ? info.name : String(b.name));
 
   if (!to) bad("name: letters, digits, '.', '_', '-'; owner: a person's login or an organization");
+
+  if (to.name !== info.name && RESERVED_REPOSITORY_NAMES.has(to.name)) throw new HttpError(400, "reserved_name", `${to.name} is reserved: /{owner}/${to.name} is one of Pando's own pages`);
   // A transfer changes who has it through an org: everyone before and after gets a membership message.
   const moving = to.owner !== info.owner;
   const before = moving ? await acc.members(info.id) : [];
@@ -511,6 +526,8 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
   // file pages' answers and walk checkpoints (files.ts, keyed by <id>--<repo>) in CACHE.
   const prefixes: [R2Bucket, string][] = [
     [c.env.BLOBS, `meta/${m}/`],
+    // Agent sessions' pieces (sessions/pieces.ts).
+    [c.env.BLOBS, `sessions/${m}/`],
     [c.env.CACHE, `ci/${m}/`],
     [c.env.CACHE, `answers/${m}--`],
     [c.env.CACHE, `partial/${m}--`],
@@ -788,9 +805,19 @@ api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   const from = str(b.from, "from", { optional: true }) ?? r.default_branch;
   const title = str(b.title, "title", { optional: true, max: 300 }) ?? null;
   const description = str(b.description, "description", { optional: true, max: 20_000 }) ?? null;
+
+  await createBranch(c, r, b.name, from, title, description);
+  // Its facts come from the queue (a branch.updated event); the answer says stale until then.
+  const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
+
+  return c.json(view satisfies typeof Contract.Branch.Encoded, 201);
+});
+
+/** Makes branch `name` at `from` (a branch or a commit) through the repo's write gate, and its record; 409 branch_exists when it is there. */
+export async function createBranch(c: C, r: RepoRecord, name: string, from: string, title: string | null, description: string | null): Promise<void> {
   const refs = branchesOf(await listRefs(c.env, r));
 
-  if (refs.has(b.name)) throw new HttpError(409, "branch_exists", `branch ${b.name} exists`);
+  if (refs.has(name)) throw new HttpError(409, "branch_exists", `branch ${name} exists`);
   let sha = refs.get(from) ?? null;
 
   if (!sha && isSha(from)) {
@@ -800,19 +827,15 @@ api.post("/v1/monorepos/:o/:m/repos/:r/branches", async (c) => {
   }
 
   if (!sha) throw new HttpError(404, "not_found", `no branch or commit ${from}`);
-  const ref = `refs/heads/${b.name}`;
+  const ref = `refs/heads/${name}`;
   // Through the repo's write gate: waits for a slot, and goes out with other waiting ref updates.
   const result = unwrap(await c.get("stub").updateRefsQueued(r.name, [{ old: ZERO, new: sha, ref }]));
   const reason = result[ref];
 
   if (reason !== null) throw new HttpError(409, "branch_not_created", `Artifacts refused: ${reason ?? "no report"}`);
   const stub = c.get("stub");
-  await stub.createBranchRecord(r.name, b.name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
-  // Its facts come from the queue (a branch.updated event); the answer says stale until then.
-  const view = (await branchViews(c, r, [b.name], "all", { inline: 0 })).branches[0];
-
-  return c.json(view satisfies typeof Contract.Branch.Encoded, 201);
-});
+  await stub.createBranchRecord(r.name, name, sha, c.get("identity"), title, description, new URL(c.req.url).origin);
+}
 
 /** /branches/<name>[/diff|/reviews|/merge], with the name raw or %2F-encoded. */
 /** A branch route's branch name, and what follows it (diff, reviews, merge, commits, or ""). */
@@ -1557,6 +1580,19 @@ mirrorRoutes(api);
 // ── Issues and labels (issues/routes.ts) ──
 
 issueRoutes(api);
+
+// ── Recorded agent sessions, from people's machines (sessions/routes.ts) ──
+
+sessionRoutes(api);
+// ── Agent sessions (agents/routes.ts) ──
+
+agentRoutes(api);
+
+issueAgentRoutes(api);
+
+reviewAgentRoutes(api);
+
+assistantRoutes(api);
 
 // ── Worktrees ─────────────────────────────────────────────────────────────
 

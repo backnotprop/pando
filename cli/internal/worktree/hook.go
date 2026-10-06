@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"pando/internal/gitx"
 )
@@ -18,8 +19,12 @@ import (
 // instead of adding them twice. `--no-divider` keeps a "---" line the author
 // wrote from being taken for a patch separator. The author's own lines are
 // never changed.
+//
+// Pando-Session names the agent session the commit came from (pando session trailer decides, from the agent's own
+// shell). It is added with addIfDifferent: an amend by the same session keeps one line, a second session adds its
+// own. During a rebase or a cherry-pick no session line is written, and the commit's lines stay as they were.
 const hookScript = `#!/bin/sh
-# Pando: adds Pando-Agent, Pando-Worktree and Pando-Machine trailers.
+# Pando: adds Pando-Agent, Pando-Worktree, Pando-Machine and Pando-Session trailers.
 # See docs/contracts/formats.md, section 6.
 msg_file="$1"
 case "$(basename "$0")" in
@@ -43,6 +48,13 @@ set --
 [ -n "$agent" ] && set -- "$@" --trailer "Pando-Agent: $agent"
 [ -n "$worktree" ] && set -- "$@" --trailer "Pando-Worktree: $worktree"
 [ -n "$machine" ] && set -- "$@" --trailer "Pando-Machine: $machine"
+pando_bin=$(git config --get pando.bin)
+[ -x "$pando_bin" ] || pando_bin=$(command -v pando 2>/dev/null)
+session=""
+[ -n "$pando_bin" ] && session=$("$pando_bin" session trailer 2>/dev/null)
+case "$session" in
+  s_*) set -- "$@" --if-exists addIfDifferent --trailer "Pando-Session: $session" ;;
+esac
 [ $# -gt 0 ] || exit 0
 exec git interpret-trailers --in-place --no-divider --if-exists replace --where end "$@" "$msg_file"
 `
@@ -84,6 +96,10 @@ func InstallHook(ctx context.Context, gitDir string, id Identity) error {
 		{"pando.worktree", id.Worktree},
 		{"pando.machine", id.Machine},
 		{"pando.kind", id.Kind},
+	}
+	// The hook asks this pando for the session line (it may not be on the agent's PATH).
+	if exe, err := os.Executable(); err == nil && strings.TrimSuffix(filepath.Base(exe), ".exe") == "pando" {
+		set = append(set, [2]string{"pando.bin", exe})
 	}
 	if id.Agent != "" {
 		set = append(set, [2]string{"pando.agent", id.Agent})

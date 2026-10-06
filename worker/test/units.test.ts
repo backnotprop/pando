@@ -12,6 +12,8 @@ import { diffLines, type Hunk } from "../src/monorepo/linediff";
 import { coAuthorEmails } from "../src/monorepo/trailers";
 import type { StatusRecord } from "../src/monorepo/types";
 import { hasCode, isRecord, isText, isTextList, isWholeNumber, parseJson } from "../src/parse";
+import { sessionIdFor } from "../src/sessions/ids";
+import { dayIn, sundayOf, winners } from "../src/sessions/marks";
 
 const dec = new TextDecoder();
 
@@ -702,5 +704,37 @@ describe("Co-authored-by trailers (the profile's credit)", () => {
 
   it("skips an empty email and counts an address once", () => {
     expect(coAuthorEmails(msg("t", "", "Co-authored-by: Nobody <>", "Co-authored-by: Ana <ana@example.com>", "Co-authored-by: A. <ANA@example.com>"))).toEqual(["ana@example.com"]);
+  });
+});
+
+// The same vectors are in cli/internal/session/session_test.go: the hook, pando sync and the Worker derive one id.
+describe("a session's id", () => {
+  it("is the same in Go and here", async () => {
+    expect(await sessionIdFor("codex", "019a0b1c-0000-7000-8000-000000000001")).toBe("s_2XDAN0ND9PZ9304DQBZ3FDWHKH");
+    expect(await sessionIdFor("claude-code", "3f1d2c4b-aaaa-bbbb-cccc-0123456789ab")).toBe("s_62XXQZZEZRSF4V9PFXHFN2JBQA");
+  });
+});
+
+describe("the profile graph's agent of a day and a week", () => {
+  const c = (at: string, program: string, session: string) => ({ at, program, session });
+
+  it("is the agent behind most commits; ties go to more sessions, then the latest commit, then the name", () => {
+    const day = (x: { at: string }) => dayIn(x.at, 0);
+
+    expect(winners([c("2026-10-04T09:00:00Z", "codex", "a"), c("2026-10-04T10:00:00Z", "claude-code", "b"), c("2026-10-04T11:00:00Z", "codex", "a")], day)).toEqual([{ date: "2026-10-04", program: "codex", commits: 2 }]);
+    expect(winners([c("2026-10-04T09:00:00Z", "codex", "a"), c("2026-10-04T09:30:00Z", "codex", "a"), c("2026-10-04T10:00:00Z", "pi", "b"), c("2026-10-04T10:30:00Z", "pi", "c")], day)[0].program).toBe("pi");
+    expect(winners([c("2026-10-04T09:00:00Z", "codex", "a"), c("2026-10-04T10:00:00Z", "pi", "b")], day)[0].program).toBe("pi");
+    expect(winners([c("2026-10-04T09:00:00Z", "pi", "a"), c("2026-10-04T09:00:00Z", "codex", "b")], day)[0].program).toBe("codex");
+  });
+
+  it("buckets by the viewer's zone, and a week from its Sunday sums its commits, not its days' winners", () => {
+    expect(dayIn("2026-10-04T23:30:00Z", 60)).toBe("2026-10-05");
+    expect(dayIn("2026-10-04T00:30:00Z", -60)).toBe("2026-10-03");
+    expect(sundayOf("2026-10-07")).toBe("2026-10-04");
+    expect(sundayOf("2026-10-04")).toBe("2026-10-04");
+    // Monday and Tuesday each won by codex 1 to 0 ... but pi has 3 on Wednesday: the week is pi's.
+    const week = (x: { at: string }) => sundayOf(dayIn(x.at, 0));
+    const commits = [c("2026-10-05T09:00:00Z", "codex", "a"), c("2026-10-06T09:00:00Z", "codex", "a"), c("2026-10-07T09:00:00Z", "pi", "b"), c("2026-10-07T10:00:00Z", "pi", "b"), c("2026-10-07T11:00:00Z", "pi", "b")];
+    expect(winners(commits, week)).toEqual([{ date: "2026-10-04", program: "pi", commits: 3 }]);
   });
 });

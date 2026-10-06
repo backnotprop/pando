@@ -1,9 +1,13 @@
 // The Worker's environment: bindings from wrangler.jsonc plus the secrets the
 // owner sets with `wrangler secret put` (never in the repo). Secrets are
 // optional here: the Worker answers clearly when one is not set.
-type Secrets = "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "PANDO_STATUS_SECRET" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS" | "FEED_FANOUT_MAX" | "FEED_TICK_MS" | "FEED_TEST" | "FEED_RETRY_MS" | "DOOR_TEST" | "FILES_BUDGET" | "FACTS_RETRY_MS" | "FACTS_TEST" | "HOOKS_TEST" | "META_TEST" | "CHECKS_TEST" | "MIRROR_TEST" | "GITHUB_APP_SLUG" | "GITHUB_APP_CLIENT_ID" | "GITHUB_APP_CLIENT_SECRET" | "GITHUB_APP_PRIVATE_KEY" | "GITHUB_API_BASE" | "GITHUB_WEB_BASE" | "GITHUB_GIT_BASE" | "MIRROR_SPACING_MS" | "MIRROR_RETRY_MS";
+import type { AgentsRpc } from "../../agents/src/protocol";
+
+type Secrets = "AGENTS" | "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "PANDO_STATUS_SECRET" | "WORKOS_CLIENT_ID" | "WORKOS_API_KEY" | "WORKOS_API_BASE" | "HOOK_RETRY_DELAYS" | "GATE_RELEASE_MS" | "FEED_FANOUT_MAX" | "FEED_TICK_MS" | "FEED_TEST" | "FEED_RETRY_MS" | "DOOR_TEST" | "FILES_BUDGET" | "FACTS_RETRY_MS" | "FACTS_TEST" | "HOOKS_TEST" | "META_TEST" | "CHECKS_TEST" | "MIRROR_TEST" | "GITHUB_APP_SLUG" | "GITHUB_APP_CLIENT_ID" | "GITHUB_APP_CLIENT_SECRET" | "GITHUB_APP_PRIVATE_KEY" | "GITHUB_API_BASE" | "GITHUB_WEB_BASE" | "GITHUB_GIT_BASE" | "MIRROR_SPACING_MS" | "MIRROR_RETRY_MS";
 
 export interface Env extends Omit<Cloudflare.Env, Secrets> {
+  /** pando-agents' AgentsApi entrypoint: Cloudflare-run agents (agents/). Absent where pando-agents is not set up. */
+  AGENTS?: Fetcher & AgentsRpc;
   /** Accounts (C8): users, credentials, monorepos, members, invites. D1 with read replication. */
   ACCOUNTS_DB: D1Database;
   /** Makes users (POST /v1/users) until a sign-in method exists. */

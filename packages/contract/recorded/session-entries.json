@@ -1,0 +1,76 @@
+{
+  "schema": "SessionEntries",
+  "route": "GET .../sessions/{id}/entries",
+  "status": 200,
+  "body": {
+    "entries": [
+      {
+        "prompt": 1,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-06T01:15:52.853Z",
+        "kind": "prompt",
+        "text": "Placeholder task: create a file a.txt containing the word hello, then run: git add a.txt && git commit -m 'placeholder one'. Reply done.",
+        "id": "0.0"
+      },
+      {
+        "prompt": null,
+        "tool": "bash",
+        "input": "{\"command\":\"printf 'hello\\n' > a.txt && git add a.txt && git commit -m 'placeholder one'\",\"timeout\":60}",
+        "result": "[main (root-commit) 4db2682] placeholder one\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+        "ok": true,
+        "by": null,
+        "at": "2026-10-06T01:15:55.237Z",
+        "kind": "tool",
+        "text": null,
+        "id": "0.1"
+      },
+      {
+        "prompt": null,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-06T01:15:56.226Z",
+        "kind": "answer",
+        "text": "done",
+        "id": "2003.0"
+      },
+      {
+        "prompt": 2,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-06T01:15:59.548Z",
+        "kind": "prompt",
+        "text": "Placeholder: reply with the single word ok.",
+        "id": "2003.1"
+      },
+      {
+        "prompt": null,
+        "tool": null,
+        "input": null,
+        "result": null,
+        "ok": null,
+        "by": null,
+        "at": "2026-10-06T01:16:00.916Z",
+        "kind": "answer",
+        "text": "ok",
+        "id": "2003.2"
+      }
+    ],
+    "next_cursor": null,
+    "model_changes": [
+      {
+        "at": "2026-10-06T01:15:55.237Z",
+        "model": "gpt-5.5"
+      }
+    ]
+  }
+}

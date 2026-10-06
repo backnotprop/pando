@@ -7,6 +7,7 @@
 // is open makes its day glow once.
 import type { ContributionDay, Contributions } from "@pando/contract";
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
+import { AgentMark, PROGRAM_NAME, type Program } from "../../ui/AgentMark";
 import { DOCS } from "../../ui/paths";
 import { count } from "./words";
 
@@ -78,6 +79,18 @@ function monthLabels(from: string, weeks: number): { col: number; label: string 
   return out.filter((m, i) => !(i === 0 && (out[1]?.col ?? weeks) - m.col < 3));
 }
 
+/**
+ * The agents on the graph (owner, 2026-10-04, graph-final.html): by week, a lane under the squares with each week's
+ * agent; by day, each day's agent on its own square, the shade showing at its corners. An agent is the one behind
+ * most of that day's (or week's) commits on main that name the person's own sessions (DETERMINISM.md rows 46 to 48).
+ */
+export interface GraphAgents {
+  view: "week" | "day";
+  days: ReadonlyMap<string, Program>;
+  /** By each week's Sunday. */
+  weeks: ReadonlyMap<string, Program>;
+}
+
 interface Tip {
   date: string;
   /** The square's centre and top, in the box. */
@@ -85,7 +98,7 @@ interface Tip {
   y: number;
 }
 
-export function Graph({ c, picked, onPick, glow }: { c: Contributions; picked: string | null; onPick: (day: string | null) => void; glow: { day: string; n: number } | null }) {
+export function Graph({ c, picked, onPick, glow, agents = null }: { c: Contributions; picked: string | null; onPick: (day: string | null) => void; glow: { day: string; n: number } | null; agents?: GraphAgents | null }) {
   const box = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const tipEl = useRef<HTMLDivElement>(null);
@@ -160,6 +173,7 @@ export function Graph({ c, picked, onPick, glow }: { c: Contributions; picked: s
     const step = stepOf(n, c.levels);
     const marked = date === picked || (keys && date === focus) || date === tip?.date;
     const glowing = glow?.day === date;
+    const agent = agents?.view === "day" ? agents.days.get(date) : undefined;
 
     return (
       <div
@@ -171,13 +185,19 @@ export function Graph({ c, picked, onPick, glow }: { c: Contributions; picked: s
         data-date={date}
         data-step={step}
         style={{ gridRow: (i % 7) + 2, gridColumn: Math.floor(i / 7) + 2, background: `var(--graph-${step})` }}
-        className={`cursor-pointer rounded-[2px] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--bark)_4%,transparent)] ${marked ? "outline-[1.5px] outline-offset-1 outline-bark outline-solid" : ""} ${glowing ? "graph-glow" : ""}`}
+        className={`grid cursor-pointer place-items-center rounded-[2px] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--bark)_4%,transparent)] ${marked ? "outline-[1.5px] outline-offset-1 outline-bark outline-solid" : ""} ${glowing ? "graph-glow" : ""}`}
         onMouseEnter={() => show(date)}
         onClick={() => {
           setFocus(date);
           onPick(date === picked ? null : date);
         }}
-      />
+      >
+        {agent ? (
+          <span className="grid size-[9px] place-items-center rounded-[1.5px] bg-soil">
+            <AgentMark program={agent} size={8} />
+          </span>
+        ) : null}
+      </div>
     );
   });
 
@@ -223,8 +243,25 @@ export function Graph({ c, picked, onPick, glow }: { c: Contributions; picked: s
             </span>
           ))}
           {rows}
+          {agents?.view === "week" ? (
+            <>
+              <span aria-hidden="true" style={{ gridRow: 9, gridColumn: 1 }} className="mt-2 text-[11px] leading-3 text-ash">
+                Agent
+              </span>
+              {Array.from({ length: weeks }, (_, w) => {
+                const program = agents.weeks.get(iso(first + w * 7 * DAY_MS));
+
+                return program ? (
+                  <span key={w} style={{ gridRow: 9, gridColumn: w + 2 }} className="mt-2 grid place-items-center" title={`Week of ${longDay(iso(first + w * 7 * DAY_MS))}: ${PROGRAM_NAME[program]}, behind most of the week's commits on main`}>
+                    <AgentMark program={program} size={12} />
+                  </span>
+                ) : null;
+              })}
+            </>
+          ) : null}
         </div>
       </div>
+      {agents?.view === "day" ? <p className="mt-2.5 text-right text-[12px] text-ash">Each day's agent sits on its square; the shade shows in the corners</p> : null}
       {tip ? (
         <div
           ref={tipEl}
@@ -234,6 +271,12 @@ export function Graph({ c, picked, onPick, glow }: { c: Contributions; picked: s
         >
           <b className="block text-[13.5px] font-semibold text-bark">{dayLabel(tipDay?.n ?? 0, tip.date)}</b>
           {tipDay ? <span className="mt-[3px] block text-[12.5px] text-bark-dim">{splitOf(tipDay)}</span> : null}
+          {agents?.days.get(tip.date) ? (
+            <span className="mt-[3px] flex items-center gap-1.5 text-[12.5px] text-bark-dim">
+              <AgentMark program={agents.days.get(tip.date)!} size={12} />
+              {PROGRAM_NAME[agents.days.get(tip.date)!]}, behind most of the day's commits on main
+            </span>
+          ) : null}
         </div>
       ) : null}
       <div className="mt-3 flex items-center gap-3 text-[12px] text-ash">

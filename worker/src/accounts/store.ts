@@ -64,6 +64,8 @@ export interface NewCredentialRow {
   kind: CredentialKind;
   /** Browser sessions: the WorkOS session, ended on sign-out. */
   workos_sid?: string | null;
+  /** An agent's sandbox credential: the one monorepo it works for. */
+  monorepo_id?: string | null;
 }
 
 export interface Member {
@@ -221,6 +223,8 @@ export function confirmed(auth: Auth | null, monorepo: MonorepoRef | string | nu
 
 interface AuthRow {
   id: string;
+  /** The one monorepo the credential works for (an agent's sandbox credential); null: the person's whole reach. */
+  scope: string | null;
   login: string;
   name: string;
   kind: CredentialKind;
@@ -255,7 +259,7 @@ const RESOLVE = `COALESCE(
 // the org that owns it, a primary-key miss when a person owns it). The higher
 // of the two is taken in higherRole, by name, not by how the strings sort.
 const AUTH_SQL = `
-SELECT c.id, c.login, c.name, c.kind, c.created_at, c.last_used_at, c.expires_at,
+SELECT c.id, c.login, c.name, c.kind, c.created_at, c.last_used_at, c.expires_at, c.monorepo_id AS scope,
        u.name AS user_name, u.email AS user_email, u.picture_url AS user_picture_url, u.created_at AS user_created_at,
        (SELECT role FROM members WHERE monorepo_id = m.id AND login = c.login) AS role,
        (SELECT role FROM org_members WHERE org = m.owner AND login = c.login) AS org_role,
@@ -530,6 +534,9 @@ export class Accounts {
     // A browser session unused for too long has ended.
     if (!row || (row.expires_at && Date.parse(row.expires_at) <= t)) return { auth: null, row: null, served };
 
+    // A credential limited to one monorepo opens nothing else, user routes included.
+    if (row.scope !== null && row.scope !== row.m_id) return { auth: null, row: null, served };
+
     const auth: Auth = {
       user: { login: row.login, name: row.user_name, email: row.user_email, picture_url: row.user_picture_url, created_at: row.user_created_at },
       credential: { id: row.id, name: row.name, kind: row.kind, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at },
@@ -573,8 +580,8 @@ export class Accounts {
     const at = now();
     const expires = c.kind === "browser" ? new Date(Date.now() + SESSION_IDLE_DAYS * DAY_MS).toISOString() : null;
     await this.run(
-      "INSERT INTO credentials (id, hash, login, name, kind, created_at, expires_at, workos_sid) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-      id, c.hash, login, c.name, c.kind, at, expires, c.workos_sid ?? null,
+      "INSERT INTO credentials (id, hash, login, name, kind, created_at, expires_at, workos_sid, monorepo_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+      id, c.hash, login, c.name, c.kind, at, expires, c.workos_sid ?? null, c.monorepo_id ?? null,
     );
 
     return { id, name: c.name, kind: c.kind, created_at: at, last_used_at: null, expires_at: expires };
@@ -1048,6 +1055,17 @@ export class Accounts {
     ]);
 
     return { shown: shown.results, orgs: orgs.results.map((o) => ({ ...o, created: o.created === 1 })) };
+  }
+
+  /** The monorepos `viewer` can open that `person` can open too: where the viewer sees the person's agent sessions. */
+  async sharedMonorepos(person: string, viewer: string): Promise<{ id: string; full_name: string }[]> {
+    const opens = (n: number) => VIEWER_OPENS.replaceAll("?1", `?${n}`);
+
+    return (await this.read<{ id: string; full_name: string }>(
+      this.db.withSession("first-unconstrained"),
+      `SELECT m.id, m.owner || '/' || m.name AS full_name FROM monorepos m WHERE ${opens(1)} AND ${opens(2)} ORDER BY m.id`,
+      viewer, person,
+    )).results;
   }
 
   private async orgRow(login: string, viewer: string): Promise<OrgRow | null> {

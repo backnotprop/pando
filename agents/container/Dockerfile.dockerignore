@@ -1,0 +1,4 @@
+# Only what the image needs from projects/pando (the build context).
+*
+!cli
+!agents/container/workspace.sh

@@ -30,6 +30,10 @@ export * from "./branch.ts";
 
 export * from "./issue.ts";
 
+export * from "./session.ts";
+
+export * from "./agent.ts";
+
 export * from "./ci.ts";
 
 export * from "./mirror.ts";

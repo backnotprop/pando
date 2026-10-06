@@ -3,6 +3,7 @@
 // Commits are immutable, so their metadata is cached per isolate. A cache
 // miss reads up to 64 first-parent ancestors in one `log` call.
 
+import { sessionLines } from "../sessions/ids";
 import type { Env } from "../env";
 import { HttpError } from "../http";
 import { withRepo } from "./artifacts";
@@ -19,6 +20,8 @@ export interface CommitInfo {
   authoredAt?: number;
   /** The emails its Co-authored-by trailers name (read from the whole message, before it is cut). */
   coauthors?: string[];
+  /** The agent sessions its Pando-Session lines name (read from the whole message too). */
+  sessions?: string[];
 }
 
 function info(c: ArtifactsCommitMetadata): CommitInfo {
@@ -27,6 +30,7 @@ function info(c: ArtifactsCommitMetadata): CommitInfo {
     message: c.message.length > 4096 ? c.message.slice(0, 4096) : c.message,
     author: c.author, committer: c.committer, authoredAt: c.authoredAt,
     coauthors: coAuthorEmails(c.message),
+    sessions: sessionLines(c.message),
   };
 }
 

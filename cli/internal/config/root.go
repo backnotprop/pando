@@ -270,7 +270,15 @@ type Settings struct {
 	Projects   []string                `toml:"projects"`
 	References []string                `toml:"references"`
 	Repos      map[string]RepoSettings `toml:"repos"`
+	Sessions   SessionRules            `toml:"sessions"`
 	Unknown    []string                `toml:"-"`
+}
+
+// SessionRules is the [sessions] table: a repository's rule for everyone's agent sessions, changed through a
+// reviewed branch like the rest of this file. record = false records none; exclude lists projects not recorded.
+type SessionRules struct {
+	Record  *bool    `toml:"record"`
+	Exclude []string `toml:"exclude"`
 }
 
 // RepoSettings is one [repos."<path>"] table.

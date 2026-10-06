@@ -1,0 +1,8 @@
+{
+  "schema": "SessionsDeleted",
+  "route": "DELETE .../sessions?older_than_days=0",
+  "status": 200,
+  "body": {
+    "deleted": 1
+  }
+}

@@ -12,7 +12,7 @@ import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
 import { sessionPersonRoutes, sessionUserRoutes } from "../sessions/user-routes";
 import { agentRoutes } from "../agents/routes";
-import { publicFileRoutes, releaseRoutes, tagRoutes } from "../releases/routes";
+import { deploymentRoutes, publicFileRoutes, releaseRoutes, tagRoutes } from "../releases/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
 import { assistantRoutes } from "../agents/assistant";
@@ -1598,6 +1598,8 @@ ciRoutes(api);
 tagRoutes(api);
 
 releaseRoutes(api);
+
+deploymentRoutes(api);
 
 // ── Mirror to GitHub (mirror/routes.ts) ──
 

@@ -496,6 +496,26 @@ try {
   r = await call("DELETE", rel("v0.6.0"), S);
   check("deleting a release deletes its files", r.status === 204 && (await getFile(files("v0.6.0", "SHA256SUMS"), S)).status === 404);
 
+  // ── 7. Deployments, recorded; and which commit the Worker runs ──
+  const v2 = (await call("GET", rel("v0.2.0"), S)).json;
+  r = await call("POST", `${base}/deployments`, B, { environment: "pando-dev", sha: v2?.sha, url: "https://pando-dev.example.invalid", description: "deploy.sh" });
+  check("a member records a deployment; its release is found from the commit", r.status === 201 && r.json?.release === "v0.2.0" && r.json.state === "success" && r.json.created_by === bo && r.json.environment === "pando-dev");
+  record("deployment.json", "Deployment", "POST .../repos/{repo}/deployments", r.status, r.json);
+  r = await call("POST", `${base}/deployments`, S, { environment: "staging", sha: main1, state: "failure" });
+  check("one with no release at its commit, failed", r.status === 201 && r.json?.release === null && r.json.state === "failure");
+  r = await call("POST", `${base}/deployments`, S, { environment: "pando-dev", sha: main1, release: "v9.9.9" });
+  check("naming a release that is not published is refused", r.status === 404);
+  r = await call("POST", `${base}/deployments`, S, { environment: "Pando Dev", sha: main1 });
+  check("an environment's name is checked", r.status === 400);
+  r = await call("GET", `${base}/deployments?environment=pando-dev`, S);
+  check("deployments of one environment, newest first", r.status === 200 && r.json?.deployments?.length === 1 && r.json.deployments[0].release === "v0.2.0");
+  record("deployments.json", "DeploymentList", "GET .../repos/{repo}/deployments?environment=pando-dev", r.status, r.json);
+  check("all of them", (await call("GET", `${base}/deployments`, S)).json?.deployments?.map((d) => d.environment).join() === "staging,pando-dev");
+  dl = await fetch(`${URL_}/healthz`);
+  const up = await dl.text();
+  const hz = await (await fetch(`${URL_}/healthz`, { headers: { accept: "application/json" } })).json();
+  check("/healthz still answers ok (the docs' Status page reads it); as JSON it names the version, and the commit when deployed with --tag <sha>", up === "ok\n" && hz.ok === true && /^[0-9a-f-]{36}$/.test(hz.version ?? "") && hz.commit === null, JSON.stringify(hz));
+
   cmd = pando(["help"]);
   check("pando help lists pando release", /pando release list \| view/.test(cmd.stderr) && /pando release create <tag>/.test(cmd.stderr), said(cmd));
 } catch (err) {

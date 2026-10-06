@@ -1,6 +1,6 @@
 // The Pando Worker: the one way in. Routes are owned by lanes (see
 // docs/contracts/README.md); this file only wires them together.
-//   /healthz                       up check (readable from any origin: the docs' Status page)
+//   /healthz                       up check (readable from any origin: the docs' Status page); which commit runs
 //   /docs, /docs/<path>            302 to the docs site (wrangler.jsonc DOCS_URL)
 //   /v1/openapi.yaml               the contract (docs/contracts/api-v1.yaml)
 //   /<owner>/<monorepo>/<repo>.git, /<owner>/<repo>.git   the git door (server-git)
@@ -155,7 +155,7 @@ export default {
   async fetch(request: IncomingRequest, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/healthz") return new Response("ok\n", { headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } });
+    if (url.pathname === "/healthz") return healthz(request, env);
 
     if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/docs" || url.pathname.startsWith("/docs/"))) return docs(env, url);
 
@@ -197,3 +197,22 @@ export default {
     return api.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env, unknown>;
+
+/**
+ * The up check: "ok", read by the docs' Status page from any origin. It also says which commit runs: the Worker
+ * version's tag, which deploy.sh sets to the commit (`wrangler deploy --tag <sha>`), as X-Pando-Commit, and as
+ * JSON when asked for it ({ok, commit, version, deployed_at}). A version deployed without a commit tag answers null.
+ */
+function healthz(request: Request, env: Env): Response {
+  const v = env.VERSION;
+  const commit = v && /^[0-9a-f]{40}$/.test(v.tag) ? v.tag : null;
+  const headers = new Headers({ "access-control-allow-origin": "*", "access-control-expose-headers": "x-pando-commit", "cache-control": "no-store" });
+
+  if (commit) headers.set("x-pando-commit", commit);
+
+  if ((request.headers.get("accept") ?? "").includes("application/json")) {
+    return Response.json({ ok: true, commit, version: v?.id || null, deployed_at: v?.timestamp || null }, { headers });
+  }
+
+  return new Response("ok\n", { headers });
+}

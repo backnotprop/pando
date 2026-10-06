@@ -13,6 +13,8 @@
 //   GET    /releases/{tag}/files/{name}   download it (`latest` works); without signing in when the project's switch
 //                                        "Anyone can download releases" is on (only release files, never code)
 //   DELETE /releases/{tag}/files/{name}
+//   POST   /deployments                   {environment, sha, state?, release?, url?, description?}: a deploy recorded
+//   GET    /deployments                   newest first (?environment, ?limit)
 // Anyone who may merge may publish (the owner's rule, as with merging). Git reads happen here; the monorepo object
 // keeps the records (releases/store.ts).
 import type { Context, Hono } from "hono";
@@ -448,4 +450,42 @@ export function releaseRoutes(api: Api): void {
 
 function throw409(code: string, message: string): never {
   throw new HttpError(409, code, message);
+}
+
+/** An environment's name: pando-dev, production, staging-eu. */
+const ENVIRONMENT = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+const DEPLOY_STATES = ["in_progress", "success", "failure"] as const;
+
+/** Deployments, recorded only: the CI (or a deploy script) deploys, then tells Pando which commit reached where. */
+export function deploymentRoutes(api: Api): void {
+  api.post(`${BASE}/deployments`, async (c) => {
+    const r = await repoOf(c);
+    const b = await bodyOf(c);
+    const environment = b.environment;
+    const sha = b.sha;
+
+    if (!isText(environment) || !ENVIRONMENT.test(environment)) bad("environment: a name such as pando-dev or production (a-z, 0-9, '.', '_', '-'; at most 64)");
+
+    if (!isText(sha) || !isSha(sha)) bad("sha: the full 40-character commit deployed");
+    const state = b.state ?? "success";
+
+    if (!DEPLOY_STATES.some((s) => s === state)) bad("state is in_progress, success or failure");
+    const release = text(b.release, "release", 200) ?? null;
+    const url = text(b.url, "url", 2000) ?? null;
+
+    if (url !== null && !/^https?:\/\//.test(url)) bad("url must be http(s)");
+    const d = { environment, sha, release, state: DEPLOY_STATES.find((s) => s === state)!, url, description: text(b.description, "description", 1000) ?? null };
+
+    return c.json(unwrap(await c.get("stub").deploymentAdd(r.name, d, c.get("identity"))) satisfies typeof Contract.Deployment.Encoded, 201);
+  });
+
+  api.get(`${BASE}/deployments`, async (c) => {
+    const r = await repoOf(c);
+    const limit = Number(c.req.query("limit") ?? RELEASES_PAGE);
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > RELEASES_PAGE_MAX) bad(`limit is 1 to ${RELEASES_PAGE_MAX}`);
+
+    return c.json({ deployments: await c.get("stub").deploymentList(r.name, c.req.query("environment") ?? null, limit) } satisfies typeof Contract.DeploymentList.Encoded);
+  });
 }

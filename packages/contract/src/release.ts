@@ -130,3 +130,26 @@ export const ReleaseNotes = Schema.Struct({
 });
 
 export interface ReleaseNotes extends Schema.Schema.Type<typeof ReleaseNotes> {}
+
+/** A deployment: a commit (and its release, if any) reached an environment. Recorded only: the CI deploys and posts it. */
+export const Deployment = Schema.Struct({
+  id: Schema.String,
+  repo: RepoName,
+  /** pando-dev, production. */
+  environment: Schema.String,
+  sha: Sha,
+  /** The published release at that commit (named when posted, or found), else null. */
+  release: Schema.NullOr(Schema.String),
+  state: Schema.Literals(["in_progress", "success", "failure"]),
+  url: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  created_by: Login,
+  created_at: Timestamp,
+});
+
+export interface Deployment extends Schema.Schema.Type<typeof Deployment> {}
+
+/** GET .../repos/{r}/deployments[?environment=]: newest first. */
+export const DeploymentList = Schema.Struct({ deployments: Schema.Array(Deployment) });
+
+export interface DeploymentList extends Schema.Schema.Type<typeof DeploymentList> {}

@@ -30,6 +30,12 @@ CREATE INDEX IF NOT EXISTS merges_commit ON merges (repo, merge_commit);
 CREATE TABLE IF NOT EXISTS release_files (
   release TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, content_type TEXT NOT NULL,
   uploaded_by TEXT NOT NULL, uploaded_at TEXT NOT NULL, PRIMARY KEY (release, name));
+
+CREATE TABLE IF NOT EXISTS deployments (
+  id TEXT PRIMARY KEY, repo TEXT NOT NULL, environment TEXT NOT NULL, sha TEXT NOT NULL, release TEXT, state TEXT NOT NULL,
+  url TEXT, description TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS deployments_env ON deployments (repo, environment, created_at DESC);
+CREATE INDEX IF NOT EXISTS deployments_repo ON deployments (repo, created_at DESC);
 `;
 
 /** Files per release (lane limit, approved 2026-10-06; GitHub allows 1,000). */
@@ -137,6 +143,23 @@ export interface GeneratedNotes {
   more: number;
   since: string | null;
 }
+
+export type DeploymentState = "in_progress" | "success" | "failure";
+
+/** A deployment as recorded: a commit (and its release, if any) reached an environment, posted by the CI or a deploy script. */
+export type DeploymentView = {
+  id: string;
+  repo: string;
+  environment: string;
+  sha: string;
+  /** The published release at that commit (named, or found), or null. */
+  release: string | null;
+  state: DeploymentState;
+  url: string | null;
+  description: string | null;
+  created_by: string;
+  created_at: string;
+};
 
 export interface ReleaseHost {
   info(): ObjectInfo | null;
@@ -429,6 +452,32 @@ export class ReleaseStore {
     this.announce("release.updated", this.releaseRow(repo, tag)!, by);
 
     return `${filesPrefix(monorepo, repo, r.id)}${name}`;
+  }
+
+  // ── Deployments (recorded only: the CI or a deploy script deploys and posts) ──
+
+  /** Record one. `release` named must be a published release; else the newest published release at its commit, if any. */
+  addDeployment(repo: string, d: { environment: string; sha: string; release: string | null; state: DeploymentState; url: string | null; description: string | null }, by: Identity): DeploymentView {
+    let release = d.release;
+
+    if (release !== null && !this.row("SELECT id FROM releases WHERE repo = ? AND tag = ? AND draft = 0", repo, release)) fail(404, "not_found", `no published release ${release}`);
+    release ??= this.row<{ tag: string }>("SELECT tag FROM releases WHERE repo = ? AND sha = ? AND draft = 0 ORDER BY published_at DESC LIMIT 1", repo, d.sha)?.tag ?? null;
+    const id = hexId("dep_");
+    this.sql.exec(
+      "INSERT INTO deployments (id, repo, environment, sha, release, state, url, description, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      id, repo, d.environment, d.sha, release, d.state, d.url, d.description, by.login, now(),
+    );
+
+    return this.row<DeploymentView>("SELECT * FROM deployments WHERE id = ?", id)!;
+  }
+
+  /** Newest first, of one environment or all. */
+  deployments(repo: string, environment: string | null, limit: number): DeploymentView[] {
+    const n = Math.min(Math.max(limit, 1), RELEASES_PAGE_MAX);
+
+    return environment
+      ? this.rows<DeploymentView>("SELECT * FROM deployments WHERE repo = ? AND environment = ? ORDER BY created_at DESC, id DESC LIMIT ?", repo, environment, n)
+      : this.rows<DeploymentView>("SELECT * FROM deployments WHERE repo = ? ORDER BY created_at DESC, id DESC LIMIT ?", repo, n);
   }
 
   // ── Notes ────────────────────────────────────────────────────────────────

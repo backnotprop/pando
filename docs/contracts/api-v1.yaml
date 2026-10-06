@@ -3297,6 +3297,55 @@ paths:
       responses:
         "204":
           description: Deleted
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/deployments:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+    post:
+      operationId: createDeployment
+      summary: Record a deployment (the CI or a deploy script deploys; Pando records)
+      description: |
+        `release`: a published release's tag; left out, the newest published
+        release at `sha` is named, if any. Pando never deploys.
+      tags: [releases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environment, sha]
+              properties:
+                environment: { type: string, description: "a-z, 0-9, '.', '_', '-'; at most 64 (pando-dev, production)." }
+                sha: { type: string }
+                state: { type: string, enum: [in_progress, success, failure], default: success }
+                release: { type: string }
+                url: { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deployment" }
+    get:
+      operationId: listDeployments
+      summary: Deployments, newest first
+      tags: [releases]
+      parameters:
+        - { name: environment, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deployments]
+                properties:
+                  deployments: { type: array, items: { $ref: "#/components/schemas/Deployment" } }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/hooks:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -5074,6 +5123,20 @@ components:
         merges: { type: [integer, "null"], description: "Generated: the merges listed (at most 500)." }
         more: { type: [integer, "null"], description: "Generated: the merges past 500." }
         since: { type: [string, "null"], description: "Generated: the release they start from; null from the start." }
+    Deployment:
+      type: object
+      required: [id, repo, environment, sha, release, state, url, description, created_by, created_at]
+      properties:
+        id: { type: string }
+        repo: { type: string }
+        environment: { type: string }
+        sha: { type: string }
+        release: { type: [string, "null"] }
+        state: { type: string, enum: [in_progress, success, failure] }
+        url: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
     HookEvent:
       type: string
       enum: [push, branch.opened, merged, tag]

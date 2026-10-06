@@ -44,7 +44,7 @@ import {
   IssueStore, type BranchWord, type IssueFilters, type IssueInput, type IssuePatch, type IssueWho, type ReactionContent,
 } from "../issues/store";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
-import { ReleaseStore, type FileFound, type FileSlot, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
+import { ReleaseStore, type DeploymentState, type DeploymentView, type FileFound, type FileSlot, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
 import type { BuildView } from "../ci/store";
 import type { Json } from "../parse";
 import type {
@@ -2793,6 +2793,14 @@ export class MonorepoObject extends DurableObject<Env> {
 
   releaseFileDelete(repo: string, tag: string, name: string, identity: Identity): Promise<Outcome<string>> {
     return this.guard(() => this.releases.deleteFile(this.info()!.id, repo, tag, name, identity));
+  }
+
+  deploymentAdd(repo: string, d: { environment: string; sha: string; release: string | null; state: DeploymentState; url: string | null; description: string | null }, identity: Identity): Promise<Outcome<DeploymentView>> {
+    return this.guard(() => this.releases.addDeployment(repo, d, identity));
+  }
+
+  deploymentList(repo: string, environment: string | null, limit: number): DeploymentView[] {
+    return this.releases.deployments(repo, environment, limit);
   }
 
   /** The switch "Anyone can download releases" of a project. */

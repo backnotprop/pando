@@ -71,6 +71,28 @@ export class PandoApi {
   }
 }
 
+/** How long the merge tool waits before trying again after a 503 (Artifacts busy with other writes to the repo). */
+const MERGE_RETRY_MS = [2000, 5000];
+
+/**
+ * A merge, tried again after a 503: Pando answers repo_busy when Artifacts is
+ * busy with other writes to the repo (a push just landed, another merge), and
+ * says to try again. A model may not; an agent's merge right after its push
+ * should not fail on that. Any other refusal is the agent's to read.
+ */
+async function mergeTrying(merge: () => Promise<Answer>): Promise<Answer> {
+  for (const wait of MERGE_RETRY_MS) {
+    try {
+      return await merge();
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith("Pando refused (503)")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+
+  return merge();
+}
+
 const RepoParam = Type.Optional(Type.String({ description: "A project's name; the session's own when left out." }));
 
 export function pandoTools(api: PandoApi, spec: () => SessionSpec): ToolRegistration[] {
@@ -174,7 +196,7 @@ export function pandoTools(api: PandoApi, spec: () => SessionSpec): ToolRegistra
       description: "Merge a branch into main through Pando, as the person who started you, with a merge commit. Pando refuses while required checks are red or still running; it is never forced. The session's own branch when left out.",
       parameters: Type.Object({ branch: Type.Optional(Type.String()), repo: RepoParam }),
       async execute({ branch, repo }) {
-        const r = await api.call("POST", `${api.repo(repo)}/branches/${branchOf(branch)}/merge`, "{}");
+        const r = await mergeTrying(() => api.call("POST", `${api.repo(repo)}/branches/${branchOf(branch)}/merge`, "{}"));
         // SAFETY: Contract.MergeResult; only these fields are read.
         const m = JSON.parse(r.text) as { status: string; sha?: string; closes?: number[] };
         const closing = m.closes?.length ? `, closing ${m.closes.map((n) => `#${n}`).join(", ")}` : "";

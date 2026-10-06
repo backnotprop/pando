@@ -27,7 +27,16 @@ CREATE TABLE IF NOT EXISTS releases (
 CREATE UNIQUE INDEX IF NOT EXISTS releases_tag ON releases (repo, tag);
 CREATE INDEX IF NOT EXISTS releases_sort ON releases (repo, sort_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS merges_commit ON merges (repo, merge_commit);
+CREATE TABLE IF NOT EXISTS release_files (
+  release TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, content_type TEXT NOT NULL,
+  uploaded_by TEXT NOT NULL, uploaded_at TEXT NOT NULL, PRIMARY KEY (release, name));
 `;
+
+/** Files per release (lane limit, approved 2026-10-06; GitHub allows 1,000). */
+export const FILES_MAX = 20;
+
+/** One release file, in bytes: under the Workers request body limit (100 MB on the Free and Pro plans), approved 2026-10-06. */
+export const FILE_MAX_BYTES = 100_000_000;
 
 /** Releases per page (lane limit, approved 2026-10-06). */
 export const RELEASES_PAGE = 30;
@@ -70,6 +79,35 @@ export interface TagView {
   frozen: boolean;
 }
 
+/** A file of a release; its bytes are in R2 (BLOBS) at fileKey(). */
+export type ReleaseFileView = {
+  name: string;
+  size: number;
+  sha256: string;
+  content_type: string;
+  uploaded_by: string;
+  uploaded_at: string;
+};
+
+type FileRow = ReleaseFileView & { release: string };
+
+/** Where a release's files live in R2 (BLOBS): one prefix per release, so deleting it deletes them all. */
+export function filesPrefix(monorepo: string, repo: string, releaseId: string): string {
+  return `releases/${monorepo}/${repo}/${releaseId}/`;
+}
+
+/** What an upload needs before it sends bytes: the release's id (for the R2 key), and whether one more file fits. */
+export interface FileSlot {
+  release_id: string;
+  replacing: boolean;
+}
+
+/** A file to download: where its bytes are, and its record. */
+export interface FileFound {
+  key: string;
+  file: ReleaseFileView;
+}
+
 export interface ReleaseView {
   repo: string;
   tag: string;
@@ -84,6 +122,7 @@ export interface ReleaseView {
   updated_at: string;
   published_by: string | null;
   published_at: string | null;
+  files: ReleaseFileView[];
 }
 
 export interface ReleasesPage {
@@ -142,6 +181,21 @@ export class ReleaseStore {
 
   ensureSchema(): void {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+
+    // The per-project switch "Anyone can download releases" (off: members only).
+    if (!this.rows<{ name: string }>("PRAGMA table_info(repos)").some((c) => c.name === "releases_public")) {
+      this.sql.exec("ALTER TABLE repos ADD COLUMN releases_public INTEGER NOT NULL DEFAULT 0");
+    }
+  }
+
+  // ── The download switch ──────────────────────────────────────────────────
+
+  releasesPublic(repo: string): boolean {
+    return this.row<{ v: number }>("SELECT releases_public AS v FROM repos WHERE name = ?", repo)?.v === 1;
+  }
+
+  setReleasesPublic(repo: string, on: boolean): void {
+    this.sql.exec("UPDATE repos SET releases_public = ? WHERE name = ?", on ? 1 : 0, repo);
   }
 
   // ── Tags ─────────────────────────────────────────────────────────────────
@@ -224,9 +278,11 @@ export class ReleaseStore {
   // ── Releases ─────────────────────────────────────────────────────────────
 
   private view(r: ReleaseRow): ReleaseView {
+    const files = this.rows<FileRow>("SELECT * FROM release_files WHERE release = ? ORDER BY name", r.id).map(({ release: _r, ...f }) => f);
+
     return {
       repo: r.repo, tag: r.tag, sha: r.sha, title: r.title, notes: r.notes, draft: r.draft === 1, forced: r.forced === 1,
-      created_by: r.created_by, created_at: r.created_at, updated_at: r.updated_at, published_by: r.published_by, published_at: r.published_at,
+      created_by: r.created_by, created_at: r.created_at, updated_at: r.updated_at, published_by: r.published_by, published_at: r.published_at, files,
     };
   }
 
@@ -314,9 +370,65 @@ export class ReleaseStore {
   deleteRelease(repo: string, tag: string, by: Identity): string {
     const r = this.releaseRow(repo, tag) ?? fail(404, "not_found", `no release ${tag}`);
     this.sql.exec("DELETE FROM releases WHERE id = ?", r.id);
+    this.sql.exec("DELETE FROM release_files WHERE release = ?", r.id);
     this.announce("release.deleted", r, by);
 
     return r.id;
+  }
+
+  // ── Files (bytes in R2, written and read by the Worker) ──────────────────
+
+  /** Before an upload: the release, and whether this name fits (a new name past FILES_MAX does not; a replaced one does). */
+  fileSlot(repo: string, tag: string, name: string): FileSlot {
+    const r = this.releaseRow(repo, tag) ?? fail(404, "not_found", `no release ${tag}`);
+    const replacing = !!this.row("SELECT name FROM release_files WHERE release = ? AND name = ?", r.id, name);
+    const n = this.row<{ n: number }>("SELECT COUNT(*) AS n FROM release_files WHERE release = ?", r.id)?.n ?? 0;
+
+    if (!replacing && n >= FILES_MAX) fail(409, "too_many_files", `${tag} has ${FILES_MAX} files, the most a release keeps; delete one first`);
+
+    return { release_id: r.id, replacing };
+  }
+
+  /** After the bytes are in R2: the file's record (a name uploaded again replaces it). Refused when the release went or filled up meanwhile. */
+  addFile(repo: string, tag: string, releaseId: string, f: Omit<ReleaseFileView, "uploaded_by" | "uploaded_at">, by: Identity): ReleaseView {
+    const r = this.releaseRow(repo, tag);
+
+    if (!r || r.id !== releaseId) fail(404, "not_found", `release ${tag} was deleted while the file was uploading`);
+    this.fileSlot(repo, tag, f.name);
+    const at = now();
+    this.sql.exec(
+      `INSERT INTO release_files (release, name, size, sha256, content_type, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (release, name) DO UPDATE SET size = excluded.size, sha256 = excluded.sha256, content_type = excluded.content_type,
+         uploaded_by = excluded.uploaded_by, uploaded_at = excluded.uploaded_at`,
+      r.id, f.name, f.size, f.sha256, f.content_type, by.login, at,
+    );
+    this.sql.exec("UPDATE releases SET updated_at = ? WHERE id = ?", at, r.id);
+    const row = this.releaseRow(repo, tag)!;
+    this.announce("release.updated", row, by);
+
+    return this.view(row);
+  }
+
+  /** A file's record and its R2 key; `latest` is the newest published release's. */
+  file(monorepo: string, repo: string, tag: string, name: string): FileFound | null {
+    const r = tag === "latest" ? this.row<ReleaseRow>("SELECT * FROM releases WHERE repo = ? AND draft = 0 ORDER BY published_at DESC, id DESC LIMIT 1", repo) : this.releaseRow(repo, tag);
+    const f = r ? this.row<FileRow>("SELECT * FROM release_files WHERE release = ? AND name = ?", r.id, name) : null;
+
+    if (!r || !f) return null;
+    const { release: _r, ...file } = f;
+
+    return { key: `${filesPrefix(monorepo, repo, r.id)}${name}`, file };
+  }
+
+  /** Delete one file's record; answers its R2 key. */
+  deleteFile(monorepo: string, repo: string, tag: string, name: string, by: Identity): string {
+    const r = this.releaseRow(repo, tag) ?? fail(404, "not_found", `no release ${tag}`);
+
+    if (!this.sql.exec("DELETE FROM release_files WHERE release = ? AND name = ?", r.id, name).rowsWritten) fail(404, "not_found", `${tag} has no file ${name}`);
+    this.sql.exec("UPDATE releases SET updated_at = ? WHERE id = ?", now(), r.id);
+    this.announce("release.updated", this.releaseRow(repo, tag)!, by);
+
+    return `${filesPrefix(monorepo, repo, r.id)}${name}`;
   }
 
   // ── Notes ────────────────────────────────────────────────────────────────

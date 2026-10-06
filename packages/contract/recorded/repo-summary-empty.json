@@ -3,7 +3,7 @@
   "route": "GET .../repos/{repo}/summary (empty)",
   "status": 200,
   "body": {
-    "repo": "rel-empty-muw4momx",
+    "repo": "rel-empty-muw5577h",
     "main": {
       "branch": "main",
       "sha": null,

@@ -12,7 +12,7 @@ import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
 import { sessionPersonRoutes, sessionUserRoutes } from "../sessions/user-routes";
 import { agentRoutes } from "../agents/routes";
-import { releaseRoutes, tagRoutes } from "../releases/routes";
+import { publicFileRoutes, releaseRoutes, tagRoutes } from "../releases/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
 import { assistantRoutes } from "../agents/assistant";
@@ -437,6 +437,9 @@ const authed = async (c: C, next: () => Promise<void>) => {
   await next();
 };
 
+// Release files a project lets anyone download (its switch on): answered before the members-only check, for that route alone.
+publicFileRoutes(api);
+
 api.use("/v1/monorepos/:o/:m", authed);
 
 api.use("/v1/monorepos/:o/:m/*", authed);
@@ -529,6 +532,8 @@ api.delete("/v1/monorepos/:o/:m", async (c) => {
     [c.env.BLOBS, `meta/${m}/`],
     // Agent sessions' pieces (sessions/pieces.ts).
     [c.env.BLOBS, `sessions/${m}/`],
+    // Release files (releases/routes.ts).
+    [c.env.BLOBS, `releases/${m}/`],
     [c.env.CACHE, `ci/${m}/`],
     [c.env.CACHE, `answers/${m}--`],
     [c.env.CACHE, `partial/${m}--`],
@@ -723,8 +728,22 @@ api.get("/v1/monorepos/:o/:m/repos", async (c) => {
 
 api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => {
   const r = await repoOf(c);
+  const releasesPublic = await c.get("stub").releasesPublic(r.name);
 
-  return c.json(repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)) satisfies typeof Contract.Repo.Encoded);
+  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: releasesPublic } satisfies typeof Contract.Repo.Encoded);
+});
+
+// A project's settings (owners): releases_public, the switch "Anyone can download releases" (release files only, never code).
+api.patch("/v1/monorepos/:o/:m/repos/:r", async (c) => {
+  owner(c, "change who can download a project's releases");
+  const r = await repoOf(c);
+  const b = await body(c.req);
+  const on = b.releases_public;
+
+  if (on !== true && on !== false) bad("releases_public is true (anyone can download release files) or false (members only)");
+  await c.get("stub").setReleasesPublic(r.name, on);
+
+  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: on } satisfies typeof Contract.Repo.Encoded);
 });
 
 // ── Branches ──────────────────────────────────────────────────────────────

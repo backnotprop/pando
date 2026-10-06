@@ -44,7 +44,7 @@ import {
   IssueStore, type BranchWord, type IssueFilters, type IssueInput, type IssuePatch, type IssueWho, type ReactionContent,
 } from "../issues/store";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
-import { ReleaseStore, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
+import { ReleaseStore, type FileFound, type FileSlot, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
 import type { BuildView } from "../ci/store";
 import type { Json } from "../parse";
 import type {
@@ -323,6 +323,12 @@ export interface MainSummary {
   /** The newest build on main, whatever its commit. */
   build: BuildView | null;
   latest_release: ReleaseView | null;
+}
+
+/** A download without signing in: whether the project allows it, and the file when it does. */
+export interface PublicFile {
+  allowed: boolean;
+  found: FileFound | null;
 }
 
 /** checkPush's answer: the refs it refuses, and whether the repo keeps pushes not yet recorded. */
@@ -2771,6 +2777,38 @@ export class MonorepoObject extends DurableObject<Env> {
 
   releaseNotes(repo: string, sha: string, tag: string): GeneratedNotes {
     return this.releases.generateNotes(repo, sha, tag);
+  }
+
+  releaseFileSlot(repo: string, tag: string, name: string): Promise<Outcome<FileSlot>> {
+    return this.guard(() => this.releases.fileSlot(repo, tag, name));
+  }
+
+  releaseFileAdd(repo: string, tag: string, releaseId: string, f: { name: string; size: number; sha256: string; content_type: string }, identity: Identity): Promise<Outcome<ReleaseView>> {
+    return this.guard(() => this.releases.addFile(repo, tag, releaseId, f, identity));
+  }
+
+  releaseFile(repo: string, tag: string, name: string): FileFound | null {
+    return this.releases.file(this.info()!.id, repo, tag, name);
+  }
+
+  releaseFileDelete(repo: string, tag: string, name: string, identity: Identity): Promise<Outcome<string>> {
+    return this.guard(() => this.releases.deleteFile(this.info()!.id, repo, tag, name, identity));
+  }
+
+  /** The switch "Anyone can download releases" of a project. */
+  releasesPublic(repo: string): boolean {
+    return this.releases.releasesPublic(repo);
+  }
+
+  setReleasesPublic(repo: string, on: boolean): void {
+    this.releases.setReleasesPublic(repo, on);
+  }
+
+  /** A download without signing in: allowed only when the project's switch is on; then the file, or null when there is none. */
+  publicReleaseFile(repo: string, tag: string, name: string): PublicFile {
+    const allowed = this.releases.releasesPublic(repo);
+
+    return { allowed, found: allowed ? this.releases.file(this.info()!.id, repo, tag, name) : null };
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

@@ -69,7 +69,22 @@ export const TagList = Schema.Struct({ tags: Schema.Array(Tag) });
 
 export interface TagList extends Schema.Schema.Type<typeof TagList> {}
 
-/** A release: a tag on the project's main, with a title and notes. */
+/** A file of a release. Its bytes are in R2; GET .../releases/{tag}/files/{name} downloads it. */
+export const ReleaseFile = Schema.Struct({
+  /** Letters, digits, `.`, `_`, `+` and `-`; at most 200 characters. */
+  name: Schema.String,
+  /** In bytes; at most 100,000,000. */
+  size: Count,
+  /** The SHA-256 of its bytes, as Pando computed it on upload (hex). */
+  sha256: Schema.String,
+  content_type: Schema.String,
+  uploaded_by: Login,
+  uploaded_at: Timestamp,
+});
+
+export interface ReleaseFile extends Schema.Schema.Type<typeof ReleaseFile> {}
+
+/** A release: a tag on the project's main, with a title, notes and files. */
 export const Release = Schema.Struct({
   repo: RepoName,
   tag: Schema.String,
@@ -86,6 +101,8 @@ export const Release = Schema.Struct({
   updated_at: Timestamp,
   published_by: Schema.NullOr(Login),
   published_at: Schema.NullOr(Timestamp),
+  /** At most 20, by name. */
+  files: Schema.Array(ReleaseFile),
   /** Its commit's checks: on GET .../releases/{tag} only. */
   checks: Schema.optionalKey(Checks),
 });

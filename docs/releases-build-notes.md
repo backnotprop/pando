@@ -44,3 +44,25 @@ projects/pando/worktrees/releases). The design: research/plans/releases-2026-10-
 - Gap: a tag push whose record fails is not kept for the reconcile
   (markUnrecorded keeps branches only); the tag stays in Artifacts and
   GET tags does not show it until it is pushed again or a release names it.
+- Stage 2 (c5aa821 server, 61c1ba4 cli): releases. POST makes a draft at
+  main (or the tag's commit, or --target on main); published at once unless
+  draft, after the gate (the merge gate's rule: combine() not success and not
+  forced is 412 checks_not_green, before anything is made). Publishing makes
+  the tag through the repo's write gate (updateRefsQueued) and records it;
+  the door then refuses to move or delete it. Notes: releases/notes.ts walks
+  the merges rows from the release's commit back to the first other
+  published release's commit (no git reads); unit tests in units.test.ts.
+- Stage 3: release files in R2 BLOBS at releases/<monorepo id>/<repo>/<release
+  id>/<name>; SHA-256 computed on upload (DigestStream on a tee), the CLI
+  sends its own and a mismatch is refused; 100,000,000 bytes and 20 files.
+  The switch is repos.releases_public, set by PATCH .../repos/{r} (owners);
+  the public download handler is registered before the members-only check
+  and answers only GET .../releases/{tag}/files/{name}. pando release
+  upload | download, and create <tag> <file>... (a draft, its files, then
+  published). releases.mjs 87 of 87; contract 157 of 157.
+- wrangler dev reads a request body before the Worker sees it, so the 413
+  check sends 100,000,001 bytes; on Cloudflare the edge refuses past 100 MB
+  itself (Free and Pro plans).
+- A run killed outright left two repositories (rel-muw4t956); deleted by
+  hand with a local credential. The suite now uses throwaways() (cleans up on
+  Ctrl-C and kill).

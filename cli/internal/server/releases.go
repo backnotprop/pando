@@ -2,6 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 )
@@ -10,19 +14,20 @@ import (
 
 // Release is a tag on a project's main with a title, notes and files.
 type Release struct {
-	Repo        string  `json:"repo"`
-	Tag         string  `json:"tag"`
-	SHA         string  `json:"sha"`
-	Title       string  `json:"title"`
-	Notes       string  `json:"notes"`
-	Draft       bool    `json:"draft"`
-	Forced      bool    `json:"forced"`
-	CreatedBy   string  `json:"created_by"`
-	CreatedAt   string  `json:"created_at"`
-	PublishedBy *string `json:"published_by"`
-	PublishedAt *string `json:"published_at"`
-	Checks      *Checks `json:"checks"`
-	JSON        []byte  `json:"-"`
+	Repo        string        `json:"repo"`
+	Tag         string        `json:"tag"`
+	SHA         string        `json:"sha"`
+	Title       string        `json:"title"`
+	Notes       string        `json:"notes"`
+	Draft       bool          `json:"draft"`
+	Forced      bool          `json:"forced"`
+	CreatedBy   string        `json:"created_by"`
+	CreatedAt   string        `json:"created_at"`
+	PublishedBy *string       `json:"published_by"`
+	PublishedAt *string       `json:"published_at"`
+	Files       []ReleaseFile `json:"files"`
+	Checks      *Checks       `json:"checks"`
+	JSON        []byte        `json:"-"`
 }
 
 type ReleaseList struct {
@@ -81,5 +86,71 @@ func (h *HTTP) PublishRelease(ctx context.Context, m, repo, tag string, force bo
 // DeleteRelease deletes a release and its files; its tag stays.
 func (h *HTTP) DeleteRelease(ctx context.Context, m, repo, tag string) error {
 	_, err := h.Call(ctx, "DELETE", releasePath(m, repo, tag), nil, nil, nil)
+	return err
+}
+
+// ReleaseFile is one file of a release; its bytes are kept by Pando (R2).
+type ReleaseFile struct {
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+	ContentType string `json:"content_type"`
+	UploadedBy  string `json:"uploaded_by"`
+	UploadedAt  string `json:"uploaded_at"`
+}
+
+func releaseFilePath(m, repo, tag, name string) string {
+	return releasePath(m, repo, tag) + "/files/" + esc(name)
+}
+
+// UploadReleaseFile sends one file, streamed, with its size and SHA-256
+// (the server computes it again and refuses a mismatch). A name uploaded
+// again replaces the file. Answers the release.
+func (h *HTTP) UploadReleaseFile(ctx context.Context, m, repo, tag, name string, body io.Reader, size int64, sha256hex string) (*Release, error) {
+	req, err := http.NewRequestWithContext(ctx, "PUT", h.Base+releaseFilePath(m, repo, tag, name), body)
+	if err != nil {
+		return nil, err
+	}
+	req.ContentLength = size
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-Pando-Sha256", sha256hex)
+	resp, data, err := h.send(req)
+	if err != nil {
+		return nil, err
+	}
+	out := &Release{JSON: data}
+	if err := json.Unmarshal(data, out); err != nil {
+		return nil, fmt.Errorf("PUT %s: bad JSON from server (HTTP %d): %w", releaseFilePath(m, repo, tag, name), resp.StatusCode, err)
+	}
+	return out, nil
+}
+
+// DownloadReleaseFile writes one file's bytes to w as they arrive, and
+// answers the SHA-256 the server recorded for it. Tag "latest" is the newest
+// published release.
+func (h *HTTP) DownloadReleaseFile(ctx context.Context, m, repo, tag, name string, w io.Writer) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", h.Base+releaseFilePath(m, repo, tag, name), nil)
+	if err != nil {
+		return "", err
+	}
+	h.authorize(req)
+	resp, err := h.streaming().Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GET %s: %w", h.Base+releaseFilePath(m, repo, tag, name), unwrapURLError(err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return "", decodeError(resp.StatusCode, data)
+	}
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		return "", err
+	}
+	return resp.Header.Get("X-Pando-Sha256"), nil
+}
+
+// DeleteReleaseFile deletes one file of a release.
+func (h *HTTP) DeleteReleaseFile(ctx context.Context, m, repo, tag, name string) error {
+	_, err := h.Call(ctx, "DELETE", releaseFilePath(m, repo, tag, name), nil, nil, nil)
 	return err
 }

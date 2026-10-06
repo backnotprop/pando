@@ -1,19 +1,26 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"pando/internal/server"
 )
 
+// filesMax is the most files one release keeps (the server's limit).
+const filesMax = 20
+
 // ── pando release: a project's releases (research/plans/releases-2026-10-04) ──
 
-const releaseUsage = "pando release list | view [<tag>] | create <tag> [--title t] [--notes n | --notes-file f] [--generate] [--target <sha>] [--draft] [--force] | publish <tag> [--force] | delete <tag> [--yes]   [--repo <path>] [--monorepo <owner/name>] [--json]"
+const releaseUsage = "pando release list | view [<tag>] | create <tag> [<file>...] [--title t] [--notes n | --notes-file f] [--generate] [--target <sha>] [--draft] [--force] | publish <tag> [--force] | upload <tag> <file>... | download [<tag>] [--pattern p] [--dir d] | delete <tag> [--yes]   [--repo <path>] [--monorepo <owner/name>] [--json]"
 
 // Release is `pando release`. A release is a tag on a project's main with
 // notes. Anyone who may merge may publish one; its commit's required checks
@@ -34,6 +41,8 @@ func Release(e *Env, args []string) error {
 	force := fs.Bool("force", false, "create, publish: publish past red or missing required checks")
 	yes := fs.Bool("yes", false, "delete: without asking (scripts)")
 	limit := fs.Int("limit", 30, "list: how many releases")
+	pattern := fs.String("pattern", "", "download: only files whose names match this pattern (pando-darwin-*)")
+	dir := fs.String("dir", ".", "download: the folder to write the files in")
 	repoFlag := fs.String("repo", "", "the repo (default: the one this folder is in, or the only one)")
 	asJSON := fs.Bool("json", false, "print the API's JSON")
 	mono := fs.String("monorepo", "", "the monorepo (default: the one this folder is in)")
@@ -42,8 +51,8 @@ func Release(e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	least := map[string]int{"list": 0, "ls": 0, "view": 0, "create": 1, "publish": 1, "delete": 1, "rm": 1}
-	most := map[string]int{"list": 0, "ls": 0, "view": 1, "create": 1, "publish": 1, "delete": 1, "rm": 1}
+	least := map[string]int{"list": 0, "ls": 0, "view": 0, "create": 1, "publish": 1, "upload": 2, "download": 0, "delete": 1, "rm": 1}
+	most := map[string]int{"list": 0, "ls": 0, "view": 1, "create": 1 + filesMax, "publish": 1, "upload": 1 + filesMax, "download": 1, "delete": 1, "rm": 1}
 	if n, ok := least[args[0]]; !ok || len(pos) < n || len(pos) > most[args[0]] {
 		return usage
 	}
@@ -93,15 +102,49 @@ func Release(e *Env, args []string) error {
 			}
 			text = b
 		}
-		in := server.ReleaseIn{Tag: pos[0], Target: *target, Title: *title, Notes: text, GenerateNotes: *generate, Draft: *draft, Force: *force}
+		files, err := releaseFiles(e, pos[1:])
+		if err != nil {
+			return err
+		}
+		// With files: a draft first, its files, then published, so a release is never seen without them.
+		in := server.ReleaseIn{Tag: pos[0], Target: *target, Title: *title, Notes: text, GenerateNotes: *generate, Draft: *draft || len(files) > 0, Force: *force}
 		r, err := h.CreateRelease(e.Ctx, full, repo.Name, in)
 		if err != nil {
 			return checksRefused(err, pos[0])
+		}
+		if len(files) > 0 {
+			if r, err = uploadAll(e, h, full, repo.Name, pos[0], files, *asJSON); err != nil {
+				return fmt.Errorf("%w\n  the draft %s is kept; upload the rest with: pando release upload %s <file>...", err, pos[0], pos[0])
+			}
+			if !*draft {
+				if r, err = h.PublishRelease(e.Ctx, full, repo.Name, pos[0], *force); err != nil {
+					return fmt.Errorf("%w\n  the draft %s and its files are kept", checksRefused(err, pos[0]), pos[0])
+				}
+			}
 		}
 		if *asJSON {
 			return e.printJSON(r.JSON)
 		}
 		return releaseMade(e, r)
+	case "upload":
+		files, err := releaseFiles(e, pos[1:])
+		if err != nil {
+			return err
+		}
+		r, err := uploadAll(e, h, full, repo.Name, pos[0], files, *asJSON)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return e.printJSON(r.JSON)
+		}
+		return nil
+	case "download":
+		tag := "latest"
+		if len(pos) == 1 {
+			tag = pos[0]
+		}
+		return releaseDownload(e, h, full, repo.Name, tag, *pattern, e.abs(*dir), *asJSON)
 	case "publish":
 		r, err := h.PublishRelease(e.Ctx, full, repo.Name, pos[0], *force)
 		if err != nil {
@@ -201,6 +244,9 @@ func releaseView(e *Env, r *server.Release) error {
 	if r.Checks != nil {
 		e.printf("  checks %s\n", r.Checks.State)
 	}
+	for _, f := range r.Files {
+		e.printf("  file %s  %s  sha256 %s\n", f.Name, sizeText(f.Size), f.SHA256[:12])
+	}
 	if strings.TrimSpace(r.Notes) != "" {
 		e.printf("\n%s\n", strings.TrimRight(r.Notes, "\n"))
 	}
@@ -217,5 +263,98 @@ func releaseMade(e *Env, r *server.Release) error {
 		forced = " past red or missing checks (forced)"
 	}
 	e.printf("Published %s at %s%s. Its tag is frozen until the release is deleted.\n", r.Tag, short(r.SHA), forced)
+	return nil
+}
+
+// releaseFile is a file on this machine to upload: its name in the release
+// (the file's own name), its size and its SHA-256.
+type releaseFile struct {
+	path   string
+	name   string
+	size   int64
+	sha256 string
+}
+
+// releaseFiles reads each file once for its SHA-256, before anything is sent.
+func releaseFiles(e *Env, paths []string) ([]releaseFile, error) {
+	var out []releaseFile
+	for _, p := range paths {
+		abs := e.abs(p)
+		f, err := os.Open(abs)
+		if err != nil {
+			return nil, err
+		}
+		h := sha256.New()
+		n, err := io.Copy(h, f)
+		f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", p, err)
+		}
+		out = append(out, releaseFile{path: abs, name: filepath.Base(abs), size: n, sha256: hex.EncodeToString(h.Sum(nil))})
+	}
+	return out, nil
+}
+
+func uploadAll(e *Env, h *server.HTTP, full, repo, tag string, files []releaseFile, quiet bool) (*server.Release, error) {
+	var r *server.Release
+	for _, f := range files {
+		body, err := os.Open(f.path)
+		if err != nil {
+			return nil, err
+		}
+		r, err = h.UploadReleaseFile(e.Ctx, full, repo, tag, f.name, body, f.size, f.sha256)
+		body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("uploading %s: %w", f.name, err)
+		}
+		if !quiet {
+			e.printf("Uploaded %s (%s, sha256 %s)\n", f.name, sizeText(f.size), f.sha256[:12])
+		}
+	}
+	return r, nil
+}
+
+// releaseDownload writes a release's files (those matching pattern) into dir,
+// each checked against the SHA-256 Pando recorded at upload.
+func releaseDownload(e *Env, h *server.HTTP, full, repo, tag, pattern, dir string, asJSON bool) error {
+	r, err := h.GetRelease(e.Ctx, full, repo, tag)
+	if err != nil {
+		return err
+	}
+	var want []server.ReleaseFile
+	for _, f := range r.Files {
+		if ok, err := path.Match(pattern, f.Name); pattern == "" || (err == nil && ok) {
+			want = append(want, f)
+		}
+	}
+	if len(want) == 0 {
+		return fmt.Errorf("%s has no files%s", r.Tag, map[bool]string{true: " matching " + pattern, false: ""}[pattern != ""])
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	for _, f := range want {
+		to := filepath.Join(dir, f.Name)
+		tmp, err := os.CreateTemp(dir, "."+f.Name+".part-*")
+		if err != nil {
+			return err
+		}
+		sum := sha256.New()
+		_, err = h.DownloadReleaseFile(e.Ctx, full, repo, r.Tag, f.Name, io.MultiWriter(tmp, sum))
+		tmp.Close()
+		if err == nil && hex.EncodeToString(sum.Sum(nil)) != f.SHA256 {
+			err = fmt.Errorf("%s: its SHA-256 is %s, not %s as recorded; nothing was written", f.Name, hex.EncodeToString(sum.Sum(nil)), f.SHA256)
+		}
+		if err == nil {
+			err = os.Rename(tmp.Name(), to)
+		}
+		if err != nil {
+			os.Remove(tmp.Name())
+			return err
+		}
+		if !asJSON {
+			e.printf("Downloaded %s (%s) to %s\n", f.Name, sizeText(f.Size), to)
+		}
+	}
 	return nil
 }

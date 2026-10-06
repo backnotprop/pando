@@ -65,16 +65,9 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 	if r.accept != "" {
 		req.Header.Set("Accept", r.accept)
 	}
-	bearer := h.token
+	h.authorize(req)
 	if r.bearer != "" {
-		bearer = r.bearer
-	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
-	req.Header.Set("User-Agent", "pando-cli/0.1")
-	if h.Agent != "" {
-		req.Header.Set("X-Pando-Agent", h.Agent)
+		req.Header.Set("Authorization", "Bearer "+r.bearer)
 	}
 	for k, vs := range r.header {
 		req.Header[k] = vs
@@ -95,6 +88,45 @@ func (h *HTTP) do(ctx context.Context, r request, out any) (*http.Response, []by
 		if err := json.Unmarshal(data, out); err != nil {
 			return resp, data, fmt.Errorf("%s %s: bad JSON from server: %w", r.method, r.path, err)
 		}
+	}
+	return resp, data, nil
+}
+
+// authorize sets what every call carries: the credential, the CLI's name,
+// and the agent acting, if any.
+func (h *HTTP) authorize(req *http.Request) {
+	if h.token != "" {
+		req.Header.Set("Authorization", "Bearer "+h.token)
+	}
+	req.Header.Set("User-Agent", "pando-cli/0.1")
+	if h.Agent != "" {
+		req.Header.Set("X-Pando-Agent", h.Agent)
+	}
+}
+
+// streaming is the client for a file's bytes (up to 100 MB each way): no
+// overall timeout, which would cut a slow upload off; the context ends it.
+func (h *HTTP) streaming() *http.Client {
+	c := *h.Client
+	c.Timeout = 0
+	return &c
+}
+
+// send runs a request made by the caller (a streamed body) with the usual
+// headers, and reads the answer as do() does: an API error for a non-2xx.
+func (h *HTTP) send(req *http.Request) (*http.Response, []byte, error) {
+	h.authorize(req)
+	resp, err := h.streaming().Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s %s: %w", req.Method, req.URL.Redacted(), unwrapURLError(err))
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return resp, nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return resp, data, decodeError(resp.StatusCode, data)
 	}
 	return resp, data, nil
 }

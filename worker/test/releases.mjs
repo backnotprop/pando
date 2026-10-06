@@ -16,13 +16,13 @@
 // a temp HOME, no system config and an empty credential helper list before its own. Credentials and tokens are
 // never printed. Every repository it makes is deleted at the end, pass or fail.
 import { spawnSync } from "node:child_process";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describeError, isConnectionReset, retryResetFetch } from "./errors.mjs";
+import { describeError, isConnectionReset, retryResetFetch, throwaways } from "./errors.mjs";
 import { request } from "./http.mjs";
 
 retryResetFetch();
@@ -130,11 +130,12 @@ const M = `rel-${id}`;
 
 const E = `rel-empty-${id}`;
 
-const made = [];
-
 let O = null;
 
 let S = null;
+
+// This run's repositories: deleted at the end, pass or fail, and on Ctrl-C or kill.
+const tw = throwaways(async (full) => (await call("DELETE", `/v1/monorepos/${full}?confirm=${full}`, S)).status);
 
 const env = {
   ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0",
@@ -168,14 +169,23 @@ try {
   let r = await call("POST", "/v1/monorepos", S, { name: M, kind: "repo" });
   O = r.json?.monorepo?.owner ?? null;
   const MID = r.json?.monorepo?.id;
+  let made = 0;
 
-  if (r.status === 201) made.push(M);
+  if (r.status === 201) {
+    tw.add(`${O}/${M}`);
+    made++;
+  }
+
   const url = r.json?.repos?.[0]?.clone_url;
   const base = `/v1/monorepos/${O}/${M}/repos/${M}`;
   r = await call("POST", "/v1/monorepos", S, { name: E, kind: "repo" });
 
-  if (r.status === 201) made.push(E);
-  check("two plain repositories made", made.length === 2 && !!url);
+  if (r.status === 201) {
+    tw.add(`${O}/${E}`);
+    made++;
+  }
+
+  check("two plain repositories made", made === 2 && !!url);
 
   // ── 1. A merge builds main's merge commit ──
   r = await call("POST", `${base}/hooks`, S, { type: "buildkite", events: ["push", "merged"], buildkite: { organization: "o", pipeline: "p", api_url: `http://127.0.0.1:${port}/buildkite` } });
@@ -410,16 +420,88 @@ try {
   check("pando release delete asks first (no terminal: needs --yes)", cmd.status !== 0 && cmd.stderr.includes("--yes"), said(cmd));
   cmd = pando(["release", "delete", "v0.5.0", "--yes", ...mono]);
   check("pando release delete --yes", cmd.status === 0 && cmd.stdout.includes("Deleted release v0.5.0") && (await call("GET", rel("v0.5.0"), S)).status === 404, said(cmd));
+
+  // ── 6. Release files in R2, and the switch "Anyone can download releases" ──
+  const files = (tag, name) => `${rel(tag)}/files/${name}`;
+
+  const put = (path, secret, bytes, headers = {}) =>
+    fetch(`${URL_}${path}`, { method: "PUT", headers: { authorization: `Bearer ${secret}`, "content-type": "text/plain", ...headers }, body: bytes }).then(async (x) => ({ status: x.status, json: await x.json().catch(() => null) }));
+
+  const getFile = (path, secret) => fetch(`${URL_}${path}`, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }).then(async (x) => ({ status: x.status, text: await x.text(), headers: x.headers }));
+  const hello = "hello from a release\n";
+  const helloSum = createHash("sha256").update(hello).digest("hex");
+  r = await put(files("v0.4.0", "hello.txt"), B, hello, { "x-pando-sha256": helloSum });
+  check("a member uploads a file: its size and SHA-256 kept", r.status === 201 && r.json?.files?.length === 1 && r.json.files[0].sha256 === helloSum && r.json.files[0].size === hello.length && r.json.files[0].uploaded_by === bo && r.json.files[0].content_type === "text/plain");
+  record("release-with-file.json", "Release", "PUT .../releases/{tag}/files/{name}", r.status, r.json);
+  let dl = await getFile(files("v0.4.0", "hello.txt"), S);
+  check("a member downloads it, with its SHA-256", dl.status === 200 && dl.text === hello && dl.headers.get("x-pando-sha256") === helloSum && dl.headers.get("content-disposition") === 'attachment; filename="hello.txt"');
+  dl = await getFile(files("v0.4.0", "hello.txt"), null);
+  check("without signing in: refused (members only by default)", dl.status === 401);
+  r = await put(files("v0.4.0", "bad.txt"), S, hello, { "x-pando-sha256": "0".repeat(64) });
+  check("a file whose SHA-256 is not the one sent is not kept", r.status === 422 && r.json?.error?.code === "sha256_mismatch" && (await getFile(files("v0.4.0", "bad.txt"), S)).status === 404);
+  r = await put(files("v0.4.0", ".hidden"), S, hello);
+  check("a file name must start with a letter or digit", r.status === 400);
+  r = await fetch(`${URL_}${files("v0.4.0", "stream.txt")}`, { method: "PUT", headers: { authorization: `Bearer ${S}` }, body: new Blob([hello]).stream(), duplex: "half" }).then((x) => x.status);
+  check("an upload without Content-Length is refused (411)", r === 411);
+  // One byte over (wrangler dev reads a body before the Worker sees it, so it is sent whole; Cloudflare's edge refuses past 100 MB itself).
+  r = await fetch(`${URL_}${files("v0.4.0", "huge.bin")}`, { method: "PUT", headers: { authorization: `Bearer ${S}` }, body: Buffer.alloc(100_000_001) }).then(async (x) => ({ status: x.status, text: await x.text() }));
+  check("a file over 100 MB is refused", r.status === 413 && r.text.includes("100,000,000 bytes") && (await getFile(files("v0.4.0", "huge.bin"), S)).status === 404, r.text.slice(0, 160));
+
+  // 20 files a release, then refused; a name sent again replaces its file.
+  for (let n = 1; n <= 20; n++) await put(files("v0.2.0", `f${n}.txt`), S, `${n}\n`);
+  r = await put(files("v0.2.0", "f21.txt"), S, "21\n");
+  check("a release keeps at most 20 files", r.status === 409 && r.json?.error?.code === "too_many_files");
+  r = await put(files("v0.2.0", "f1.txt"), S, "one again\n");
+  check("uploading a name again replaces it", r.status === 200 && r.json?.files?.length === 20 && r.json.files.find((f) => f.name === "f1.txt")?.size === 10);
+  r = await call("DELETE", files("v0.2.0", "f2.txt"), B);
+  check("a member deletes a file", r.status === 204 && (await getFile(files("v0.2.0", "f2.txt"), S)).status === 404 && (await call("GET", rel("v0.2.0"), S)).json?.files?.length === 19);
+
+  r = await call("PATCH", base, B, { releases_public: true });
+  check("only an owner turns on \"Anyone can download releases\"", r.status === 403);
+  r = await call("PATCH", base, S, { releases_public: true });
+  check("an owner turns it on", r.status === 200 && r.json?.releases_public === true);
+  r = await call("GET", base, S);
+  check("the project says so", r.json?.releases_public === true);
+  record("repo-releases-public.json", "Repo", "GET .../repos/{repo} (the switch on)", r.status, r.json);
+  dl = await getFile(files("v0.4.0", "hello.txt"), null);
+  check("now anyone downloads its release files, without signing in", dl.status === 200 && dl.text === hello && dl.headers.get("cache-control")?.startsWith("public"));
+  dl = await getFile(`${base}/releases/latest/files/hello.txt`, null);
+  check("latest works too (the newest published release)", dl.status === 200 && dl.text === hello);
+  const N = (await call("POST", "/v1/users", BOOT, { login: `rel-n-${id}` })).json?.credential?.secret;
+  dl = await getFile(files("v0.4.0", "hello.txt"), N);
+  check("and a signed-in person who is not a member", dl.status === 200);
+  check("but never the code or anything else: tree, releases, tags", (await getFile(`${base}/tree?ref=main`, null)).status === 401 && (await getFile(`${base}/releases`, null)).status === 401 && (await getFile(`${base}/tags`, N)).status === 403);
+  check("a file that is not there is a 404", (await getFile(files("v0.4.0", "nope.txt"), null)).status === 404);
+  await call("PATCH", base, S, { releases_public: false });
+  check("turned off, downloads are members only again", (await getFile(files("v0.4.0", "hello.txt"), null)).status === 401 && (await getFile(files("v0.4.0", "hello.txt"), N)).status === 403);
+
+  // The cli: a release made with its files, downloaded and checked.
+  const dist = join(work, "dist");
+  mkdirSync(dist);
+  writeFileSync(join(dist, "pando-linux-amd64"), "linux binary\n");
+  writeFileSync(join(dist, "pando-darwin-arm64"), "mac binary\n");
+  cmd = pando(["release", "create", "v0.6.0", join(dist, "pando-linux-amd64"), join(dist, "pando-darwin-arm64"), "--generate", "--force", ...mono]);
+  check("pando release create <tag> <file>...: uploads, then publishes", cmd.status === 0 && cmd.stdout.includes("Uploaded pando-linux-amd64") && cmd.stdout.includes("Uploaded pando-darwin-arm64") && cmd.stdout.includes("Published v0.6.0"), said(cmd));
+  r = await call("GET", rel("v0.6.0"), S);
+  check("the release has both files, published", r.json?.draft === false && r.json.files.map((f) => f.name).join() === "pando-darwin-arm64,pando-linux-amd64");
+  cmd = pando(["release", "download", "--dir", join(work, "got"), ...mono]);
+  check("pando release download: the latest's files, checked by SHA-256", cmd.status === 0 && readFileSync(join(work, "got", "pando-linux-amd64"), "utf8") === "linux binary\n" && readFileSync(join(work, "got", "pando-darwin-arm64"), "utf8") === "mac binary\n", said(cmd));
+  cmd = pando(["release", "download", "v0.6.0", "--pattern", "pando-darwin-*", "--dir", join(work, "mac"), ...mono]);
+  check("--pattern picks files", cmd.status === 0 && cmd.stdout.split("\n").filter((l) => l.startsWith("Downloaded")).length === 1, said(cmd));
+  writeFileSync(join(dist, "SHA256SUMS"), "sums\n");
+  cmd = pando(["release", "upload", "v0.6.0", join(dist, "SHA256SUMS"), ...mono]);
+  check("pando release upload adds a file", cmd.status === 0 && cmd.stdout.startsWith("Uploaded SHA256SUMS"), said(cmd));
+  cmd = pando(["release", "view", "v0.6.0", ...mono]);
+  check("pando release view lists its files", cmd.status === 0 && /file SHA256SUMS\s+5 bytes\s+sha256 [0-9a-f]{12}/.test(cmd.stdout), said(cmd));
+  r = await call("DELETE", rel("v0.6.0"), S);
+  check("deleting a release deletes its files", r.status === 204 && (await getFile(files("v0.6.0", "SHA256SUMS"), S)).status === 404);
+
   cmd = pando(["help"]);
   check("pando help lists pando release", /pando release list \| view/.test(cmd.stderr) && /pando release create <tag>/.test(cmd.stderr), said(cmd));
 } catch (err) {
   check("no unexpected error", false, describeError(err));
 } finally {
-  for (const name of made) {
-    const r = await call("DELETE", `/v1/monorepos/${O}/${name}?confirm=${O}/${name}`, S).catch(() => ({ status: 0 }));
-    console.log(`deleted ${name}: ${r.status}`);
-  }
-
+  check("this run's repositories are deleted", await tw.cleanup());
   server.close();
   rmSync(work, { recursive: true, force: true });
 }

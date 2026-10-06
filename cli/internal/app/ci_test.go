@@ -259,7 +259,7 @@ func TestCIPipeline(t *testing.T) {
 	if f.hookPosts[0]["type"] != "buildkite" || bk["organization"] != "acme" || bk["pipeline"] != "pando-ci" {
 		t.Fatalf("hook body %v", f.hookPosts[0])
 	}
-	if s := out.String(); !strings.Contains(s, "projects/web: each push to a branch now starts a build of acme/pando-ci") || !strings.Contains(s, `[repos."projects/web"]`) {
+	if s := out.String(); !strings.Contains(s, "projects/web: each push to a branch, and each merge into main, now starts a build of acme/pando-ci") || !strings.Contains(s, `[repos."projects/web"]`) {
 		t.Fatalf("add output:\n%s", s)
 	}
 	// Again, by name: nothing new.

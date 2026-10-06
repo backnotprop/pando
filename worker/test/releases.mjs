@@ -270,6 +270,103 @@ try {
   r = { status: git(["push", "-qf", url, "v0.0.1"], src).status };
   r = await call("GET", `${base}/tags`, S);
   check("a tag no release holds moves freely", r.json?.tags?.find((t) => t.name === "v0.0.1")?.sha === main1);
+
+  // ── 4. Releases ──
+  // A second member: anyone who may merge may publish.
+  const bo = `rel-b-${id}`;
+  const B = (await call("POST", "/v1/users", BOOT, { login: bo })).json?.credential?.secret;
+  r = await call("PUT", `/v1/monorepos/${O}/${M}/members/${bo}`, S, { role: "member" });
+  check("a second person, a member (not an owner)", r.status === 200 && !!B);
+  const issue = async (title) => (await call("POST", `/v1/monorepos/${O}/${M}/issues`, S, { title })).json?.number;
+  const i1 = await issue("The gate is slow");
+  const i2 = await issue("Docs miss a page");
+  const mb = await landBranch(src, url, base, "feat-b", "Speed up the gate", { description: `Fixes #${i1}` });
+  const mc = await landBranch(src, url, base, "feat-c", "Add the missing page", { description: `Closes #${i2}` });
+  const mainC = mc?.sha;
+  check("two more branches merged, each closing an issue", mb?.status === "merged" && mc?.status === "merged" && mb.closes?.includes(i1) && mc.closes?.includes(i2));
+  await waitFor(async () => (await call("GET", `/v1/monorepos/${O}/${M}/issues/${i2}`, S)).json?.state === "closed");
+
+  const rel = (tag) => `${base}/releases/${encodeURIComponent(tag)}`;
+  r = await call("POST", `${base}/releases`, S, { tag: "latest" });
+  check("the tag latest is refused (it names the newest release in addresses)", r.status === 400);
+  git(["checkout", "-q", "-b", "side", mainC], src);
+  writeFileSync(join(src, "side.txt"), "side\n");
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "not on main"], src);
+  git(["push", "-q", url, "side"], src);
+  r = await call("POST", `${base}/releases`, S, { tag: "v9.9.9", target: sha(src), draft: true });
+  check("a release from a commit not on main is refused", r.status === 422 && r.json?.error?.code === "not_on_main", r.text.slice(0, 160));
+  r = await call("POST", `${base}/releases`, S, { tag: "v0.0.1", target: mainC, draft: true });
+  check("a release whose tag names another commit is refused", r.status === 409 && r.json?.error?.code === "tag_exists");
+
+  r = await call("GET", `${rel("v0.1.0")}/notes?generate=1`, S);
+  const notes = r.json?.markdown ?? "";
+  check("notes generated from the merges: newest first, title, branch, who, issues closed", r.status === 200 && r.json.generated && r.json.merges === 3 && r.json.more === 0 && r.json.since === null && r.json.sha === mainC &&
+    notes.startsWith("## Changes\n") && notes.indexOf("Add the missing page (`feat-c`)") < notes.indexOf("Speed up the gate (`feat-b`)") && notes.includes(`by rel-${id}, closes #${i1}`) && notes.includes(`closes #${i2}`) && notes.includes("Add feature A (`feat-a`)"), notes.slice(0, 300));
+  record("release-notes-generated.json", "ReleaseNotes", "GET .../releases/{tag}/notes?generate=1", r.status, r.json);
+
+  r = await call("POST", `${base}/releases`, S, { tag: "v0.1.0", title: "First release", generate_notes: true, draft: true });
+  check("a draft release at main, its notes generated", r.status === 201 && r.json?.draft === true && r.json.sha === mainC && r.json.notes.includes("Speed up the gate") && r.json.published_at === null);
+  record("release-draft.json", "Release", "POST .../releases {tag, title, generate_notes, draft}", r.status, r.json);
+  check("a draft makes no tag yet", !(await call("GET", `${base}/tags`, S)).json?.tags?.some((t) => t.name === "v0.1.0"));
+
+  await call("POST", `${base}/statuses/${mainC}`, S, { state: "failure", context: "ci" });
+  r = await call("POST", `${rel("v0.1.0")}/publish`, B, {});
+  check("publish is refused on red checks, the merge rule", r.status === 412 && r.json?.error?.code === "checks_not_green" && r.json.error.checks?.state === "failure");
+  record("error-412-release-checks.json", "ErrorBody", "POST .../releases/{tag}/publish (red checks)", r.status, r.json);
+  await call("POST", `${base}/statuses/${mainC}`, S, { state: "success", context: "ci" });
+  r = await call("POST", `${rel("v0.1.0")}/publish`, B, {});
+  check("a member publishes once green", r.status === 200 && r.json?.draft === false && r.json.forced === false && r.json.published_by === bo, r.text.slice(0, 160));
+  const ls = git(["ls-remote", url, "refs/tags/v0.1.0"], src).stdout.trim().split("\t")[0];
+  r = await call("GET", `${base}/tags`, S);
+  check("publishing made the tag at the release's commit, recorded and frozen", ls === mainC && r.json?.tags?.find((t) => t.name === "v0.1.0")?.frozen === true && r.json.tags.find((t) => t.name === "v0.1.0").sha === mainC);
+
+  let push = git(["push", url, ":refs/tags/v0.1.0"], src);
+  check("git can't delete a published release's tag, with a plain message", push.status !== 0 && push.stderr.includes("belongs to the published release v0.1.0"), scrub(push.stderr).split("\n").find((l) => l.includes("v0.1.0")));
+  git(["tag", "-f", "v0.1.0", main1], src);
+  push = git(["push", "-f", url, "v0.1.0"], src);
+  check("nor move it", push.status !== 0 && git(["ls-remote", url, "refs/tags/v0.1.0"], src).stdout.startsWith(mainC));
+
+  r = await call("PATCH", rel("v0.1.0"), S, { title: "The first release" });
+  check("its title edited", r.status === 200 && r.json?.title === "The first release");
+  r = await call("GET", `${base}/releases/latest`, S);
+  check("latest is the newest published release, with its commit's checks", r.status === 200 && r.json?.tag === "v0.1.0" && r.json.checks?.state === "success");
+  record("release.json", "Release", "GET .../releases/latest", r.status, r.json);
+  r = await call("GET", `${base}/summary`, S);
+  check("the summary names the latest release", r.json?.latest_release?.tag === "v0.1.0" && r.json.latest_release.published_by === bo);
+
+  const md = await landBranch(src, url, base, "feat-d", "Add release notes");
+  r = await call("POST", `${base}/releases`, B, { tag: "v0.2.0", generate_notes: true });
+  check("the next release: published at once, notes only since v0.1.0", r.status === 201 && r.json?.draft === false && r.json.sha === md?.sha && r.json.notes.startsWith("## Changes since v0.1.0") && r.json.notes.includes("Add release notes") && !r.json.notes.includes("Speed up the gate"), r.text.slice(0, 200));
+
+  // Required checks (pando.toml on main): a missing one refuses an unforced release, as it refuses a merge.
+  git(["checkout", "-q", "main"], src);
+  git(["pull", "-q", url, "main"], src);
+  git(["checkout", "-qb", "config"], src);
+  mkdirSync(join(src, ".pando"), { recursive: true });
+  writeFileSync(join(src, ".pando/pando.toml"), '[repos."."]\nrequired_checks = ["ci"]\n');
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "require ci"], src);
+  git(["push", "-q", url, "config"], src);
+  const mcfg = (await call("POST", `${base}/branches/config/merge`, S, { force: true })).json;
+  r = await call("POST", `${base}/releases`, S, { tag: "v0.3.0" });
+  check("a release with a required check missing is refused, and leaves no draft", r.status === 412 && r.json?.error?.checks?.state === "missing" && (await call("GET", rel("v0.3.0"), S)).status === 404);
+  r = await call("POST", `${base}/releases`, S, { tag: "v0.3.0", force: true });
+  check("forced, it is published and says so", r.status === 201 && r.json?.forced === true && r.json.sha === mcfg?.sha);
+
+  r = await call("GET", `${base}/releases?limit=2`, S);
+  const page2 = r.json?.next_cursor ? (await call("GET", `${base}/releases?limit=2&cursor=${encodeURIComponent(r.json.next_cursor)}`, S)).json : null;
+  check("releases list newest first, paged", r.status === 200 && r.json.releases.map((x) => x.tag).join() === "v0.3.0,v0.2.0" && page2?.releases?.map((x) => x.tag).join() === "v0.1.0" && page2.next_cursor === null);
+  record("releases.json", "ReleaseList", "GET .../releases?limit=2", r.status, r.json);
+
+  r = await call("DELETE", rel("v0.1.0"), B);
+  check("a member deletes a release", r.status === 204);
+  r = await call("GET", `${base}/tags`, S);
+  check("its tag stays, free again", r.json?.tags?.find((t) => t.name === "v0.1.0")?.frozen === false);
+  push = git(["push", url, ":refs/tags/v0.1.0"], src);
+  check("and git can delete it now", push.status === 0 && git(["ls-remote", url, "refs/tags/v0.1.0"], src).stdout.trim() === "");
+  check("release events on the stream: created, updated, published, deleted", !!(await waitFor(() => ["release.created", "release.updated", "release.published", "release.deleted"].every((k) => sock.events().some((e) => e.kind === k)))));
+  record("release-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=kind:release.* (WebSocket)", 101, sock.events().filter((e) => e.kind.startsWith("release.")));
 } catch (err) {
   check("no unexpected error", false, describeError(err));
 } finally {

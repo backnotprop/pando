@@ -1,0 +1,30 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../releases/{tag}/publish (red checks)",
+  "status": 412,
+  "body": {
+    "error": {
+      "code": "checks_not_green",
+      "message": "checks are failure on 9d284491c231; wait, or publish with force",
+      "checks": {
+        "sha": "9d284491c231b85dffb23e7c24549c53b1ae3164",
+        "state": "failure",
+        "required": [],
+        "missing": [],
+        "statuses": [
+          {
+            "sha": "9d284491c231b85dffb23e7c24549c53b1ae3164",
+            "context": "ci",
+            "state": "failure",
+            "target_url": null,
+            "description": null,
+            "creator": "rel-muw4hmx3",
+            "app": null,
+            "created_at": "2026-10-06T03:32:40.288Z"
+          }
+        ],
+        "checks_unknown": null
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "ReleaseList",
+  "route": "GET .../releases?limit=2",
+  "status": 200,
+  "body": {
+    "releases": [
+      {
+        "repo": "rel-muw4hmx3",
+        "tag": "v0.3.0",
+        "sha": "0a6a970b0e539105536c282494b53a31fc0d8217",
+        "title": "v0.3.0",
+        "notes": "",
+        "draft": false,
+        "forced": true,
+        "created_by": "rel-muw4hmx3",
+        "created_at": "2026-10-06T03:32:47.391Z",
+        "updated_at": "2026-10-06T03:32:47.736Z",
+        "published_by": "rel-muw4hmx3",
+        "published_at": "2026-10-06T03:32:47.736Z"
+      },
+      {
+        "repo": "rel-muw4hmx3",
+        "tag": "v0.2.0",
+        "sha": "0b480413045287e8b862e754d5e8820e70c2294d",
+        "title": "v0.2.0",
+        "notes": "## Changes since v0.1.0\n\n- Add release notes (`feat-d`) by rel-muw4hmx3\n",
+        "draft": false,
+        "forced": false,
+        "created_by": "rel-b-muw4hmx3",
+        "created_at": "2026-10-06T03:32:44.476Z",
+        "updated_at": "2026-10-06T03:32:44.832Z",
+        "published_by": "rel-b-muw4hmx3",
+        "published_at": "2026-10-06T03:32:44.832Z"
+      }
+    ],
+    "next_cursor": "MjAyNi0xMC0wNlQwMzozMjo0NC44MzJaIHJlbF8yYmU3ZTQ4NTdhN2NlNjgw"
+  }
+}

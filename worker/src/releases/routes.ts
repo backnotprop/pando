@@ -136,6 +136,17 @@ function fail404(message: string): never {
   throw new HttpError(404, "not_found", message);
 }
 
+/** The release gate, the merge gate's rule: the commit's required checks green, else refused unless forced. */
+async function gate(c: C, r: RepoRecord, sha: string, force: boolean): Promise<Checks> {
+  const checks = await checksOf(c, r, sha);
+
+  if (checks.state !== "success" && !force) {
+    throw new HttpError(412, "checks_not_green", `checks are ${checks.state} on ${sha.slice(0, 12)}; wait, or publish with force`, { checks });
+  }
+
+  return checks;
+}
+
 /**
  * Publish a draft: its commit's required checks green, unless forced (the
  * merge rule); its tag made at its commit when it does not exist, refused
@@ -143,11 +154,7 @@ function fail404(message: string): never {
  */
 async function publish(c: C, r: RepoRecord, rel: ReleaseView, force: boolean): Promise<ReleaseView> {
   const stub = c.get("stub");
-  const checks = await checksOf(c, r, rel.sha);
-
-  if (checks.state !== "success" && !force) {
-    throw new HttpError(412, "checks_not_green", `checks are ${checks.state} on ${rel.sha.slice(0, 12)}; wait, or publish with force`, { checks });
-  }
+  const checks = await gate(c, r, rel.sha, force);
 
   const at = await tagCommit(c, r, rel.tag);
 
@@ -246,6 +253,9 @@ export function releaseRoutes(api: Api): void {
     if (tagged !== null && tagged !== sha) throw new HttpError(409, "tag_exists", `tag ${tag} names ${tagged.slice(0, 12)}, not ${sha.slice(0, 12)}; leave out target to release the tag's commit`);
 
     if (!(await onMain(c, r, main, sha))) throw new HttpError(422, "not_on_main", `${sha.slice(0, 12)} is not on ${r.default_branch}; a release is made from ${r.default_branch}`);
+
+    // Published at once: refused before anything is made when its checks are not green (no draft is left behind).
+    if (!draft) await gate(c, r, sha, force);
 
     if (flag(b.generate_notes, "generate_notes")) {
       const generated = (await stub.releaseNotes(r.name, sha, tag)).markdown;

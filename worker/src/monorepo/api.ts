@@ -12,7 +12,7 @@ import { issueRoutes } from "../issues/routes";
 import { sessionRoutes } from "../sessions/routes";
 import { sessionPersonRoutes, sessionUserRoutes } from "../sessions/user-routes";
 import { agentRoutes } from "../agents/routes";
-import { tagRoutes } from "../releases/routes";
+import { releaseRoutes, tagRoutes } from "../releases/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
 import { assistantRoutes } from "../agents/assistant";
@@ -1577,6 +1577,8 @@ ciRoutes(api);
 // ── Builds of main, tags and releases (releases/routes.ts) ──
 
 tagRoutes(api);
+
+releaseRoutes(api);
 
 // ── Mirror to GitHub (mirror/routes.ts) ──
 

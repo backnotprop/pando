@@ -5,8 +5,8 @@
   "body": {
     "exclusions": [
       {
-        "monorepo": "scli-muvmw3ed/scli-muvmw3ed",
-        "monorepo_id": "m_9880c475b660703d",
+        "monorepo": "scli-muvznqr3/scli-muvznqr3",
+        "monorepo_id": "m_d5f420b4c7ce3b51",
         "project": "projects/app"
       }
     ]

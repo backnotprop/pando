@@ -5,28 +5,28 @@
   "body": {
     "machines": [
       {
-        "credential_id": "cred_39e8e838413bf13d",
+        "credential_id": "cred_f1e42dca99554763",
         "machine": "scli-box",
         "kind": "bootstrap",
         "recording": true,
         "stores": [
           {
             "program": "claude-code",
-            "path": "/var/folders/xg/f67qq94s1qsbxl_nlh9hd_xc0000gn/T/pando-scli-rX1i7g/moved-claude/projects",
+            "path": "/var/folders/xg/f67qq94s1qsbxl_nlh9hd_xc0000gn/T/pando-scli-grMYEa/moved-claude/projects",
             "found": "commit hook"
           },
           {
             "program": "opencode",
-            "path": "/var/folders/xg/f67qq94s1qsbxl_nlh9hd_xc0000gn/T/pando-scli-rX1i7g/home/.local/share/opencode/opencode.db",
+            "path": "/var/folders/xg/f67qq94s1qsbxl_nlh9hd_xc0000gn/T/pando-scli-grMYEa/home/.local/share/opencode/opencode.db",
             "found": "default"
           },
           {
             "program": "pi",
-            "path": "/var/folders/xg/f67qq94s1qsbxl_nlh9hd_xc0000gn/T/pando-scli-rX1i7g/home/.pi/agent/sessions",
+            "path": "/var/folders/xg/f67qq94s1qsbxl_nlh9hd_xc0000gn/T/pando-scli-grMYEa/home/.pi/agent/sessions",
             "found": "default"
           }
         ],
-        "updated_at": "2026-10-05T19:19:56.203Z"
+        "updated_at": "2026-10-06T01:17:24.458Z"
       }
     ]
   }

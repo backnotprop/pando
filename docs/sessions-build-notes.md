@@ -19,7 +19,7 @@ removed).
 | 1. Server: store and read | done, reported 2026-10-05. Claude Code and Codex fixtures wait on the owner's fixture logins |
 | 2. Machine: capture | done, landed (main bdf147c) |
 | 3. Linking | done, landed with stage 2 (main bdf147c) |
-| 4. Web | built and tested except the session page's conversation, which waits for the shared component (cloud-agents b2551ed) to land on main |
+| 4. Web | built and tested, the conversation wired after main ce9335b |
 | 5. Docs, limits, recorded fixtures | docs and limits done; Claude Code and Codex fixtures wait for the owner's logins |
 
 ## Stage 0 findings (2026-10-05)
@@ -361,10 +361,12 @@ decisions relayed 2026-10-05.
   both people can open, with `counts` and `repositories`) and `GET /v1/users/{login}/session-marks?tz=` (the tie rule
   in `worker/src/sessions/marks.ts`, unit-tested); `DELETE .../sessions?repo=&older_than_days=&everyone=1`; a
   machine's `kind`. The repository name `sessions` is reserved (400 `reserved_name` at creation and rename).
-- The conversation's feeder (entries to the shared component's shape.ts) is drafted at
-  `/tmp/pando-sessions-state/fromSession.ts` and goes in as
-  `web/src/routes/$owner/$name/-sessions/fromSession.ts` once the component is on main, with `promptAction` for
-  Remove turn.
+- The conversation (after main ce9335b brought `web/src/conversation`): `-sessions/fromSession.ts` turns the entries
+  into the shared component's items; `-sessions/Talk.tsx` draws `Conversation` in the page from prompt 1 (not `Thread`,
+  which follows the end of a live chat), More reads the next page, and `promptAction` gives its person or an owner
+  Remove turn, asked once. A deleted session (by this page or a `session.deleted` frame) puts its stub in the session's
+  query and does not read its entries or files again (they answer 410). The repository tabs read Code, Issues, Agents,
+  Sessions.
 - Web e2e: `web/e2e/sessions.spec.ts` with `sessions-seed.ts` (projects `sessions` and `sessions-shots`), on ports
   8869 and 8870: `PANDO_E2E_PORT=8869 PANDO_E2E_INSPECTOR_PORT=9369 npx playwright test --project=sessions`.
   It needs `worker/.dev.vars` with `WORKOS_API_BASE=http://127.0.0.1:8870` and local `PANDO_STATUS_SECRET`,

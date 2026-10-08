@@ -6,7 +6,7 @@
 import { NeutralToneMapping, PMREMGenerator, SRGBColorSpace, WebGLRenderer } from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { ease } from "./motion";
-import { BLEND, kick, loopTime, mixPose, STATES, toned, type LeafState, type LeafTone, type Pose } from "./pose";
+import { BLEND, kick, mixPose, STATES, toned, type LeafState, type LeafTone, type Pose } from "./pose";
 import { LeafRig, type Framing } from "./rig";
 
 export interface LeafLook {
@@ -183,7 +183,7 @@ export class LeafStage {
 
     const at = (state: LeafState, tone: LeafLook["tone"], t: number, still: boolean) => {
       const spec = STATES[state];
-      const p = spec.pose(still || tone ? spec.still : it.o.replay ? t % spec.period : loopTime(state, t));
+      const p = spec.pose(still || tone ? spec.still : it.o.replay ? t % spec.period : t);
 
       return tone ? toned(p, tone.kind) : p;
     };
@@ -193,7 +193,7 @@ export class LeafStage {
     if (!it.prev || dt >= BLEND + 0.7) return cur;
 
     const before = at(it.prev.state, it.prev.tone, it.prev.t + dt, it.o.still);
-    const p = mixPose(before, cur, ease.smooth(dt / BLEND));
+    const p = mixPose(before, cur, ease.glide(dt / BLEND));
 
     if (!it.o.still) kick(p, dt);
 

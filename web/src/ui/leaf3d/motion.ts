@@ -20,6 +20,8 @@ export const ease = {
 
     return c < 0.5 ? 4 * c * c * c : 1 - (-2 * c + 2) ** 3 / 2;
   },
+  /** Leaves gently and arrives on a long tail: never symmetric, never linear. */
+  glide: (x: number) => 1 - (1 - clamp(x) ** 1.6) ** 2.6,
   inn: (x: number) => clamp(x) ** 2,
   out: (x: number) => 1 - (1 - clamp(x)) ** 3,
   back: (x: number) => {
@@ -47,6 +49,9 @@ export const ramp = (t: number, a: number, b: number, e: Ease = ease.smooth) => 
 /** A loop-safe wave: k whole cycles per period p. */
 export const wave = (t: number, p: number, k: number, phase = 0) => Math.sin(TAU * ((k * t) / p + phase));
 
+/** A lazy sway: a wave with its second harmonic, so it lingers at one side and swings through the other. */
+export const sway = (t: number, p: number, k: number, phase = 0) => 0.85 * wave(t, p, k, phase) + 0.22 * wave(t, p, 2 * k, phase + 0.15);
+
 /** A blink centred on each time: a fast close, a frame shut, a slower open. */
 export function blink(t: number, times: readonly number[]) {
   let c = 0;
@@ -62,13 +67,4 @@ export function blink(t: number, times: readonly number[]) {
   }
 
   return c;
-}
-
-/** A settle after an impact at t0: a damped wobble that starts at 1 and dies out. */
-export function settle(t: number, t0: number, freq = 5, decay = 6) {
-  const x = t - t0;
-
-  if (x < 0) return 0;
-
-  return Math.cos(TAU * freq * x) * Math.exp(-decay * x);
 }

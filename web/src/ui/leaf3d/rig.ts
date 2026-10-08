@@ -404,6 +404,7 @@ export class LeafRig {
   private readonly eyes: Eye[];
   private readonly mouth: Mesh;
   private readonly badge: Mesh;
+  private readonly badgeMat = new MeshPhysicalMaterial({ color: PALETTE.gold, emissive: PALETTE.gold, emissiveIntensity: 0.35, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1, transparent: true });
   private readonly foot: Mesh;
   private readonly pool: Mesh;
   private readonly footMat = new MeshBasicMaterial();
@@ -468,7 +469,7 @@ export class LeafRig {
     this.mouth = new Mesh(ball, new MeshPhysicalMaterial({ color: "#2a1208", roughness: 0.35, clearcoat: 0.6 }));
     this.face.add(this.mouth);
 
-    this.badge = new Mesh(new SphereGeometry(1, 32, 24), new MeshPhysicalMaterial({ color: PALETTE.gold, emissive: PALETTE.gold, emissiveIntensity: 0.35, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 }));
+    this.badge = new Mesh(new SphereGeometry(1, 32, 24), this.badgeMat);
     this.body.add(this.badge);
 
     // The contact shadow: a tight dark spot under the stem's tip and a wide soft pool under the blade.
@@ -562,7 +563,9 @@ export class LeafRig {
     const b = Math.max(0, p.badge);
 
     this.badge.visible = b > 0.01 && !tone;
-    this.badge.scale.setScalar(0.2 * b * Math.sqrt(boost));
+    // It fades in as it grows, rather than popping.
+    this.badge.scale.setScalar(0.2 * (0.6 + 0.4 * b) * Math.sqrt(boost));
+    this.badgeMat.opacity = clamp(b);
     this.badge.position.set(1.08, JOINT + 1.95, 0.25);
 
     if (!icon) this.shadow(p, travel, sq);

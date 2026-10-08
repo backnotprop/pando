@@ -73,8 +73,8 @@ Proposed after the owner's look: floating button 40, chat header 24 (or keep
 
 | Case | Frame gap mean / p95 / max | Leaf work per frame mean / p95 |
 |---|---|---|
-| 30 leaves at 24 px | 16.66 / 16.70 / 16.80 ms | 0.94 / 1.70 ms |
-| 30 leaves at 40 px | 16.64 / 16.70 / 16.80 ms | 0.98 / 1.70 ms |
+| 30 leaves at 24 px | 16.65 / 16.80 / 16.80 ms | 0.75 / 0.90 ms |
+| 30 leaves at 40 px | 16.64 / 16.80 / 16.80 ms | 0.72 / 0.80 ms |
 | 120 leaves at 24 px, about 32 on screen | 16.66 / 16.80 / 16.80 ms | 1.05 / 1.60 ms |
 | 1 leaf at 160 px | 16.65 / 16.80 / 16.80 ms | 0.20 ms |
 
@@ -90,6 +90,31 @@ preview's `leaf.bundle.js` is 140 KB gzipped with the pixel frames).
 `node living/_src/capture.mjs` (about 30 s for all): 1080 x 1080, 60 fps,
 10 s per state (the tour 15 s), H.264 MP4 and a 480 px 25 fps GIF.
 `node living/_src/shot.mjs "render.html?mode=contact&size=220" renders/contact-sheet.png 1300 1400 2`.
+
+## Tuning pass after the owner's look (2026-10-07)
+
+The owner: "all pretty good, working is a bit rapid/edgy, needs you is too. the
+others are nice and subtle but maybe a bit too much... the accenture ones are a
+bit more fluid." Timing and ease only, not the design:
+
+- Every channel now follows its written targets through a damped spring
+  (low stiffness, well damped), stepped at a fixed 240 Hz from t = 0 and
+  baked once per state into a loop table (the first pass, then the steady
+  loop), as the reference rig does. Softer springs down the chain: the blade
+  lags the body and overshoots a little, the stem lags the blade, the eyes
+  lead. The tremble is layered on after the springs; blinks stay crisp.
+- A new ease, `glide`, leaves gently and arrives on a long tail; sways carry
+  a second harmonic so they linger at one side. No move is linear or
+  symmetric.
+- Working: one beat a second (was two), a long rise, an eased fall, a gentle
+  press on landing, no hard accent beat.
+- Needs you: one gentle hop and a settle; the badge fades in and pulses
+  slowly.
+- Idle, thinking, done: amplitudes down about a third, slower sways; done
+  keeps its full turn with a longer wind-up and a softer landing.
+- Every loop is 5 s (done: 2.5 s flourish, then a 2.5 s loop), so the 10 s
+  renders and the preview's 10 s timeline loop without a seam. A change of
+  state blends over 0.7 s.
 
 ## How close to the bar
 

@@ -51,6 +51,9 @@ const POW = 2.6;
 /** The blade's length from the joint to the tip, for the twist's falloff. */
 const SPAN = 2.1;
 
+/** The pixel leaf is a little wider than tall: the blade is stretched across by this much. */
+const WIDE = 1.07;
+
 /** The blade's outline: round, a short pointed tip at the top, a flatter base with a small notch at the stem, fine round teeth. */
 function outline(th: number) {
   const up = Math.max(0, Math.cos(th - Math.PI / 2));
@@ -71,7 +74,7 @@ const radius = (th: number, rho: number) => {
 /** The front surface's height over the blade at (x, y) in joint space. */
 function frontZ(x: number, y: number) {
   const dy = y - CY;
-  const rho = clamp(Math.hypot(x, dy) / outline(Math.atan2(dy, x)).body);
+  const rho = clamp(Math.hypot(x / WIDE, dy) / outline(Math.atan2(dy, x / WIDE)).body);
 
   return FRONT * (1 - rho ** POW) ** (1 / POW);
 }
@@ -92,7 +95,7 @@ function bladeGeometry(around = 120, across = 36) {
       const th = (i / around) * Math.PI * 2;
       const r = radius(th, rho);
 
-      pos.push(r * Math.cos(th), CY + r * Math.sin(th), z);
+      pos.push(WIDE * r * Math.cos(th), CY + r * Math.sin(th), z);
       edge.push(rho);
     }
   }
@@ -344,11 +347,11 @@ function stemSkin(u: SkinUniforms, curl: { value: number }) {
 // ----------------------------------------------------------------- the face --
 
 /** Eye layout in joint space, read off the pixel leaf: columns 5 and 10, rows 7 and 8 of 16. */
-const EYE_X = 0.36;
+const EYE_X = 0.38;
 
 const EYE_Y = CY - 0.17;
 
-const EYE = { w: 0.095, h: 0.15, d: 0.075 };
+const EYE = { w: 0.11, h: 0.172, d: 0.08 };
 
 const MOUTH_Y = CY - 0.5;
 
@@ -409,6 +412,8 @@ export class LeafRig {
   private readonly holeMat: MeshBasicMaterial;
   private readonly glintMat: MeshBasicMaterial;
   private framing: Framing = "icon";
+  /** Optical sizing: the eyes and badge grow a little as the leaf gets small, so they read at 24 px. */
+  private boost = 1;
   private readonly basis = new Matrix4();
   private readonly v = new Vector3();
 
@@ -491,16 +496,17 @@ export class LeafRig {
 
     fill.position.set(5, 0.5, 6);
     scene.add(key, rim, fill, new HemisphereLight("#fff4ea", "#7a3410", 0.25));
-    this.frame("icon");
+    this.frame("icon", 24);
   }
 
   /** Icon framing fills the box like the pixel leaf, seen straight on; hero framing leaves room to hop and shows the ground. */
-  frame(f: Framing) {
+  frame(f: Framing, size: number) {
     this.framing = f;
+    this.boost = size <= 28 ? 1.4 : size < 64 ? 1.2 : 1;
     const cam = this.camera;
     const icon = f === "icon";
-    const centre = icon ? 1.36 : 1.42;
-    const half = icon ? 1.5 : 2.05;
+    const centre = icon ? 1.36 : 1.55;
+    const half = icon ? 1.5 : 1.85;
     const dist = 13;
     const lift = icon ? 0.25 : 1.6;
 
@@ -543,7 +549,7 @@ export class LeafRig {
     }
 
     // The face: an icon's eyes are a touch bigger, so they read at 24 px.
-    const boost = icon ? 1.18 : 1;
+    const { boost } = this;
 
     for (const e of this.eyes) this.eye(e, p, boost, tone);
 
@@ -551,12 +557,12 @@ export class LeafRig {
 
     this.mouth.visible = open > 0.02 && !tone;
     this.place(this.mouth, p.gx * 0.02, MOUTH_Y + p.gy * 0.012, 0.01, p);
-    this.mouth.scale.set(0.1 * (1 - 0.2 * open) * boost, 0.09 * open * boost, 0.03);
+    this.mouth.scale.set(0.12 * (1 - 0.2 * open) * boost, 0.11 * open * boost, 0.03);
 
     const b = Math.max(0, p.badge);
 
     this.badge.visible = b > 0.01 && !tone;
-    this.badge.scale.setScalar(0.2 * b);
+    this.badge.scale.setScalar(0.2 * b * Math.sqrt(boost));
     this.badge.position.set(1.08, JOINT + 1.95, 0.25);
 
     if (!icon) this.shadow(p, travel, sq);
@@ -583,8 +589,8 @@ export class LeafRig {
     const gx = clamp(p.gx, -1.2, 1.2);
     const gy = clamp(p.gy, -1.2, 1.2);
     // The eyes drift toward the gaze; the near eye travels a touch more.
-    const fx = e.side * EYE_X + gx * 0.05 + (e.side * gx > 0 ? 0.008 : -0.008);
-    const fy = EYE_Y + gy * 0.045;
+    const fx = e.side * EYE_X + gx * 0.07 + (e.side * gx > 0 ? 0.01 : -0.01);
+    const fy = EYE_Y + gy * 0.07;
     const sc = p.wide * boost;
     const w = EYE.w * sc * (1 - 0.1 * Math.abs(gx));
 

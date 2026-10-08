@@ -130,7 +130,7 @@ function working(t: number): Pose {
   const i = Math.floor(t / BEAT) % 6;
   const u = (t % BEAT) / BEAT;
   // The last beat of six lands harder: a little accent in the rhythm.
-  const accent = i === 5 ? 1.5 : 1;
+  const accent = i === 5 ? 1.3 : 1;
   // Up on an ease out, down on an ease in (it falls), the hit at 0.7 of the beat.
   const h = u < 0.5 ? ease.out(u / 0.5) : u < 0.7 ? 1 - ease.inn((u - 0.5) / 0.2) : 0;
   const hit = t - (t % BEAT) + 0.7 * BEAT;
@@ -138,10 +138,10 @@ function working(t: number): Pose {
   const side = i % 2 ? 1 : -1;
 
   flutter(p, t, 3, 0.25);
-  p.y = 0.03 * h * accent;
-  p.sq = 1 + 0.035 * h * accent - 0.065 * s * accent;
-  p.pitch = 0.05 - 0.05 * h + 0.07 * Math.max(0, s);
-  p.bend = 0.05 - 0.12 * settle(t, hit + 0.04, 4, 7) - 0.12 * settle(t, hit + 0.04 - BEAT, 4, 7);
+  p.y = 0.06 * h * accent;
+  p.sq = 1 + 0.05 * h * accent - 0.08 * s * accent;
+  p.pitch = 0.08 - 0.08 * h + 0.12 * Math.max(0, s) * accent;
+  p.bend = 0.05 - 0.2 * settle(t, hit + 0.04, 4, 7) - 0.2 * settle(t, hit + 0.04 - BEAT, 4, 7);
   p.twist += 0.07 * side * h;
   p.lean = 0.05 * wave(t, 3, 3);
   p.yaw = -0.12;

@@ -252,7 +252,7 @@ export class LeafStage {
 
       r.setViewport(it.x, gy, it.px, it.px);
       r.setScissor(it.x, gy, it.px, it.px);
-      rig.frame(it.o.framing ?? (it.o.size < 64 ? "icon" : "hero"));
+      rig.frame(it.o.framing ?? (it.o.size < 64 ? "icon" : "hero"), it.o.size);
       rig.pose(this.poseOf(it, now), it.o.tone?.colour ?? null);
       r.render(rig.scene, rig.camera);
     }

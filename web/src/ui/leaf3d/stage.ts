@@ -30,6 +30,8 @@ export interface LeafOptions extends LeafLook {
   ground?: string;
   /** Called once the first frame is on the canvas. */
   onDrawn?: () => void;
+  /** Called if the WebGL context is lost: the leaf goes back to its pixels. */
+  onLost?: () => void;
 }
 
 export interface LeafHandle {
@@ -71,7 +73,6 @@ export class LeafStage {
   /** The work of the last frames in milliseconds (posing, drawing and copying), for the performance check. */
   readonly costs: number[] = [];
   lost = false;
-  onLost: (() => void) | null = null;
 
   constructor() {
     this.renderer = new WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance" });
@@ -86,7 +87,8 @@ export class LeafStage {
     pmrem.dispose();
     this.renderer.domElement.addEventListener("webglcontextlost", () => {
       this.lost = true;
-      this.onLost?.();
+
+      for (const it of this.items) it.o.onLost?.();
     });
     this.seen = new IntersectionObserver(
       (entries) => {
@@ -107,6 +109,8 @@ export class LeafStage {
   }
 
   add(canvas: HTMLCanvasElement, o: LeafOptions): LeafHandle {
+    if (this.lost) queueMicrotask(() => o.onLost?.());
+
     const ctx = canvas.getContext("2d");
 
     if (!ctx) throw new Error("no 2D canvas");

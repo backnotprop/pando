@@ -165,7 +165,7 @@ export function Assistant() {
         onClick={() => setOpen(true)}
         className="fixed right-6 bottom-6 z-20 grid size-14 cursor-pointer place-items-center rounded-full border border-rootline bg-pop shadow-pop hover:bg-pop-hi phone:right-4 phone:bottom-4"
       >
-        <Leaf state="idle" size={28} />
+        <Leaf state="idle" size={40} />
       </button>
     );
   }

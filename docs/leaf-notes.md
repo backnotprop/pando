@@ -63,9 +63,20 @@ product where it is big enough to matter.
 | Issue page | `-issues/Issue.tsx` | 16 |
 | Conversation, Thread | `conversation/` | 12 |
 
-Proposed after the owner's look: floating button 40, chat header 24 (or keep
-28), agent page header 32 (stays), Agents tab empty state 160. Everything at
-16 and below stays pixels; no other call site changes.
+Integrated after the owner's approval ("cool, approved", 2026-10-07): the
+floating button is 40, the Agents tab's empty state 160 (the hero, with its
+contact shadow); the chat header (28) and the agent page header (32) draw
+living without a change. Everything at 20 and below stays pixels.
+
+`Leaf` (web/src/ui/Leaf.tsx) keeps its props. At 24 px and up, when the
+browser can draw WebGL, it shows a canvas the page's one stage draws into,
+with the pixel leaf in its place until the first frame; the stage's chunk is
+imported only then. A lost WebGL context sends every leaf back to its
+pixels. A tone's colour is read from the theme's `--ash` or `--rust` (some
+themes write them in oklch, so they are resolved to rgb first) and follows a
+theme change. Reduced motion holds each state's still. A leaf mounted
+already done starts in its satisfied loop; the flourish plays when the state
+changes to done while it is on screen.
 
 ## Measured (2026-10-07, this Mac, headless Chrome with Metal, 60 Hz)
 
@@ -81,9 +92,19 @@ Proposed after the owner's look: floating button 40, chat header 24 (or keep
 No dropped frames. "Leaf work" is the main-thread time of posing, drawing and
 copying; GPU time is not in it, but the frame gap shows it fits.
 
-Bundle: three.js plus the leaf code, minified 550 KB, **about 136 KB
-gzipped**, in a chunk of its own (measured with rolldown on `stage.ts`; the
-preview's `leaf.bundle.js` is 140 KB gzipped with the pixel frames).
+Bundle: three.js plus the leaf code, in a chunk of its own
+(`dist/assets/stage-*.js`): 560 KB minified, **141.7 KB gzipped** as Vite
+reports it. The app's main chunk does not carry it.
+
+## Tests (2026-10-07, ports 8875 to 8876, inspector 9375)
+
+- `npx playwright test --project=sessions`: 5 passed.
+- `npx playwright test -c playwright.agents.config.ts` (Colima profile
+  cloud-agents, stopped after): agents, agents-assistant, agents-issue,
+  agents-review, 4 passed.
+- The agents shots (`PANDO_AGENTS_SHOTS=1`) show the living leaf in the
+  floating button, the chat header and the agent page header.
+- `npm run lint`, `npm run typecheck`: clean.
 
 ## Renders
 

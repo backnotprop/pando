@@ -171,7 +171,7 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
           </div>
         ) : list.isSuccess ? (
           <div className="grid justify-items-center gap-3.5 border-t border-rule-faint px-4 pt-14 pb-[60px] text-center text-[14px] text-bark-dim">
-            <Leaf state="idle" size={32} />
+            <Leaf state="idle" size={160} />
             <p>{filtered || f.status ? "No agents match." : "No agents have run in this repository."}</p>
           </div>
         ) : null}

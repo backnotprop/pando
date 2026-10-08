@@ -2,9 +2,10 @@
 // of the last year, 53 week columns from a Sunday, Sunday on top, in five
 // steps by the person's own quartiles (`levels`), coloured by the theme
 // (graph.css). Hover, or the arrow keys once the grid has focus, show a day's
-// count and its split; a click or Enter picks the day. On a phone it scrolls
-// sideways inside its box, starting at today. Your own work landing while it
-// is open makes its day glow once.
+// count and its split; a click or Enter picks the day. It draws only the whole
+// weeks its frame holds, this week at the right, the squares sized to fill the
+// frame (a phone shows fewer weeks, never half a column or half a month's
+// name). Your own work landing while it is open makes its day glow once.
 import type { ContributionDay, Contributions } from "@pando/contract";
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import { AgentMark, PROGRAM_NAME, type Program } from "../../ui/AgentMark";
@@ -44,6 +45,26 @@ export function stepOf(n: number, levels: readonly number[]): number {
   for (const [i, l] of levels.entries()) if (n >= l) step = i + 1;
 
   return step;
+}
+
+const GAP = 2.5;
+
+/** The weekday names' column, in px. */
+const LABELS = 30;
+
+/** How many whole weeks the graph draws, and its squares' size in px. */
+interface Fit {
+  weeks: number;
+  cell: number;
+}
+
+/** The whole weeks that fit a width (at most `most`, squares at least 12 px), and the square size that fills it (at most 20 px). */
+function fit(width: number, most: number): Fit {
+  // Each week column takes its square and the gap before it.
+  const room = width - LABELS;
+  const weeks = Math.max(4, Math.min(most, Math.floor(room / (12 + GAP))));
+
+  return { weeks, cell: Math.min(20, Math.floor((room / weeks - GAP) * 100) / 100) };
 }
 
 const cellId = (d: string) => `day-${d}`;
@@ -100,24 +121,35 @@ interface Tip {
 
 export function Graph({ c, picked, onPick, glow, agents = null }: { c: Contributions; picked: string | null; onPick: (day: string | null) => void; glow: { day: string; n: number } | null; agents?: GraphAgents | null }) {
   const box = useRef<HTMLDivElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const tipEl = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   // The day the arrow keys move from, and whether the keyboard is driving (its day keeps the popover and the ring).
   const [focus, setFocus] = useState<string | null>(null);
   const [keys, setKeys] = useState(false);
-  const first = parse(c.from);
   const last = parse(c.to);
+  const year = Math.ceil((Math.round((last - parse(c.from)) / DAY_MS) + 1) / 7);
+  const [{ weeks: shown, cell }, setFit] = useState<Fit>({ weeks: year, cell: 12 });
+
+  // Only whole weeks are drawn, as many as the frame holds; the squares grow to fill it.
+  useLayoutEffect(() => {
+    const el = frame.current;
+
+    if (!el) return;
+    const measure = () => setFit(fit(el.getBoundingClientRect().width, year));
+    measure();
+    const o = new ResizeObserver(measure);
+    o.observe(el);
+
+    return () => o.disconnect();
+  }, [year]);
+
+  // The first column's Sunday: `shown - 1` weeks before this week's.
+  const first = Math.max(parse(c.from), last - new Date(last).getUTCDay() * DAY_MS - (shown - 1) * 7 * DAY_MS);
+  const from = iso(first);
   const total = Math.round((last - first) / DAY_MS) + 1;
   const weeks = Math.ceil(total / 7);
   const byDate = new Map(c.days.map((d) => [d.date, d]));
-
-  // A phone shows the box's right end first: this week.
-  useLayoutEffect(() => {
-    const s = scroller.current;
-
-    if (s) s.scrollLeft = s.scrollWidth;
-  }, []);
 
   // The popover stays inside the box; its arrow points at the square.
   useLayoutEffect(() => {
@@ -157,7 +189,7 @@ export function Graph({ c, picked, onPick, glow, agents = null }: { c: Contribut
       move(iso(Math.min(last, Math.max(first, at + days * DAY_MS))));
     } else if (e.key === "Home" || e.key === "End") {
       e.preventDefault();
-      move(e.key === "Home" ? c.from : c.to);
+      move(e.key === "Home" ? from : c.to);
     } else if ((e.key === "Enter" || e.key === " ") && focus) {
       e.preventDefault();
       onPick(focus === picked ? null : focus);
@@ -211,10 +243,10 @@ export function Graph({ c, picked, onPick, glow, agents = null }: { c: Contribut
 
   return (
     <div ref={box} className="relative rounded-[10px] border border-rootline px-[18px] pt-4 pb-3 phone:px-3 phone:pt-3.5 phone:pb-2.5">
-      <div ref={scroller} className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div ref={frame}>
         <div
           role="grid"
-          aria-label={`Contributions from ${longDay(c.from)} to ${longDay(c.to)}: arrow keys move between days, Enter shows a day`}
+          aria-label={`Contributions from ${longDay(from)} to ${longDay(c.to)}: arrow keys move between days, Enter shows a day`}
           aria-activedescendant={focus ? cellId(focus) : undefined}
           tabIndex={0}
           onKeyDown={onKey}
@@ -229,11 +261,12 @@ export function Graph({ c, picked, onPick, glow, agents = null }: { c: Contribut
             setTip(null);
           }}
           onMouseLeave={() => (keys && focus ? show(focus) : setTip(null))}
-          style={{ gridTemplateColumns: `30px repeat(${weeks}, 12px)` }}
-          className="grid w-max grid-rows-[15px_repeat(7,12px)] gap-[2.5px] rounded-[3px] focus-visible:outline-offset-4"
+          style={{ gridTemplateColumns: `${LABELS}px repeat(${weeks}, ${cell}px)`, gridTemplateRows: `15px repeat(7, ${cell}px)`, gap: GAP }}
+          className="grid w-max rounded-[3px] focus-visible:outline-offset-4"
         >
-          {monthLabels(c.from, weeks).map((m) => (
-            <span key={m.col} aria-hidden="true" style={{ gridRow: 1, gridColumn: m.col + 2 }} className="text-[11.5px] leading-[13px] whitespace-nowrap text-ash">
+          {/* A month starting in the last two weeks ends at the grid's right edge, so its name stays inside the frame. */}
+          {monthLabels(from, weeks).map((m) => (
+            <span key={m.col} aria-hidden="true" style={m.col >= weeks - 2 ? { gridRow: 1, gridColumn: `${m.col + 2} / -1`, justifySelf: "end" } : { gridRow: 1, gridColumn: m.col + 2 }} className="text-[11.5px] leading-[13px] whitespace-nowrap text-ash">
               {m.label}
             </span>
           ))}

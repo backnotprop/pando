@@ -13,9 +13,9 @@ import { withItems } from "../../../../live/issues";
 import { fallback, useRows } from "../../../../live/rows";
 import { button, field, Refusal } from "../../../../ui/controls";
 import { Chevron } from "../../../../ui/Icons";
-import { DoneIcon, NotPlannedIcon, OpenIcon, ReopenIcon } from "../../../../ui/IssueIcons";
+import { DoneIcon, DotsIcon, NotPlannedIcon, OpenIcon, ReopenIcon } from "../../../../ui/IssueIcons";
 import { Leaf } from "../../../../ui/Leaf";
-import { MenuPopup, menuItem } from "../../../../ui/menu";
+import { MenuLink, MenuPopup, menuItem } from "../../../../ui/menu";
 import { newIssueLink, ownerLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
@@ -47,7 +47,7 @@ function StateChip({ issue }: { issue: Issue }) {
   );
 }
 
-/** The title, and Edit to rename it in place. */
+/** The title, and Edit to rename it in place. A phone keeps Address with agent under the title, full width, and folds Edit and New issue into the "..." menu. */
 function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => Promise<Issue> }) {
   const { monorepo } = useMonorepo();
   const clock = useNow();
@@ -74,7 +74,7 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
   return (
     <>
       {title === null ? (
-        <div className="flex items-start justify-between gap-8 phone:flex-col phone:gap-3">
+        <div className="flex items-start justify-between gap-8 phone:gap-3">
           <h1 className="max-w-[30em] text-[26px] leading-8 tracking-[-.018em] text-balance phone:text-[22px] phone:leading-7">
             {issue.title}
             <span className="ml-2 text-ash">#{issue.number}</span>
@@ -92,6 +92,19 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
             <Link {...newIssueLink(monorepo.full)} className={button("solid")}>
               New issue
             </Link>
+          </div>
+          <div className="hidden flex-none phone:block">
+            <Menu.Root>
+              <Menu.Trigger aria-label="More" className="flex size-8 cursor-pointer items-center justify-center rounded-[7px] text-bark shadow-[inset_0_0_0_1px_var(--ash-half)] data-popup-open:bg-pop-hi">
+                <DotsIcon className="size-4" />
+              </Menu.Trigger>
+              <MenuPopup align="end">
+                <Menu.Item className={menuItem} onClick={() => setTitle(issue.title)}>
+                  Edit
+                </Menu.Item>
+                <MenuLink link={newIssueLink(monorepo.full)}>New issue</MenuLink>
+              </MenuPopup>
+            </Menu.Root>
           </div>
         </div>
       ) : (
@@ -111,6 +124,14 @@ function Head({ issue, onPatch }: { issue: Issue; onPatch: (patch: JsonBody) => 
           </button>
         </form>
       )}
+      {title === null && issue.state === "open" ? (
+        <div className="mt-3.5 hidden phone:block">
+          <button type="button" className={`${button("quiet")} w-full gap-2`} onClick={() => setAddressing(true)}>
+            <Leaf state="idle" size={16} />
+            Address with agent
+          </button>
+        </div>
+      ) : null}
       <Refusal error={error} />
       <AddressAgent issue={issue} open={addressing} onClose={() => setAddressing(false)} />
       <div className="mt-3.5 flex items-center gap-3 text-[14px] text-bark-dim phone:flex-wrap phone:gap-x-2.5 phone:gap-y-2 phone:text-[13.5px]">

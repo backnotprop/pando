@@ -310,6 +310,31 @@ test("slice 4: issues, from a new issue to its close by merge, live", async ({ p
       await page.setViewportSize({ width: 1440, height: 900 });
     });
 
+    await test.step("on a phone: Address with agent under the title, full width; Edit and New issue in the ... menu", async () => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${issues}/2`);
+      const address = page.getByRole("button", { name: "Address with agent" });
+
+      await expect(address).toBeVisible();
+      await address.click();
+      await expect(page.getByRole("dialog")).toContainText("Address with agent #2");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.getByRole("button", { name: "More" }).click();
+      await expect(page.getByRole("menuitem", { name: "New issue" })).toBeVisible();
+      const edit = page.getByRole("menuitem", { name: "Edit" });
+
+      await expect(edit).toBeVisible();
+      await edit.click();
+      const title = page.getByRole("textbox", { name: "Title" });
+
+      await expect(title).toHaveValue("Branch picker: recent branches first");
+      await page.getByRole("button", { name: "Cancel" }).click();
+      await expect(page.getByRole("heading", { level: 1 })).toContainText("Branch picker: recent branches first");
+      await fits(page);
+      await page.setViewportSize({ width: 1440, height: 900 });
+    });
+
     expect(errors).toEqual([]);
   } finally {
     await made.sandbox?.api("DELETE", `/v1/monorepos/${full}?confirm=${full}`);

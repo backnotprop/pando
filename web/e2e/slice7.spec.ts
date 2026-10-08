@@ -5,7 +5,8 @@
 // at 160 characters). Her own merge lands while her profile is open: the
 // count steps up and today's square glows, with no reload. Bo, who shares one
 // repository with her, sees only her work there. At phone width the page
-// does not scroll sideways; the graph scrolls inside its box, from today.
+// does not scroll sideways; the graph draws only the whole weeks that fit its
+// frame, to today, with no square or month name cut.
 // Real Worker, real D1 and Artifacts, real git, real browser.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -208,7 +209,7 @@ test("slice 7: a profile's graph, its days, Edit profile, a live square, another
       await expect(boPage.getByRole("heading", { name: "4 contributions in the last year" })).toBeVisible();
     });
 
-    await test.step("a phone: no sideways scroll on the page; the graph scrolls inside its box, from today", async () => {
+    await test.step("a phone: no sideways scroll; the graph draws only the whole weeks its frame holds, to today", async () => {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${BASE}/${login}`);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("Pia Lane", HARD_LOAD);
@@ -216,15 +217,40 @@ test("slice 7: a profile's graph, its days, Edit profile, a live square, another
 
       expect(widths.page).toBeLessThanOrEqual(widths.view);
 
-      const box = await page.getByRole("grid").evaluate((g) => {
-        const s = g.parentElement!;
+      const fit = await page.getByRole("grid").evaluate((g) => {
+        const frame = g.parentElement!.getBoundingClientRect();
+        const cells = [...g.querySelectorAll('[role="gridcell"]')].map((c) => c.getBoundingClientRect());
 
-        return { scroll: s.scrollWidth, client: s.clientWidth, left: s.scrollLeft };
+        // The month names are the grid's text spans in its first row, the first one first.
+        const months = [...g.querySelectorAll(":scope > span")].flatMap((s) => {
+          const r = s.getBoundingClientRect();
+
+          return r.top < (cells[0]?.top ?? 0) ? [{ text: s.textContent, left: r.left }] : [];
+        });
+
+        return {
+          frame: { left: frame.left, right: frame.right, width: frame.width },
+          grid: g.getBoundingClientRect().width,
+          scroll: g.parentElement!.scrollWidth - g.parentElement!.clientWidth,
+          cellsLeft: Math.min(...cells.map((c) => c.left)),
+          cellsRight: Math.max(...cells.map((c) => c.right)),
+          cells: cells.length,
+          months,
+        };
       });
 
-      expect(box.scroll).toBeGreaterThan(box.client);
-      expect(box.left).toBeGreaterThanOrEqual(box.scroll - box.client - 1);
+      expect(fit.grid).toBeLessThanOrEqual(fit.frame.width);
+      expect(fit.scroll).toBe(0);
+      expect(fit.cellsLeft).toBeGreaterThanOrEqual(fit.frame.left);
+      expect(fit.cellsRight).toBeLessThanOrEqual(fit.frame.right);
+      // Fewer weeks than the year's, and the squares fill the frame: under one column's width left over.
+      expect(fit.cells).toBeLessThan(365);
+      expect(fit.frame.right - fit.cellsRight).toBeLessThan(15);
+      // The first month name is whole: a month's full short name, inside the frame.
+      expect(fit.months[0]?.text).toMatch(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/);
+      expect(fit.months[0]!.left).toBeGreaterThanOrEqual(fit.frame.left);
       await expect(page.locator(`[data-date="${c.to}"]`)).toBeInViewport();
+      await page.setViewportSize({ width: 1440, height: 900 });
     });
 
     expect(errors).toEqual([]);

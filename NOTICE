@@ -35,6 +35,11 @@ Worker (worker/src/sessions/parse.ts), by Letta (letta-ai), licensed under
 the Apache License, Version 2.0 (its LICENSE names no other holder).
 Source: https://github.com/letta-ai/trajectory (version 0.4.3)
 
+This product bundles three.js 0.186.1, which draws the living Quaking leaf
+(the assistant's and the agents' mark) in the web (web/src/ui/leaf3d/), in
+its own chunk, copyright 2010-2026 three.js authors, licensed under the MIT
+License. Source: https://github.com/mrdoob/three.js (version 0.186.1)
+
 The pando command line program includes betterleaks v1.8.1
 (https://github.com/betterleaks/betterleaks), copyright (c) 2026 Zachary
 Rice, licensed under the MIT License, to find secrets in agent sessions

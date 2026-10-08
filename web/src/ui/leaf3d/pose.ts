@@ -168,44 +168,44 @@ const thinking: Acting = {
 
 // ---------------------------------------------------------------- working --
 
-/** One beat a second, five to a loop, each a little different; the mouth says something on each. */
-const BEAT = 1;
+/** Eight beats to a 5 s loop (1.6 a second), each a little different; the mouth says something on each. */
+const BEAT = 0.625;
 
-const HEIGHTS = [1, 0.85, 1, 0.9, 0.95];
+const HEIGHTS = [1, 0.8, 0.95, 0.85, 1, 0.8, 0.9, 0.85];
 
-const SAYS = [0.9, 0.5, 1, 0.6, 0.75];
+const SAYS = [0.9, 0.5, 1, 0.6, 0.8, 0.45, 0.95, 0.65];
 
-const HIT = 0.8;
+const HIT = 0.78;
 
-/** The weight of a hit, dh seconds after it: a quick press, then a long release. */
-const press = (dh: number) => (dh < 0.06 ? ease.glide(dh / 0.06) : Math.exp(-(dh - 0.06) / 0.16));
+/** The weight of a hit, dh (a share of the beat) after it: a firm press, then a long release. */
+const press = (dh: number) => (dh < 0.07 ? ease.glide(dh / 0.07) : Math.exp(-(dh - 0.07) / 0.2));
 
 const working: Acting = {
   period: 5,
   hold: 0,
-  still: 0.3,
+  still: 0.25,
   shake: () => 0.18,
   target: (t) => {
     const p = { ...REST };
-    const i = Math.floor(t / BEAT) % 5;
+    const i = Math.floor(t / BEAT) % 8;
     const u = (t % BEAT) / BEAT;
     const a = HEIGHTS[i] ?? 1;
-    // A long rise (the anticipation), a short, eased fall, the hit at 0.8 of the beat.
-    const h = u < 0.55 ? ease.glide(u / 0.55) : u < HIT ? 1 - ease.inn((u - 0.55) / (HIT - 0.55)) : 0;
+    // A long rise (the anticipation), a shorter fall that eases in like a drop, the press at 0.78 of the beat.
+    const h = u < 0.5 ? ease.glide(u / 0.5) : u < HIT ? 1 - ease.inn((u - 0.5) / (HIT - 0.5)) : 0;
     const hit = press((u - HIT + 1) % 1);
     const side = i % 2 ? 1 : -1;
 
-    p.y = 0.035 * h * a;
-    p.sq = 1 + 0.03 * h * a - 0.045 * hit;
-    p.pitch = 0.06 - 0.05 * h + 0.07 * hit;
-    p.bend = 0.05 - 0.09 * hit;
-    p.twist = 0.04 * side * h;
-    p.lean = 0.03 * sway(t, 5, 1);
+    p.y = 0.055 * h * a;
+    p.sq = 1 + 0.045 * h * a - 0.08 * hit;
+    p.pitch = 0.07 - 0.06 * h + 0.1 * hit;
+    p.bend = 0.05 - 0.17 * hit;
+    p.twist = 0.06 * side * h;
+    p.lean = 0.035 * sway(t, 5, 2);
     p.yaw = -0.12;
-    p.gx = 0.25 + 0.04 * side * h;
+    p.gx = 0.25 + 0.05 * side * h;
     p.gy = -0.45;
     p.lid = 0.14;
-    p.mouth = (SAYS[i] ?? 0) * bump(u, 0.08, 0.3, 0.5, 0.78, ease.glide);
+    p.mouth = (SAYS[i] ?? 0) * bump(u, 0.06, 0.28, 0.48, 0.76, ease.glide);
     p.blink = blink(t, [2.4]);
 
     return p;

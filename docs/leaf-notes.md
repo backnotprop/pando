@@ -116,6 +116,11 @@ bit more fluid." Timing and ease only, not the design:
   renders and the preview's 10 s timeline loop without a seam. A change of
   state blends over 0.7 s.
 
+Then the owner: "working is now a bit too subtle." Working sits halfway
+between the two: the springs and eases stay, the beat is 1.6 a second (eight
+to the 5 s loop), with more height in the rise, a firmer press with a clearer
+squash and nod, and a larger blade follow-through. It reads at 40 px.
+
 ## How close to the bar
 
 The reference (a character animation the owner loved) has: real volume, key

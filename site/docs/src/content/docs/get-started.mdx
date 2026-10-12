@@ -9,10 +9,18 @@ This page takes you from nothing to a merged branch. You need git.
 
 ## Install pando
 
-`pando` is one program. Pando releases it on Pando itself: each [release](/releases/) of Pando's code carries `pando` for macOS and Linux, on Apple chips or ARM and on Intel or AMD. One command downloads the one for this machine from the latest release, into `~/.local/bin`:
+`pando` is one program. Pando releases it on Pando itself: each [release](/releases/) of Pando's code carries `pando` for macOS and Linux, on Apple chips or ARM and on Intel or AMD. One command installs the one for this machine:
 
 ```sh
-mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/pando "https://pando-dev.plannotator.workers.dev/v1/monorepos/ramos/pando/repos/projects-pando/releases/latest/files/pando-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && chmod +x ~/.local/bin/pando && pando help
+curl -fsSL https://gitpando.com/install | sh
+```
+
+It downloads `pando` from the latest release, checks its SHA-256 against the release's `SHA256SUMS` file, and puts it at `~/.local/bin/pando`. To read the script first, open [app.gitpando.com/install](https://app.gitpando.com/install).
+
+The same by hand, without the check:
+
+```sh
+mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/pando "https://app.gitpando.com/v1/monorepos/ramos/pando/repos/projects-pando/releases/latest/files/pando-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && chmod +x ~/.local/bin/pando && pando help
 ```
 
 Put `~/.local/bin` on your `PATH` if it is not there already. The release's `SHA256SUMS` file lists each file's SHA-256, to check it with `shasum -a 256 ~/.local/bin/pando`.
@@ -27,10 +35,10 @@ go build -o ~/.local/bin/pando ./cmd/pando
 ## Sign in
 
 ```sh
-pando login --server https://pando-dev.plannotator.workers.dev
+pando login
 ```
 
-`pando` shows a code and a link, and opens your browser. Confirm the code there. The terminal then says `Signed in to ... as <your login>`. The credential is kept in `~/.pando/`, readable only by you. From then on, git and `pando` on this machine act as you, with no further sign-in.
+With no `--server`, `pando login` signs in to Pando at `https://app.gitpando.com`. `pando` shows a code and a link, and opens your browser. Confirm the code there. The terminal then says `Signed in to ... as <your login>`. The credential is kept in `~/.pando/`, readable only by you. From then on, git and `pando` on this machine act as you, with no further sign-in.
 
 `pando auth status` shows who this machine is signed in as.
 

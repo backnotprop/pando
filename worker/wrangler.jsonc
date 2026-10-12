@@ -14,6 +14,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  // app.gitpando.com (decisions/RULINGS.md, "The domain is gitpando.com") is a Custom Domain attached at
+  // deploy with `wrangler deploy --domain app.gitpando.com` (docs/DOMAIN-CUTOVER.md), not with `routes` here:
+  // with a route in this file, every `wrangler dev` rewrites its requests' URL to http://app.gitpando.com,
+  // so clone URLs and the browser's same-origin check break in every lane's tests. A later deploy without
+  // --domain leaves the domain in place. workers.dev stays on, so pando-dev's old address keeps answering.
   "workers_dev": true,
   // Calls to Cloudflare services (Artifacts reads, R2) per request: 10,000 by
   // default. A streamed Files changed of 5,000 files reads up to 10,000
@@ -24,9 +29,8 @@
     // the same name, if set, takes its place.
     "WORKOS_CLIENT_ID": "client_01M3ZW5WYKNDQZE358DYA7VHY5",
     // The docs site (site/docs, the Worker pando-docs): the app's /docs
-    // redirects here, and the home reads What's new from it. docs.<domain>
-    // once the domain is bought.
-    "DOCS_URL": "https://pando-docs.plannotator.workers.dev",
+    // redirects here, and the home reads What's new from it.
+    "DOCS_URL": "https://docs.gitpando.com",
     // Shared files (the meta layer): everything due in one quiet window is
     // one git commit, the others as Co-authored-by ("author": one per person).
     // The owner's choice, 2026-10-04 (docs/contracts/meta-sync.md).

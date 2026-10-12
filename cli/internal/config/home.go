@@ -44,6 +44,10 @@ func HomeDir() (string, error) {
 	return filepath.Join(h, ".pando"), nil
 }
 
+// DefaultServer is Pando's own server, where `pando login` signs in when
+// no server is given or configured.
+const DefaultServer = "https://app.gitpando.com"
+
 // LoadHome reads ~/.pando/config.toml (missing is fine) and applies the
 // PANDO_SERVER and PANDO_MACHINE overrides.
 func LoadHome() (*Home, error) {

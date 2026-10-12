@@ -9,6 +9,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 ## 2026-10-12
 
+### Pando at gitpando.com, with a one-line install
+
+Pando's app and API are at app.gitpando.com, these docs at docs.gitpando.com, and gitpando.com is Pando's home page. `curl -fsSL https://gitpando.com/install | sh` installs `pando` for your Mac or Linux machine from the latest release, after checking its SHA-256 against the release's `SHA256SUMS`. `pando login` with no `--server` signs in to app.gitpando.com. The old address, pando-dev.plannotator.workers.dev, keeps working. See [Get started](/get-started/).
+
 ### Artifacts: plans, designs and guided reviews on a branch's page, with comments
 
 A branch's page has an Artifacts tab, beside Files changed. Drop Markdown, HTML or images on it, or use Add, or `pando artifact add <branch> plan.md` from an agent; an HTML page comes with the images it uses. The same name again is the next version, and every version is kept. Open one and select words, or click an element of an HTML page, to comment; reply, resolve and reopen beside it, live for everyone on the page. A comment made on an older version is placed again on the newest; one whose words are gone says Unanchored, with a link to the version it was made on. Artifacts never go into git and stay on the branch's page after the merge. On a CI build's page, Buildkite's artifacts are now called Build files. See [Artifacts](/artifacts/).

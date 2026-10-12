@@ -16,7 +16,7 @@ import (
 // Config is what the engine needs to sync one meta layer.
 type Config struct {
 	Root     string // the monorepo root: the meta layer
-	Server   string // https://pando-dev.<subdomain>.workers.dev
+	Server   string // https://app.gitpando.com
 	Monorepo string
 	Token    string // a Pando token; never printed or logged
 

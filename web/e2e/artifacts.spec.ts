@@ -58,6 +58,7 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR
 /** Files dropped on an element, as a person's drop would bring them (a DataTransfer in the page). */
 async function drop(page: Page, target: string, files: { name: string; type: string; body: string | Buffer }[]) {
   const sent = files.map((f) => ({ name: f.name, type: f.type, b64: Buffer.from(f.body).toString("base64") }));
+
   const dt = await page.evaluateHandle((list) => {
     const t = new DataTransfer();
 
@@ -122,6 +123,11 @@ const panel = (page: Page) => page.getByRole("region", { name: "Comments" });
 
 const card = (page: Page, text: string) => panel(page).locator("[data-annotation-id]").filter({ hasText: text });
 
+/** What the test makes along the way: the sandbox's credential (it deletes the repository at the end). */
+interface Made {
+  machine: Machine | null;
+}
+
 const SHOTS = "e2e/shots/artifacts";
 
 async function shots(page: Page, what: string) {
@@ -152,8 +158,7 @@ test("artifacts: drop, comment, reply, live, resolve, v2 and Unanchored, an HTML
     if (m.type() === "error" && !/status of (401|404|409)/.test(m.text())) errors.push(m.text());
   });
 
-  // The sandbox's credential (it deletes the repository at the end).
-  const made: { machine: Machine | null } = { machine: null };
+  const made: Made = { machine: null };
 
   const sandbox = () => {
     if (!made.machine) throw new Error("no machine credential yet");

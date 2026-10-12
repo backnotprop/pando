@@ -177,12 +177,13 @@ const toneOf = (word: string) => (word === "passed" ? "text-bark-dim" : word ===
  * Each required or reported check, as GitHub lists them: its CI service's
  * mark, its name (opening its job on the build's page), its state in words,
  * and its time, which ticks each second while it runs. A check that moves
- * while the page is open plays the arrival.
+ * while the page is open plays the arrival. A release's page shows its
+ * commit's the same way (`branch` is main there).
  */
-function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch; checks: Checks; live: boolean }) {
+export function CheckRows({ repo, branch, sha, checks, live }: { repo: Repo; branch: string; sha: string; checks: Checks; live: boolean }) {
   const { monorepo, info } = useMonorepo();
   // Read from Pando's stored builds, not only when a status names a service: a job shows the moment it is queued.
-  const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch.name, branch.head), refetchInterval: fallback(live) }).data?.runs;
+  const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch, sha), refetchInterval: fallback(live) }).data?.runs;
   const names = [...new Set([...(checks.required ?? []), ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
   const words = names.map((name) => checkWord(checks.statuses.find((x) => x.context === name), runs?.get(name)));
   const clock = useSeconds(words.includes("running"));
@@ -487,7 +488,7 @@ function Overview({ repo, b, commits, total, reviews, live, on }: { repo: Repo; 
         <BranchIssues repo={repo} b={b} />
         <div className="mt-10">
           <SectionHead title="Checks" />
-          <CheckRows repo={repo} branch={b} checks={b.checks} live={live} />
+          <CheckRows repo={repo} branch={b.name} sha={b.head} checks={b.checks} live={live} />
         </div>
         <Worktree repo={repo} branch={b.name} />
       </aside>

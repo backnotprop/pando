@@ -82,6 +82,20 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **Builds of main share your CI's minutes:** every merge adds one build. On Buildkite's free plan, all builds share about 1,000 job minutes a month.
 - **Tags pushed while a push's record failed** are in the repository but not in Pando's list until pushed again or named by a release.
 
+## Artifacts on a branch's page
+
+- **One artifact: at most 10 MiB in all,** its document and its images together. An HTML artifact's images are written into its page as one string (a third larger that way), and the browser holds all of it. Well under a Worker request's 100 MB. Pando's number.
+- **Its document (Markdown or HTML): at most 1.5 MiB.** The largest text Pando's shared files carry live; the viewer draws the whole document at once.
+- **At most 20 files in one artifact:** a document and its images. More is a folder of assets, not a document.
+- **At most 100 artifacts on one branch,** read as one list with their comment counts. A new version of one already there is always taken.
+- **Every version is kept.** At 10 MiB each, 100 artifacts with 20 versions is 20 GB, about $0.30 a month in R2.
+- **At most 500 threads on one version of an artifact:** each is placed again in the browser every time the page draws. To be measured.
+- **At most 100 replies in a thread.** A longer talk belongs in an issue.
+- **A comment: at most 65,536 characters,** as an issue comment. **Its anchor: at most 16,384 bytes** and 16 extra HTML elements, Plannotator's own limits.
+- **At most 10 people named with `@` in one comment,** as an issue's assignees.
+- **A name:** letters, digits, `.`, `_`, `+` and `-`, starting with a letter or digit; at most 200 characters, as release files. An image's path is such names joined by `/`.
+- **Deleting an artifact has no undo:** every version, its bytes and its comments go at once. Any member may delete one, as anyone may merge.
+
 ## Hooks
 
 - **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.
@@ -99,7 +113,7 @@ Pando's side:
 - **One Buildkite organization per repository.**
 - **At most 40 calls to Buildkite a minute per repository.** Buildkite allows 50 per token; repositories sharing one token can together reach Buildkite's limit, and Pando then waits for it to reset.
 - **A job's log shows its last 1 MiB.** A log over 64 MiB opens only in Buildkite.
-- **The first 100 annotations and artifacts** of a build. Download links last about 60 seconds (Buildkite's).
+- **The first 100 annotations and build files** of a build (Buildkite calls the files artifacts). Download links last about 60 seconds (Buildkite's).
 - **30 builds a page,** 100 at most.
 - **A pipeline's settings are read again at most every 5 minutes,** and a running build's details every 10 seconds.
 - **Webhook bodies up to 5 MiB;** a signature is good for 5 minutes.

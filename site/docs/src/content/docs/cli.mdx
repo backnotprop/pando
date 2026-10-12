@@ -61,6 +61,13 @@ usage: pando <command> [args]
   pando release create <tag> <file>...                            with files: a draft, its files, then published
   pando release upload <tag> <file>... | download [<tag>]         a release's files (checked by SHA-256) [--pattern p] [--dir d]
   pando release publish <tag> [--force] | delete <tag>            publish a draft; delete one (its tag stays)
+  pando artifact add [<branch>] <file> [<image>...]               a document (and its images) on a branch's page; the same name again is v2
+  pando artifact list [<branch>]                                  the branch's artifacts, their versions and open comments
+  pando artifact get [<branch>] <name> [--version n] [-o dir]     download a version's files (checked by SHA-256)
+  pando artifact open [<branch>] <name>                           its page in the browser
+  pando artifact comments [<branch>] [<name>] [--all]             open threads: the quote, the comment, replies, ids
+  pando artifact comment [<branch>] <name> [--quote words] -m c   comment on words, or on the whole file
+  pando artifact reply <id> -m c | resolve <id> [--reopen]        answer a thread; resolve or reopen it
   pando credential create --name <sandbox> | list | revoke <id>   credentials that act as you
   pando hook list | create <url> | delete <id>                    a repo's web hooks [--repo <path>] (owners write)
   pando hook deliveries <id> | redeliver <delivery-id>            what a hook sent; send one again
@@ -249,6 +256,33 @@ With no `-m`, opens the branch diff in Plannotator (it must be installed). Appro
 | `--approve` | With `-m`: post it as an approval (people only). |
 | `--request-changes` | With `-m`: post it as a request for changes. |
 | `--repo <path>` | The repo. Default: the one you are in. |
+
+### pando artifact
+
+```sh
+pando artifact add [<branch>] <file> [<image>...]
+pando artifact list [<branch>]
+pando artifact get [<branch>] <name> [--version n] [-o dir]
+pando artifact open [<branch>] <name>
+pando artifact comments [<branch>] [<name>] [--all]
+pando artifact comment [<branch>] <name> [--quote "<words>"] -m "<comment>"
+pando artifact reply <id> -m "<reply>"
+pando artifact resolve <id> [--reopen]
+```
+
+Documents on a branch's page, never in git: a plan, a diagram, a design, an exported guided review. `add` uploads the first file and the images it uses, kept by their paths from the document's folder; the same name again is its next version. An agent reads the comments people leave with `comments`, uploads the next version with `add`, and answers with `reply` and `resolve`. With no branch, the branch of the worktree you are in. See [Artifacts](/artifacts/).
+
+| Flag | What it does |
+| --- | --- |
+| `-m <text>` | `comment`, `reply`: the comment, Markdown. |
+| `--quote <words>` | `comment`: the words it is on, plain, from one line. Default: the whole file. |
+| `--version <n>` | `get`: the version. Default: the newest. |
+| `-o <dir>` | `get`: the folder to write its files in. Default: this folder. |
+| `--all` | `comments`: resolved threads too. |
+| `--reopen` | `resolve`: open the thread again. |
+| `--json` | Print the API's answer. |
+| `--repo <path>` | The repo. Default: the one you are in, or the only one. |
+| `--monorepo <owner/name>` | The monorepo. Default: the one you are in. |
 
 ### pando merge
 

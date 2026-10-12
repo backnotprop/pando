@@ -8,7 +8,7 @@
 // and one open with its comments (-artifacts/).
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Branch, BranchSessions, ChangedFile, Commit, Repo, Review } from "@pando/contract";
@@ -22,7 +22,6 @@ import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
 import { type ArtifactAt, branchArtifactsLink, branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
 import { artifactListQuery } from "../../../../api/artifacts";
-import { ArtifactsTab } from "../-artifacts/ArtifactsTab";
 import { Ref } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, since, useNow } from "../../../../ui/time";
@@ -367,6 +366,9 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
 }
 
+// The Artifacts tab is its own chunk, loaded when the tab is opened: the branch's other tabs never carry it.
+const ArtifactsTab = lazy(() => import("../-artifacts/ArtifactsTab").then((m) => ({ default: m.ArtifactsTab })));
+
 /** Where on the Artifacts tab the address is (`?tab=artifacts&artifact=...`), or null on another tab. */
 export const artifactsAt = (s: { tab?: string; artifact?: string; v?: string; plain?: string }): ArtifactAt | null =>
   s.tab === "artifacts" ? { artifact: s.artifact, v: s.v, plain: s.plain } : null;
@@ -390,8 +392,9 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
   const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.start?.files_total;
   // The agent sessions its commits name: the Sessions tab, and each commit's numbers on the Overview.
   const on = useQuery(branchSessionsQuery(monorepo, repo.name, branch)).data;
-  // The documents uploaded to its page: the Artifacts tab's count.
-  const uploaded = useQuery(artifactListQuery(monorepo, repo.name, branch)).data?.total;
+  // The documents uploaded to its page: the Artifacts tab's count, read once the page's own reads are done (its diff's
+  // first files), or at once on the Artifacts tab; never ahead of what the page draws.
+  const uploaded = useQuery({ ...artifactListQuery(monorepo, repo.name, branch), enabled: !!artifacts || changed !== undefined }).data?.total;
   // One count for the line under the title and the Commits heading, from the commits read (a new head reads it again, live/rows.ts).
   const n = commits.total;
 
@@ -412,7 +415,9 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
         <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
       </TabBar>
       {artifacts ? (
-        <ArtifactsTab repo={repo} b={b} at={artifacts} aside={<Aside repo={repo} b={b} live={live} />} />
+        <Suspense fallback={<div className="min-h-24" />}>
+          <ArtifactsTab repo={repo} b={b} at={artifacts} aside={<Aside repo={repo} b={b} live={live} />} />
+        </Suspense>
       ) : files ? (
         <FilesTab repo={repo} branch={branch} />
       ) : sessions ? (

@@ -12,10 +12,11 @@ import type { Group } from "../routes/$owner/$name/-artifacts/group";
 
 export const artifactsKey = (m: MonorepoRef) => ["m", m.owner, m.name, "artifacts"] as const;
 
-/** A branch's artifacts: its Artifacts tab, and the tab's count. */
+/** A branch's artifacts: its Artifacts tab, and the tab's count. Fresh for a minute: the page's socket reads it again on any change (live/rows.ts). */
 export const artifactListQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({
     queryKey: [...artifactsKey(m), "list", repo, branch],
+    staleTime: 60_000,
     queryFn: () => {
       const route = Routes.listArtifacts(m.owner, m.name, repo, branch);
 

@@ -337,7 +337,7 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(note.locator("img, script")).toHaveCount(0);
       await expect(note.getByRole("link", { name: "a link" })).toHaveCount(0);
       expect(await page.evaluate(() => "__pwned" in window)).toBe(false);
-      const artifact = page.getByRole("list", { name: "Artifacts" }).getByRole("link", { name: "Download" });
+      const artifact = page.getByRole("list", { name: "Build files" }).getByRole("link", { name: "Download" });
 
       await expect(artifact).toHaveAttribute("href", /\/ci\/builds\/cib_[^/]+\/artifacts\/art-1\/download$/);
       // typecheck, closed, opens to its own log on demand.

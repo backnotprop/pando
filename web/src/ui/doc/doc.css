@@ -128,6 +128,58 @@
     margin-top: 0;
   }
 
+  /* Comments' highlights (theme.css's annotation rules) in Pando's clay, not
+     the browser's yellow <mark>: a quiet wash and a rule under the words; the
+     selected one stronger. A deletion is struck through in Rust. */
+  .annotation-highlight {
+    border-radius: 2px;
+    padding: 0 2px;
+    margin: 0 -2px;
+    color: inherit;
+    background: color-mix(in srgb, var(--clay) 22%, transparent);
+    border-bottom: 1.5px solid var(--clay);
+    cursor: pointer;
+  }
+  .annotation-highlight.deletion {
+    background: color-mix(in srgb, var(--rust) 18%, transparent);
+    border-bottom: 0;
+    text-decoration: line-through;
+    text-decoration-color: var(--rust);
+  }
+  .annotation-highlight.focused {
+    background: color-mix(in srgb, var(--clay) 40%, transparent);
+  }
+  .annotation-highlight.math-inline-annotation {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
+  .annotation-highlight.math-block-annotation {
+    display: block;
+  }
+
+  /* An HTML artifact: the viewer's own bar above the frame (a whole-file
+     comment) is the panel's "Comment on the file" in Pando. */
+  .pn-html > div > [data-print-hide]:first-child {
+    display: none;
+  }
+
+  /* A reply's card (an artifact's comment panel): no type word and no quote,
+     which its thread's first card already shows. */
+  [data-annotation-reply] [data-annotation-id] > div:first-child > span:first-child,
+  [data-annotation-reply] [data-annotation-id] > p.font-mono {
+    display: none;
+  }
+  /* A whole-file comment's word in Pando's ink, not Plannotator's purple. */
+  [data-annotation-id] .text-purple-500 {
+    color: var(--bark-dim);
+  }
+  /* The panel's own Edit and Delete only on your own comments (the header
+     slot marks each card data-own, ui/doc/artifact/Panel.tsx). */
+  [data-annotation-id]:has([data-own="false"]) > div:first-child > .ml-auto {
+    display: none;
+  }
+
   /* Links as Pando draws them in a document: the text's own colour, a quiet underline. */
   a {
     text-decoration-color: var(--ash);

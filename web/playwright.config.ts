@@ -66,6 +66,8 @@ export default defineConfig({
   // `e2e` is the test; `shots` makes the fidelity screenshots for review (npm run shots); `org-shots` the org screens', `profile-shots` the profile's; `mirror` is Mirror to GitHub against its stand-in (PANDO_E2E_GITHUB_PORT).
   projects: [
     { name: "e2e", testMatch: /slice\d\.spec\.ts/ },
+    // Artifacts on a branch's page: documents, comments, versions (research/plans/artifacts-2026-10-12/SPEC.md).
+    { name: "artifacts", testMatch: /artifacts\.spec\.ts/ },
     { name: "shots", testMatch: /fidelity\.spec\.ts/ },
     { name: "org-shots", testMatch: /orgs-shots\.spec\.ts/ },
     { name: "mirror", testMatch: /mirror\.spec\.ts/ },

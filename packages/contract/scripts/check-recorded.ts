@@ -104,6 +104,11 @@ import {
   ReleaseNotes,
   Deployment,
   DeploymentList,
+  Artifact,
+  ArtifactComment,
+  ArtifactDetail,
+  ArtifactList,
+  ArtifactThreads,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -212,6 +217,11 @@ const decoders = {
   ReleaseNotes: refuses(ReleaseNotes),
   Deployment: refuses(Deployment),
   DeploymentList: refuses(DeploymentList),
+  Artifact: refuses(Artifact),
+  ArtifactDetail: refuses(ArtifactDetail),
+  ArtifactList: refuses(ArtifactList),
+  ArtifactComment: refuses(ArtifactComment),
+  ArtifactThreads: refuses(ArtifactThreads),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

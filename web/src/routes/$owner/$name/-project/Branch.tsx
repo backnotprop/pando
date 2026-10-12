@@ -4,10 +4,11 @@
 // worktree. Merge lands exactly the head on screen (expected_head); a refusal
 // is shown in the box, in words. The issues it is linked to sit under the box
 // (-issues/BranchIssues.tsx). Files changed: each file's diff, read only
-// (FilesChanged.tsx).
+// (FilesChanged.tsx). Artifacts: the documents uploaded to the branch's page,
+// and one open with its comments (-artifacts/).
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
 import type { Branch, BranchSessions, ChangedFile, Commit, Repo, Review } from "@pando/contract";
@@ -19,7 +20,8 @@ import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
 import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
-import { branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
+import { type ArtifactAt, branchArtifactsLink, branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
+import { artifactListQuery } from "../../../../api/artifacts";
 import { Ref } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 import { ago, since, useNow } from "../../../../ui/time";
@@ -364,7 +366,14 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
 }
 
-export function BranchPage({ repo, branch, files, sessions }: { repo: Repo; branch: string; files: boolean; sessions: boolean }) {
+// The Artifacts tab is its own chunk, loaded when the tab is opened: the branch's other tabs never carry it.
+const ArtifactsTab = lazy(() => import("../-artifacts/ArtifactsTab").then((m) => ({ default: m.ArtifactsTab })));
+
+/** Where on the Artifacts tab the address is (`?tab=artifacts&artifact=...`), or null on another tab. */
+export const artifactsAt = (s: { tab?: string; artifact?: string; v?: string; plain?: string }): ArtifactAt | null =>
+  s.tab === "artifacts" ? { artifact: s.artifact, v: s.v, plain: s.plain } : null;
+
+export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo: Repo; branch: string; files: boolean; sessions: boolean; artifacts: ArtifactAt | null }) {
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
 
@@ -383,6 +392,9 @@ export function BranchPage({ repo, branch, files, sessions }: { repo: Repo; bran
   const changed = useQuery(branchDiffQuery(monorepo, repo.name, branch)).data?.start?.files_total;
   // The agent sessions its commits name: the Sessions tab, and each commit's numbers on the Overview.
   const on = useQuery(branchSessionsQuery(monorepo, repo.name, branch)).data;
+  // The documents uploaded to its page: the Artifacts tab's count, read once the page's own reads are done (its diff's
+  // first files), or at once on the Artifacts tab; never ahead of what the page draws.
+  const uploaded = useQuery({ ...artifactListQuery(monorepo, repo.name, branch), enabled: !!artifacts || changed !== undefined }).data?.total;
   // One count for the line under the title and the Commits heading, from the commits read (a new head reads it again, live/rows.ts).
   const n = commits.total;
 
@@ -397,11 +409,16 @@ export function BranchPage({ repo, branch, files, sessions }: { repo: Repo; bran
         </p>
       </div>
       <TabBar label="Branch">
-        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files && !sessions} label="Overview" />
+        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files && !sessions && !artifacts} label="Overview" />
         {on?.sessions.length ? <Tab link={branchSessionsLink(monorepo.full, repo.path, branch)} current={sessions} label="Sessions" count={on.sessions.length} /> : null}
+        <Tab link={branchArtifactsLink(monorepo.full, repo.path, branch)} current={!!artifacts} label="Artifacts" count={uploaded || undefined} />
         <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
       </TabBar>
-      {files ? (
+      {artifacts ? (
+        <Suspense fallback={<div className="min-h-24" />}>
+          <ArtifactsTab repo={repo} b={b} at={artifacts} aside={<Aside repo={repo} b={b} live={live} />} />
+        </Suspense>
+      ) : files ? (
         <FilesTab repo={repo} branch={branch} />
       ) : sessions ? (
         <BranchSessionsTab repo={repo} branch={branch} merged={b.state === "merged"} on={on} commits={commits.commits} />
@@ -424,15 +441,22 @@ function Overview({ repo, b, commits, total, reviews, live, on }: { repo: Repo; 
           <Reviews reviews={reviews} />
         </div>
       </section>
-      <aside>
-        <MergeBox repo={repo} b={b} />
-        <BranchIssues repo={repo} b={b} />
-        <div className="mt-10">
-          <SectionHead title="Checks" />
-          <CheckRows repo={repo} sha={b.head} checks={b.checks} live={live} />
-        </div>
-        <Worktree repo={repo} branch={b.name} />
-      </aside>
+      <Aside repo={repo} b={b} live={live} />
     </div>
+  );
+}
+
+/** The right column of Overview (and of the Artifacts list): the Merge box, the linked issues, the checks, the worktree. */
+function Aside({ repo, b, live }: { repo: Repo; b: Branch; live: boolean }) {
+  return (
+    <aside>
+      <MergeBox repo={repo} b={b} />
+      <BranchIssues repo={repo} b={b} />
+      <div className="mt-10">
+        <SectionHead title="Checks" />
+        <CheckRows repo={repo} sha={b.head} checks={b.checks} live={live} />
+      </div>
+      <Worktree repo={repo} branch={b.name} />
+    </aside>
   );
 }

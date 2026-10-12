@@ -54,6 +54,7 @@ import { profileRoutes } from "../accounts/profile-routes";
 import { feedMembership, membersBeforeDelete } from "../feed/membership";
 import { closeAfterTransfer, closeIfRemoved } from "./access";
 import { monoreposSummary } from "../feed/routes";
+import { artifactRoutes, branchArtifacts } from "../branch-artifacts/routes";
 
 /** Which branches a list shows. */
 type BranchState = "open" | "merged" | "all";
@@ -858,7 +859,7 @@ export async function createBranch(c: C, r: RepoRecord, name: string, from: stri
 }
 
 /** /branches/<name>[/diff|/reviews|/merge], with the name raw or %2F-encoded. */
-/** A branch route's branch name, and what follows it (diff, reviews, merge, commits, or ""). */
+/** A branch route's branch name, and what follows it (diff, reviews, merge, commits, artifacts, artifact-comments, or ""). */
 interface BranchPath {
   branch: string;
   rest: string;
@@ -868,7 +869,7 @@ function branchPath(c: C): BranchPath {
   let tail = rawTail(c);
   let rest = "";
 
-  for (const s of ["/diff", "/reviews", "/merge", "/commits"]) {
+  for (const s of ["/diff", "/reviews", "/merge", "/commits", "/artifacts", "/artifact-comments"]) {
     if (tail.endsWith(s)) {
       rest = s.slice(1);
       tail = tail.slice(0, -s.length);
@@ -931,6 +932,8 @@ api.all("/v1/monorepos/:o/:m/repos/:r/branches/*", async (c) => {
   if (rest === "reviews" && method === "POST") return review(c, r, branch);
 
   if (rest === "merge" && method === "POST") return merge(c, r, branch);
+
+  if (rest === "artifacts" || rest === "artifact-comments") return branchArtifacts(c, r, branch, rest);
   throw new HttpError(405, "method", "method not allowed");
 });
 
@@ -1702,6 +1705,10 @@ deploymentRoutes(api);
 // ── Mirror to GitHub (mirror/routes.ts) ──
 
 mirrorRoutes(api);
+
+// ── Artifacts on branch pages (branch-artifacts/routes.ts) ──
+
+artifactRoutes(api);
 
 // ── Issues and labels (issues/routes.ts) ──
 

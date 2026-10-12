@@ -308,6 +308,22 @@ tags:
         20 a release, SHA-256 kept. Downloads are for members unless the
         project's switch "Anyone can download releases" (`releases_public`)
         is on; it opens release files only, never code.
+  - name: artifacts
+    description: |
+      Documents uploaded to a branch's page (the pull request), never in
+      git: a Markdown or HTML file with the images it uses, or an image
+      (research/plans/artifacts-2026-10-12/SPEC.md). Bytes in R2, rows in
+      the monorepo object. The same name again is the next version; every
+      version is kept. Comments are Plannotator's annotations (the anchor is
+      stored as written, never read by the server) with Pando's thread:
+      replies one level deep, open or resolved. Members only; any member
+      may delete an artifact (every version, its bytes and comments go, with
+      no undo).
+
+      Limits: 10 MiB an artifact in all, its document at most 1.5 MiB, 20
+      files; 100 artifacts on a branch; 500 threads on one version, 100
+      replies in a thread; a comment 65,536 characters, its anchor 16,384
+      bytes and 16 extra HTML elements; 10 people named in one comment.
   - name: ci
     description: |
       CI on one model for every service:
@@ -1323,6 +1339,15 @@ paths:
           or deleted), `release.published` (a Release row), `release.deleted`
           (delete, row `{repo, tag}`).
         - reviews: `review` (Review row).
+        - artifacts: `artifact.added`, `artifact.versioned` (an Artifact row),
+          `artifact.deleted` (delete, row `{repo, branch, id, name}`); each
+          carries `branch`.
+        - artifact_comments: `artifact_comment.added`, `.edited`,
+          `.resolved`, `.reopened` (an ArtifactComment row; the thread's root
+          for a state change; a body over 16 KB is null), and
+          `artifact_comment.deleted` (delete with `{id, artifact, thread}`, or
+          an upsert with the body null for a root that keeps its replies);
+          each carries `branch`.
         - worktrees: `worktree.reported` (upsert), `worktree.removed` (delete).
         - meta_files: `meta.saved` (a meta history entry, no bytes; not sent
           during pando init's first upload).
@@ -3365,6 +3390,209 @@ paths:
       responses:
         "204":
           description: Deleted
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/artifacts:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - { name: branch, in: path, required: true, schema: { type: string }, description: "The branch's name; a '/' in it raw or as %2F." }
+    get:
+      operationId: listArtifacts
+      summary: The branch's artifacts, newest first
+      tags: [artifacts]
+      responses:
+        "200":
+          description: At most 100, each with its newest version and its comment counts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactList" }
+    post:
+      operationId: addArtifact
+      summary: Upload an artifact, or the next version of one with the same name
+      description: |
+        Multipart, with Content-Length (411 without it): one `file` field
+        (a .md, .markdown, .html, .htm, .png, .jpg, .jpeg, .gif, .webp or
+        .svg file; its name is the artifact's) and an `image` field for each
+        image a document uses, the file's name its path from the document
+        (`img/hero.png`). Refused: 413 too_large (over 10 MiB in all, or a
+        document over 1.5 MiB), 400 too_many_files (over 20), 409
+        too_many_artifacts (100 on the branch), 400 bad_request (a name,
+        path or kind Pando does not take). Each file's SHA-256 is computed
+        and checked by R2.
+      tags: [artifacts]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                image: { type: array, items: { type: string, format: binary } }
+      responses:
+        "201":
+          description: A new artifact (200 when it is the next version of one)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/branches/{branch}/artifact-comments:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - { name: branch, in: path, required: true, schema: { type: string } }
+      - { name: state, in: query, schema: { type: string, enum: [open, resolved, all], default: all } }
+    get:
+      operationId: listBranchArtifactThreads
+      summary: Every artifact's threads on the branch (the panel's All files)
+      tags: [artifacts]
+      responses:
+        "200":
+          description: Threads oldest first; counts are of all
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactThreads" }
+  /v1/monorepos/{owner}/{monorepo}/artifacts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getArtifact
+      summary: One artifact with every version
+      tags: [artifacts]
+      responses:
+        "200":
+          description: The artifact
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactDetail" }
+    delete:
+      operationId: deleteArtifact
+      summary: Delete it (any member), every version, its bytes and comments
+      tags: [artifacts]
+      responses:
+        "204":
+          description: Deleted
+  /v1/monorepos/{owner}/{monorepo}/artifacts/{id}/versions/{n}/files/{path}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: n, in: path, required: true, schema: { type: integer } }
+      - { name: path, in: path, required: true, schema: { type: string }, description: "The file's path; may hold '/'." }
+    get:
+      operationId: getArtifactFile
+      summary: One file's bytes
+      description: |
+        Its type from its extension, with `Content-Security-Policy: sandbox;
+        default-src 'none'` so opening it never runs it on Pando's address,
+        and X-Pando-Sha256.
+      tags: [artifacts]
+      responses:
+        "200":
+          description: The bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+  /v1/monorepos/{owner}/{monorepo}/artifacts/{id}/versions/{n}/document:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: n, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getArtifactDocument
+      summary: The version's document, its images written in as data addresses
+      description: |
+        The Markdown or HTML with each image it names from its own files
+        (`img/a.png` or `./img/a.png`) replaced by a `data:` address, for
+        the viewer's frame, which cannot fetch from Pando. Same sandbox
+        policy as a file. An image artifact answers its image.
+      tags: [artifacts]
+      responses:
+        "200":
+          description: The document
+          content:
+            text/html:
+              schema: { type: string }
+            text/markdown:
+              schema: { type: string }
+  /v1/monorepos/{owner}/{monorepo}/artifacts/{id}/comments:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listArtifactThreads
+      summary: Its threads on every version
+      tags: [artifacts]
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [open, resolved, all], default: all } }
+      responses:
+        "200":
+          description: Threads oldest first; counts are of all
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactThreads" }
+    post:
+      operationId: addArtifactComment
+      summary: A thread, or a reply
+      description: |
+        `{body, version?, anchor?, quote?, in_reply_to?}`. A thread takes
+        `anchor` (Plannotator's fields, as written) or `quote` (plain words,
+        stored as Plannotator's external annotation: blockId `external`,
+        offsets 0); neither: the whole artifact. `version` defaults to the
+        newest. A reply names `in_reply_to` and takes neither; it joins the
+        thread's root. Members named with `@login` are recorded. Send an
+        Idempotency-Key to make a retry safe (200 with `pando-replayed`).
+        Refused: 409 too_many_threads, too_many_replies; 400
+        too_many_mentions; 413 too_large (body or anchor).
+      tags: [artifacts]
+      responses:
+        "201":
+          description: Made
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactComment" }
+  /v1/monorepos/{owner}/{monorepo}/artifact-comments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getArtifactComment
+      summary: One comment, whole
+      tags: [artifacts]
+      responses:
+        "200":
+          description: The comment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactComment" }
+    patch:
+      operationId: updateArtifactComment
+      summary: Edit your own, or resolve or reopen its thread
+      description: |
+        `{body, base_version?}`: your own (403 not_author; 409 edited with
+        `current` when base_version is stale). `{state: open | resolved}`:
+        any member; answers the thread's root.
+      tags: [artifacts]
+      responses:
+        "200":
+          description: The comment changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactComment" }
+    delete:
+      operationId: deleteArtifactComment
+      summary: Delete your own
+      description: A root with replies keeps its place with its body null; it goes with its last reply.
+      tags: [artifacts]
+      responses:
+        "204":
+          description: Deleted
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/deployments:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -5224,6 +5452,98 @@ components:
         merges: { type: [integer, "null"], description: "Generated: the merges listed (at most 500)." }
         more: { type: [integer, "null"], description: "Generated: the merges past 500." }
         since: { type: [string, "null"], description: "Generated: the release they start from; null from the start." }
+    ArtifactVersion:
+      type: object
+      required: [n, size, sha256, files, uploaded_by, machine, via, created_at]
+      properties:
+        n: { type: integer }
+        size: { type: integer, description: All its files, in bytes. }
+        sha256: { type: string, description: The main file's. }
+        files:
+          type: array
+          description: The main file first, then its images by path.
+          items:
+            type: object
+            required: [path, size, sha256, type]
+            properties:
+              path: { type: string }
+              size: { type: integer }
+              sha256: { type: string }
+              type: { type: string }
+        uploaded_by: { type: string }
+        machine: { type: [string, "null"], description: "The credential's machine; web from the browser." }
+        via: { type: string, enum: [web, cli] }
+        created_at: { type: string, format: date-time }
+    Artifact:
+      type: object
+      required: [id, repo, branch, name, kind, title, latest, versions, comments, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        repo: { type: string }
+        branch: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [markdown, html, image] }
+        title: { type: [string, "null"], description: "The first heading or <title>, at most 200 characters." }
+        latest: { $ref: "#/components/schemas/ArtifactVersion" }
+        versions: { type: integer }
+        comments:
+          type: object
+          required: [open, resolved]
+          properties: { open: { type: integer }, resolved: { type: integer } }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ArtifactDetail:
+      allOf:
+        - $ref: "#/components/schemas/Artifact"
+        - type: object
+          required: [all_versions]
+          properties:
+            all_versions: { type: array, items: { $ref: "#/components/schemas/ArtifactVersion" } }
+    ArtifactList:
+      type: object
+      required: [branch, artifacts, total]
+      properties:
+        branch: { type: string }
+        artifacts: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+        total: { type: integer }
+    ArtifactComment:
+      type: object
+      required: [id, artifact, version, thread, in_reply_to, anchor, body, body_version, author, machine, mentions, state, resolved_by, resolved_at, created_at, updated_at]
+      properties:
+        id: { type: string }
+        artifact: { type: string }
+        version: { type: integer, description: The version it was made on. }
+        thread: { type: string, description: The root's id. }
+        in_reply_to: { type: [string, "null"] }
+        anchor: { description: "Plannotator's placing fields and Pando's context, opaque; null: the whole artifact. Roots only." }
+        body: { type: [string, "null"], description: Null once deleted. }
+        body_version: { type: integer }
+        author: { type: string }
+        machine: { type: [string, "null"] }
+        mentions: { type: array, items: { type: string } }
+        state: { type: string, enum: [open, resolved] }
+        resolved_by: { type: [string, "null"] }
+        resolved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ArtifactThreads:
+      type: object
+      required: [threads, counts]
+      properties:
+        threads:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/ArtifactComment"
+              - type: object
+                required: [replies]
+                properties:
+                  replies: { type: array, items: { $ref: "#/components/schemas/ArtifactComment" } }
+        counts:
+          type: object
+          required: [open, resolved]
+          properties: { open: { type: integer }, resolved: { type: integer } }
     Deployment:
       type: object
       required: [id, repo, environment, sha, release, state, url, description, created_by, created_at]

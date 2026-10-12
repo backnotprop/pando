@@ -23,8 +23,19 @@ export const refSearch = Schema.toStandardSchemaV1(Schema.Struct({ ref: Schema.o
 /** A repo's branches: `?tab=merged` for what landed on main. */
 export const branchesSearch = Schema.toStandardSchemaV1(Schema.Struct({ tab: Schema.optionalKey(Schema.String) }));
 
-/** A branch's page: `?tab=files` for Files changed. */
-export const branchSearch = Schema.toStandardSchemaV1(Schema.Struct({ tab: Schema.optionalKey(Schema.String) }));
+/**
+ * A branch's page: `?tab=files` for Files changed, `?tab=artifacts` for its
+ * Artifacts; `&artifact=<name>` opens one, `&v=` at an older version,
+ * `&plain=1` on its code.
+ */
+export const branchSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    tab: Schema.optionalKey(Schema.String),
+    artifact: Schema.optionalKey(Schema.String),
+    v: Schema.optionalKey(Schema.String),
+    plain: Schema.optionalKey(Schema.String),
+  }),
+);
 
 /** A CI build: `?job=` opens that job on its log (a branch's check links there). */
 export const jobSearch = Schema.toStandardSchemaV1(Schema.Struct({ job: Schema.optionalKey(Schema.String) }));

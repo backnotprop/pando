@@ -50,6 +50,9 @@ export const HISTORY_PAGE = 30;
 /** How far back a walk looks (an owner limit). */
 export const WALK_MAX = 10_000;
 
+/** Commits a walk reads at once (Walker.readAhead): last commits, a path's history. */
+const READ_AHEAD = 16;
+
 /** Edge misses (Artifacts reads) a request may spend, and loads in all; a queue job's misses. */
 export const REQUEST_BUDGET = { misses: 40, loads: 400 };
 
@@ -97,7 +100,8 @@ export type WalkedRepo = Pick<RepoRecord, "name" | "artifacts_name">;
 
 export class Walker<R extends WalkedRepo = RepoRecord> {
   readonly stats: ObjectStats = { hits: 0, misses: 0 };
-  private trees = new Map<string, TreeEntry[]>();
+  /** Reads in flight count too, so walks that read ahead at once never fetch a tree twice. */
+  private trees = new Map<string, Promise<TreeEntry[]>>();
   private commits = new Map<string, CommitMeta>();
   private at = new Map<string, { oid: string; type: TreeEntry["type"] } | null>();
 
@@ -122,12 +126,14 @@ export class Walker<R extends WalkedRepo = RepoRecord> {
     return c;
   }
 
-  async tree(oid: string): Promise<TreeEntry[]> {
+  tree(oid: string): Promise<TreeEntry[]> {
     const hit = this.trees.get(oid);
 
     if (hit) return hit;
-    const t = (await this.obj.json<TreeEntry[]>(`/tree/${this.repo.artifacts_name}/${oid}`, this.stats)) ?? [];
+    const t = this.obj.json<TreeEntry[]>(`/tree/${this.repo.artifacts_name}/${oid}`, this.stats).then((x) => x ?? []);
     this.trees.set(oid, t);
+    // A failed read is not kept: the next asks again.
+    t.catch(() => this.trees.delete(oid));
 
     return t;
   }
@@ -168,6 +174,43 @@ export class Walker<R extends WalkedRepo = RepoRecord> {
     }
 
     return this.commits.get(p) ?? (await this.commit(p));
+  }
+
+  /**
+   * Read at once what a walk of `path` from `from` reads over its next `n`
+   * first parents: the path's entry in each commit, and the folder's tree on
+   * each side of a change. Each read misses to Artifacts on a first view, so
+   * one by one they cost a round trip each. Returns the commits covered.
+   * `log`: commits per log read, as the walk asks for them. `folders` false:
+   * the entries only (a path's history compares hashes).
+   */
+  async readAhead(from: CommitMeta, path: string, n: number, log: number, folders: boolean): Promise<CommitMeta[]> {
+    const chain = [from];
+    let last: CommitMeta | null = from;
+
+    while (last && chain.length <= n) {
+      last = await this.parentOf(last, log);
+
+      if (last) chain.push(last);
+    }
+
+    const at: ({ oid: string; type: TreeEntry["type"] } | null)[] = await Promise.all(chain.map((c) => this.entryAt(c.treeHash, path)));
+
+    if (!folders) return last ? chain.slice(0, -1) : chain;
+
+    // The first commit: nothing before it.
+    if (!last) at.push(null);
+    const changed = new Set<string>();
+
+    for (let i = 0; i + 1 < at.length; i++) {
+      if (at[i]?.oid === at[i + 1]?.oid) continue;
+
+      for (const a of [at[i], at[i + 1]]) if (a?.type === "tree") changed.add(a.oid);
+    }
+
+    await Promise.all([...changed].map((oid) => this.tree(oid)));
+
+    return last ? chain.slice(0, -1) : chain;
   }
 }
 
@@ -226,12 +269,20 @@ async function walkLast(w: Walker<WalkedRepo>, path: string, state: LastState, r
   let k: CommitMeta | null = state.next ? await w.commit(state.next) : null;
   let walked = state.walked;
   let older: string | null = null;
+  // Commits whose reads are already loaded (readAhead); the budget is checked before loading more.
+  const ready = new Set<string>();
 
   while (k && open.size) {
     if (reuse && k.hash === reuse.commit) {
       for (const n of open) if (reuse.entries[n]) state.answers[n] = reuse.entries[n]!;
       open.clear();
       break;
+    }
+
+    if (!ready.has(k.hash)) {
+      if (walked > state.walked && w.spent()) break;
+
+      for (const c of await w.readAhead(k, path, Math.min(READ_AHEAD, WALK_MAX - walked), 1000, true)) ready.add(c.hash);
     }
 
     const p = await w.parentOf(k, 1000);
@@ -260,8 +311,6 @@ async function walkLast(w: Walker<WalkedRepo>, path: string, state: LastState, r
       older = new Date(k.authoredAt * 1000).toISOString();
       break;
     }
-
-    if (w.spent()) break;
   }
 
   const done = open.size === 0 || !k || older !== null;
@@ -276,6 +325,16 @@ async function labelMerges(lines: Iterable<CommitLine>, shas: Set<string>, merge
   const m = await mergesFor([...shas]);
 
   for (const l of lines) if (m[l.sha]) l.merged_branch = m[l.sha];
+}
+
+async function folderNames(w: Walker<WalkedRepo>, commit: CommitMeta, path: string): Promise<string[]> {
+  const at = await w.entryAt(commit.treeHash, path);
+
+  if (!at) throw new HttpError(404, "not_found", `no ${path || "root"} at this ref`);
+
+  if (at.type !== "tree") throw new HttpError(404, "not_a_folder", `${path} is a file`);
+
+  return (await w.tree(at.oid)).map((e) => e.name);
 }
 
 /**
@@ -299,12 +358,8 @@ export async function lastCommits(
   const stored = await obj.json<LastCommits>(`/answer/${repo.artifacts_name}/${key}`);
 
   if (stored) return { ...stored, queued: false };
-  const at = await w.entryAt(commit.treeHash, path);
-
-  if (!at) throw new HttpError(404, "not_found", `no ${path || "root"} at this ref`);
-
-  if (at.type !== "tree") throw new HttpError(404, "not_a_folder", `${path} is a file`);
-  const names = (await w.tree(at.oid)).map((e) => e.name);
+  // The folder and the first-parent history the walk reads load at once.
+  const [names] = await Promise.all([folderNames(w, commit, path), w.parentOf(commit, 1000)]);
   const partialKey = `partial/${repo.artifacts_name}/${key}.json`;
   const saved = (await (await env.CACHE?.get(partialKey))?.json<LastState>()) ?? null;
   const state: LastState = saved ?? { answers: {}, open: names, next: commit.hash, walked: 0 };
@@ -352,8 +407,11 @@ export async function walkHistory(w: Walker, start: string, path: string, limit:
   let walked = walkedBefore;
   let next: string | null = null;
   let budgetCut = false;
+  // Commits whose entries are already loaded (readAhead); the budget is checked before loading more.
+  const ready = new Set<string>();
 
   while (k) {
+    if (!ready.has(k.hash)) for (const c of await w.readAhead(k, path, Math.min(READ_AHEAD, WALK_MAX - walked), 200, false)) ready.add(c.hash);
     const p = await w.parentOf(k, 200);
     const ka = await w.entryAt(k.treeHash, path);
     const pa = p ? await w.entryAt(p.treeHash, path) : null;
@@ -368,7 +426,7 @@ export async function walkHistory(w: Walker, start: string, path: string, limit:
 
     if (!p) break;
 
-    if (changes.length >= limit || walked >= WALK_MAX || w.spent()) {
+    if (changes.length >= limit || walked >= WALK_MAX || (!ready.has(p.hash) && w.spent())) {
       next = p.hash;
       budgetCut = changes.length < limit && walked < WALK_MAX;
       break;

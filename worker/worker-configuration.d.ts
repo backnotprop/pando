@@ -10,7 +10,7 @@ interface __BaseEnv_Env {
 	ARTIFACTS: Artifacts;
 	ASSETS: Fetcher;
 	WORKOS_CLIENT_ID: "client_01M3ZW5WYKNDQZE358DYA7VHY5";
-	DOCS_URL: "https://pando-docs.plannotator.workers.dev";
+	DOCS_URL: "https://docs.gitpando.com";
 	META_COMMIT_GROUPING: "window";
 	PANDO_BOOTSTRAP: string;
 	BUILDKITE_API_TOKEN: string;

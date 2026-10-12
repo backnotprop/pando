@@ -1,0 +1,16 @@
+// Pando's landing page (site/landing): an assets-only Worker, no code. Every
+// request is a static file from public/; gitpando.com is its Custom Domain
+// (wrangler deploy makes the DNS record and certificate on the zone).
+// /install and /install.sh redirect to the app's script (public/_redirects).
+// pando-ops deploys it, from this folder, with the Worker's wrangler:
+//   ../../worker/node_modules/.bin/wrangler deploy
+{
+  "$schema": "../../worker/node_modules/wrangler/config-schema.json",
+  "name": "pando-landing",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "routes": [{ "pattern": "gitpando.com", "custom_domain": true }],
+  // Apple's SF fonts are copied in before each deploy and never committed (copy-fonts.sh).
+  "build": { "command": "sh copy-fonts.sh" },
+  "assets": { "directory": "./public" }
+}

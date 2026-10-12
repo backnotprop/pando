@@ -2,6 +2,7 @@
 // docs/contracts/README.md); this file only wires them together.
 //   /healthz                       up check (readable from any origin: the docs' Status page); which commit runs
 //   /docs, /docs/<path>            302 to the docs site (wrangler.jsonc DOCS_URL)
+//   /install, /install.sh          the one-line install's script (install.ts)
 //   /v1/openapi.yaml               the contract (docs/contracts/api-v1.yaml)
 //   /<owner>/<monorepo>/<repo>.git, /<owner>/<repo>.git   the git door (server-git)
 //   /v1/users, /v1/login/...       sign-in (accounts/signin.ts)
@@ -30,6 +31,7 @@ import { handleFeed, isFeedPath } from "./feed/routes";
 import type { FeedMessage } from "./feed/shape";
 import { handleIntegration, isIntegrationPath } from "./ci/routes";
 import { githubCallback } from "./mirror/routes";
+import { install, isInstallPath } from "./install";
 import { mirrorTestRoute } from "./mirror/test-route";
 
 export { MonorepoObject } from "./monorepo/object";
@@ -158,6 +160,8 @@ export default {
     if (url.pathname === "/healthz") return healthz(request, env);
 
     if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/docs" || url.pathname.startsWith("/docs/"))) return docs(env, url);
+
+    if ((request.method === "GET" || request.method === "HEAD") && isInstallPath(url.pathname)) return install(request);
 
     if (url.pathname === "/v1/openapi.yaml") return new Response(contract, { headers: { "content-type": "application/yaml; charset=utf-8" } });
 

@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pando · Everything everywhere all at once</title>
+<meta name="description" content="Pando is a git platform for monorepos, built on Cloudflare, where many agents work at once: each on its own branch, all sharing one live meta layer.">
+<meta name="theme-color" content="#0C0F0C">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%230C0F0C%22%2F%3E%3Cg%20transform%3D%22translate(6%205)%20scale(.82)%22%3E%3Cpath%20d%3D%22M1%2056.5%20H58%20L62.05%2052%20H52.45%20A3.2%203.2%200%200%201%2049.25%2048.8%20V24%20L42.75%2029.2%20V48.8%20A3.2%203.2%200%200%201%2039.55%2052%20H37.95%20A3.2%203.2%200%200%201%2034.75%2048.8%20V5%20L28.25%2010.2%20V48.8%20A3.2%203.2%200%200%201%2025.05%2052%20H23.45%20A3.2%203.2%200%200%201%2020.25%2048.8%20V16%20L13.75%2021.2%20V48.8%20A3.2%203.2%200%200%201%2010.55%2052%20H5.05Z%22%20fill%3D%22%23E6E0D1%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+<style>
+@font-face{font-family:"SF Pro Text";src:url("fonts/SF-Pro-Text-Regular.otf") format("opentype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"SF Pro Text";src:url("fonts/SF-Pro-Text-Semibold.otf") format("opentype");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"SF Pro Text";src:url("fonts/SF-Pro-Text-RegularItalic.otf") format("opentype");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:"SF Mono";src:url("fonts/SFNSMono.ttf") format("truetype");font-weight:300 900;font-style:normal;font-display:swap}
+:root{--soil:#0C0F0C;--air:#121614;--loam:#1A1F18;--bark:#E6E0D1;--ash:#7E8476;--clay:#9A7B5E;--fox:#C4E86F;
+  --bark-hi:#F4EFE3;--mesh:#7E8476;--speck:#6E6152;--litter:#8C7A62;--mesh-b:#A9A796;--mesh-c:#8C8676;--grass:#9EA391;--rule:var(--ash);--rule-k:1;
+  --label:#E6E0D1cc;
+  --sans:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;--disp:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;--mono:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--pad:clamp(16px,3vw,40px);--max:1600px}
+html[data-theme="plannotator-dark"]{--soil:oklch(0.15 0.02 260);--air:oklch(0.22 0.02 260);--loam:oklch(0.28 0.025 260);--bark:oklch(0.90 0.01 260);--ash:oklch(0.72 0.02 260);--clay:oklch(0.70 0.20 60);--fox:oklch(0.75 0.18 280);--rule:oklch(0.35 0.02 260);--rule-k:2.5;--label:color-mix(in srgb,var(--bark) 80%,transparent);--mesh:color-mix(in srgb,var(--ash) 78%,var(--soil));--speck:color-mix(in srgb,color-mix(in srgb,var(--mesh) 80%,var(--clay)) 75%,var(--soil));--litter:color-mix(in srgb,var(--mesh) 75%,var(--clay));--mesh-b:color-mix(in srgb,var(--mesh) 60%,var(--bark));--mesh-c:color-mix(in srgb,var(--mesh) 88%,var(--clay));--grass:color-mix(in srgb,var(--ash) 70%,var(--bark));--bark-hi:color-mix(in srgb,var(--bark) 55%,#fff)}
+html[data-theme="plannotator-light"]{--soil:oklch(0.97 0.005 260);--air:oklch(1 0 0);--loam:oklch(1 0 0);--bark:oklch(0.18 0.02 260);--ash:oklch(0.40 0.02 260);--clay:oklch(0.60 0.22 50);--fox:oklch(0.50 0.25 280);--rule:oklch(0.88 0.01 260);--rule-k:2.5;--label:color-mix(in srgb,var(--bark) 80%,transparent);--mesh:color-mix(in srgb,var(--ash) 78%,var(--soil));--speck:color-mix(in srgb,color-mix(in srgb,var(--mesh) 80%,var(--clay)) 75%,var(--soil));--litter:color-mix(in srgb,var(--mesh) 75%,var(--clay));--mesh-b:color-mix(in srgb,var(--mesh) 60%,var(--bark));--mesh-c:color-mix(in srgb,var(--mesh) 88%,var(--clay));--grass:color-mix(in srgb,var(--ash) 70%,var(--bark));--bark-hi:color-mix(in srgb,var(--bark) 82%,var(--soil));color-scheme:light}
+html[data-theme="iris-dark"]{--soil:#08090c;--air:#101116;--loam:#15171e;--bark:#f4f5f7;--ash:oklch(0.72 0.02 260);--clay:#d58f70;--fox:#9496ff;--rule:#414244;--rule-k:2.5;--label:color-mix(in srgb,var(--bark) 80%,transparent);--mesh:color-mix(in srgb,var(--ash) 78%,var(--soil));--speck:color-mix(in srgb,color-mix(in srgb,var(--mesh) 80%,var(--clay)) 75%,var(--soil));--litter:color-mix(in srgb,var(--mesh) 75%,var(--clay));--mesh-b:color-mix(in srgb,var(--mesh) 60%,var(--bark));--mesh-c:color-mix(in srgb,var(--mesh) 88%,var(--clay));--grass:color-mix(in srgb,var(--ash) 70%,var(--bark));--bark-hi:color-mix(in srgb,var(--bark) 55%,#fff)}
+html[data-theme="iris-light"]{--soil:#f4f5f7;--air:#ffffff;--loam:#ffffff;--bark:#11131a;--ash:oklch(0.40 0.02 260);--clay:#a75841;--fox:#4f46e5;--rule:#bebfc2;--rule-k:2.5;--label:color-mix(in srgb,var(--bark) 80%,transparent);--mesh:color-mix(in srgb,var(--ash) 78%,var(--soil));--speck:color-mix(in srgb,color-mix(in srgb,var(--mesh) 80%,var(--clay)) 75%,var(--soil));--litter:color-mix(in srgb,var(--mesh) 75%,var(--clay));--mesh-b:color-mix(in srgb,var(--mesh) 60%,var(--bark));--mesh-c:color-mix(in srgb,var(--mesh) 88%,var(--clay));--grass:color-mix(in srgb,var(--ash) 70%,var(--bark));--bark-hi:color-mix(in srgb,var(--bark) 82%,var(--soil));color-scheme:light}
+*{box-sizing:border-box}
+html{background:var(--soil);color-scheme:dark}
+body{margin:0;background:var(--soil);color:var(--bark);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit}
+:focus-visible{outline:1.5px solid var(--bark);outline-offset:3px;border-radius:3px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:-999px;top:8px;z-index:9;background:var(--bark);color:var(--soil);padding:8px 12px;border-radius:6px}
+.skip:focus{left:8px}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 var(--pad)}
+
+/* nav */
+.nav{display:flex;align-items:center;gap:32px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand svg{display:block}
+.nav nav{display:flex;gap:26px}
+.nav nav a,.nav-end a:not(.btn){color:color-mix(in srgb,var(--bark) 72.15687%,transparent);text-decoration:none;font-size:14px}
+.nav nav a:hover,.nav-end a:not(.btn):hover{color:var(--bark)}
+.nav-end{margin-left:auto;display:flex;align-items:center;gap:22px}
+.btn{display:inline-flex;align-items:center;height:40px;padding:0 18px;border-radius:7px;background:var(--bark);color:var(--soil);font:600 14.5px var(--sans);text-decoration:none;white-space:nowrap}
+.btn:hover{background:var(--bark-hi)}
+.btn.sm{height:32px;padding:0 13px;font-size:13.5px}
+.link{color:var(--bark);font:400 14.5px var(--sans);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--ash) 80%,transparent);padding-bottom:1px}
+.link:hover{border-color:var(--bark)}
+
+/* hero: the plate */
+.hero{padding-top:6px}
+.plate-scroll{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--ash) transparent}
+.plate{position:relative;margin:0 auto;overflow:hidden}
+.plate canvas{position:absolute;display:block}
+.world{position:absolute;left:0;top:0;width:1504px;height:608px;transform-origin:0 0}
+.world .over{position:absolute;left:0;top:0;overflow:visible}
+.copy-world{position:absolute;right:44px;top:54px}
+.copy h1{white-space:nowrap;margin:0 0 14px;font:400 39px/1.12 var(--disp);letter-spacing:-.022em}
+.lede{margin:0 0 26px;max-width:31em;font:400 17px/1.45 var(--sans);color:color-mix(in srgb,var(--bark) 78.03922%,transparent);text-wrap:pretty}
+.ctas{display:flex;align-items:center;gap:22px;margin:0}
+.pkg{position:absolute;height:24px;margin:0;border:0;background:none;padding-top:0;padding-bottom:0;font:500 10.5px/24px var(--mono);letter-spacing:.01em;color:var(--label);cursor:pointer;white-space:nowrap}
+.pkg span{display:inline-block;line-height:13px;padding:0 3px;border-radius:2px;background:color-mix(in srgb,var(--soil) 74.11765%,transparent);transition:color .45s}
+.pkg:hover span{color:var(--bark);background:color-mix(in srgb,var(--soil) 92.15687%,transparent)}
+.pkg.on span,.pkg.chg span{color:var(--fox)}
+.pkg.chg span{box-shadow:inset 0 -1px 0 var(--fox)}
+.pkg[aria-pressed="true"] span{font-weight:600}
+.pkg.root{cursor:default;color:var(--bark)}
+.pkg.root span{padding:1px 4px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 54.90197%)),transparent)}
+.pkg:focus-visible{outline:none}
+.pkg:focus-visible span{outline:1.5px solid var(--bark);outline-offset:2px}
+/* below 880px the words leave the plate and the plate pans */
+.copy-flow .copy{padding:22px 0 24px}
+.copy-flow .lede{font-size:15.5px;margin-bottom:20px}
+.copy-flow .copy h1{font-size:clamp(17px,calc((100vw - 2 * var(--pad)) / 15.4),38px)}
+
+/* sections */
+section.band{padding-top:96px}
+h2.fig{display:flex;gap:14px;align-items:baseline;margin:0 0 22px;font:600 11.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}
+h2.fig span{color:var(--ash);font-weight:400}
+.end{padding-top:112px;padding-bottom:64px}
+/* the shape: seven parts, each a specimen, a title and one line, and a command or file */
+.parts{list-style:none;margin:0;padding:0}
+.part{display:grid;grid-template-columns:220px minmax(0,4fr) minmax(0,7fr);gap:20px 36px;align-items:start;padding:30px 0}
+.part+.part{border-top:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 20%)),transparent)}
+.sp{position:relative;aspect-ratio:16/10;background:var(--soil);border:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 40%)),transparent);overflow:hidden}
+.sp canvas{position:absolute;left:0;top:0;display:block}
+/* Cloudflare's cloud at the hub of the "Built on Cloudflare" specimen, in place of the central knot:
+   the official file, unaltered, sized through its viewBox; a ground-coloured halo hugs its outline
+   so no strand crosses it, and the web stays visible all around */
+.cf-mark{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:clamp(44px,22%,56px);line-height:0;pointer-events:none;filter:drop-shadow(0 0 1px var(--soil)) drop-shadow(0 0 1.5px var(--soil)) drop-shadow(0 0 2px var(--soil))}
+.cf-mark svg{display:block;width:100%;height:auto}
+.pt h3{margin:0 0 8px;font:600 17px/1.3 var(--sans);letter-spacing:-.005em;text-wrap:balance}
+.pt p{margin:0;max-width:36em;color:color-mix(in srgb,var(--bark) 65.88236%,transparent);font-size:14.5px;line-height:1.55;text-wrap:pretty}
+.pt code,.end .note code{font:13px var(--mono);color:var(--bark)}
+.pb{min-width:0}
+.code{margin:0;padding:16px 18px;background:var(--loam);border:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 27.84314%)),transparent);border-radius:10px;overflow-x:auto;font:12.5px/1.7 var(--mono);color:var(--bark);tab-size:2}
+.code:focus-visible{outline:1.5px solid var(--bark);outline-offset:2px}
+.code .pr{color:var(--ash)}
+.code .cm{color:var(--ash)}
+.code .out{color:color-mix(in srgb,var(--bark) 74.11765%,transparent)}
+/* part 1: the tree that builds up in three beats; a beat's lines and its caption arrive together */
+.build{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:28px;align-items:start}
+.code.bt{min-width:15em}
+.bt .ln{display:block;padding-left:calc(var(--d, 0) * 2ch)}
+.bt .who{margin-left:2ch;color:color-mix(in srgb,var(--bark) 58.03922%,transparent);font:400 11.5px var(--sans)}
+/* an agent's own mark, about the cap height of the text beside it, in that text's colour */
+.ic{display:inline-block;width:.82em;height:.82em;margin-right:.45em;vertical-align:-.08em}
+.ic svg{display:block;width:100%;height:100%}
+.beats{list-style:none;margin:0;padding:4px 0 0;display:grid;gap:16px}
+.beats li{display:grid;gap:3px;max-width:30em}
+.beats b{font:600 14px var(--sans)}
+.beats span{color:color-mix(in srgb,var(--bark) 65.88236%,transparent);font-size:13.5px;line-height:1.5}
+.beats code{font:12.5px var(--mono);color:var(--bark)}
+.adapt{margin:16px 0 0;color:var(--ash);font:italic 400 13px/1.5 var(--sans)}
+.adapt code{font:normal 12px var(--mono);color:var(--ash)}
+.build.armed [data-b]{opacity:0;transform:translateY(5px)}
+.build.armed [data-b]{transition:opacity .42s cubic-bezier(.2,.7,.2,1),transform .42s cubic-bezier(.2,.7,.2,1)}
+.build.armed .ln[data-b]{transition-delay:calc(var(--k) * 60ms)}
+.build.armed li[data-b]{transition-delay:120ms}
+.build.b1 [data-b="1"],.build.b2 [data-b="2"],.build.b3 [data-b="3"]{opacity:1;transform:none}
+/* part 2: the same tree in three panes; the saved file arrives in all three at once */
+.panes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pane{margin:0;min-width:0}
+.pane figcaption{margin:0 0 7px;font:600 12.5px var(--sans);color:color-mix(in srgb,var(--bark) 80%,transparent)}
+.pane .code{padding:12px 14px;font-size:11.5px;line-height:1.75;min-width:0}
+.q4 .nm{color:var(--fox)}
+.q4 .sv{margin-left:1.2ch;font:italic 400 11px var(--sans);color:var(--ash)}
+.share.armed .q4{opacity:0;transform:translateY(4px)}
+.share.armed .q4{transition:opacity .45s cubic-bezier(.2,.7,.2,1),transform .45s cubic-bezier(.2,.7,.2,1)}
+.share.armed.on .q4{opacity:1;transform:none}
+.cf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 28px;margin:0}
+.cf div{margin:0;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 27.84314%)),transparent)}
+.cf dt{font:600 14.5px var(--sans)}
+.cf dd{margin:2px 0 0;color:color-mix(in srgb,var(--bark) 65.88236%,transparent);font-size:13.5px;line-height:1.5}
+.credits{margin:22px 0 0;max-width:62em;color:var(--ash);font-size:13px;line-height:1.55}
+.end h2{margin:0 0 26px;font:400 clamp(34px,5vw,56px)/1.05 var(--disp);letter-spacing:-.025em}
+.end .note{max-width:34em;margin:18px 0 0;color:color-mix(in srgb,var(--bark) 61.96079%,transparent);font-size:13.5px;line-height:1.55;text-wrap:pretty}
+.end .note code{font:12.5px var(--mono);color:var(--bark)}
+.later{margin:44px 0 0;max-width:62em;color:color-mix(in srgb,var(--bark) 61.96079%,transparent);font-size:13.5px;line-height:1.55;border-top:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 30.19608%)),transparent);padding-top:18px}
+.cmds{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin:30px 0 0}
+.end .note a{color:var(--bark);text-underline-offset:3px}
+.cmdline{display:inline-flex;align-items:center;gap:14px;margin:0;max-width:100%;padding:8px 8px 8px 14px;border:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 40%)),transparent);border-radius:8px;font:13px var(--mono)}
+.cmdline code{overflow-wrap:anywhere}
+.cmdline code::before{content:"$ ";color:var(--ash)}
+.cmdline button{font:12px var(--mono);color:var(--bark);background:var(--loam);border:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 40%)),transparent);border-radius:5px;padding:4px 10px;cursor:pointer;min-width:64px}
+
+.foot .ground{position:relative;border-top:1px solid color-mix(in srgb,var(--bark) 85.09804%,transparent)}
+.foot .ground canvas{display:block}
+.foot-row{display:flex;align-items:flex-start;gap:14px 22px;flex-wrap:wrap;padding:22px 0 34px;font-size:13px;color:var(--ash)}
+.foot-row svg{margin-top:1px}
+.foot-row .c{margin-left:auto;white-space:nowrap}
+
+/* the debug panel: the colour theme (panel.js); hidden until the backtick key or ?debug=1 */
+.dbg{position:fixed;right:16px;bottom:16px;z-index:20;width:204px;padding:12px 14px 11px;background:var(--loam);border:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 40%)),transparent);border-radius:8px;color:var(--bark);font:13px/1.4 var(--sans)}
+.dbg[hidden]{display:none}
+.dbg fieldset{margin:0;padding:0;border:0;min-width:0}
+.dbg legend{padding:0;margin:0 0 6px;font:600 10.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ash)}
+.dbg label{display:flex;align-items:center;gap:8px;padding:2px 0;cursor:pointer}
+.dbg input{margin:0;accent-color:var(--bark)}
+.dbg-row{margin-top:10px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--rule) min(100%,calc(var(--rule-k) * 27.84314%)),transparent)}
+.dbg-mode label{display:inline-flex;margin-right:16px}
+.dbg fieldset:disabled label{color:var(--ash);cursor:default}
+.dbg-k{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:10px 0 0;color:var(--ash);font-size:11.5px}
+.dbg kbd{font:11px var(--mono)}
+.dbg-x{padding:0;border:0;background:none;color:var(--bark);font:11.5px var(--sans);cursor:pointer;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--ash) 80%,transparent);text-underline-offset:2px}
+
+@media (max-width:1100px){.part{grid-template-columns:180px minmax(0,1fr)}.pb{grid-column:1 / -1}}
+@media (max-width:880px){.nav nav{display:none}.hero{padding-top:0}section.band{padding-top:72px}}
+@media (max-width:560px){.part{grid-template-columns:1fr;gap:16px;padding:26px 0}.sp{aspect-ratio:16/7}.end{padding-top:88px}.cf{grid-template-columns:1fr}
+  .code{font-size:12px;padding:14px}.build{grid-template-columns:1fr;gap:18px}.panes{grid-template-columns:1fr;gap:10px}.pane figcaption{margin-bottom:5px}.pane .code{padding:9px 12px;line-height:1.55}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<script>(function () {
+  var K = {"pando":"#0C0F0C","plannotator-dark":"oklch(0.15 0.02 260)","plannotator-light":"oklch(0.97 0.005 260)","iris-dark":"#08090c","iris-light":"#f4f5f7"}, d = document.documentElement;
+  function key(k) { if (!k) return null; k = String(k).toLowerCase(); if (!K[k] && K[k + '-dark']) k += '-dark'; return K[k] ? k : null; }
+  function set(k, keep) {
+    k = key(k) || 'pando';
+    if (k === 'pando') d.removeAttribute('data-theme'); else d.setAttribute('data-theme', k);
+    var m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute('content', K[k]);
+    if (keep) try { localStorage.setItem('pando-theme', k); } catch (e) {}
+    document.dispatchEvent(new Event('pando:theme'));
+  }
+  var q = null, s = null;
+  try { q = new URLSearchParams(location.search).get('theme'); } catch (e) {}
+  try { s = localStorage.getItem('pando-theme'); } catch (e) {}
+  set(key(q) || s, !!key(q));
+  window.PandoTheme = { set: set, get: function () { return d.getAttribute('data-theme') || 'pando'; } };
+})();</script>
+</head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="wrap nav">
+  <a class="brand" href="#top" aria-label="Pando, top of the page"><svg width="26" height="26" viewBox="0 2 64 64" aria-hidden="true" focusable="false"><path d="M1 56.5 H58 L62.05 52 H52.45 A3.2 3.2 0 0 1 49.25 48.8 V24 L42.75 29.2 V48.8 A3.2 3.2 0 0 1 39.55 52 H37.95 A3.2 3.2 0 0 1 34.75 48.8 V5 L28.25 10.2 V48.8 A3.2 3.2 0 0 1 25.05 52 H23.45 A3.2 3.2 0 0 1 20.25 48.8 V16 L13.75 21.2 V48.8 A3.2 3.2 0 0 1 10.55 52 H5.05Z" style="fill:var(--bark)"/></svg></a>
+  <nav aria-label="On this page"><a href="#shape">How it works</a><a href="#review">Review and merge</a><a href="#start">Bring your monorepo</a></nav>
+  <div class="nav-end"><a class="btn sm" href="#start">Create your first repo</a></div>
+</header>
+<main id="main">
+<section class="wrap hero" id="top" aria-labelledby="h1">
+  <div class="copy-flow"></div>
+  <div class="plate-scroll">
+    <div class="plate">
+      <canvas id="net" aria-hidden="true"></canvas><canvas id="lit" aria-hidden="true"></canvas>
+      <div class="world">
+        <svg class="over" aria-hidden="true" focusable="false" width="1504" height="608" viewBox="48 12 1504 608">
+  <rect x="48.5" y="12.5" width="1503" height="607" fill="none" style="stroke:var(--rule);stroke-opacity:min(1,calc(var(--rule-k) * .7))"/>
+  <rect x="55.5" y="19.5" width="1489" height="593" fill="none" style="stroke:var(--rule);stroke-opacity:min(1,calc(var(--rule-k) * .45))" stroke-width=".5"/>
+  <line x1="56" x2="1544" y1="286.5" y2="286.5" style="stroke:var(--bark)" stroke-opacity=".85"/>
+  <g transform="translate(110 286) scale(1.8)">
+  <defs><clipPath id="mk"><path d="M1 56.5 H58 L62.05 52 H52.45 A3.2 3.2 0 0 1 49.25 48.8 V24 L42.75 29.2 V48.8 A3.2 3.2 0 0 1 39.55 52 H37.95 A3.2 3.2 0 0 1 34.75 48.8 V5 L28.25 10.2 V48.8 A3.2 3.2 0 0 1 25.05 52 H23.45 A3.2 3.2 0 0 1 20.25 48.8 V16 L13.75 21.2 V48.8 A3.2 3.2 0 0 1 10.55 52 H5.05Z"/></clipPath></defs>
+  <g transform="translate(0 -66.38) scale(1.2766)">
+    <path d="M1 56.5 H58 L62.05 52 H52.45 A3.2 3.2 0 0 1 49.25 48.8 V24 L42.75 29.2 V48.8 A3.2 3.2 0 0 1 39.55 52 H37.95 A3.2 3.2 0 0 1 34.75 48.8 V5 L28.25 10.2 V48.8 A3.2 3.2 0 0 1 25.05 52 H23.45 A3.2 3.2 0 0 1 20.25 48.8 V16 L13.75 21.2 V48.8 A3.2 3.2 0 0 1 10.55 52 H5.05Z" style="fill:var(--air)"/>
+    <g clip-path="url(#mk)"><path d="M34.7 15.5h1.7M11 38.2h1.9M53.1 23.6h1.1M49.7 22.6h1.8M0.7 42h1.1M55.6 29.1h2.2M44.6 21.9h1.2M3.7 36h1.2M57 18.1h1.3M22.8 44.6h0.7M19.4 9.5h2M37.2 10.9h1.2M57.8 31.7h0.9M60.9 28.5h2.1M38.8 11.6h1.6M9.7 26.9h1.3M22 31.7h1.9M25.4 50.2h0.9M24 48.6h1.8M1.3 37.9h1.4M20.2 49.2h1M12.7 7.7h1.5M22.7 41h1.3M22.5 44h1.7M1.9 5.5h1.9M2.3 11.9h1.7M37.4 46.8h1.1M40.3 16.4h1.2M24.8 17.5h0.7M42 49.6h1.9M18.5 16.4h1.9M11.1 32.2h1.9M56.3 32h1.7M18.8 23.3h1.3M52.4 34.7h0.7M20.1 26.9h0.8M19.8 8.6h1.9M36.8 11.8h1.3M56.6 37.5h1.9M45.2 30.5h0.9M36.9 44.8h1.4M29 32.4h2.1M2 12.7h1.6M1.2 14.9h1M44.3 50.3h1M21.3 15.2h1.4M10.5 50.4h0.8M62.7 27.1h2.2M37 19.6h1.8M10.9 38.4h1.7M38.6 18.7h1.7M33.4 22h1.5M36.1 38.6h0.9M33 22.4h1.5M44 41.8h0.8M3.3 23.6h0.6M15.7 24.1h0.8M11 49h1M34.3 33.8h1.9M49.1 31.2h1.9M28.8 50.4h1.7M31.9 20.8h0.8M48 18h0.6M62.9 5.5h1.3M29.3 18.6h1.3M23.9 28.8h0.8M10.2 32.6h0.9M35.2 28.5h0.8M16 48.3h1.9M31.8 7.4h1.5M21 6.5h1.1M23.2 51h1.7M60.5 45h1.3M50.7 40.7h0.7M10.5 25.3h1.1M42.5 48.3h2.2M2 45h1M51.6 38.8h1.5M23.8 7.2h1.3M13.4 17.7h1.8M0.1 46.1h1.6M44.6 15.2h1.5M55.3 41.3h0.9M4.9 33.3h1.1M56.2 7.9h2.2M34.3 39.7h1.3M43.6 11.2h1.7M32.5 31.2h0.6M13.8 25.6h0.8M33 32.5h1.3M26.1 47.7h1.4M28.3 23.8h0.8M55.9 9.9h0.6M25.7 41.7h1.2M24.9 51h2.2M5.3 44.5h0.6M26.2 11.1h0.9M22.2 23.8h0.6M21.8 46.6h0.8M45.2 7.2h1.1M32.2 41h1M43.7 48.1h1.9M52.6 6.6h0.8M35.1 15.6h1.8M36.3 43.4h1.2M33.8 32.1h2.1M62.9 24.1h2.1M5.4 43.1h0.6M10.2 24.8h2M63.1 43.4h1.6M50.7 8.6h1.2M55.2 46.7h1.6M2.3 44.4h2.1M7.2 23.7h1.2M32.3 19.1h0.6M30.8 43.8h1.8M4.6 47.4h0.9M24.1 29h1.4M18.3 14.3h2.1M35.1 44h2M15.9 15h1.7M40.1 25.5h1.3M1.5 39.4h1.4M56 33.2h2.1M16.4 14.1h0.8M3.9 41.5h1.7M64 32.1h1.8M12.2 34.1h0.8M37.6 37.4h1M18.2 16.5h1M21.3 25.4h2.1M0.8 17.1h1.9M35 35.8h1.4M6.4 36.9h1.8M54 47.7h1.2M2.3 46.4h2M25.7 6h1.2M0.8 5.5h0.9M49.4 29.8h1.3M8.1 29.8h1.3M49.1 45.6h2M21.2 9h1.7M12.9 46.8h1.7M43 47.9h1.9M35 38.3h0.9M6.3 22h1.7M27.8 32.7h1.9M37.8 5.6h1.9M11 4.6h0.8M8.1 49.9h1.8M30.2 42h0.9M18.1 43.4h1.2M3.4 16.1h2.1M42 12.7h1.3M17.1 16.3h1M48.1 18.9h1.1M41.2 46.5h1.7M56.1 34.1h1.5M9.3 41.7h1.7M30.5 24h1.6" style="stroke:var(--bark)" stroke-opacity=".26" stroke-width=".32" stroke-linecap="round"/></g>
+    <path d="M1 56.5 H58 L62.05 52 H52.45 A3.2 3.2 0 0 1 49.25 48.8 V24 L42.75 29.2 V48.8 A3.2 3.2 0 0 1 39.55 52 H37.95 A3.2 3.2 0 0 1 34.75 48.8 V5 L28.25 10.2 V48.8 A3.2 3.2 0 0 1 25.05 52 H23.45 A3.2 3.2 0 0 1 20.25 48.8 V16 L13.75 21.2 V48.8 A3.2 3.2 0 0 1 10.55 52 H5.05Z" fill="none" style="stroke:var(--bark)" stroke-width="2.6" stroke-miterlimit="4"/>
+    <path d="M15.51 31 A1.82 1.82 0 0 1 18.5 31 A1.82 1.82 0 0 1 15.51 31Z" style="fill:var(--bark)"/><path d="M30.01 20 A1.82 1.82 0 0 1 32.99 20 A1.82 1.82 0 0 1 30.01 20Z" style="fill:var(--bark)"/><path d="M30.01 38 A1.82 1.82 0 0 1 32.99 38 A1.82 1.82 0 0 1 30.01 38Z" style="fill:var(--bark)"/><path d="M44.51 38 A1.82 1.82 0 0 1 47.5 38 A1.82 1.82 0 0 1 44.51 38Z" style="fill:var(--bark)"/>
+  </g>
+  <g transform="translate(101.21 0)"><g style="fill:var(--bark)"><path d="M0 -40 L6.2 -40 V13.04 L0 18Z"/><path fill-rule="evenodd" d="M0 -20a21 20.8 0 1 0 42 0a21 20.8 0 1 0 -42 0Z M6.7 -20a14.3 15.22 0 1 1 28.61 0a14.3 15.22 0 1 1 -28.61 0Z"/><path fill-rule="evenodd" d="M48 -20a21 20.8 0 1 0 42 0a21 20.8 0 1 0 -42 0Z M54.7 -20a14.3 15.22 0 1 1 28.61 0a14.3 15.22 0 1 1 -28.61 0Z"/><path d="M83.8 -40 L90 -40 V0 L83.8 0Z"/><path d="M99 -40 L105.2 -40 V0 L99 0Z"/><path d="M99 -20 A18.5 20.8 0 0 1 136 -20 H129.8 A12.3 15.22 0 0 0 105.2 -20Z"/><path d="M129.8 -20.6 H136 V0 H129.8Z"/><path fill-rule="evenodd" d="M143 -20a21 20.8 0 1 0 42 0a21 20.8 0 1 0 -42 0Z M149.7 -20a14.3 15.22 0 1 1 28.61 0a14.3 15.22 0 1 1 -28.61 0Z"/><path d="M178.8 -55.04 L185 -60 V0 L178.8 0Z"/><path fill-rule="evenodd" d="M191.5 -20a21 20.8 0 1 0 42 0a21 20.8 0 1 0 -42 0Z M198.2 -20a14.3 15.22 0 1 1 28.61 0a14.3 15.22 0 1 1 -28.61 0Z"/></g></g>
+</g>
+</svg>
+        <div class="copy-world">
+          <div class="copy">
+            <h1 id="h1">Everything everywhere all at once</h1>
+            <p class="lede">A git platform for monorepos, built on Cloudflare, where many agents work at once.</p>
+            <p class="ctas"><a class="btn" href="#start">Create your first repo</a><a class="link" href="#shape">How it works →</a></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="sr-only">The picture below the headline is an example monorepo drawn as one root system. Each knot is a part of it: a meta-layer folder such as decisions/ or research/plans/, a project such as projects/workspaces, or a worktree such as worktrees/main. It shows three changes in turn, in decisions/, in worktrees/decision-chips and in worktrees/main, and lights the parts each one reaches. Each label is a button that makes a change there.</p>
+  <p class="sr-only" aria-live="polite" id="live"></p>
+</section>
+
+<section class="wrap band" id="shape" aria-labelledby="fig2">
+  <h2 class="fig" id="fig2"><span>Fig. 2</span>The shape of Pando</h2>
+  <ol class="parts">
+    <li class="part" id="monorepo">
+      <div class="sp"><canvas id="sp-1" role="img" aria-label="An example monorepo at rest: its parts are knots, joined by cords into one root system."></canvas></div>
+      <div class="pt"><h3>One monorepo per project, shared live</h3><p>It is just your folders. The one rule: each code repo lives under <code>projects/</code>. Everything else is yours.</p></div>
+      <div class="pb"><div class="build" data-build>
+      <pre class="code bt" aria-label="An example monorepo, built up in three steps"><span class="ln"><span class="pr">$ </span>pando clone acme</span><span class="ln" data-b="1" style="--d:0;--k:0">~/acme/</span><span class="ln" data-b="1" style="--d:1;--k:1">AGENTS.md</span><span class="ln" data-b="1" style="--d:1;--k:2">artifacts/</span><span class="ln" data-b="1" style="--d:1;--k:3">decisions/</span><span class="ln" data-b="1" style="--d:2;--k:4">0007-merge-commits.md</span><span class="ln" data-b="1" style="--d:1;--k:5">docs/</span><span class="ln" data-b="1" style="--d:1;--k:6">research/</span><span class="ln" data-b="1" style="--d:1;--k:7">wiki/</span><span class="ln" data-b="2" style="--d:1;--k:0">projects/api/</span><span class="ln" data-b="2" style="--d:1;--k:1">projects/web/</span><span class="ln" data-b="3" style="--d:2;--k:0">worktrees/main/</span><span class="ln" data-b="3" style="--d:2;--k:1">worktrees/agent-1/<span class="who"><span class="ic" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 257" fill="currentColor">
+          <path d="m50.228 170.321 50.357-28.257.843-2.463-.843-1.361h-2.462l-8.426-.518-28.775-.778-24.952-1.037-24.175-1.296-6.092-1.297L0 125.796l.583-3.759 5.12-3.434 7.324.648 16.202 1.101 24.304 1.685 17.629 1.037 26.118 2.722h4.148l.583-1.685-1.426-1.037-1.101-1.037-25.147-17.045-27.22-18.017-14.258-10.37-7.713-5.25-3.888-4.925-1.685-10.758 7-7.713 9.397.649 2.398.648 9.527 7.323 20.35 15.75L94.817 91.9l3.889 3.24 1.555-1.102.195-.777-1.75-2.917-14.453-26.118-15.425-26.572-6.87-11.018-1.814-6.61c-.648-2.723-1.102-4.991-1.102-7.778l7.972-10.823L71.42 0 82.05 1.426l4.472 3.888 6.61 15.101 10.694 23.786 16.591 32.34 4.861 9.592 2.592 8.879.973 2.722h1.685v-1.556l1.36-18.211 2.528-22.36 2.463-28.776.843-8.1 4.018-9.722 7.971-5.25 6.222 2.981 5.12 7.324-.713 4.73-3.046 19.768-5.962 30.98-3.889 20.739h2.268l2.593-2.593 10.499-13.934 17.628-22.036 7.778-8.749 9.073-9.657 5.833-4.601h11.018l8.1 12.055-3.628 12.443-11.342 14.388-9.398 12.184-13.48 18.147-8.426 14.518.778 1.166 2.01-.194 30.46-6.481 16.462-2.982 19.637-3.37 8.88 4.148.971 4.213-3.5 8.62-20.998 5.184-24.628 4.926-36.682 8.685-.454.324.519.648 16.526 1.555 7.065.389h17.304l32.21 2.398 8.426 5.574 5.055 6.805-.843 5.184-12.962 6.611-17.498-4.148-40.83-9.721-14-3.5h-1.944v1.167l11.666 11.406 21.387 19.314 26.767 24.887 1.36 6.157-3.434 4.86-3.63-.518-23.526-17.693-9.073-7.972-20.545-17.304h-1.36v1.814l4.73 6.935 25.017 37.59 1.296 11.536-1.814 3.76-6.481 2.268-7.13-1.297-14.647-20.544-15.1-23.138-12.185-20.739-1.49.843-7.194 77.448-3.37 3.953-7.778 2.981-6.48-4.925-3.436-7.972 3.435-15.749 4.148-20.544 3.37-16.333 3.046-20.285 1.815-6.74-.13-.454-1.49.194-15.295 20.999-23.267 31.433-18.406 19.702-4.407 1.75-7.648-3.954.713-7.064 4.277-6.286 25.47-32.405 15.36-20.092 9.917-11.6-.065-1.686h-.583L44.07 198.125l-12.055 1.555-5.185-4.86.648-7.972 2.463-2.593 20.35-13.999-.064.065Z" />
+        </svg></span>Claude Code</span></span><span class="ln" data-b="3" style="--d:2;--k:2">worktrees/agent-2/<span class="who"><span class="ic" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd">
+          <path
+            clip-rule="evenodd"
+            d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"
+          />
+        </svg></span>Codex</span></span></pre>
+      <ol class="beats"><li data-b="1"><b>Your artifacts, docs, wiki, and decision records</b><span>Plain files, live on every machine. This is the meta layer: whatever you keep outside <code>projects/</code>.</span></li><li data-b="2"><b>Your code</b><span>Each folder in <code>projects/</code> is its own repo, with a protected main.</span></li><li data-b="3"><b>Your agents</b><span>One worktree per agent. It appears at once, and files download when opened.</span></li></ol>
+    </div>
+    <p class="adapt">Pando adapts to any monorepo layout. <code>projects/</code> is only the default; one line in <code>.pando/pando.toml</code> points it at yours.</p></div>
+    </li>
+    <li class="part" id="agents">
+      <div class="sp"><canvas id="sp-2" role="img" aria-label="Taproots at the ground line, lit by a change in an agent's branch."></canvas></div>
+      <div class="pt"><h3>Many (remote) agents at once</h3><p>Everyone works in the same filesystem: the same folders at the same paths on your laptop, a teammate's, and every agent's cloud sandbox.</p></div>
+      <div class="pb"><div class="share" data-share>
+      <div class="panes"><figure class="pane"><figcaption>your Mac</figcaption><pre class="code bt" aria-label="The same folders on your Mac"><span class="ln">~/acme/</span><span class="ln" style="--d:1">AGENTS.md</span><span class="ln" style="--d:1">artifacts/</span><span class="ln" style="--d:1">decisions/</span><span class="ln q4" style="--d:2"><span class="nm">0008-q4-plan.md</span><span class="sv">saved</span></span><span class="ln" style="--d:1">docs/</span><span class="ln" style="--d:1">research/</span><span class="ln" style="--d:1">wiki/</span><span class="ln" style="--d:1">projects/web/worktrees/</span></pre></figure><figure class="pane"><figcaption>a teammate's laptop</figcaption><pre class="code bt" aria-label="The same folders on a teammate's laptop"><span class="ln">~/acme/</span><span class="ln" style="--d:1">AGENTS.md</span><span class="ln" style="--d:1">artifacts/</span><span class="ln" style="--d:1">decisions/</span><span class="ln q4" style="--d:2"><span class="nm">0008-q4-plan.md</span></span><span class="ln" style="--d:1">docs/</span><span class="ln" style="--d:1">research/</span><span class="ln" style="--d:1">wiki/</span><span class="ln" style="--d:1">projects/web/worktrees/</span></pre></figure><figure class="pane"><figcaption><span class="ic" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 257" fill="currentColor">
+          <path d="m50.228 170.321 50.357-28.257.843-2.463-.843-1.361h-2.462l-8.426-.518-28.775-.778-24.952-1.037-24.175-1.296-6.092-1.297L0 125.796l.583-3.759 5.12-3.434 7.324.648 16.202 1.101 24.304 1.685 17.629 1.037 26.118 2.722h4.148l.583-1.685-1.426-1.037-1.101-1.037-25.147-17.045-27.22-18.017-14.258-10.37-7.713-5.25-3.888-4.925-1.685-10.758 7-7.713 9.397.649 2.398.648 9.527 7.323 20.35 15.75L94.817 91.9l3.889 3.24 1.555-1.102.195-.777-1.75-2.917-14.453-26.118-15.425-26.572-6.87-11.018-1.814-6.61c-.648-2.723-1.102-4.991-1.102-7.778l7.972-10.823L71.42 0 82.05 1.426l4.472 3.888 6.61 15.101 10.694 23.786 16.591 32.34 4.861 9.592 2.592 8.879.973 2.722h1.685v-1.556l1.36-18.211 2.528-22.36 2.463-28.776.843-8.1 4.018-9.722 7.971-5.25 6.222 2.981 5.12 7.324-.713 4.73-3.046 19.768-5.962 30.98-3.889 20.739h2.268l2.593-2.593 10.499-13.934 17.628-22.036 7.778-8.749 9.073-9.657 5.833-4.601h11.018l8.1 12.055-3.628 12.443-11.342 14.388-9.398 12.184-13.48 18.147-8.426 14.518.778 1.166 2.01-.194 30.46-6.481 16.462-2.982 19.637-3.37 8.88 4.148.971 4.213-3.5 8.62-20.998 5.184-24.628 4.926-36.682 8.685-.454.324.519.648 16.526 1.555 7.065.389h17.304l32.21 2.398 8.426 5.574 5.055 6.805-.843 5.184-12.962 6.611-17.498-4.148-40.83-9.721-14-3.5h-1.944v1.167l11.666 11.406 21.387 19.314 26.767 24.887 1.36 6.157-3.434 4.86-3.63-.518-23.526-17.693-9.073-7.972-20.545-17.304h-1.36v1.814l4.73 6.935 25.017 37.59 1.296 11.536-1.814 3.76-6.481 2.268-7.13-1.297-14.647-20.544-15.1-23.138-12.185-20.739-1.49.843-7.194 77.448-3.37 3.953-7.778 2.981-6.48-4.925-3.436-7.972 3.435-15.749 4.148-20.544 3.37-16.333 3.046-20.285 1.815-6.74-.13-.454-1.49.194-15.295 20.999-23.267 31.433-18.406 19.702-4.407 1.75-7.648-3.954.713-7.064 4.277-6.286 25.47-32.405 15.36-20.092 9.917-11.6-.065-1.686h-.583L44.07 198.125l-12.055 1.555-5.185-4.86.648-7.972 2.463-2.593 20.35-13.999-.064.065Z" />
+        </svg></span>agent-1 · cloud sandbox</figcaption><pre class="code bt" aria-label="The same folders on agent-1 · cloud sandbox"><span class="ln">~/acme/</span><span class="ln" style="--d:1">AGENTS.md</span><span class="ln" style="--d:1">artifacts/</span><span class="ln" style="--d:1">decisions/</span><span class="ln q4" style="--d:2"><span class="nm">0008-q4-plan.md</span></span><span class="ln" style="--d:1">docs/</span><span class="ln" style="--d:1">research/</span><span class="ln" style="--d:1">wiki/</span><span class="ln" style="--d:1">projects/web/worktrees/</span></pre></figure></div>
+      <p class="adapt">Docs and decisions change everywhere as they are saved. Code reaches others when it is pushed.</p>
+    </div></div>
+    </li>
+    <li class="part" id="review">
+      <div class="sp"><canvas id="sp-3" role="img" aria-label="A change in worktrees/decision-chips on its way along a cord to projects/workspaces."></canvas></div>
+      <div class="pt"><h3>Review built for agents and people</h3><p>A review is the branch diff (the three-dot diff, as on GitHub) and the branch's commits, with their messages and who made them. Agents read it as JSON; people read it in Plannotator.</p></div>
+      <div class="pb"><pre class="code" tabindex="0"><span class="pr">$ </span>pando diff decision-chips --json
+<span class="out">{ "branch": "decision-chips", "base": "c03d41e", "head": "9f1c2ab",</span>
+<span class="out">  "files": [</span>
+<span class="out">    { "path": "apps/web/src/DecisionChip.tsx",</span>
+<span class="out">      "status": "added", "additions": 84, "deletions": 0 },</span>
+<span class="out">    { "path": "apps/web/src/Card.tsx",</span>
+<span class="out">      "status": "modified", "additions": 12, "deletions": 3 } ],</span>
+<span class="out">  "commits": [</span>
+<span class="out">    { "id": "9f1c2ab", "message": "Show the linked decision on each card",</span>
+<span class="out">      "trailers": {</span>
+<span class="out">        "Pando-Agent": "agent-1",</span>
+<span class="out">        "Pando-Worktree": "projects/workspaces/worktrees/decision-chips",</span>
+<span class="out">        "Pando-Machine": "sandbox-1" } } ] }</span>
+<span class="pr">$ </span>pando review decision-chips   <span class="cm"># opens it in Plannotator</span></pre></div>
+    </li>
+    <li class="part" id="merge">
+      <div class="sp"><canvas id="sp-4" role="img" aria-label="After a change in worktrees/main: the parts it reached are lit."></canvas></div>
+      <div class="pt"><h3>A person merges</h3><p>A person's Merge is the approval, and the branch's review page is the pull request. Agents comment but never merge. Merge commits keep every commit and message on main, and main never takes a direct push.</p></div>
+      <div class="pb"><pre class="code" tabindex="0"><span class="cm"># agent-1, in its worktree</span>
+<span class="pr">$ </span>git push origin HEAD:main
+<span class="out">refused: main is protected; push a branch</span>
+<span class="cm"># you, after the review</span>
+<span class="pr">$ </span>pando merge decision-chips
+<span class="out">main is now 3e7a91c: a merge commit by you, with all 4 commits</span></pre></div>
+    </li>
+    <li class="part" id="checks">
+      <div class="sp"><canvas id="sp-5" role="img" aria-label="A change that has just landed on a knot: a ring goes out before the light moves on."></canvas></div>
+      <div class="pt"><h3>Checks run elsewhere</h3><p>Every push sends a signed webhook. Buildkite, or any CI, runs the checks and posts the status back. Merge waits for green; anyone who may merge can force it.</p></div>
+      <div class="pb"><pre class="code" tabindex="0"><span class="cm"># each push: a signed POST to your CI</span>
+<span class="out">X-Pando-Event: push</span>
+<span class="out">X-Pando-Signature-256: sha256=&lt;HMAC of the body&gt;</span>
+<span class="cm"># the CI posts its status back</span>
+<span class="out">POST /v1/repos/{repo}/commits/4be0c17/statuses</span>
+<span class="out">{ "context": "ci", "state": "failure" }</span>
+<span class="pr">$ </span>pando merge search-index
+<span class="out">refused: required check "ci" is failing on 4be0c17</span>
+<span class="pr">$ </span>pando merge search-index --force</pre></div>
+    </li>
+    <li class="part" id="kept">
+      <div class="sp"><canvas id="sp-6" role="img" aria-label="A change in decisions/ on its way along a cord to deploy/."></canvas></div>
+      <div class="pt"><h3>Nothing is lost</h3><p>Two saves of one file keep both versions. Every save to the meta layer is history. Large files and images go to R2.</p></div>
+      <div class="pb"><pre class="code" tabindex="0"><span class="cm"># two machines saved decisions/HISTORY.md at once</span>
+<span class="pr">$ </span>ls decisions/
+<span class="out">HISTORY.md  HISTORY.conflict-local-&lt;timestamp&gt;.md</span>
+<span class="pr">$ </span>pando resolve decisions/HISTORY.md
+<span class="pr">$ </span>pando history decisions/HISTORY.md
+<span class="pr">$ </span>pando restore decisions/HISTORY.md --to 10:42</pre></div>
+    </li>
+    <li class="part" id="cloudflare">
+      <div class="sp"><canvas id="sp-7" role="img" aria-label="The root of the web: cords converge on Cloudflare's cloud, set where the central knot was."></canvas><span class="cf-mark" role="img" aria-label="Cloudflare"><svg width="66" height="30" viewBox="0 0 66 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_746_2)">
+<path d="M53.1202 13.125C60.1167 13.125 65.7884 18.8334 65.7884 25.875C65.7884 27.1302 65.6082 28.3433 65.2725 29.489C65.1823 29.7967 64.8967 30 64.578 30H46.953C46.6917 30 46.5115 29.7362 46.6052 29.4906L46.9421 28.6077C48.0182 25.775 51.0884 23.4544 53.929 23.3185L59.3134 23.041C59.6011 23.0262 59.8269 22.7869 59.8269 22.4971C59.8269 22.2087 59.6034 21.9702 59.3175 21.9533L54.2613 21.654C51.543 21.5148 50.215 19.0948 50.9461 16.5729L51.7875 13.6705C51.873 13.3753 52.129 13.1604 52.434 13.1438C52.6611 13.1314 52.89 13.125 53.1202 13.125Z" fill="#FF9910"/>
+<path d="M35.6085 0C42.9042 0 49.0327 5.02494 50.7661 11.8235C50.8388 12.109 50.8161 12.4103 50.7121 12.6858L49.324 16.3634C48.2479 19.1961 45.4823 21.6525 42.3531 21.6525L18.249 21.9313C17.9581 21.9348 17.724 22.1731 17.7239 22.466C17.7239 22.7585 17.9576 22.9971 18.2483 23.001L42.0129 23.3169C44.7371 23.3169 46.0592 25.8762 45.3285 28.3983L45.0217 29.4594C44.9292 29.7798 44.6377 30 44.3063 30H0.963624C0.592828 30 0.275519 29.7258 0.245826 29.3538C0.223348 29.0721 0.211914 28.7875 0.211914 28.5C0.211914 23.0237 4.37763 18.527 9.69384 18.0436C9.58474 17.5465 9.52682 17.0301 9.52682 16.5C9.52682 12.565 12.6963 9.375 16.6061 9.375C18.1622 9.375 19.6008 9.88056 20.769 10.7369C22.8496 4.49627 28.7073 0 35.6085 0Z" fill="#FF5F08"/>
+<path d="M53.1202 13.125C60.1167 13.125 65.7884 18.8334 65.7884 25.875C65.7884 27.1302 65.6082 28.3433 65.2725 29.489C65.1823 29.7967 64.8967 30 64.578 30H46.953C46.6917 30 46.5115 29.7362 46.6052 29.4906L46.9421 28.6077C48.0182 25.775 51.0884 23.4544 53.929 23.3185L59.3134 23.041C59.6011 23.0262 59.8269 22.7869 59.8269 22.4971C59.8269 22.2087 59.6034 21.9702 59.3175 21.9533L54.2613 21.654C51.543 21.5148 50.215 19.0948 50.9461 16.5729L51.7875 13.6705C51.873 13.3753 52.129 13.1604 52.434 13.1438C52.6611 13.1314 52.89 13.125 53.1202 13.125Z" fill="#FF9910"/>
+<path d="M35.6085 0C42.9042 0 49.0327 5.02494 50.7661 11.8235C50.8388 12.109 50.8161 12.4103 50.7121 12.6858L49.324 16.3634C48.2479 19.1961 45.4823 21.6525 42.3531 21.6525L18.249 21.9313C17.9581 21.9348 17.724 22.1731 17.7239 22.466C17.7239 22.7585 17.9576 22.9971 18.2483 23.001L42.0129 23.3169C44.7371 23.3169 46.0592 25.8762 45.3285 28.3983L45.0217 29.4594C44.9292 29.7798 44.6377 30 44.3063 30H0.963624C0.592828 30 0.275519 29.7258 0.245826 29.3538C0.223348 29.0721 0.211914 28.7875 0.211914 28.5C0.211914 23.0237 4.37763 18.527 9.69384 18.0436C9.58474 17.5465 9.52682 17.0301 9.52682 16.5C9.52682 12.565 12.6963 9.375 16.6061 9.375C18.1622 9.375 19.6008 9.88056 20.769 10.7369C22.8496 4.49627 28.7073 0 35.6085 0Z" fill="#FF5F08"/>
+</g>
+<defs>
+<clipPath id="clip0_746_2">
+<rect width="66" height="30" fill="white"/>
+</clipPath>
+</defs>
+</svg></span></div>
+      <div class="pt"><h3>Built on Cloudflare</h3><p>Every part runs on Cloudflare's developer platform.</p></div>
+      <div class="pb"><dl class="cf">
+      <div><dt>Workers®</dt><dd>the git door, the API, merges and webhooks</dd></div>
+      <div><dt>Artifacts</dt><dd>every repo, its branches and its history</dd></div>
+      <div><dt>Durable Objects™</dt><dd>the meta layer's live saves, and each monorepo's state</dd></div>
+      <div><dt>R2</dt><dd>large files and images</dd></div>
+    </dl>
+    <p class="credits">The mount engine is ArtifactFS (Cloudflare, Apache 2.0). The Mac mount, Pando.app, starts from Oak's open-source FSKit extension and follows its approach of an extension in front of a daemon (Oakspace Inc., Apache 2.0). People review in Plannotator.</p></div>
+    </li></ol>
+</section>
+
+<section class="wrap end" id="start" aria-labelledby="end">
+  <h2 id="end">Bring your monorepo.</h2>
+  <p class="ctas"><a class="btn" href="#init">Create your first repo</a></p>
+  <div class="cmds">
+  <p class="cmdline" id="install"><code>curl -fsSL https://gitpando.com/install | sh</code><button type="button" data-cmd="curl -fsSL https://gitpando.com/install | sh">Copy</button></p>
+  <p class="cmdline" id="init"><code>pando init</code><button type="button" data-cmd="pando init">Copy</button></p>
+  </div>
+  <p class="note">The first line installs <code>pando</code> on a Mac or Linux, and <code>pando login</code> signs you in. Run <code>pando init</code> in the folder you have. With no config file, every folder under <code>projects/</code> becomes a repo with <code>worktrees/</code> inside, and everything else is the meta layer.</p>
+  <p class="note">The app is at <a href="https://app.gitpando.com/">app.gitpando.com</a>, and the docs at <a href="https://docs.gitpando.com/">docs.gitpando.com</a>.</p>
+  <p class="later">A worktree is a git clone on a Mac and on Linux; Cloudflare-run agents mount theirs next to the storage. Later: Windows, a laptop mount that fetches in bulk, and Git LFS for code repos.</p>
+</section>
+</main>
+<footer class="foot">
+  <div class="wrap"><div class="ground"><canvas id="strip" aria-hidden="true"></canvas></div>
+  <div class="foot-row"><svg width="18" height="18" viewBox="0 2 64 64" aria-hidden="true" focusable="false"><path d="M1 56.5 H58 L62.05 52 H52.45 A3.2 3.2 0 0 1 49.25 48.8 V24 L42.75 29.2 V48.8 A3.2 3.2 0 0 1 39.55 52 H37.95 A3.2 3.2 0 0 1 34.75 48.8 V5 L28.25 10.2 V48.8 A3.2 3.2 0 0 1 25.05 52 H23.45 A3.2 3.2 0 0 1 20.25 48.8 V16 L13.75 21.2 V48.8 A3.2 3.2 0 0 1 10.55 52 H5.05Z" style="fill:var(--ash)"/></svg><span class="nm">Pando</span><span class="c">Apache 2.0</span></div></div>
+</footer>
+<aside class="dbg" id="dbg" hidden aria-label="Colour theme (debug)">
+  <fieldset><legend>Theme</legend><label><input type="radio" name="dbg-theme" value="pando">Pando (green)</label><label><input type="radio" name="dbg-theme" value="plannotator">Plannotator</label><label><input type="radio" name="dbg-theme" value="iris">Workspaces Iris</label></fieldset>
+  <div class="dbg-row"><fieldset class="dbg-mode"><legend>Mode</legend><label><input type="radio" name="dbg-mode" value="dark">Dark</label><label><input type="radio" name="dbg-mode" value="light">Light</label></fieldset></div>
+  <p class="dbg-k"><span><kbd>`</kbd> or <kbd>esc</kbd> closes</span><button type="button" class="dbg-x">Close</button></p>
+</aside>
+<script>
+// graph.js: the Pando landing page's living graph, from 01E3 · Mycelium, Living Graph.
+// The real dependency graph of a 22-package monorepo (acme/platform), grown as one mycelium.
+// Packages are knots, every dependency is a braided cord grown from the dependency to its
+// dependent, and a fine anastomosing mesh (every thread joins two others: no loose ends) fuses
+// the cords into one organism. The network is grown once; pulse(W, id) then works out what a
+// change to any package reaches, so the page can land a change wherever the visitor points.
+(function (root) {
+'use strict';
+const TAU = Math.PI * 2;
+
+// ------------------------------------------------------------------ chance --
+function mulberry(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+// one stream per key, so changing one part never reshuffles another
+function stream(...keys) {
+  const f = mulberry(hash(keys.join('|'))); for (let i = 0; i < 9; i++) f();
+  const r = (a = 0, b = 1) => a + f() * (b - a);
+  r.chance = p => f() < p;
+  r.gauss = () => (f() + f() + f() - 1.5) / 1.5;
+  return r;
+}
+function h2(ix, iy, s) { let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(s | 0, 1442695041) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+function noise(x, y, s = 0) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  return h2(xi, yi, s) * (1 - u) * (1 - v) + h2(xi + 1, yi, s) * u * (1 - v) + h2(xi, yi + 1, s) * (1 - u) * v + h2(xi + 1, yi + 1, s) * u * v;
+}
+function fbm(x, y, s = 0, o = 3) { let a = .5, f = 1, t = 0, n = 0; for (let i = 0; i < o; i++) { t += noise(x * f, y * f, s + i * 31) * a; n += a; a *= .5; f *= 2.03; } return t / n; }
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth01 = t => t * t * (3 - 2 * t);
+
+// ---------------------------------------------------------------- geometry --
+function resample(pts, step) {
+  const out = [[pts[0][0], pts[0][1]]]; let need = step;
+  for (let i = 1; i < pts.length; i++) {
+    let x0 = pts[i - 1][0], y0 = pts[i - 1][1]; const x1 = pts[i][0], y1 = pts[i][1];
+    let d = Math.hypot(x1 - x0, y1 - y0);
+    while (d >= need && d > 0) { const t = need / d; x0 += (x1 - x0) * t; y0 += (y1 - y0) * t; out.push([x0, y0]); d = Math.hypot(x1 - x0, y1 - y0); need = step; }
+    need -= d;
+  }
+  const last = pts[pts.length - 1], le = out[out.length - 1];
+  if (Math.hypot(last[0] - le[0], last[1] - le[1]) > step * .2 || out.length < 2) out.push([last[0], last[1]]);
+  return out;
+}
+function chaikin(p, it = 1) {
+  for (let k = 0; k < it; k++) {
+    const q = [p[0]];
+    for (let i = 0; i < p.length - 1; i++) { const a = p[i], b = p[i + 1]; q.push([a[0] * .75 + b[0] * .25, a[1] * .75 + b[1] * .25], [a[0] * .25 + b[0] * .75, a[1] * .25 + b[1] * .75]); }
+    q.push(p[p.length - 1]); p = q;
+  }
+  return p;
+}
+function cumlen(pts) { const c = new Float64Array(pts.length); for (let i = 1; i < pts.length; i++) c[i] = c[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return c; }
+function normalAt(pts, i) { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; let nx = -(b[1] - a[1]), ny = b[0] - a[0]; const l = Math.hypot(nx, ny) || 1; return [nx / l, ny / l]; }
+// a point at arc length s along pts (with its cumulative lengths c)
+function at(pts, c, s) {
+  if (s <= 0) return pts[0]; const n = pts.length; if (s >= c[n - 1]) return pts[n - 1];
+  let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] < s) lo = m; else hi = m; }
+  const t = (s - c[lo]) / ((c[hi] - c[lo]) || 1); return [lerp(pts[lo][0], pts[hi][0], t), lerp(pts[lo][1], pts[hi][1], t)];
+}
+
+// ------------------------------------------------------------------ colour --
+// The default theme, "Pando (green)". build.mjs writes these as the page's CSS tokens, and page.js
+// draws with the live token values, so another theme (themes.mjs) only changes the tokens.
+const COLORS = {
+  soil: '#0C0F0C',   // Night Soil: the ground of everything
+  loam: '#1A1F18',   // Loam: product surfaces, tiles
+  bark: '#E6E0D1',   // Moon Bark: mark, type, knots, cords
+  ash: '#7E8476',    // Hypha Ash: the mesh, quiet labels
+  clay: '#9A7B5E',   // Clay: annotation, the soil itself
+  fox: '#C4E86F',    // Foxfire: affected only
+  air: '#121614',    // night air above ground (a mix, not a swatch)
+  // details of the drawing and the page (they were literals in page.js and build.mjs)
+  mesh: '#7E8476',   // the mesh: Hypha Ash itself in this theme
+  speck: '#6E6152',  // specks in the soil
+  litter: '#8C7A62', // litter under the ground line
+  meshB: '#A9A796',  // the mesh's light tint
+  meshC: '#8C8676',  // the mesh's warm tint
+  grass: '#9EA391',  // grass on the ground line
+  barkHi: '#F4EFE3', // a button under the pointer
+};
+
+// ------------------------------------------------------- the monorepo ------
+// acme/platform @ main: 22 packages, 41 dependencies. Placed by hand: depth runs down,
+// apps nearest the surface, services under them, libraries and tools deeper, foundations at the bottom.
+const GROUND = 286;
+const PACKAGES = [
+  ['apps/docs', 196, 352], ['apps/web', 470, 360], ['apps/mobile', 760, 346], ['apps/admin', 1076, 356],
+  ['services/auth', 330, 430], ['services/notify', 636, 420], ['services/search', 924, 434], ['services/billing', 1196, 418], ['services/ledger', 1442, 428, 'l'],
+  ['tools/release', 112, 478], ['packages/forms', 430, 494], ['packages/api-client', 604, 506], ['packages/i18n', 796, 492], ['packages/telemetry', 984, 508], ['packages/db', 1146, 494], ['packages/money', 1300, 500],
+  ['tools/build', 214, 540], ['packages/ui', 360, 566], ['packages/icons', 540, 580], ['tools/codegen', 716, 566], ['packages/config', 904, 576], ['tools/lint', 120, 590],
+];
+// dependent: [its dependencies]
+const DEPS = {
+  'apps/web': ['packages/ui', 'packages/api-client', 'packages/i18n', 'packages/forms', 'packages/telemetry'],
+  'apps/admin': ['packages/ui', 'packages/api-client', 'packages/forms', 'packages/money'],
+  'apps/docs': ['packages/ui', 'packages/icons'],
+  'apps/mobile': ['packages/api-client', 'packages/i18n', 'packages/icons'],
+  'services/billing': ['packages/money', 'packages/db', 'packages/config', 'packages/telemetry'],
+  'services/ledger': ['packages/money', 'packages/db', 'packages/config'],
+  'services/auth': ['packages/db', 'packages/config', 'packages/telemetry'],
+  'services/search': ['packages/db', 'packages/config'],
+  'services/notify': ['packages/config', 'packages/i18n', 'packages/telemetry'],
+  'packages/ui': ['packages/icons'],
+  'packages/forms': ['packages/ui', 'packages/i18n'],
+  'packages/api-client': ['packages/config', 'tools/codegen'],
+  'packages/db': ['packages/config'],
+  'packages/telemetry': ['packages/config'],
+  'packages/money': ['packages/i18n'],
+  'tools/build': ['packages/config', 'tools/lint'],
+  'tools/release': ['tools/build'],
+  'tools/codegen': ['packages/config'],
+};
+const CHANGED = 'packages/money';   // the change the page opens on (PR #4182)
+// Pando relabel (landing lane, 2026-10-03): what each knot is called on the page. Only the text
+// changes. Ids, positions, cords, label boxes (still sized from the id, so the mesh is grown
+// exactly as before) and the pulse are art-ops' originals. Every label names a part of an example
+// monorepo shaped like Workspaces: meta-layer folders, projects, worktrees, one reference.
+const LABELS = {
+  'packages/money': 'decisions/',                     // tour 1: a decision saved
+  'packages/ui': 'worktrees/decision-chips',          // tour 2: an agent's branch
+  'packages/i18n': 'worktrees/main',                  // tour 3: a merge
+  'apps/admin': 'backlog/', 'services/billing': 'adr/', 'services/ledger': 'deploy/',
+  'packages/forms': 'projects/workspaces', 'apps/web': 'worktrees/callout-seam',
+  'apps/docs': 'research/design/', 'apps/mobile': 'customer-docs/', 'services/notify': 'research/plans/',
+  'packages/api-client': 'projects/workspaces-cli', 'tools/codegen': 'projects/artifact-fs',
+  'packages/icons': 'projects/pando', 'packages/config': 'research/infra/cloudflare',
+  'packages/telemetry': 'scratchpad/', 'packages/db': 'research/reviews/',
+  'services/auth': 'worktrees/oauth-pkce', 'services/search': 'worktrees/search-index',
+  'tools/release': '.pando/pando.toml', 'tools/build': 'research/handoffs/', 'tools/lint': 'research/findings/',
+};
+const LABEL = { size: 10.5, char: 6.32, dx: 11, dy: 3.6 };   // SF Mono 10.5 px
+
+// the repo as data: nodes, edges, who depends on whom
+function repo() {
+  const nodes = PACKAGES.map(([id, x, y, side], i) => ({ i, id, label: LABELS[id] || id, x, y, side: side || 'r' }));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = [];
+  for (const [a, bs] of Object.entries(DEPS)) for (const b of bs) edges.push({ from: byId[b], to: byId[a] });   // grown from the dependency to its dependent
+  const dependents = id => edges.filter(e => e.from.id === id).map(e => e.to.id);
+  // everything that depends on id, directly or through others: what a change to id wakes
+  const closure = id => { const seen = new Set(), st = [id]; while (st.length) for (const d of dependents(st.pop())) if (!seen.has(d)) { seen.add(d); st.push(d); } seen.delete(id); return seen; };
+  for (const n of nodes) { n.deg = edges.filter(e => e.from === n || e.to === n).length; n.traffic = closure(n.id).size; n.rk = 4.2 + 1.45 * Math.sqrt(n.deg); }
+  for (const n of nodes) {     // label box, used to keep the mesh off the words
+    const w = n.id.length * LABEL.char;
+    const x = n.side === 'l' ? n.x - n.rk - LABEL.dx - w : n.x + n.rk + LABEL.dx - 2;
+    n.box = [x - 3, n.y + LABEL.dy - 10, x + w + 3, n.y + LABEL.dy + 3];
+  }
+  return { nodes, edges, byId, closure };
+}
+
+// ------------------------------------------------------------ growing ------
+// a cord walks from P to Q through the soil's grain: nearby cords bend the same way
+function grownPath(P, Q, key, bounds) {
+  const r = stream('path', key);
+  const D0 = Math.hypot(Q[0] - P[0], Q[1] - P[1]);
+  let x = P[0], y = P[1], h = Math.atan2(Q[1] - y, Q[0] - x) + r(-.8, .8), walked = 0;
+  const pts = [[x, y]], step = 3;
+  for (let k = 0; k < 3000; k++) {
+    const dx = Q[0] - x, dy = Q[1] - y, d = Math.hypot(dx, dy);
+    if (d < step * 1.6) break;
+    const to = Math.atan2(dy, dx);
+    const grain = (fbm(x * .0052, y * .0052, 7, 3) - .5) * 3.4;
+    const near = clamp(1 - d / Math.min(200, D0 * .62), 0, 1);
+    let target = to + grain * (1 - near);
+    if (bounds) {   // stay in the soil: lean away from its edges
+      if (y < bounds[1] + 14) target = lerp(target, Math.PI / 2, .5); if (y > bounds[3] - 10) target = lerp(target, -Math.PI / 2, .5);
+    }
+    let diff = target - h; diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    h += diff * (.07 + .55 * near * near + .4 * clamp(walked / D0 - 1.35, 0, 1));
+    x += Math.cos(h) * step; y += Math.sin(h) * step; walked += step;
+    pts.push([x, y]);
+  }
+  pts.push([Q[0], Q[1]]);
+  return resample(chaikin(pts, 2), 3);
+}
+// a cord is a few strands braided round its path, gathered tight where it meets a knot
+function braid(M, n, W, key) {
+  const r = stream('braid', key), c = cumlen(M), L = c[c.length - 1];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = r(.45, 1), wl = r(55, 120), ph = r(0, TAU), b = r(-.3, .3), tr = r(.15, .35);
+    out.push(M.map((p, j) => {
+      const u = c[j] / L, env = Math.pow(Math.sin(Math.PI * u), .55), [nx, ny] = normalAt(M, j);
+      const o = (a * Math.sin(c[j] / wl * TAU + ph) + b) * W * env + r(-tr, tr);
+      return [p[0] + nx * o, p[1] + ny * o];
+    }));
+  }
+  return { strands: out, c, L };
+}
+
+// hyphae: threads grow out of the cords (and out of each other, in generations) through the
+// soil's grain, all at once, a step at a time. A tip that runs into another thread fuses with it
+// and stops; a tip that never meets anything is cut away, and so is anything that fused into it.
+// Every thread that survives joins two others: a true mesh, no loose ends.
+function hyphae(o) {
+  const r = stream('hyphae', o.seed), cs = o.cell || 3, [X0, Y0, X1, Y1] = o.bounds;
+  const gw = Math.ceil((X1 - X0) / cs) + 1, gh = Math.ceil((Y1 - Y0) / cs) + 1;
+  const occ = new Int32Array(gw * gh).fill(-1);
+  const idx = (x, y) => { if (x < X0 || y < Y0 || x > X1 || y > Y1) return -2; return Math.floor((y - Y0) / cs) * gw + Math.floor((x - X0) / cs); };
+  const stamp = (pts, id) => { for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (cs * .5))); for (let k = 0; k <= n; k++) { const q = idx(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n); if (q >= 0) occ[q] = id; } } };
+  const discs = o.discs || [];
+  let next = 0;
+  (o.cords || []).forEach(group => { const id = next++; for (const p of group) stamp(p, id); });   // a cord is a group of strands with one id
+  for (const [x, y, rad] of discs) { const id = next++; for (let yy = y - rad; yy <= y + rad; yy += cs * .5) for (let xx = x - rad; xx <= x + rad; xx += cs * .5) if (Math.hypot(xx - x, yy - y) <= rad) { const q = idx(xx, yy); if (q >= 0) occ[q] = id; } }
+  const fixed = next;                         // ids below this are cords and knots: always alive
+  const alive = new Set(), kept = [];
+  let seeds = o.seeds.slice().concat(o.gens[0].free || []);
+  const step = o.step || 2.4, minRun = o.minRun ?? 10;
+  for (let g = 0; g < o.gens.length; g++) {
+    const G = o.gens[g];
+    const mk = (x, y, h, src, max) => ({ x, y, h, src, id: next++, pts: [[x, y]], len: 0, max, done: false, into: -1, cells: [], turn: r(-.04, .04), pair: null });
+    const tips = [];
+    for (const s of seeds) {
+      if (s[3] >= 0) { tips.push(mk(s[0], s[1], s[2], s[3], r(G.min, G.max))); continue; }
+      // a free hypha in open soil grows both ways; it lives only if both ends find the network
+      const a = mk(s[0], s[1], s[2], -1, r(G.min, G.max) * 1.2), b = mk(s[0], s[1], s[2] + Math.PI, -1, r(G.min, G.max) * 1.2);
+      a.pair = b; b.pair = a; tips.push(a, b);
+    }
+    for (let active = tips.length; active;) {
+      active = 0;
+      for (const t of tips) {
+        if (t.done) continue;
+        const grain = PI2 * fbm(t.x * .0065, t.y * .0065, 41 + g, 2) * 1.6;
+        let d = grain - t.h; d = Math.atan2(Math.sin(d), Math.cos(d));
+        t.h += d * (G.grain ?? .05) + t.turn + r(-G.wander, G.wander);
+        // homing: a tip senses a thread just ahead and bends to meet it
+        if (t.len > minRun) {
+          let best = null;
+          for (const da of [-.32, -.16, 0, .16, .32]) for (const dd of [6, 10, 14]) {
+            const sx = t.x + Math.cos(t.h + da) * dd, sy = t.y + Math.sin(t.h + da) * dd, sq = idx(sx, sy);
+            if (sq < 0) continue; const sv = occ[sq];
+            // homing answers only the settled network (cords, knots, earlier generations), not siblings still growing
+            if (sv >= 0 && sv !== t.src && (sv < fixed || alive.has(sv)) && (!best || dd < best.dd)) best = { da, dd };
+          }
+          if (best) t.h += best.da * .45;
+        }
+        const nx = t.x + Math.cos(t.h) * step, ny = t.y + Math.sin(t.h) * step;
+        t.len += step;
+        const q = idx(nx, ny);
+        if (q === -2 && o.edgeFuse && t.len > minRun) { t.pts.push([clamp(nx, X0, X1), clamp(ny, Y0, Y1)]); t.done = true; t.into = EDGE; continue; }   // runs on past the section's cut
+        if (q === -2 || (o.blocked && o.blocked(nx, ny))) { t.done = true; continue; }
+        const v = occ[q];
+        if (v >= 0 && v !== t.id && t.len > minRun) { t.pts.push([nx, ny]); t.done = true; t.into = v; continue; }   // a tip runs free a little before it can fuse
+        t.x = nx; t.y = ny; t.pts.push([nx, ny]);
+        if (v < 0) { occ[q] = t.id; t.cells.push(q); }
+        if (t.len >= t.max) {
+          // last reach: the nearest thread within a short hop, or nothing
+          t.done = true; let best = null; const R = o.reach ?? 16;
+          for (let a = 0; a < 16; a++) for (let dd = 4; dd <= R; dd += 3) {
+            const sx = t.x + Math.cos(t.h + (a - 8) * .2) * dd, sy = t.y + Math.sin(t.h + (a - 8) * .2) * dd, sq = idx(sx, sy);
+            if (sq < 0) continue; const sv = occ[sq];
+            if (sv >= 0 && sv !== t.id && sv !== t.src && (!best || dd < best.dd)) { best = { dd, x: sx, y: sy, v: sv }; break; }
+          }
+          if (best && !(o.blocked && o.blocked((t.x + best.x) / 2, (t.y + best.y) / 2))) { t.pts.push([(t.x + best.x) / 2 + r(-1, 1), (t.y + best.y) / 2 + r(-1, 1)], [best.x, best.y]); t.into = best.v; }
+          continue;
+        }
+        active++;
+      }
+    }
+    // a thread lives if it fused into something alive; settle that until nothing changes
+    const byId = new Map(tips.map(t => [t.id, t]));
+    const live = new Set(tips.filter(t => t.into !== -1).map(t => t.id));
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const id of live) {
+        const t = byId.get(id), v = t.into;
+        if ((v < fixed || alive.has(v) || live.has(v)) && (!t.pair || live.has(t.pair.id))) continue;
+        live.delete(id); changed = true;
+      }
+    }
+    const out = [];
+    for (const t of tips) {
+      if (live.has(t.id)) {
+        alive.add(t.id);
+        if (!t.pair) out.push(t.pts); else if (t.id < t.pair.id) out.push(t.pts.slice().reverse().concat(t.pair.pts.slice(1)));
+      } else for (const q of t.cells) if (occ[q] === t.id) occ[q] = -1;
+    }
+    for (const pts of out) kept.push({ pts, g });
+    // the next generation branches off this one
+    seeds = [];
+    const B = o.gens[g + 1];
+    if (B) for (const t of tips) if (live.has(t.id)) for (let i = 4; i < t.pts.length - 3; i += 2) {
+      if (!r.chance(B.branch)) continue;
+      const a = t.pts[i - 1], b = t.pts[i + 1], dir = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      seeds.push([t.pts[i][0], t.pts[i][1], dir + (r.chance(.5) ? 1 : -1) * r(.5, 1.3), t.id]);
+    }
+    if (B && B.free) seeds.push(...B.free);
+  }
+  return kept;
+}
+const PI2 = TAU, EDGE = -5;
+// a mesh thread: a shallow bow between two points, with a hand's tremor
+function thread(p, q, r) {
+  const L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (L < .5) return [p, q];
+  const nx = -(q[1] - p[1]) / L, ny = (q[0] - p[0]) / L, bow = r(-.2, .2) * L;
+  const n = Math.max(2, Math.round(L / 2.6)), out = [];
+  for (let k = 0; k <= n; k++) {
+    const t = k / n, b = 4 * t * (1 - t) * bow, tr = k === 0 || k === n ? 0 : r(-.22, .22);
+    out.push([lerp(p[0], q[0], t) + nx * (b + tr), lerp(p[1], q[1], t) + ny * (b + tr)]);
+  }
+  return out;
+}
+
+// ============================================================ THE WORLD =====
+// geometry of the hero plate in world coordinates (the frame spans 48..1552 x 12..620; the page
+// gives the card's plate 60 more units of air, for the headline and its actions)
+const PLATE = { x0: 56, y0: 20, x1: 1544, y1: 612 };
+const FRAME = { x: 48, y: 12, w: 1504, h: 608 };
+const LOCK = { x: 110, k: 1.8 };   // lockup origin on the ground, and its scale
+function world() {
+  const R = repo(), { nodes, edges } = R;
+  const soil = [62, GROUND + 14, 1538, PLATE.y1 - 6];
+  // cords
+  for (const e of edges) {
+    const key = e.from.id + '>' + e.to.id;
+    e.path = grownPath([e.from.x, e.from.y], [e.to.x, e.to.y], key, soil);
+    const tr = e.from.traffic;
+    const n = 2 + Math.min(4, Math.round(Math.sqrt(tr) * .9)), W = 1.6 + 1.05 * Math.sqrt(tr);
+    Object.assign(e, braid(e.path, n, W, key));
+    e.w = .55 + .1 * Math.sqrt(tr);
+  }
+  // taproots: every deployable (apps/*, services/*) reaches up to the ground, where it ships
+  const taps = [];
+  for (const n of nodes) {
+    if (!/^(apps|services)\//.test(n.id)) continue;
+    const r = stream('tap', n.id);
+    // the root rises where it passes no other package's name or knot
+    const clear = gx => nodes.every(m => m === n || [.2, .4, .6, .8].every(t => { const x = lerp(n.x, gx, t), y = lerp(n.y, GROUND, t), b = m.box; return !(x > b[0] - 14 && x < b[2] + 14 && y > b[1] - 10 && y < b[3] + 10) && Math.hypot(x - m.x, y - m.y) > m.rk + 14; }));
+    const tries = [0, 8, -8, 16, -16, 24, -24, 32, -32, 44, -44].map(d => n.x + d + r(-4, 4));
+    const gx = tries.find(clear) ?? tries[0];
+    // a taproot rises nearly straight: a gentle sway, never a wander
+    const pts = [], H = n.y - GROUND, ph = r(0, TAU), amp = r(3, 6);
+    for (let k = 0; k <= Math.ceil(H / 3); k++) { const t = k / Math.ceil(H / 3); pts.push([lerp(n.x, gx, smooth01(t)) + Math.sin(t * Math.PI * r(1.2, 1.3) + ph) * amp * Math.sin(Math.PI * t), lerp(n.y, GROUND + 1, t)]); }
+    const path = resample(pts, 3);
+    const b = braid(path, 2, 1.6, 'tap/' + n.id);
+    taps.push({ node: n, path, strands: b.strands, c: b.c, L: b.L, top: [gx, GROUND], sprout: Array.from({ length: 5 }, () => [r(-3.5, 3.5), r(4, 11), r(-2.5, 2.5)]) });
+  }
+  // knots: tight coils of hyphae where cords meet
+  for (const n of nodes) {
+    const r = stream('knot', n.id), coils = [];
+    for (let k = 0; k < 24 + 7 * n.deg; k++) {
+      const d = Math.abs(r.gauss()) * n.rk * .9, a = r(0, TAU), cx = n.x + Math.cos(a) * d, cy = n.y + Math.sin(a) * d;
+      const rr = r(1.2, 3.6), a0 = r(0, TAU), span = r(1.6, 4.2), pts = [];
+      for (let s = 0; s <= 8; s++) { const t = a0 + span * s / 8; pts.push([cx + Math.cos(t) * rr, cy + Math.sin(t) * rr * r(.7, 1)]); }
+      coils.push(pts);
+    }
+    n.coils = coils;
+  }
+  // the mesh: hyphae grown out of every cord, every knot and the mark's floor, fused where they meet
+  const mx = u => LOCK.x + LOCK.k * 1.2766 * u;
+  const inBox = (x, y, b, pad = 0) => x > b[0] - pad && x < b[2] + pad && y > b[1] - pad && y < b[3] + pad;
+  const blocked = (x, y) => nodes.some(n => inBox(x, y, n.box, 2));
+  const floor = [[mx(1.5), GROUND + 12.5], [mx(60), GROUND + 12.5]], desc = [[LOCK.x + LOCK.k * 104.3, GROUND + 4], [LOCK.x + LOCK.k * 104.3, GROUND + LOCK.k * 16]];
+  const groups = edges.map(e => e.strands.concat([e.path])).concat([[floor, desc]]).concat(taps.map(t => t.strands.concat([t.path])));
+  const discs = nodes.map(n => [n.x, n.y, n.rk + 1]);
+  const rh = stream('hyphae-seeds'), seeds = [];
+  edges.forEach((e, ei) => { const p = e.path; for (let j = 3; j < p.length - 3; j += 1) { if (!rh.chance(.48)) continue; const [nx, ny] = normalAt(p, j), side = rh.chance(.5) ? 1 : -1; seeds.push([p[j][0] + nx * side * 2, p[j][1] + ny * side * 2, Math.atan2(ny * side, nx * side) + rh(-.7, .7), ei]); } });
+  nodes.forEach((n, ni) => { for (let k = 0; k < 6 + 2 * n.deg; k++) { const a = rh(0, TAU); seeds.push([n.x + Math.cos(a) * (n.rk + 1.5), n.y + Math.sin(a) * (n.rk + 1.5), a + rh(-.3, .3), groups.length + ni]); } });
+  for (let x = floor[0][0] + 4; x < floor[1][0]; x += 3) if (rh.chance(.5)) seeds.push([x, GROUND + 14, Math.PI / 2 + rh(-.8, .8), edges.length]);
+  taps.forEach((t, ti) => { const p = t.path; for (let j = 3; j < p.length - 3; j += 1) { if (!rh.chance(.4)) continue; const [nx, ny] = normalAt(p, j), side = rh.chance(.5) ? 1 : -1; seeds.push([p[j][0] + nx * side * 2, p[j][1] + ny * side * 2, Math.atan2(ny * side, nx * side) + rh(-.7, .7), edges.length + 1 + ti]); } });
+  // free hyphae in the open soil, thicker where cords run close, thinning toward the deep and the edges
+  const hc = 20, hg = new Map();
+  edges.forEach(e => { for (let j = 0; j < e.path.length; j += 3) { const p = e.path[j], k = Math.floor(p[0] / hc) + ',' + Math.floor(p[1] / hc); if (!hg.has(k)) hg.set(k, []); hg.get(k).push(p); } });
+  const cordDist = (x, y) => { let d = 1e9; const gx = Math.floor(x / hc), gy = Math.floor(y / hc); for (let j = -5; j <= 5; j++) for (let i = -5; i <= 5; i++) { const b = hg.get((gx + i) + ',' + (gy + j)); if (b) for (const p of b) d = Math.min(d, (p[0] - x) ** 2 + (p[1] - y) ** 2); } return Math.sqrt(d); };
+  const freeSeeds = n => { const out = []; for (let k = 0; out.length < n && k < n * 6; k++) { const x = rh(soil[0] + 6, soil[2] - 6), y = rh(soil[1] + 4, soil[3] - 4); if (blocked(x, y)) continue; const d = cordDist(x, y); const surface = 1 - clamp((y - GROUND - 20) / 90, 0, 1), deep = clamp((y - GROUND - 200) / 120, 0, 1); if (!rh.chance(clamp(.4 + .6 * (1 - smooth01(clamp(d / 110, 0, 1))) + .4 * surface - .15 * deep, 0, 1))) continue; out.push([x, y, rh(0, TAU), -1]); } return out; };
+  const hy = hyphae({
+    bounds: [PLATE.x0 + 1, GROUND + 3, PLATE.x1 - 1, PLATE.y1 - 1], edgeFuse: true, cell: 2.4, cords: groups, discs, seeds, blocked, seed: 'hero', step: 2.2, minRun: 14,
+    gens: [{ min: 70, max: 300, wander: .08, grain: .03, free: freeSeeds(4200) }, { branch: .2, min: 30, max: 170, wander: .09, grain: .03, free: freeSeeds(2400) }, { branch: .18, min: 22, max: 110, wander: .11, free: freeSeeds(1600) }, { branch: .16, min: 14, max: 70, wander: .13 }, { branch: .14, min: 10, max: 44, wander: .15 }],
+  });
+  const GW = [.62, .52, .45, .4, .35], GA = [.62, .54, .47, .41, .35];
+  const threads = hy.map(h => {
+    const [x, y] = h.pts[h.pts.length >> 1], band = fbm(x * .004, y * .004, 21, 3), deep = clamp((y - GROUND - 60) / 260, 0, 1);
+    return { pts: chaikin(h.pts, 1), w: GW[h.g], a: clamp(GA[h.g] * (1 - .3 * deep) + .1 * (band - .5), .1, .6), tint: band > .57 ? 'b' : band < .42 ? 'c' : 'a', g: h.g };
+  });
+  // fuzz: very short hyphal tips along the cords, the velvet on a rhizomorph
+  const rf = stream('fuzz'), fuzz = [];
+  edges.forEach(e => e.strands.forEach(s => { for (let j = 3; j < s.length - 3; j += 2) { if (!rf.chance(.35)) continue; const [nx, ny] = normalAt(s, j), side = rf.chance(.5) ? 1 : -1, l = rf(1.2, 3.6), a = rf(-.6, .6); fuzz.push([s[j], [s[j][0] + (nx * Math.cos(a) - ny * Math.sin(a)) * side * l, s[j][1] + (ny * Math.cos(a) + nx * Math.sin(a)) * side * l]]); } }));
+  // the soil: tone by accumulation, densest under the litter
+  const rs = stream('soil'), specks = [], litter = [];
+  for (let k = 0; k < 9000; k++) {
+    const x = rs(PLATE.x0, PLATE.x1), y = GROUND + 2 + (PLATE.y1 - GROUND - 2) * Math.pow(rs(), 1.25);
+    const n = fbm(x * .02, y * .02, 5, 3);
+    if (rs() < .55 * (.55 + n)) specks.push([x, y, rs(.7, 1.3), rs(.25, .55)]);
+  }
+  for (let x = PLATE.x0 + 2; x < PLATE.x1 - 2; x += rs(1.6, 3.4)) { const y = GROUND + rs(2, 16) * Math.pow(rs(), .7), a = rs(-.5, .5) + (rs.chance(.5) ? 0 : Math.PI), l = rs(2, 6); litter.push([x, y, x + Math.cos(a) * l, y + Math.sin(a) * l * .4]); }
+  // grass on the ground line, thin in front of the lockup
+  const grass = [];
+  const lockEnd = LOCK.x + LOCK.k * 336;
+  for (let x = PLATE.x0 + 2; x < PLATE.x1 - 2; x += rs(1.3, 3.1)) {
+    if (x > LOCK.x - 6 && x < lockEnd + 8 && rs.chance(.75)) continue;
+    if (x > 900 && rs.chance(.35)) continue;
+    const h = rs(1.5, 8) * (.45 + fbm(x * .02, 1, 4, 2)), lean = rs(-2.4, 2.4);
+    grass.push([x, h, lean]);
+  }
+
+  // spores trail behind each head of light, densest at the head (one stream per cord, so any
+  // cord can carry light without reshuffling another)
+  for (const e of edges) { const sp = stream('spores', e.from.id, e.to.id); e.spores = Array.from({ length: 110 }, () => ({ back: Math.pow(sp(), 1.9) * 80, off: sp.gauss() * 9, size: sp(.7, 1.5), a: sp(.4, 1) })); }
+  return { R, nodes, edges, taps, threads, fuzz, specks, litter, grass };
+}
+
+// ------------------------------------------------------------ the pulse --
+// a change lands on package id; light leaves along every cord to a dependent, and on from each
+// dependent it reaches. reach[node] is the arc length at which the light arrives. Deployables it
+// reaches (and the changed one, if it ships) climb their taproots to the ground.
+function pulse(W, id) {
+  const { edges, byId, closure } = W.R, affected = closure(id);
+  const on = n => n.id === id || affected.has(n.id);
+  const litEdges = edges.filter(e => on(e.from) && affected.has(e.to.id));
+  const reach = { [id]: 0 };
+  for (let pass = 0; pass < W.nodes.length; pass++) {
+    let moved = false;
+    for (const e of litEdges) if (reach[e.from.id] !== undefined) { const v = reach[e.from.id] + e.L; if (reach[e.to.id] === undefined || v < reach[e.to.id]) { reach[e.to.id] = v; moved = true; } }
+    if (!moved) break;
+  }
+  const lit = litEdges.map(e => ({ e, s0: reach[e.from.id] }));
+  const taps = W.taps.filter(t => on(t.node)).map(t => ({ t, s0: reach[t.node.id] }));
+  // halo: mesh threads near a lit cord catch its light, each at the arc length where it sits.
+  // lit path points go in a grid of 42-unit cells so each thread looks only at its neighbours.
+  const CELL = 42, grid = new Map(), key = (gx, gy) => gx * 4096 + gy;
+  const add = (path, c, s0) => { for (let j = 0; j < path.length; j += 2) { const p = path[j], k = key(Math.floor(p[0] / CELL), Math.floor(p[1] / CELL)); let b = grid.get(k); if (!b) grid.set(k, b = []); b.push(p[0], p[1], s0 + c[j]); } };
+  for (const { e, s0 } of lit) add(e.path, e.c, s0);
+  for (const { t, s0 } of taps) add(t.path, t.c, s0);
+  const halo = [];
+  for (const th of W.threads) {
+    const [x, y] = th.pts[th.pts.length >> 1], gx = Math.floor(x / CELL), gy = Math.floor(y / CELL);
+    let bd = CELL * CELL, bs = -1;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+      const b = grid.get(key(gx + i, gy + j)); if (!b) continue;
+      for (let q = 0; q < b.length; q += 3) { const d = (b[q] - x) ** 2 + (b[q + 1] - y) ** 2; if (d < bd) { bd = d; bs = b[q + 2]; } }
+    }
+    if (bs >= 0) halo.push({ pts: th.pts, s: bs, a: Math.pow(1 - Math.sqrt(bd) / CELL, 1.3) * .95 });
+  }
+  halo.sort((a, b) => a.s - b.s);
+  const ends = [0, ...lit.map(l => l.s0 + l.e.L), ...taps.map(x => x.s0 + x.t.L)];
+  return { id, changed: byId[id], affected, lit, taps, halo, reach, maxReach: Math.max(...ends) };
+}
+
+// a small band of the living graph for marks and tiles: a few knots joined by cords, each rooted to
+// the ground line, and hyphae fused between them (they may run on past the band's edge)
+function band(x0, y0, x1, y1, scale, seed, knots = []) {
+  const r = stream('band-seeds', seed), seeds = [], cords = [[[[x0, y0], [x1, y0]]]], links = [];
+  const step = 1.2 * scale;
+  const grow = (P, Q, key) => {    // a short cord: a bowed path, a little braid
+    const n = Math.max(6, Math.round(Math.hypot(Q[0] - P[0], Q[1] - P[1]) / step)), bow = r(-.22, .22) * Math.hypot(Q[0] - P[0], Q[1] - P[1]);
+    const L = Math.hypot(Q[0] - P[0], Q[1] - P[1]) || 1, nx = -(Q[1] - P[1]) / L, ny = (Q[0] - P[0]) / L, pts = [];
+    for (let k = 0; k <= n; k++) { const t = k / n, w = 4 * t * (1 - t) * bow + (k && k < n ? r(-.15, .15) * scale : 0); pts.push([lerp(P[0], Q[0], t) + nx * w, lerp(P[1], Q[1], t) + ny * w]); }
+    return braid(pts, 2, .7 * scale, key).strands.concat([pts]);
+  };
+  knots.forEach((k, i) => {
+    const up = grow(k, [k[0] + r(-3, 3) * scale, y0], seed + 'u' + i); cords.push(up); links.push(up);
+    if (i) { const c = grow(knots[i - 1], k, seed + 'c' + i); cords.push(c); links.push(c); }
+  });
+  cords.forEach((group, gi) => { const p = group[group.length - 1]; for (let j = 1; j < p.length - 1; j++) for (const side of [1, -1]) if (r.chance(gi ? .5 : .55)) { const a = p[j - 1], b = p[j + 1], d = Math.atan2(b[1] - a[1], b[0] - a[0]); seeds.push([p[j][0], p[j][1] + (gi ? 0 : .6 * scale), gi ? d + side * r(.8, 1.6) : Math.PI / 2 + r(-.9, .9), gi]); } });
+  const hy = hyphae({ bounds: [x0, y0, x1, y1], edgeFuse: true, cell: .9 * scale, step: .8 * scale, minRun: 4 * scale, reach: 6 * scale, cords, discs: knots.map(k => [k[0], k[1], 1.6 * scale]), seeds, seed,
+    gens: [{ min: 6 * scale, max: 26 * scale, wander: .16, grain: .03 }, { branch: .22, min: 5 * scale, max: 18 * scale, wander: .18 }, { branch: .18, min: 4 * scale, max: 12 * scale, wander: .2 }] });
+  return { threads: hy.map(h => ({ pts: chaikin(h.pts, 1), g: h.g })), cords: links };
+}
+
+root.PandoGraph = { world, pulse, repo, LABELS, band, hyphae, thread, stream, fbm, noise, cumlen, at, clamp, lerp, smooth01, COLORS, GROUND, PLATE, FRAME, LOCK, LABEL, CHANGED, TAU };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+// page.js: draws the living graph for the Pando landing page and runs it.
+// The hero is the card's plate at any width: a canvas for the grown network, a canvas for the
+// light, and an HTML layer (scaled with the plate) for the lockup, the words and the packages,
+// which are real buttons. A change lands on a package; light travels only the real dependency
+// cords; whatever it reaches wakes. The page tours a few changes until the visitor picks one.
+(function () {
+'use strict';
+const PG = window.PandoGraph, C = Object.assign({}, PG.COLORS), { PLATE, FRAME, GROUND, LABEL } = PG;
+// The canvases draw with the page's live colour tokens (build.mjs, :root and html[data-theme]), so a
+// theme is only a set of token values. Each token is resolved to #rrggbb through a 1x1 canvas, which
+// takes any CSS colour (hex, oklch(), color-mix()).
+const TOKENS = { soil: 'soil', air: 'air', loam: 'loam', bark: 'bark', ash: 'ash', clay: 'clay', fox: 'fox', mesh: 'mesh', speck: 'speck', litter: 'litter', meshB: 'mesh-b', meshC: 'mesh-c', grass: 'grass' };
+const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true }), probeEl = document.createElement('i');
+function resolve(v) {
+  probe.fillStyle = '#010203'; probe.fillStyle = v;
+  if (probe.fillStyle === '#010203') {    // a browser whose canvas does not take this syntax: let CSS resolve it first
+    probeEl.style.color = v; document.body.appendChild(probeEl); probe.fillStyle = getComputedStyle(probeEl).color; probeEl.remove();
+  }
+  probe.clearRect(0, 0, 1, 1); probe.fillRect(0, 0, 1, 1);
+  return '#' + [...probe.getImageData(0, 0, 1, 1).data.slice(0, 3)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  for (const [k, name] of Object.entries(TOKENS)) { const v = cs.getPropertyValue('--' + name).trim(); if (v) C[k] = resolve(v); }
+}
+readColors();
+const W = PG.world(), byId = W.R.byId, N = W.nodes.length;
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+const TOUR = ['packages/money', 'packages/ui', 'packages/i18n'];
+const T_LAND = .5, T_GO = .8;
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgba = (h, a) => { const [r, g, b] = hex(h); return `rgba(${r},${g},${b},${a})`; };
+const mix = (a, b, t) => { const A = hex(a), B = hex(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
+const ease = t => 1 - Math.pow(1 - PG.clamp(t, 0, 1), 3);
+const pulses = new Map(), pulse = id => { if (!pulses.has(id)) pulses.set(id, PG.pulse(W, id)); return pulses.get(id); };
+
+// a canvas showing the world rect (x, y, w, h) at k css px per world unit
+function setup(canvas, x, y, w, h, k) {
+  const dpr = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1));
+  canvas.width = Math.round(w * k * dpr); canvas.height = Math.round(h * k * dpr);
+  canvas.style.width = w * k + 'px'; canvas.style.height = h * k + 'px';
+  const ctx = canvas.getContext('2d'); ctx.setTransform(k * dpr, 0, 0, k * dpr, -x * k * dpr, -y * k * dpr);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  return ctx;
+}
+function line(ctx, pts) { ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); }
+function prefix(pts, c, s) {
+  if (s >= c[c.length - 1]) return pts;
+  const out = [pts[0]]; let i = 1;
+  for (; i < pts.length && c[i] <= s; i++) out.push(pts[i]);
+  if (i < pts.length) { const t = (s - c[i - 1]) / ((c[i] - c[i - 1]) || 1); out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]); }
+  return out;
+}
+function slice(pts, c, s0, s1) { const p = prefix(pts, c, s1); let k = 0; while (k < p.length - 1 && c[k] < s0) k++; return p.slice(Math.max(0, k - 1)); }
+
+// ================================================================ static ===
+function drawStatic(ctx, o = {}) {
+  const k = o.scale || 1, px = v => v / k;
+  if (!o.mini) {
+    ctx.fillStyle = C.air; ctx.fillRect(PLATE.x0, PLATE.y0, PLATE.x1 - PLATE.x0, GROUND - PLATE.y0);
+    ctx.fillStyle = C.soil; ctx.fillRect(PLATE.x0, GROUND, PLATE.x1 - PLATE.x0, PLATE.y1 - GROUND);
+    for (const [x, y, s, a] of W.specks) { ctx.fillStyle = rgba(C.speck, a); ctx.fillRect(x, y, s, s); }
+    ctx.strokeStyle = rgba(C.litter, .5); ctx.lineWidth = .7; ctx.beginPath();
+    for (const [x0, y0, x1, y1] of W.litter) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); } ctx.stroke();
+  }
+  const tints = { a: C.mesh, b: C.meshB, c: C.meshC }, buckets = new Map();
+  W.threads.forEach((t, i) => {
+    if (o.mini && i % 2) return;
+    const key = o.mini ? 'm' : `${t.tint}|${Math.round(t.a * 20) / 20}|${Math.round(t.w * 10) / 10}`;
+    if (!buckets.has(key)) buckets.set(key, []); buckets.get(key).push(t.pts);
+  });
+  for (const [key, list] of buckets) {
+    if (o.mini) { ctx.strokeStyle = rgba(C.ash, .32); ctx.lineWidth = px(.45); }
+    else { const [tn, a, w] = key.split('|'); ctx.strokeStyle = rgba(tints[tn], +a); ctx.lineWidth = +w; }
+    ctx.beginPath(); for (const p of list) line(ctx, p); ctx.stroke();
+  }
+  if (!o.mini) { ctx.strokeStyle = rgba(C.bark, .22); ctx.lineWidth = .45; ctx.beginPath(); for (const [a, b] of W.fuzz) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke(); }
+  for (const e of W.edges) {
+    if (o.mini) { ctx.strokeStyle = rgba(C.bark, .5); ctx.lineWidth = px(.55 + .12 * Math.sqrt(e.from.traffic)); ctx.beginPath(); line(ctx, e.path); ctx.stroke(); continue; }
+    const lift = Math.min(1, .55 + .12 * Math.sqrt(e.from.traffic));
+    ctx.strokeStyle = rgba(mix(C.bark, C.ash, .3), .4 * lift); ctx.lineWidth = e.w;
+    ctx.beginPath(); for (const s of e.strands) line(ctx, s); ctx.stroke();
+    ctx.strokeStyle = rgba(C.bark, .1 * lift); ctx.lineWidth = e.w * 2.6;
+    ctx.beginPath(); line(ctx, e.path); ctx.stroke();
+  }
+  for (const t of W.taps) {
+    if (o.mini) { ctx.strokeStyle = rgba(C.bark, .35); ctx.lineWidth = px(.5); ctx.beginPath(); line(ctx, t.path); ctx.stroke(); continue; }
+    ctx.strokeStyle = rgba(mix(C.bark, C.ash, .3), .45); ctx.lineWidth = .55; ctx.beginPath(); for (const s of t.strands) line(ctx, s); ctx.stroke();
+    if (t.top[0] > PG.LOCK.x - 8 && t.top[0] < PG.LOCK.x + PG.LOCK.k * 336 + 8) continue;
+    ctx.strokeStyle = rgba(C.bark, .55); ctx.lineWidth = .7; ctx.beginPath();
+    for (const [dx, h, lean] of t.sprout) { ctx.moveTo(t.top[0] + dx, GROUND); ctx.quadraticCurveTo(t.top[0] + dx + lean * .3, GROUND - h * .6, t.top[0] + dx + lean, GROUND - h); }
+    ctx.stroke();
+  }
+  for (const n of W.nodes) {
+    if (o.mini) { ctx.fillStyle = C.bark; ctx.beginPath(); ctx.arc(n.x, n.y, px(1.9 + .25 * Math.sqrt(n.deg)), 0, PG.TAU); ctx.fill(); continue; }
+    ctx.fillStyle = C.soil; ctx.beginPath(); ctx.arc(n.x, n.y, n.rk * .9, 0, PG.TAU); ctx.fill();
+    ctx.strokeStyle = rgba(C.bark, .62); ctx.lineWidth = .6; ctx.beginPath(); for (const p of n.coils) line(ctx, p); ctx.stroke();
+    ctx.fillStyle = C.bark; ctx.beginPath(); ctx.arc(n.x, n.y, 2.7, 0, PG.TAU); ctx.fill();
+  }
+  if (!o.mini) {
+    ctx.strokeStyle = rgba(C.grass, .5); ctx.lineWidth = .7; ctx.beginPath();
+    for (const [x, h, lean] of W.grass) { ctx.moveTo(x, GROUND); ctx.quadraticCurveTo(x + lean * .3, GROUND - h * .6, x + lean, GROUND - h); }
+    ctx.stroke();
+  }
+}
+
+// ================================================================ the pulse ==
+// how fast the light runs and when it rests, so a big change takes no longer to read than a small one
+function timing(P) {
+  const speed = Math.max(85, P.maxReach / 5.5), done = T_GO + P.maxReach / speed;
+  return { speed, done, hold: done + 2.8, fade: done + 4.1, period: done + 4.6 };
+}
+function state(t, tm, fades) {
+  let glow = 1;
+  if (fades) glow = t < tm.hold ? 1 : t > tm.fade ? 0 : 1 - (t - tm.hold) / (tm.fade - tm.hold);
+  return { t, front: (t - T_GO) * tm.speed, glow: glow * glow * (3 - 2 * glow), landed: t >= T_LAND, speed: tm.speed };
+}
+const SETTLED = { t: 1e3, front: 1e9, glow: 1, landed: true, speed: 85 };
+
+function drawLit(ctx, s, P, o = {}) {
+  const k = o.scale || 1, px = v => v / k, { front, glow } = s;
+  if (!s.landed || glow <= 0) return;
+  ctx.save(); ctx.globalAlpha = glow;
+  if (!o.mini) {
+    const byA = new Map();
+    for (const h of P.halo) { if (h.s >= front) break; const a = Math.round(h.a * 10) / 10; if (a <= 0) continue; if (!byA.has(a)) byA.set(a, []); byA.get(a).push(h.pts); }
+    for (const [a, list] of byA) { ctx.strokeStyle = rgba(C.fox, a * .9); ctx.lineWidth = .62; ctx.beginPath(); for (const p of list) line(ctx, p); ctx.stroke(); }
+  }
+  for (const { e, s0 } of P.lit) {
+    const f = front - s0; if (f <= 0) continue;
+    if (o.mini) { ctx.strokeStyle = C.fox; ctx.lineWidth = px(1.4); ctx.beginPath(); line(ctx, prefix(e.path, e.c, f)); ctx.stroke(); continue; }
+    ctx.strokeStyle = rgba(C.fox, .92); ctx.lineWidth = e.w * 1.05; ctx.beginPath(); for (const st of e.strands) line(ctx, prefix(st, e.c, f)); ctx.stroke();
+    ctx.strokeStyle = rgba(C.fox, .1); ctx.lineWidth = e.w * 3.2; ctx.beginPath(); line(ctx, prefix(e.path, e.c, f)); ctx.stroke();
+    if (f < e.L) {
+      // the head: the last stretch laid down again, heavier each pass (accumulation, no blur)
+      for (let p = 0; p < 4; p++) {
+        const back = 64 - p * 15; ctx.strokeStyle = rgba(C.fox, .12 + p * .1); ctx.lineWidth = 1 + p * .7;
+        ctx.beginPath(); line(ctx, slice(e.path, e.c, f - back, f)); ctx.stroke();
+      }
+      const hd = PG.at(e.path, e.c, f);
+      ctx.fillStyle = C.fox; ctx.beginPath(); ctx.arc(hd[0], hd[1], 2.6, 0, PG.TAU); ctx.fill();
+    }
+    const fadeS = PG.clamp((e.L + 50 - f) / 50, 0, 1);
+    if (fadeS > 0) for (const sp of e.spores) {
+      const ss = f - sp.back; if (ss < 0) continue;
+      const p = PG.at(e.path, e.c, ss), j = Math.min(e.path.length - 2, Math.max(1, Math.round(ss / 3)));
+      const a = e.path[j - 1], b = e.path[j + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L;
+      ctx.fillStyle = rgba(C.fox, sp.a * (1 - sp.back / 80) * .85 * fadeS);
+      ctx.fillRect(p[0] + nx * sp.off - sp.size / 2, p[1] + ny * sp.off - sp.size / 2, sp.size, sp.size);
+    }
+  }
+  for (const { t, s0 } of P.taps) {
+    const f = front - s0; if (f <= 0) continue;
+    if (o.mini) { ctx.strokeStyle = C.fox; ctx.lineWidth = px(1); ctx.beginPath(); line(ctx, prefix(t.path, t.c, f)); ctx.stroke(); if (f >= t.L) { ctx.fillStyle = C.fox; ctx.fillRect(t.top[0] - px(5), GROUND - px(.6), px(10), px(1.6)); } continue; }
+    ctx.strokeStyle = rgba(C.fox, .9); ctx.lineWidth = .8; ctx.beginPath(); for (const st of t.strands) line(ctx, prefix(st, t.c, f)); ctx.stroke();
+    if (f < t.L) { const hd = PG.at(t.path, t.c, f); ctx.fillStyle = C.fox; ctx.beginPath(); ctx.arc(hd[0], hd[1], 2.2, 0, PG.TAU); ctx.fill(); continue; }
+    const u = ease((f - t.L) / (s.speed * .6));
+    ctx.strokeStyle = rgba(C.fox, .95); ctx.lineWidth = .9; ctx.beginPath();
+    for (const [dx, h, lean] of t.sprout) { const hh = h * (.6 + .4 * u) + 2; ctx.moveTo(t.top[0] + dx, GROUND); ctx.quadraticCurveTo(t.top[0] + dx + lean * .3, GROUND - hh * .6, t.top[0] + dx + lean, GROUND - hh); }
+    ctx.stroke();
+    ctx.fillStyle = rgba(C.fox, .85); ctx.fillRect(t.top[0] - 6, GROUND - .2, 12, 1.4);
+  }
+  // the knot where the change landed: a ring goes out once, then it holds a hollow ring
+  const ch = P.changed, lt = s.t - T_LAND;
+  if (!o.mini && lt < 1.3) { const u = ease(lt / 1.3); ctx.strokeStyle = rgba(C.fox, (1 - u) * .85); ctx.lineWidth = 1.1; ctx.beginPath(); ctx.arc(ch.x, ch.y, ch.rk + 2 + 30 * u, 0, PG.TAU); ctx.stroke(); }
+  ctx.fillStyle = C.soil; ctx.beginPath(); ctx.arc(ch.x, ch.y, px(o.mini ? 3.2 : 4.6), 0, PG.TAU); ctx.fill();
+  ctx.strokeStyle = C.fox; ctx.lineWidth = px(o.mini ? 1.3 : 1.6); ctx.beginPath(); ctx.arc(ch.x, ch.y, px(o.mini ? 3.2 : 4.6), 0, PG.TAU); ctx.stroke();
+  for (const id of P.affected) {
+    const n = byId[id], r = P.reach[id]; if (front < r) continue;
+    const u = ease((front - r) / (s.speed * .5));
+    if (o.mini) { ctx.fillStyle = C.fox; ctx.beginPath(); ctx.arc(n.x, n.y, px(2.8), 0, PG.TAU); ctx.fill(); ctx.strokeStyle = rgba(C.fox, .6); ctx.lineWidth = px(.8); ctx.beginPath(); ctx.arc(n.x, n.y, px(5.4), 0, PG.TAU); ctx.stroke(); continue; }
+    ctx.strokeStyle = rgba(C.fox, .75); ctx.lineWidth = .7; ctx.beginPath(); for (const p of n.coils) line(ctx, p); ctx.stroke();
+    ctx.fillStyle = C.fox; ctx.beginPath(); ctx.arc(n.x, n.y, 3, 0, PG.TAU); ctx.fill();
+    ctx.strokeStyle = rgba(C.fox, .7 * u); ctx.lineWidth = .9; ctx.beginPath(); ctx.arc(n.x, n.y, n.rk + 2 + 3 * u, 0, PG.TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ================================================================== hero ===
+const hero = document.querySelector('.plate'), scroller = document.querySelector('.plate-scroll');
+const world = hero.querySelector('.world'), copy = document.querySelector('.copy');
+const netC = document.getElementById('net'), litC = document.getElementById('lit');
+const flowSlot = document.querySelector('.copy-flow'), worldSlot = world.querySelector('.copy-world');
+const buttons = new Map();
+for (const n of W.nodes) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'pkg ' + n.side; b.dataset.id = n.id;
+  b.innerHTML = `<span>${n.label}</span>`;
+  b.setAttribute('aria-pressed', 'false');
+  b.setAttribute('aria-label', `${n.label}: make a change here`);
+  const pad = 2 * n.rk + 13, top = n.y - 12 - FRAME.y;
+  if (n.side === 'l') { b.style.right = (FRAME.x + FRAME.w - (n.x + n.rk + 4)) + 'px'; b.style.paddingRight = pad + 2 + 'px'; }
+  else { b.style.left = (n.x - n.rk - 4 - FRAME.x) + 'px'; b.style.paddingLeft = pad + 'px'; }
+  b.style.top = top + 'px';
+  b.addEventListener('click', () => choose(n.id));
+  world.appendChild(b); buttons.set(n.id, b);
+}
+const live = document.getElementById('live');
+
+let K = 1, lit = null, P = null, tm = null, t0 = 0, mode = 'tour', tourI = 0, raf = 0, onScreen = true;
+let narrow = false, userPanned = false;
+function layout() {
+  narrow = window.innerWidth < 880;
+  K = narrow ? .92 : scroller.clientWidth / FRAME.w;
+  const top = narrow ? GROUND - 70 : FRAME.y;     // on a phone the words sit above the plate, so its sky is cut short
+  hero.style.width = FRAME.w * K + 'px'; hero.style.height = (FRAME.y + FRAME.h - top) * K + 'px';
+  world.style.transform = `translateY(${-(top - FRAME.y) * K}px) scale(${K})`;
+  for (const c of [netC, litC]) { c.style.left = (PLATE.x0 - FRAME.x) * K + 'px'; c.style.top = (PLATE.y0 - top) * K + 'px'; }
+  const target = narrow ? flowSlot : worldSlot;
+  if (copy.parentNode !== target) target.appendChild(copy);
+  drawStatic(setup(netC, PLATE.x0, PLATE.y0, PLATE.x1 - PLATE.x0, PLATE.y1 - PLATE.y0, K));
+  lit = setup(litC, PLATE.x0, PLATE.y0, PLATE.x1 - PLATE.x0, PLATE.y1 - PLATE.y0, K);
+  follow(false);
+  paint(performance.now());
+}
+// on a narrow screen the plate pans to wherever the light is, until the visitor pans it themselves
+function follow(smooth) {
+  if (!narrow || !P || userPanned) return;
+  // the lit knots and their names: show all of them if they fit, else start from the left-most
+  const ns = [P.changed, ...[...P.affected].map(id => byId[id])];
+  const x0 = Math.min(...ns.map(n => n.side === 'l' ? n.box[0] : n.x - n.rk)) - 14, x1 = Math.max(...ns.map(n => n.side === 'l' ? n.x + n.rk : n.box[2])) + 14;
+  const view = scroller.clientWidth / K, cx = x1 - x0 > view ? x0 + view / 2 : (x0 + x1) / 2;
+  scroller.scrollTo({ left: Math.max(0, (cx - FRAME.x) * K - scroller.clientWidth / 2), behavior: smooth && !reduced.matches ? 'smooth' : 'auto' });
+}
+for (const ev of ['pointerdown', 'wheel', 'touchstart']) scroller.addEventListener(ev, () => { userPanned = true; }, { passive: true });
+function labels(s) {
+  const showing = s.landed && s.glow > .5;
+  for (const [id, b] of buttons) {
+    const chg = showing && id === P.id, on = showing && P.affected.has(id) && s.front >= P.reach[id];
+    b.classList.toggle('chg', chg); b.classList.toggle('on', on);
+  }
+}
+function paint(now) {
+  if (!P || !lit) return;
+  const s = reduced.matches ? SETTLED : state((now - t0) / 1000, tm, mode === 'tour');
+  lit.clearRect(PLATE.x0, PLATE.y0, PLATE.x1 - PLATE.x0, PLATE.y1 - PLATE.y0);
+  drawLit(lit, s, P); labels(s);
+  return s;
+}
+function begin(id, how) {
+  P = pulse(id); tm = timing(P); t0 = performance.now(); mode = how;
+  for (const [bid, b] of buttons) b.setAttribute('aria-pressed', String(bid === id && how === 'user'));
+  if (how === 'tour') follow(true);
+  paint(t0); run();
+}
+function choose(id) {
+  begin(id, 'user');
+  const n = P.affected.size;
+  live.textContent = `A change in ${byId[id].label} reached ${n} ${n === 1 ? 'part' : 'parts'} of the monorepo.`;
+}
+function frame(now) {
+  raf = 0;
+  if (!onScreen || reduced.matches) return;
+  const t = (now - t0) / 1000;
+  if (mode === 'tour' && t > tm.period) { tourI = (tourI + 1) % TOUR.length; begin(TOUR[tourI], 'tour'); return; }
+  paint(now);
+  if (mode === 'user' && t > tm.done + 1.4) return;     // settled: hold still until asked again
+  raf = requestAnimationFrame(frame);
+}
+function run() { if (!raf && onScreen && !reduced.matches) raf = requestAnimationFrame(frame); }
+new IntersectionObserver(es => { onScreen = es[0].isIntersecting; if (onScreen) run(); }).observe(hero);
+reduced.addEventListener('change', () => { paint(performance.now()); run(); });
+
+// ========================================================= the specimens ===
+// (Pando landing lane) seven specimens for "The shape of Pando", cut from the same world and
+// lit by the same pulse. They replace art-ops' four-specimen legend; the hero is untouched.
+const PM = pulse('packages/money'), PU = pulse('packages/ui'), PI = pulse('packages/i18n');
+const toLedger = PM.lit.find(l => l.e.to.id === 'services/ledger');
+const headAt = toLedger.s0 + toLedger.e.L * .5, head = PG.at(toLedger.e.path, toLedger.e.c, headAt - toLedger.s0);
+const toForms = PU.lit.find(l => l.e.to.id === 'packages/forms');
+const reviewAt = toForms.s0 + toForms.e.L * .55, reviewHead = PG.at(toForms.e.path, toForms.e.c, reviewAt - toForms.s0);
+const money = byId['packages/money'], cfg = byId['packages/config'];
+const SPECIMENS = [
+  { el: 'sp-1', cx: 800, cy: 470, w: 720 },                                                              // the monorepo at rest
+  { el: 'sp-2', cx: 330, cy: GROUND + 40, w: 330, lit: SETTLED, P: PU, ground: true },                   // branches standing at the ground
+  { el: 'sp-3', cx: reviewHead[0] + 10, cy: reviewHead[1] + 6, w: 200, lit: { ...SETTLED, front: reviewAt }, P: PU },   // a change on its way
+  { el: 'sp-4', cx: 1250, cy: 430, w: 400, lit: SETTLED, P: PI },                                        // after a merge
+  { el: 'sp-5', cx: money.x, cy: money.y, w: 150, lit: { ...SETTLED, t: T_LAND + .45, front: 4 }, P: PM }, // a change landing, before it moves
+  { el: 'sp-6', cx: head[0] - 22, cy: head[1] + 4, w: 170, lit: { ...SETTLED, front: headAt }, P: PM }, // a change on its way
+  { el: 'sp-7', cx: cfg.x, cy: cfg.y - 12, w: 230, knot: cfg, logo: '.cf-mark' },                                                          // the root: cords converge on the Cloudflare logo placed over this knot
+];
+function drawSpecimens() {
+  for (const s of SPECIMENS) {
+    const c = document.getElementById(s.el); if (!c) continue;
+    const box = c.parentNode, cw = box.clientWidth, chh = box.clientHeight || cw * .625, k = cw / s.w, h = chh / k;
+    const cy = s.at != null ? s.knot.y + (.5 - s.at) * h : s.cy;     // a knot held at a set height of the frame
+    const ctx = setup(c, s.cx - s.w / 2, cy - h / 2, s.w, h, k);
+    if (s.logo) { const lg = box.querySelector(s.logo); if (lg) {
+      lg.style.left = (s.knot.x - (s.cx - s.w / 2)) * k + 'px'; lg.style.top = (s.knot.y - (cy - h / 2)) * k + 'px';
+      // the mark replaces the knot: clear the knot, and the band behind the cloud's cut line, to ground
+      // colour; both lie inside the cloud's outline, so nothing outside it changes
+      const mw = lg.offsetWidth / k, mh = lg.offsetHeight / k, kx = s.knot.x, ky = s.knot.y;
+      s.clear = ctx => { ctx.fillStyle = C.soil; ctx.beginPath(); ctx.arc(kx, ky, Math.min(s.knot.rk + 1.5, mh * .45), 0, PG.TAU); ctx.fill(); ctx.fillRect(kx - mw * .25, ky + mh * .16, mw * .68, mh * .18); };
+    } }
+    drawStatic(ctx);
+    if (s.ground) { ctx.strokeStyle = rgba(C.bark, .85); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PLATE.x0, GROUND + .5); ctx.lineTo(PLATE.x1, GROUND + .5); ctx.stroke(); }
+    if (s.lit) drawLit(ctx, s.lit, s.P);
+    if (s.clear) s.clear(ctx);
+  }
+}
+
+// ======================================================== the pull request ==
+function drawMini() {
+  const c = document.getElementById('mini'); if (!c) return;
+  const sx0 = 66, sx1 = 1530, sy0 = GROUND - 9, sy1 = PLATE.y1 - 4, cw = c.parentNode.clientWidth, k = cw / (sx1 - sx0);
+  const ctx = setup(c, sx0, sy0, sx1 - sx0, sy1 - sy0, k);
+  ctx.fillStyle = C.soil; ctx.fillRect(sx0, sy0, sx1 - sx0, sy1 - sy0);
+  drawStatic(ctx, { mini: true, scale: k });
+  ctx.strokeStyle = rgba(C.bark, .6); ctx.lineWidth = .8 / k; ctx.beginPath(); ctx.moveTo(sx0, GROUND + .5); ctx.lineTo(sx1, GROUND + .5); ctx.stroke();
+  drawLit(ctx, SETTLED, PM, { mini: true, scale: k });
+}
+
+// ============================================================= the ground ==
+// the page ends on the ground line, with the same root running under it
+function drawStrip() {
+  const c = document.getElementById('strip'); if (!c) return;
+  const cw = c.parentNode.clientWidth, k = cw / (PLATE.x1 - PLATE.x0), h = 44;
+  drawStatic(setup(c, PLATE.x0, GROUND + 2, PLATE.x1 - PLATE.x0, h, k));
+}
+
+// ================================================================== start ===
+// part 1: the tree builds up in three beats, once, when it scrolls into view. Reduced motion (and
+// no JS) shows the final state, because the hidden state exists only under .armed.
+const build = document.querySelector('[data-build]');
+if (build && !reduced.matches && 'IntersectionObserver' in window) {
+  build.classList.add('armed');
+  const io = new IntersectionObserver(es => {
+    if (!es[0].isIntersecting) return;
+    io.disconnect();
+    [1, 2, 3].forEach((b, i) => setTimeout(() => build.classList.add('b' + b), 250 + i * 1150));
+  }, { threshold: .55 });
+  io.observe(build);
+}
+// part 2: one beat, once, on scroll: the file saved on the Mac appears in all three panes together
+const share = document.querySelector('[data-share]');
+if (share && !reduced.matches && 'IntersectionObserver' in window) {
+  share.classList.add('armed');
+  const io2 = new IntersectionObserver(es => {
+    if (!es[0].isIntersecting) return;
+    io2.disconnect();
+    setTimeout(() => share.classList.add('on'), 700);
+  }, { threshold: .55 });
+  io2.observe(share);
+}
+for (const copyBtn of document.querySelectorAll('button[data-cmd]')) copyBtn.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(copyBtn.dataset.cmd); copyBtn.textContent = 'Copied'; }
+  catch { copyBtn.textContent = 'Select and copy'; }
+  setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1600);
+});
+let rz = 0;
+function all() { layout(); drawSpecimens(); drawMini(); drawStrip(); }
+window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(all, 140); });
+// a theme picked in the debug panel: read the new token values and draw everything again
+document.addEventListener('pando:theme', () => { readColors(); all(); });
+begin(TOUR[0], 'tour');
+all();
+window.__pando = { W, choose, state: () => ({ id: P.id, mode }) };
+})();
+
+// panel.js: a small debug panel for the page's colour theme (themes.mjs). Hidden until the backtick
+// key or ?debug=1 opens it; the backtick or Escape closes it. The choice is kept in localStorage
+// ("pando-theme"), and ?theme=plannotator, ?theme=iris or ?theme=pando sets it (add -light or -dark).
+// window.PandoTheme comes from the small script in <head>, which applies the theme before the page paints.
+(function () {
+'use strict';
+const T = window.PandoTheme, box = document.getElementById('dbg');
+if (!T || !box) return;
+const pick = name => box.querySelectorAll(`input[name="${name}"]`), modeSet = box.querySelector('.dbg-mode');
+let lastMode = 'dark';
+function sync() {
+  const k = T.get(), i = k.lastIndexOf('-'), id = i < 0 ? k : k.slice(0, i), mode = i < 0 ? '' : k.slice(i + 1);
+  if (mode) lastMode = mode;
+  pick('dbg-theme').forEach(r => { r.checked = r.value === id; });
+  modeSet.disabled = !mode;                       // Pando (green) has only its night palette: Dark, fixed
+  pick('dbg-mode').forEach(r => { r.checked = r.value === (mode || 'dark'); });
+}
+box.addEventListener('change', e => {
+  if (e.target.name === 'dbg-mode') lastMode = e.target.value;
+  const id = box.querySelector('input[name="dbg-theme"]:checked').value;
+  T.set(id === 'pando' ? 'pando' : id + '-' + lastMode, true);
+  sync();
+});
+function show(open) { box.hidden = !open; if (open) sync(); }
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.isContentEditable || /^(TEXTAREA|SELECT)$/.test(e.target.tagName) || (e.target.tagName === 'INPUT' && !/^(radio|checkbox)$/.test(e.target.type))) return;
+  if (e.key === '`') { e.preventDefault(); show(box.hidden); }
+  else if (e.key === 'Escape' && !box.hidden) show(false);
+});
+box.querySelector('.dbg-x').addEventListener('click', () => show(false));
+try { if (new URLSearchParams(location.search).get('debug') === '1') show(true); } catch (e) { /* no query string */ }
+sync();
+})();
+
+</script>
+</body></html>

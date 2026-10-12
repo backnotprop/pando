@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describeError, isConnectionReset, retryResetFetch, throwaways } from "./errors.mjs";
 import { request } from "./http.mjs";
 
@@ -423,6 +424,25 @@ try {
   check("nor comment", r.status === 403);
   res = await fetch(`${URL_}${mono}/artifacts/${banner.id}/versions/1/document`);
   check("and without signing in, nothing (401)", res.status === 401);
+
+  // ── 9. pando artifact, end to end: the Go test drives the commands against this server ──
+  const CLI_BRANCH = "agent/plan-loop";
+  r = await call("POST", `${base}/branches`, S, { name: CLI_BRANCH, from: "main" });
+  const [GOMODCACHE, GOCACHE, GOPATH] = spawnSync("go", ["env", "GOMODCACHE", "GOCACHE", "GOPATH"], { encoding: "utf8" }).stdout.trim().split("\n");
+
+  const go = spawnSync("go", ["test", "./internal/app", "-run", "^TestArtifactLive$", "-count=1", "-v"], {
+    cwd: fileURLToPath(new URL("../../cli/", import.meta.url)), encoding: "utf8", timeout: 300_000,
+    env: {
+      ...env, GOMODCACHE, GOCACHE, GOPATH, PANDO_LIVE_URL: URL_, PANDO_LIVE_SECRET: S, PANDO_LIVE_PEER_SECRET: B,
+      PANDO_LIVE_MONOREPO: `${O}/${M}`, PANDO_LIVE_BRANCH: CLI_BRANCH,
+    },
+  });
+
+  check(
+    "go test TestArtifactLive: add (v1, v2), list, comments, comment with a quote (warned when not in the file), reply, resolve, reopen, get --version, open",
+    r.status === 201 && go.status === 0 && /--- PASS: TestArtifactLive/.test(go.stdout),
+    scrub(`${go.stdout}${go.stderr}`).trim().split("\n").slice(-12).join(" | "),
+  );
 } catch (err) {
   check("no unexpected error", false, describeError(err));
 } finally {

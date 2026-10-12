@@ -74,11 +74,11 @@ function List({ repo, b, aside }: { repo: Repo; b: Branch; aside: ReactNode }) {
   else if (!list.data) body = null;
   else if (!artifacts.length) {
     body = (
-      <div className="mt-[46px] grid gap-4 phone:mt-0">
+      <div className="mt-9 grid gap-4 phone:mt-0">
         <DropZone adding={adding} empty>
           <AddButton adding={adding} big />
         </DropZone>
-        <div>
+        <div className="min-w-0">
           <Cmd text={`pando artifact add ${b.name} plan.md`} />
         </div>
       </div>

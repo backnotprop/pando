@@ -19,7 +19,7 @@
 import { exports, WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "./env";
 import { withRepo } from "./monorepo/artifacts";
-import { currentTiming } from "./timing";
+import { addArtifacts, currentTiming } from "./timing";
 
 const OID = /^[0-9a-f]{40}$/;
 
@@ -111,8 +111,14 @@ export function objectsClient(): ObjectsClient {
   const fetcher = exports.Objects;
 
   const get = async (path: string, stats?: ObjectStats): Promise<Response | null> => {
+    const start = Date.now();
     const res = await fetcher.fetch(`https://objects.internal${path}`);
     const hit = res.headers.get("cf-cache-status") === "HIT";
+    const [, kind = "", repo = null] = path.split("/");
+
+    // A miss for a git object ran the entrypoint's Artifacts read, whose own
+    // timing stays in that call's context: count it here as Artifacts time.
+    if (!hit && kind !== "answer") addArtifacts(`objects ${kind}`, repo, start, Date.now());
 
     if (stats) stats[hit ? "hits" : "misses"]++;
     const t = currentTiming();

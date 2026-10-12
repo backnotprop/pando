@@ -20,7 +20,7 @@ import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
 import { combine, requiredKept, type Required } from "./checks";
 import { type DiffPlan, filePatch, fileDiffs, hunkBytes, isDropped, type PairCache, type PairDiff, planDiff, statsOf, toPatch, treeDiff, type BranchDiff, type ShownFile } from "./diff";
-import { commitReader, compareWith } from "./graph";
+import { commitReader, compareWith, type CommitReader } from "./graph";
 import * as views from "./views";
 import type { BranchList } from "./views";
 import { computeFacts, INLINE_MAX, SWEEP_PARALLEL } from "./facts";
@@ -1013,17 +1013,6 @@ async function diffEnds(c: C, r: RepoRecord, branch: string): Promise<{ head: st
 }
 
 /**
- * Files changed, streamed (`?patches=1&stream=1`), for a large branch: NDJSON,
- * one line as soon as each part is known. A "start" line (the ends, the merge
- * base, how many files changed), then one "file" line per file in path order
- * (a ShownFile: its row and its patch), then an "end" line (stats, whether
- * patches were left out for the budget); an "error" line if the diff fails
- * after the start. The files come in a file tree's order (folders first), as
- * the web's tree lists them. Kept in R2 by (main, head) once complete, and
- * streamed from there after, with the two shas as its ETag; an answer being
- * computed has none (no-store), since it may stop part way.
- */
-/**
  * Two blobs' diff, kept in R2 by repo and blobs (`pairs/`), so a branch's next
  * head, another branch or a reload reads only pairs not diffed before. Writes
  * go on in the background; `writes` holds them until they land.
@@ -1049,28 +1038,60 @@ function pairCache(env: Env, artifacts: string, writes: Promise<unknown>[]): Pai
 /** The streamed diff's reader went away: the work stops, quietly. */
 class ReaderLeft extends Error {}
 
+/**
+ * Files changed, streamed (`?patches=1&stream=1`), for a large branch: NDJSON,
+ * one line as soon as each part is known. A "start" line (the ends, the merge
+ * base, how many files changed), then one "file" line per file in path order
+ * (a ShownFile: its row and its patch), then an "end" line (stats, whether
+ * patches were left out for the budget); an "error" line if the diff fails
+ * after the start. The files come in a file tree's order (folders first), as
+ * the web's tree lists them. Kept in R2 by (main, head) once complete, and
+ * streamed from there after, with the two shas as its ETag; an answer being
+ * computed has none (no-store), since it may stop part way.
+ */
 async function filesChangedStream(c: C, r: RepoRecord, branch: string): Promise<Response> {
   const { head, main } = await diffEnds(c, r, branch);
-  const tag = `${main}.${head}`;
-  const type = "application/x-ndjson; charset=utf-8";
   const stored = `answers/${r.artifacts_name}/${files.answerKey("diff", head, main)}.ndjson`;
+  const kept = await keptDiff(c, stored, `${main}.${head}`);
 
-  // Only a whole answer carries the ETag (and its 304): one being computed may stop part way, and must not be kept.
-  if (await c.env.CACHE?.head(stored)) {
-    const kept = { etag: `"${tag}"`, "cache-control": "private, no-cache" };
-
-    if (files.matchesEtag(c.req.header("if-none-match") ?? null, tag)) return new Response(null, { status: 304, headers: kept });
-    const body = await c.env.CACHE?.get(stored);
-
-    if (body) return new Response(body.body, { headers: { ...kept, "content-type": type } });
-  }
-
-  const headers = { "cache-control": "no-store", "content-type": type };
+  if (kept) return kept;
 
   // The merge base first, so a branch with no shared history is an HTTP error, not a broken stream.
   const mergeBase = await withRepo(c.env, r.artifacts_name, async (repo) => (await compareWith(commitReader(repo), main, head)).mergeBase);
 
   if (!mergeBase) throw new HttpError(409, "no_merge_base", `${branch} shares no history with ${r.default_branch}`);
+
+  return streamDiff(c, r, {
+    stored, from: mergeBase, to: head, route: "diff-stream",
+    start: (plan) => ({ type: "start", base_branch: r.default_branch, base: main, head, merge_base: mergeBase, files_total: plan.files_total, too_many_files: plan.too_many_files }),
+  });
+}
+
+const NDJSON = "application/x-ndjson; charset=utf-8";
+
+/** A whole streamed diff kept in R2 (`stored`), with its ETag `tag` (and its 304); null when none is kept. */
+async function keptDiff(c: C, stored: string, tag: string): Promise<Response | null> {
+  // Only a whole answer carries the ETag (and its 304): one being computed may stop part way, and must not be kept.
+  if (!(await c.env.CACHE?.head(stored))) return null;
+  const headers = { etag: `"${tag}"`, "cache-control": "private, no-cache" };
+
+  if (files.matchesEtag(c.req.header("if-none-match") ?? null, tag)) return new Response(null, { status: 304, headers });
+  const body = await c.env.CACHE?.get(stored);
+
+  return body ? new Response(body.body, { headers: { ...headers, "content-type": NDJSON } }) : null;
+}
+
+/** A streamed diff: from one commit (null: nothing, for a first commit) to another, its start line its own, kept in R2 at `stored` once whole. */
+interface DiffStream {
+  stored: string;
+  from: string | null;
+  to: string;
+  route: string;
+  start: (plan: DiffPlan) => typeof Contract.BranchDiffLine.Encoded | typeof Contract.CommitDiffLine.Encoded;
+}
+
+async function streamDiff(c: C, r: RepoRecord, d: DiffStream): Promise<Response> {
+  const headers = { "cache-control": "no-store", "content-type": NDJSON };
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
@@ -1087,7 +1108,7 @@ async function filesChangedStream(c: C, r: RepoRecord, branch: string): Promise<
     left.yes = true;
   });
 
-  const send = (line: typeof Contract.BranchDiffLine.Encoded) => {
+  const send = (line: typeof Contract.BranchDiffLine.Encoded | typeof Contract.CommitDiffLine.Encoded) => {
     if (left.yes) throw new ReaderLeft();
     const bytes = encoder.encode(JSON.stringify(line) + "\n");
 
@@ -1106,10 +1127,10 @@ async function filesChangedStream(c: C, r: RepoRecord, branch: string): Promise<
     withRepo(c.env, r.artifacts_name, async (repo) => {
       if (!plan) {
         const read = commitReader(repo);
-        const [from, to] = await Promise.all([read(mergeBase), read(head)]);
+        const [from, to] = await Promise.all([d.from === null ? null : read(d.from), read(d.to)]);
 
-        plan = await planDiff(repo, from.tree, to.tree, { paths: [], maxFiles: STREAM_FILES_MAX, order: "tree" });
-        send({ type: "start", base_branch: r.default_branch, base: main, head, merge_base: mergeBase, files_total: plan.files_total, too_many_files: plan.too_many_files });
+        plan = await planDiff(repo, from?.tree ?? null, to.tree, { paths: [], maxFiles: STREAM_FILES_MAX, order: "tree" });
+        send(d.start(plan));
       }
 
       const rest = { ...plan, pairs: plan.pairs.slice(sent) };
@@ -1124,22 +1145,22 @@ async function filesChangedStream(c: C, r: RepoRecord, branch: string): Promise<
       }
     });
 
-  const run = timed("api", { route: "diff-stream", repo: r.name, artifacts: r.artifacts_name }, async () => {
+  const run = timed("api", { route: d.route, repo: r.name, artifacts: r.artifacts_name }, async () => {
     for (let tries = 1; ; tries++) {
       try {
         await attempt();
         break;
       } catch (err) {
         if (tries === 3 || !(err instanceof Error) || !isDropped(err)) throw err;
-        console.warn({ msg: "pando.diff-stream", repo: r.name, resumed_after: sent, error: err.message });
+        console.warn({ msg: `pando.${d.route}`, repo: r.name, resumed_after: sent, error: err.message });
       }
     }
 
     send({ type: "end", truncated: listed.some((f) => f.patch_omitted === "budget"), stats: statsOf(listed) });
     writer.close().catch(() => {});
   })
-    // The whole answer kept for (main, head), and every pair diffed.
-    .then(() => Promise.all([c.env.CACHE?.put(stored, new Blob(lines), { httpMetadata: { contentType: type } }), ...writes]))
+    // The whole answer kept, and every pair diffed.
+    .then(() => Promise.all([c.env.CACHE?.put(d.stored, new Blob(lines), { httpMetadata: { contentType: NDJSON } }), ...writes]))
     .catch((err: Error) => {
       if (err instanceof ReaderLeft) return Promise.all(writes);
       console.error("diff stream failed", err);
@@ -1228,6 +1249,30 @@ async function deleteBranch(c: C, r: RepoRecord, branch: string): Promise<Respon
   return c.body(null, 204);
 }
 
+/** One commit as the API shows it (Contract.Commit), with Pando's trailers and its co-authors parsed. */
+async function commitView(repo: ArtifactsRepo, read: CommitReader, sha: string): Promise<typeof Contract.Commit.Encoded> {
+  let ci = await read(sha);
+
+  if (ci.message === undefined) {
+    const full = await repo.readCommit(sha);
+
+    if (full) ci = { ...ci, message: full.message, author: full.author, committer: full.committer, authoredAt: full.authoredAt };
+  }
+
+  const message = ci.message ?? "";
+
+  return {
+    sha,
+    parents: ci.parents,
+    title: message.split("\n")[0],
+    message,
+    author: { name: ci.author?.name ?? null, email: ci.author?.email ?? null, date: ci.authoredAt ? new Date(ci.authoredAt * 1000).toISOString() : null },
+    committer: { name: ci.committer?.name ?? null, email: ci.committer?.email ?? null, date: new Date(ci.time * 1000).toISOString() },
+    trailers: views.pandoTrailers(message),
+    co_authors: views.coAuthors(message),
+  };
+}
+
 /** The branch's own commits (on it, not on the default branch), newest first, with Pando's trailers parsed. */
 async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
   const limitQ = c.req.query("limit");
@@ -1254,30 +1299,7 @@ async function commits(c: C, r: RepoRecord, branch: string): Promise<Response> {
       shas = (await repo.log({ ref: head, limit })).map((x) => x.hash);
     }
 
-    const list = await Promise.all(
-      shas.slice(0, limit).map(async (sha) => {
-        let ci = await read(sha);
-
-        if (ci.message === undefined) {
-          const full = await repo.readCommit(sha);
-
-          if (full) ci = { ...ci, message: full.message, author: full.author, committer: full.committer, authoredAt: full.authoredAt };
-        }
-
-        const message = ci.message ?? "";
-
-        return {
-          sha,
-          parents: ci.parents,
-          title: message.split("\n")[0],
-          message,
-          author: { name: ci.author?.name ?? null, email: ci.author?.email ?? null, date: ci.authoredAt ? new Date(ci.authoredAt * 1000).toISOString() : null },
-          committer: { name: ci.committer?.name ?? null, email: ci.committer?.email ?? null, date: new Date(ci.time * 1000).toISOString() },
-          trailers: views.pandoTrailers(message),
-          co_authors: views.coAuthors(message),
-        };
-      }),
-    );
+    const list = await Promise.all(shas.slice(0, limit).map((sha) => commitView(repo, read, sha)));
 
     return { mergeBase, total: shas.length, list };
   });
@@ -1494,11 +1516,86 @@ api.post("/v1/monorepos/:o/:m/repos/:r/statuses/:sha", async (c) => {
   return c.json(s satisfies typeof Contract.Status.Encoded, 201);
 });
 
+/** A short sha in an address is looked up in main's newest commits this far back (one Artifacts read) when Pando has not recorded it. */
+const SHORT_SHA_MAIN = 1_000;
+
+/** A full sha, or 7 to 39 of its first characters, to the one commit Pando knows that starts so. */
+async function commitSha(c: C, r: RepoRecord, ref: string): Promise<string> {
+  if (isSha(ref)) return ref;
+
+  if (!/^[0-9a-f]{7,39}$/.test(ref)) throw new HttpError(404, "not_found", `no commit ${ref}`);
+  const stub = c.get("stub");
+  let found: string[] = await stub.shasStartingWith(r.name, ref);
+
+  if (!found.length) {
+    const main = await stub.refHead(r.name, r.default_branch);
+
+    if (main) found = (await withRepo(c.env, r.artifacts_name, (repo) => repo.log({ ref: main, limit: SHORT_SHA_MAIN }))).map((x) => x.hash).filter((h) => h.startsWith(ref));
+  }
+
+  if (found.length > 1) throw new HttpError(404, "not_found", `more than one commit starts with ${ref}: give more of its sha`);
+
+  if (!found[0]) throw new HttpError(404, "not_found", `no commit ${ref}`);
+
+  return found[0];
+}
+
+/** The person a commit's author email names (their sign-in email, or Pando's <login>@users.pando.invalid), if they can open the monorepo. */
+async function authorPerson(c: C, email: string | null): Promise<typeof Contract.CommitPage.Encoded.author_person> {
+  const e = email?.toLowerCase();
+
+  if (!e) return null;
+  const login = /^([a-z0-9-]+)@users\.pando\.invalid$/.exec(e)?.[1];
+  const [p] = await accounts(c.env).creditees(c.get("info").id, login ? [] : [e], login ? [login] : []);
+
+  return p ? { login: p.login, picture_url: p.picture_url } : null;
+}
+
+/** One commit's page: the commit, its author's person, the branch it came from or merges, and its checks. */
+async function getCommit(c: C, r: RepoRecord, ref: string): Promise<Response> {
+  const sha = await commitSha(c, r, ref);
+
+  const [commit, facts, required] = await Promise.all([
+    withRepo(c.env, r.artifacts_name, (repo) => commitView(repo, commitReader(repo), sha)),
+    c.get("stub").commitFacts(r.name, sha),
+    requiredKept(c.env, c.get("info"), r),
+  ]);
+
+  const person = await authorPerson(c, commit.author.email);
+
+  return c.json({
+    commit, author_person: person, branch: facts.branch, merge_of: facts.merge_of, checks: combine(sha, required, facts.statuses),
+  } satisfies typeof Contract.CommitPage.Encoded);
+}
+
+/** What a commit changed against its first parent, streamed as Files changed is, with its limits; kept by the sha. */
+async function commitDiff(c: C, r: RepoRecord, sha: string): Promise<Response> {
+  if (!isSha(sha)) bad("sha must be a full 40-character sha");
+  const stored = `answers/${r.artifacts_name}/${files.answerKey("commit", sha, "diff")}.ndjson`;
+  const kept = await keptDiff(c, stored, sha);
+
+  if (kept) return kept;
+  // Read before the stream starts, so an unknown commit is a 404, not a broken stream.
+  const parent = await withRepo(c.env, r.artifacts_name, async (repo) => (await commitReader(repo)(sha)).parents[0] ?? null);
+
+  return streamDiff(c, r, {
+    stored, from: parent, to: sha, route: "commit-diff",
+    start: (plan) => ({ type: "start", sha, parent, files_total: plan.files_total, too_many_files: plan.too_many_files }),
+  });
+}
+
 api.get("/v1/monorepos/:o/:m/repos/:r/commits/*", async (c) => {
   const r = await repoOf(c);
   const tail = rawTail(c);
 
-  if (!tail.endsWith("/status")) throw new HttpError(404, "not_found", "no such route");
+  if (tail.endsWith("/diff")) return commitDiff(c, r, decodeURIComponent(tail.slice(0, -"/diff".length)));
+
+  if (!tail.endsWith("/status")) {
+    if (tail.includes("/")) throw new HttpError(404, "not_found", "no such route");
+
+    return getCommit(c, r, decodeURIComponent(tail));
+  }
+
   const ref = decodeURIComponent(tail.slice(0, -"/status".length));
   const sha = isSha(ref) ? ref : branchesOf(await listRefs(c.env, r)).get(ref);
 

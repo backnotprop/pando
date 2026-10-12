@@ -215,3 +215,20 @@ export const UploadIcon = (p: Props) => (
     <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13.5h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/** A tag: a release's. */
+export const TagIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round">
+      <path d="M2.25 2.25h5.5l6 6-5.5 5.5-6-6z" />
+      <circle cx="5.25" cy="5.25" r="1.1" />
+    </g>
+  </svg>
+);
+
+/** Download: a release's files. */
+export const DownloadIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <path d="M8 2.5v8M4.75 7.5 8 10.75l3.25-3.25M2.75 13.25h10.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);

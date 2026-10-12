@@ -25,7 +25,7 @@ import { MainMoved, mergeableOf, pool, type DryRun, type Mergeable } from "./vie
 import type { RepoRecord } from "./types";
 import { sendPushSummary } from "../feed/push";
 import { runReconcile } from "./reconcile";
-import { closingsIn, commitClosings } from "../issues/commits";
+import { closingsIn, COMMITS_READ_MAX, commitClosings } from "../issues/commits";
 import { sessionCommitsIn, type SessionCommitRef } from "../sessions/commits";
 import { runCredit, type CreditMessage } from "./credit";
 
@@ -57,6 +57,8 @@ export interface Facts {
   issue_refs: { number: number; sha: string }[] | null;
   /** The branch's own commits that name agent sessions, newest first; absent when they were not read. */
   session_commits?: SessionCommitRef[];
+  /** The branch's own commits, newest first, at most COMMITS_READ_MAX (a commit's page names the branch it came from); absent when not read. */
+  commits?: string[];
 }
 
 export type FactsMessage = (
@@ -82,6 +84,7 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
     let behind: number | null = null;
     let issueRefs: Facts["issue_refs"] = null;
     let sessionCommits: SessionCommitRef[] | undefined;
+    let commits: string[] | undefined;
 
     try {
       const c = await compareWith(rd, main, head);
@@ -89,6 +92,7 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
       // The walk cached each commit's message: reading the keywords costs no Artifacts call.
       issueRefs = await closingsIn(rd, c.aheadCommits, names);
       sessionCommits = await sessionCommitsIn(rd, c.aheadCommits);
+      commits = c.aheadCommits.slice(0, COMMITS_READ_MAX);
     } catch {
       /* too far apart: unknown */
     }
@@ -98,6 +102,8 @@ export async function computeFacts(env: Env, r: RepoRecord, main: string, head: 
     const f: Facts = { main, head, ahead, behind, merge_base: base, mergeable: dry.mergeable, conflict_paths: dry.conflict_paths, issue_refs: issueRefs };
 
     if (sessionCommits) f.session_commits = sessionCommits;
+
+    if (commits) f.commits = commits;
 
     return f;
   };

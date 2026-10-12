@@ -6,6 +6,7 @@ import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./
 import { Artifact, ArtifactComment, ArtifactDetail, ArtifactList, ArtifactThreads, type ArtifactCommentState } from "./artifact.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
+import { CommitDiffLine, CommitPage } from "./commit.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
 import { HistoryPage, LastCommits, TreePage } from "./files.ts";
 import { Issue, IssueComment, IssueList, Label, LabelList, ReactionsAnswer, Timeline, type IssueState, type ReactionContent } from "./issue.ts";
@@ -17,6 +18,7 @@ import { EventsPage } from "./feed.ts";
 import { MetaHistory, MetaTree, Restored } from "./meta.ts";
 import { GithubChoices, GithubRepos, Mirror, MirrorQueued, MirrorSaved } from "./mirror.ts";
 import { NeedsPage } from "./needs.ts";
+import { Release, ReleaseList, RepoSummary } from "./release.ts";
 import { HeadList, InviteList, InviteResult, MachineList, MemberList, MonorepoCreated, Repo, RepoList, WorktreeList } from "./repo.ts";
 import { BranchSessions, PersonSessions, Session, SessionAny, SessionEntries, SessionExclusions, SessionFiles, SessionList, SessionMachines, SessionMarks, SessionsDeleted } from "./session.ts";
 import { CredentialList, Me, SignedOut } from "./user.ts";
@@ -159,6 +161,30 @@ export const listHeads = (owner: Login, name: MonorepoName) => ({ path: `${monor
 /** GET .../repos/{repo}: one repo, with its required_checks. */
 export const getRepo = (owner: Login, name: MonorepoName, repo: RepoName) => ({ path: repoBase(owner, name, repo), response: Repo });
 
+/** PATCH .../repos/{repo} {releases_public} (owners): "Anyone can download releases", the project's release files only, never its code. */
+export const setReleasesPublic = (owner: Login, name: MonorepoName, repo: RepoName) => ({ method: "PATCH", path: repoBase(owner, name, repo), response: Repo }) as const;
+
+// ── Builds of main and releases (research/plans/releases-2026-10-04). Made, published and deleted with the CLI or the API; the web shows them.
+
+/** GET .../repos/{repo}/summary: main's commit and its state (or not built), the newest build on main, the latest release. */
+export const getRepoSummary = (owner: Login, name: MonorepoName, repo: RepoName) => ({ path: `${repoBase(owner, name, repo)}/summary`, response: RepoSummary });
+
+/** GET .../repos/{repo}/releases: newest first, drafts too (members), 30 a page; `cursor` is a page's next_cursor. */
+export const listReleases = (owner: Login, name: MonorepoName, repo: RepoName, cursor: string | null) => ({
+  path: `${repoBase(owner, name, repo)}/releases${cursor === null ? "" : query(new URLSearchParams({ cursor }))}`,
+  response: ReleaseList,
+});
+
+/** GET .../releases/{tag}: one release, with its commit's checks; `latest` is the newest published one. */
+export const getRelease = (owner: Login, name: MonorepoName, repo: RepoName, tag: string) => ({
+  path: `${repoBase(owner, name, repo)}/releases/${encodeURIComponent(tag)}`,
+  response: Release,
+});
+
+/** GET .../releases/{tag}/files/{file}: a file's bytes, as a download (members; anyone when the project's switch is on). */
+export const releaseFilePath = (owner: Login, name: MonorepoName, repo: RepoName, tag: string, file: string): string =>
+  `${repoBase(owner, name, repo)}/releases/${encodeURIComponent(tag)}/files/${encodeURIComponent(file)}`;
+
 /** GET .../members. */
 export const listMembers = (owner: Login, name: MonorepoName) => ({ path: `${monorepoBase(owner, name)}/members`, response: MemberList });
 
@@ -222,13 +248,33 @@ export const combinedStatus = (owner: Login, name: MonorepoName, repo: RepoName,
   response: Checks,
 });
 
-/** GET .../ci/builds, newest first; narrowed to one branch (and repo) when given. */
-export const listCiBuilds = (owner: Login, name: MonorepoName, repo: RepoName | null, branch: string | null) => {
+/**
+ * GET .../repos/{repo}/commits/{sha}: one commit, the branch it came from and its checks. `sha` is a full sha or
+ * 7 to 39 of its first characters (404 when none or more than one commit Pando knows starts so).
+ */
+export const getCommit = (owner: Login, name: MonorepoName, repo: RepoName, sha: string) => ({
+  path: `${repoBase(owner, name, repo)}/commits/${encodeURIComponent(sha)}`,
+  response: CommitPage,
+});
+
+/**
+ * GET .../repos/{repo}/commits/{sha}/diff: what it changed against its first parent, as NDJSON, a CommitDiffLine
+ * per line (decodeCommitDiffLine), with Files changed's limits. `sha` is the full sha. ETag: the sha.
+ */
+export const commitDiffStream = (owner: Login, name: MonorepoName, repo: RepoName, sha: string) => ({
+  path: `${repoBase(owner, name, repo)}/commits/${encodeURIComponent(sha)}/diff`,
+  line: CommitDiffLine,
+});
+
+/** GET .../ci/builds, newest first; narrowed to one repo, branch or commit when given. */
+export const listCiBuilds = (owner: Login, name: MonorepoName, repo: RepoName | null, branch: string | null, sha: string | null = null) => {
   const params = new URLSearchParams();
 
   if (repo !== null) params.set("repo", repo);
 
   if (branch !== null) params.set("branch", branch);
+
+  if (sha !== null) params.set("sha", sha);
 
   return { path: `${monorepoBase(owner, name)}/ci/builds${query(params)}`, response: CiBuildList };
 };

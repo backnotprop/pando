@@ -9,7 +9,7 @@
 // list moves the tree to the file at the top. The tab fills the window below
 // the page's head, the tree and the list each scrolling on their own; narrow
 // screens fold the tree behind Files.
-import type { BranchDiffLine, ChangedFile, Repo } from "@pando/contract";
+import type { ChangedFile, Repo } from "@pando/contract";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FilesSoFar } from "../../../../api/projects";
@@ -22,13 +22,24 @@ import { useColourViews } from "../-code/coloured";
 import { tool } from "../-code/FileView";
 import { useMonorepo } from "../-frame/heads";
 
-type Start = Extract<typeof BranchDiffLine.Type, { type: "start" }>;
+/** What the list needs from a diff's start: the commit each file links to, the one before (a deleted file's), how many files changed. */
+export interface DiffEnds {
+  after: string;
+  /** Null for a first commit: nothing came before. */
+  before: string | null;
+  files_total: number;
+  too_many_files: boolean;
+}
 
-const WHY = {
-  binary: "Binary file",
-  too_large: "Too large to show (over 8 MiB)",
-  budget: "Not shown: this branch's changes are over 32 MiB",
-} as const;
+/** A file's commit for its link: before the change for a deleted one. */
+const atOf = (ends: DiffEnds, f: ChangedFile) => (f.status === "deleted" ? (ends.before ?? ends.after) : ends.after);
+
+const why = (what: "branch" | "commit") =>
+  ({
+    binary: "Binary file",
+    too_large: "Too large to show (over 8 MiB)",
+    budget: `Not shown: this ${what}'s changes are over 32 MiB`,
+  }) as const;
 
 /** The tree's order (Plannotator's): at each level folders before files, each by name. The server streams in the same order. */
 function treeOrder(a: ChangedFile, b: ChangedFile): number {
@@ -64,10 +75,10 @@ function Counts({ f }: { f: ChangedFile }) {
   );
 }
 
-/** The file's path, a link to the file (at the branch's head, or before the branch for a deleted one): what the line is about. */
-function Path({ repo, start, f }: { repo: Repo; start: Start; f: ChangedFile }) {
+/** The file's path, a link to the file (after the change, or before it for a deleted one): what the line is about. */
+function Path({ repo, ends, f }: { repo: Repo; ends: DiffEnds; f: ChangedFile }) {
   const { monorepo } = useMonorepo();
-  const at = f.status === "deleted" ? start.merge_base : start.head;
+  const at = atOf(ends, f);
 
   return (
     <span className="min-w-0 flex-1 overflow-hidden text-[12.5px] leading-[15px] text-ellipsis whitespace-nowrap">
@@ -79,16 +90,16 @@ function Path({ repo, start, f }: { repo: Repo; start: Start; f: ChangedFile }) 
   );
 }
 
-/** Why a file has no lines here, and the file itself (at the branch's head, or before the branch for a deleted one). */
-function Why({ repo, start, f }: { repo: Repo; start: Start; f: ChangedFile }) {
+/** Why a file has no lines here, and the file itself (after the change, or before it for a deleted one). */
+function Why({ repo, what, ends, f }: { repo: Repo; what: "branch" | "commit"; ends: DiffEnds; f: ChangedFile }) {
   const { monorepo } = useMonorepo();
-  const at = f.status === "deleted" ? start.merge_base : start.head;
+  const at = atOf(ends, f);
 
   if (f.patch !== null) return <span className="flex-none text-[12.5px] leading-[15px] text-ash">{f.status === "renamed" ? "Renamed, no line changes" : "No line changes"}</span>;
 
   return (
     <span className="flex flex-none items-baseline gap-4 text-[12.5px] leading-[15px] text-ash">
-      {WHY[f.patch_omitted ?? "too_large"]}
+      {why(what)[f.patch_omitted ?? "too_large"]}
       <Link {...codeBlobLink(monorepo.full, repo.path, f.path, at)} className={lnk}>
         View file
       </Link>
@@ -99,7 +110,7 @@ function Why({ repo, start, f }: { repo: Repo; start: Start; f: ChangedFile }) {
 const hasLines = (f: ChangedFile) => f.patch !== null && f.patch.includes("\n@@");
 
 /** One file's header in the list: exactly the list's header height (DiffList HEADER_HEIGHT, 44 px), opaque, as it sticks while its lines scroll by. */
-function Header({ repo, start, f, open, current, toggle }: { repo: Repo; start: Start; f: ChangedFile; open: boolean; current: boolean; toggle: () => void }) {
+function Header({ repo, what, ends, f, open, current, toggle }: { repo: Repo; what: "branch" | "commit"; ends: DiffEnds; f: ChangedFile; open: boolean; current: boolean; toggle: () => void }) {
   return (
     <div
       data-file-path={f.path}
@@ -113,15 +124,22 @@ function Header({ repo, start, f, open, current, toggle }: { repo: Repo; start: 
       ) : (
         <span className="-ml-1 size-3.5 flex-none" />
       )}
-      <Path repo={repo} start={start} f={f} />
+      <Path repo={repo} ends={ends} f={f} />
       <span className="flex-none text-[12.5px] leading-[15px] text-ash">{f.status}</span>
       <Counts f={f} />
-      {hasLines(f) ? null : <Why repo={repo} start={start} f={f} />}
+      {hasLines(f) ? null : <Why repo={repo} what={what} ends={ends} f={f} />}
     </div>
   );
 }
 
-/** The tab's height: the window below where it starts, with a 16 px margin, while the page itself stays still. */
+/** The pane's least height: below it, a page whose head is tall (a commit's long message on a phone) scrolls instead. */
+const PANE_MIN = 360;
+
+/**
+ * The tab's height: the window below where it starts, with a 16 px margin,
+ * while the page itself stays still. When the page's head leaves less than
+ * PANE_MIN, the page scrolls to a pane as tall as the window.
+ */
 function usePane() {
   const ref = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | null>(null);
@@ -133,9 +151,15 @@ function usePane() {
     window.scrollTo(0, 0);
     const html = document.documentElement;
     const was = html.style.overflow;
-    const fit = () => setHeight(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 16)));
 
-    html.style.overflow = "hidden";
+    const fit = () => {
+      const room = Math.floor(window.innerHeight - (el.getBoundingClientRect().top + window.scrollY) - 16);
+      const fits = room >= PANE_MIN;
+
+      html.style.overflow = fits ? "hidden" : was;
+      setHeight(fits ? room : Math.max(PANE_MIN, window.innerHeight - 32));
+    };
+
     fit();
     window.addEventListener("resize", fit);
 
@@ -151,8 +175,11 @@ function usePane() {
 const list =
   "relative h-full overflow-y-auto overflow-x-clip overscroll-contain px-px [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:rounded-[10px] [&_diffs-container]:shadow-[0_0_0_1px_var(--rootline)] [&_diffs-container]:[contain:layout_paint_style]";
 
-/** `readAgain` reads the branch's diff again (after one stopped part way: the pairs already diffed come back at once). */
-export function FilesChanged({ repo, diff, start, reading, readAgain }: { repo: Repo; diff: FilesSoFar; start: Start; reading: boolean; readAgain: () => void }) {
+/**
+ * A branch's or a commit's changed files (`what`). `readAgain` reads the diff again (after one stopped part way: the
+ * pairs already diffed come back at once).
+ */
+export function FilesChanged({ repo, what, diff, ends, reading, readAgain }: { repo: Repo; what: "branch" | "commit"; diff: Pick<FilesSoFar, "files" | "end" | "error">; ends: DiffEnds; reading: boolean; readAgain: () => void }) {
   const views = useColourViews();
   const { ref, height } = usePane();
   // Closed by the person, by path.
@@ -196,8 +223,8 @@ export function FilesChanged({ repo, diff, start, reading, readAgain }: { repo: 
   const tree = <FileTree files={treeFiles} selected={at} onSelect={choose} />;
 
   const notes = [
-    start.too_many_files ? `The first ${files.length.toLocaleString("en-US")} of ${start.files_total.toLocaleString("en-US")} files` : null,
-    !diff.end && reading ? `Reading the files changed: ${files.length.toLocaleString("en-US")} of ${start.files_total.toLocaleString("en-US")}` : null,
+    ends.too_many_files ? `The first ${files.length.toLocaleString("en-US")} of ${ends.files_total.toLocaleString("en-US")} files` : null,
+    !diff.end && reading ? `Reading the files changed: ${files.length.toLocaleString("en-US")} of ${ends.files_total.toLocaleString("en-US")}` : null,
     diff.end?.truncated ? "Diffs stop at 32 MiB in all: the later files are listed without theirs" : null,
   ].filter((n) => n !== null);
 
@@ -233,7 +260,7 @@ export function FilesChanged({ repo, diff, start, reading, readAgain }: { repo: 
               target={target}
               onTop={onTop}
               className={list}
-              header={(f) => <Header repo={repo} start={start} f={f} open={!closed.has(f.path)} current={f.path === at} toggle={() => toggle(f.path)} />}
+              header={(f) => <Header repo={repo} what={what} ends={ends} f={f} open={!closed.has(f.path)} current={f.path === at} toggle={() => toggle(f.path)} />}
             />
           ) : null}
         </section>

@@ -119,6 +119,18 @@ export const branchesLink = (full: string, repoPath: string, merged = false) =>
     ? linkOptions({ to: "/$owner/$name/branches", params: split(full), search: merged ? { tab: "merged" } : {} })
     : linkOptions({ to: "/$owner/$name/projects/$project/branches", params: { ...split(full), project: project(repoPath) }, search: merged ? { tab: "merged" } : {} });
 
+/** A repo's Releases tab. */
+export const releasesLink = (full: string, repoPath: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/releases", params: split(full) })
+    : linkOptions({ to: "/$owner/$name/projects/$project/releases", params: { ...split(full), project: project(repoPath) } });
+
+/** One release's page, by its tag. */
+export const releaseLink = (full: string, repoPath: string, tag: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/releases/$tag", params: { ...split(full), tag } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/releases/$tag", params: { ...split(full), project: project(repoPath), tag } });
+
 /** A branch's page: the pull request; `files` for its Files changed tab. */
 export const branchLink = (full: string, repoPath: string, branch: string, files = false) =>
   repoPath === "."
@@ -128,6 +140,12 @@ export const branchLink = (full: string, repoPath: string, branch: string, files
         params: { ...split(full), project: project(repoPath), _splat: branch },
         search: files ? { tab: "files" } : {},
       });
+
+/** A commit's page (/commit/{sha}, as GitHub's): its message, checks and the files it changed. */
+export const commitLink = (full: string, repoPath: string, sha: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/commit/$sha", params: { ...split(full), sha } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/commit/$sha", params: { ...split(full), project: project(repoPath), sha } });
 
 /** A branch's Sessions tab. */
 export const branchSessionsLink = (full: string, repoPath: string, branch: string) =>
@@ -190,9 +208,12 @@ export type AppLink =
   | ReturnType<typeof codeBlobLink>
   | ReturnType<typeof codeHistoryLink>
   | ReturnType<typeof branchesLink>
+  | ReturnType<typeof releasesLink>
+  | ReturnType<typeof releaseLink>
   | ReturnType<typeof branchLink>
   | ReturnType<typeof branchSessionsLink>
   | ReturnType<typeof branchArtifactsLink>
+  | ReturnType<typeof commitLink>
   | ReturnType<typeof sessionsLink>
   | ReturnType<typeof sessionLink>
   | ReturnType<typeof personSessionsLink>;

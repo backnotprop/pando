@@ -5,7 +5,7 @@
   "body": {
     "job": {
       "id": "job-lint-1-retry",
-      "build": "cib_5fa125a40750929f",
+      "build": "cib_0a1e37ec6969b962",
       "name": "lint",
       "step_key": "lint",
       "type": "script",
@@ -15,7 +15,7 @@
       "soft_failed": false,
       "retried": false,
       "web_url": "https://buildkite.com/o/web/builds/1#job-lint-1-retry",
-      "created_at": "2026-10-04T17:05:02.510Z",
+      "created_at": "2026-10-12T10:57:15.298Z",
       "started_at": null,
       "finished_at": null,
       "duration_s": null,

@@ -10,7 +10,7 @@ import { branchesQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from ".
 import { openBranchesQuery } from "../../../../api/queries";
 import { isDoc } from "../../../../ui/doc/Doc";
 import { useHeld, useLastAnswer } from "../../../../ui/held";
-import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref } from "../../../../ui/paths";
+import { codeBlobLink, codeHistoryLink, codeLink, codeRawHref, commitLink } from "../../../../ui/paths";
 import { loadColourViews } from "../-code/coloured";
 import { BarSpace, ChangeBar } from "../-code/FileList";
 import { FileShown, FileTools } from "../-code/FileView";
@@ -63,7 +63,7 @@ export function ProjectFile({ repo, path, gitRef, plain }: { repo: Repo; path: s
         </div>
         <div className="overflow-hidden rounded-[10px] border border-rootline">
           {last ? (
-            <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} sha at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
+            <ChangeBar who={last.author.name ?? ""} title={last.title} id={last.sha.slice(0, 7)} sha idLink={commitLink(full, repo.path, last.sha)} at={Date.parse(last.at)} history={codeHistoryLink(full, repo.path, path, gitRef)} />
           ) : lastCommits?.complete ? null : (
             <BarSpace />
           )}

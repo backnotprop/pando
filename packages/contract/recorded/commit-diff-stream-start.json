@@ -1,0 +1,12 @@
+{
+  "schema": "CommitDiffLine",
+  "route": "GET .../repos/{repo}/commits/{sha}/diff (a start line)",
+  "status": 200,
+  "body": {
+    "type": "start",
+    "sha": "c640463c9489db1bed65a0d656cb1429b06f17ae",
+    "parent": "e73da8281947c127c26bf7546a343762b60d2fef",
+    "files_total": 1,
+    "too_many_files": false
+  }
+}

@@ -25,7 +25,8 @@ export const saverOf = (v: MetaVersion) => v.login ?? (v.author.replace(/\s*<[^>
 const ICONS = { up: FolderIcon, dir: FolderIcon, project: RepoIcon, file: FileIcon };
 
 /** The bar over a list or a file: who, what, where, when, and History. `id` is a commit's (`sha`, set in mono) or a word ("saved", "on ramos-mbp"). */
-export function ChangeBar({ who, title, id, sha = false, at, history }: { who: string; title: string; id: string; sha?: boolean; at: number; history: AppLink }) {
+/** `idLink`: a git commit's page, from its short sha. */
+export function ChangeBar({ who, title, id, sha = false, idLink, at, history }: { who: string; title: string; id: string; sha?: boolean; idLink?: AppLink; at: number; history: AppLink }) {
   const clock = useNow();
 
   return (
@@ -34,7 +35,13 @@ export function ChangeBar({ who, title, id, sha = false, at, history }: { who: s
       <span className="flex-none text-[13px] text-bark">{who}</span>
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-bark-dim phone:order-3 phone:basis-full">{title}</span>
       <span className="ml-auto flex flex-none items-center gap-4">
-        <span className={`text-[12.5px] leading-[15px] text-ash phone:hidden ${sha ? "font-mono" : ""}`}>{id}</span>
+        {idLink ? (
+          <Link {...idLink} className="font-mono text-[12.5px] leading-[15px] text-ash hover:text-link hover:underline phone:hidden">
+            {id}
+          </Link>
+        ) : (
+          <span className={`text-[12.5px] leading-[15px] text-ash phone:hidden ${sha ? "font-mono" : ""}`}>{id}</span>
+        )}
         <span className="text-[12.5px] whitespace-nowrap text-ash">{ago(at, clock)}</span>
         <Link {...history} className={lnk}>
           History

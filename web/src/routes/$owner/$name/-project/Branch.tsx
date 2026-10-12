@@ -11,26 +11,27 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { merge } from "../../../../api/actions";
 import type { MonorepoRef } from "../../../../api/names";
-import type { Branch, BranchSessions, ChangedFile, Checks, Commit, Repo, Review, Status } from "@pando/contract";
+import type { Branch, BranchSessions, ChangedFile, Commit, Repo, Review } from "@pando/contract";
 import { branchSessionsQuery } from "../../../../api/sessions";
-import { branchDiffQuery, branchQuery, type CheckRun, checkRunsQuery, commitsQuery, type FilesSoFar, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
+import { branchDiffQuery, branchQuery, commitsQuery, type FilesSoFar, repoKey, reviewsQuery, worktreeQuery } from "../../../../api/projects";
 import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
 import { fallback, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
-import { type ArtifactAt, branchArtifactsLink, branchLink, branchSessionsLink, ciBuildLink, codeBlobLink, ownerLink } from "../../../../ui/paths";
+import { type ArtifactAt, branchArtifactsLink, branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
 import { artifactListQuery } from "../../../../api/artifacts";
 import { ArtifactsTab } from "../-artifacts/ArtifactsTab";
-import { Ref, refClass } from "../../../../ui/Ref";
+import { Ref } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
-import { ago, elapsed, since, useNow, useSeconds } from "../../../../ui/time";
+import { ago, since, useNow } from "../../../../ui/time";
 import { BranchSessionsTab, SessionNumbers } from "../-sessions/BranchTab";
 import { useMonorepo } from "../-frame/heads";
 import { loadColourViews } from "../-code/coloured";
 import { ReviewAgents, ReviewWithAgent } from "../-agents/ReviewAgent";
 import { BranchIssues } from "../-issues/BranchIssues";
+import { CheckRows } from "./Checks";
 import { FilesChanged } from "./FilesChanged";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
 
@@ -48,9 +49,9 @@ function fillsScreen(files: readonly ChangedFile[]): boolean {
 }
 
 /** Resolves once the streamed diff has its first screen of files, or has ended (`done`), whichever is first. */
-function firstFiles(qc: QueryClient, key: QueryKey, done: Promise<void>): Promise<void> {
+export function firstFiles(qc: QueryClient, key: QueryKey, done: Promise<void>): Promise<void> {
   const ready = () => {
-    const d = qc.getQueryData<FilesSoFar>(key);
+    const d = qc.getQueryData<Pick<FilesSoFar, "files" | "end" | "error">>(key);
 
     return !!d && (d.end !== null || d.error !== null || fillsScreen(d.files));
   };
@@ -111,7 +112,9 @@ function Authors({ c }: { c: Commit }) {
   );
 }
 
-function Commits({ commits, on }: { commits: readonly Commit[]; on: BranchSessions | undefined }) {
+/** The branch's commits, newest first: each sha and title opens the commit's page. */
+function Commits({ repo, commits, on }: { repo: Repo; commits: readonly Commit[]; on: BranchSessions | undefined }) {
+  const { monorepo } = useMonorepo();
   const clock = useNow();
 
   return (
@@ -119,10 +122,14 @@ function Commits({ commits, on }: { commits: readonly Commit[]; on: BranchSessio
       {commits.map((c) => (
         <li key={c.sha} className="border-t border-rule-faint">
           <div className="-mx-2.5 grid min-h-10 grid-cols-[76px_minmax(0,1fr)_200px_56px] items-center gap-4 rounded-[7px] px-2.5 py-2 phone:grid-cols-[64px_minmax(0,1fr)]">
-            <span className="font-mono text-[13.5px] leading-[16px] text-bark-dim">{c.sha.slice(0, 7)}</span>
+            <Ref kind="object" mono link={commitLink(monorepo.full, repo.path, c.sha)} className="text-[13.5px] leading-[16px]">
+              {c.sha.slice(0, 7)}
+            </Ref>
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">
               <SessionNumbers sha={c.sha} on={on} />
-              {c.title}
+              <Link {...commitLink(monorepo.full, repo.path, c.sha)} className="hover:text-link hover:underline">
+                {c.title}
+              </Link>
             </span>
             <span className="phone:col-span-2">
               <Authors c={c} />
@@ -162,82 +169,6 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-/** A check's state in words: its job's, when a CI service runs it; else its status's. */
-function checkWord(s: Status | undefined, run: CheckRun | undefined): string {
-  if (run) return run.job.state;
-
-  if (!s) return "not reported";
-
-  return s.state === "success" ? "passed" : s.state === "pending" ? "running" : s.state === "failure" ? "failed" : "errored";
-}
-
-const toneOf = (word: string) => (word === "passed" ? "text-bark-dim" : word === "failed" || word === "errored" ? "font-semibold text-rust" : "text-ash");
-
-/**
- * Each required or reported check, as GitHub lists them: its CI service's
- * mark, its name (opening its job on the build's page), its state in words,
- * and its time, which ticks each second while it runs. A check that moves
- * while the page is open plays the arrival.
- */
-function CheckRows({ repo, branch, checks, live }: { repo: Repo; branch: Branch; checks: Checks; live: boolean }) {
-  const { monorepo, info } = useMonorepo();
-  // Read from Pando's stored builds, not only when a status names a service: a job shows the moment it is queued.
-  const runs = useQuery({ ...checkRunsQuery(monorepo, repo.name, branch.name, branch.head), refetchInterval: fallback(live) }).data?.runs;
-  const names = [...new Set([...(checks.required ?? []), ...checks.statuses.map((s) => s.context), ...(runs?.keys() ?? [])])];
-  const words = names.map((name) => checkWord(checks.statuses.find((x) => x.context === name), runs?.get(name)));
-  const clock = useSeconds(words.includes("running"));
-  const arrived = useArrivals(runs ? names.map((name, i) => ({ key: name, state: words[i] ?? "" })) : undefined);
-
-  // pando.toml unreadable or broken: which checks are required is not known (the Merge box gives the reason in full).
-  const unknown =
-    checks.state === "unknown" ? (
-      <p title={checks.checks_unknown ?? undefined} className="mb-2.5 text-[13px] text-ash">
-        Required checks unknown
-      </p>
-    ) : null;
-
-  if (!names.length) return unknown ?? <Empty>None required.</Empty>;
-
-  return (
-    <>
-      {unknown}
-      <ul aria-label="Checks" className="grid gap-2.5">
-        {names.map((name, i) => {
-          const s = checks.statuses.find((x) => x.context === name);
-          const run = runs?.get(name);
-          const word = words[i] ?? "";
-          const mark = s?.app === "buildkite" || run?.build.service === "buildkite";
-          // A monorepo's build has its page here; a plain repo's opens in the service.
-          const page = run && info.kind === "monorepo" ? ciBuildLink(monorepo.full, run.build.pipeline, run.build.number) : null;
-          const url = run?.job.web_url ?? s?.target_url ?? null;
-          const label = <span className="fox-cool">{name}</span>;
-
-          return (
-            <li key={`${name}:${word}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-[13px] ${arrived(name) ? "arrived" : ""}`}>
-              <span className="text-bark-dim">
-                {mark ? <CheckMark /> : null}
-                {page && run ? (
-                  <Link {...page} search={{ job: run.job.id }} className={refClass("person")}>
-                    {label}
-                  </Link>
-                ) : url ? (
-                  <a href={url} target="_blank" rel="noopener noreferrer" className={refClass("person")}>
-                    {label}
-                  </a>
-                ) : (
-                  <span className="font-semibold text-bark">{label}</span>
-                )}{" "}
-                <span className={`fox-cool text-[13px] whitespace-nowrap ${toneOf(word)}`}>{word}</span>
-              </span>
-              <span className="fox-cool text-[12.5px] whitespace-nowrap text-ash">{run ? elapsed(run.job, clock) : ""}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </>
   );
 }
 
@@ -303,7 +234,11 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
           Merged into main
         </p>
         <p className={`${q} mt-1.5`}>
-          <code className="text-[12.5px] text-bark">{b.merge_commit?.slice(0, 7) ?? ""}</code>
+          {b.merge_commit ? (
+            <Ref kind="object" mono link={commitLink(monorepo.full, repo.path, b.merge_commit)} className="text-[12.5px]">
+              {b.merge_commit.slice(0, 7)}
+            </Ref>
+          ) : null}
           {b.merged_by ? `, by ${b.merged_by}` : ""}
           {b.merged_at ? `, ${ago(b.merged_at, clock)}` : ""}
         </p>
@@ -420,7 +355,14 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   const { monorepo } = useMonorepo();
   const diff = useQuery(branchDiffQuery(monorepo, repo.name, branch));
 
-  if (diff.data?.start) return <FilesChanged repo={repo} diff={diff.data} start={diff.data.start} reading={diff.isFetching} readAgain={() => void diff.refetch()} />;
+  const start = diff.data?.start;
+
+  if (diff.data && start) {
+    const ends = { after: start.head, before: start.merge_base, files_total: start.files_total, too_many_files: start.too_many_files };
+
+    return <FilesChanged repo={repo} what="branch" diff={diff.data} ends={ends} reading={diff.isFetching} readAgain={() => void diff.refetch()} />;
+  }
+
 
   return diff.isError ? <Empty>The files changed could not be read.</Empty> : null;
 }
@@ -487,7 +429,7 @@ function Overview({ repo, b, commits, total, reviews, live, on }: { repo: Repo; 
     <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
       <section>
         <SectionHead title="Commits" count={total} />
-        {commits.length ? <Commits commits={commits} on={on} /> : <Empty>No commits ahead of main.</Empty>}
+        {commits.length ? <Commits repo={repo} commits={commits} on={on} /> : <Empty>No commits ahead of main.</Empty>}
         <div className="mt-10">
           <SectionHead title="Reviews" right={b.state === "merged" ? null : <ReviewWithAgent repo={repo} branch={b.name} />} />
           <ReviewAgents repo={repo} branch={b.name} />
@@ -507,7 +449,7 @@ function Aside({ repo, b, live }: { repo: Repo; b: Branch; live: boolean }) {
       <BranchIssues repo={repo} b={b} />
       <div className="mt-10">
         <SectionHead title="Checks" />
-        <CheckRows repo={repo} branch={b} checks={b.checks} live={live} />
+        <CheckRows repo={repo} sha={b.head} checks={b.checks} live={live} />
       </div>
       <Worktree repo={repo} branch={b.name} />
     </aside>

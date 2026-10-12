@@ -28,6 +28,8 @@ export * from "./repo.ts";
 
 export * from "./branch.ts";
 
+export * from "./commit.ts";
+
 export * from "./issue.ts";
 
 export * from "./session.ts";

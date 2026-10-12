@@ -5,23 +5,23 @@
   "body": {
     "builds": [
       {
-        "id": "cib_5fa125a40750929f",
+        "id": "cib_0a1e37ec6969b962",
         "service": "buildkite",
-        "connection": "m_45d69c4a03ba6d4e--cic_fc7bd4c95b2b",
+        "connection": "m_9f5ba36b26db5990--cic_841865c3fca1",
         "pipeline": "web",
         "number": 1,
         "repo": "projects-web",
         "repo_path": "projects/web",
-        "sha": "ec2a63d55a41070e53dccdded163c94161f90746",
+        "sha": "c640463c9489db1bed65a0d656cb1429b06f17ae",
         "branch": "feat/ready",
         "message": "Add the ready file",
         "state": "passed",
         "service_state": "passed",
         "web_url": "https://buildkite.com/o/web/builds/1",
-        "pushed_by": "rec-muu2mhw1",
-        "created_at": "2026-10-04T17:04:50.346Z",
-        "started_at": "2026-10-04T17:04:51.346Z",
-        "finished_at": "2026-10-04T17:05:00.346Z",
+        "pushed_by": "rec-mv5508dy",
+        "created_at": "2026-10-12T10:56:55.982Z",
+        "started_at": "2026-10-12T10:56:56.982Z",
+        "finished_at": "2026-10-12T10:57:05.982Z",
         "duration_s": 9,
         "rebuilt_from": null
       }

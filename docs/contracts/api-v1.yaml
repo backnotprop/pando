@@ -3090,6 +3090,73 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Checks" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/commits/{sha}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: sha
+        in: path
+        required: true
+        description: |
+          A full sha, or its first 7 to 39 characters. A short one is looked
+          up among the commits Pando has recorded in the repo (branch heads,
+          branches' own commits, merges, checks, sessions' commits), then in
+          main's newest 1,000 first-parent commits (one Artifacts read); a 404
+          when none or more than one starts so.
+        schema: { type: string }
+    get:
+      operationId: getCommit
+      summary: One commit, the branch it came from, and its checks (the web's commit page)
+      description: |
+        `branch` is the branch it was pushed on, when Pando knows it: the
+        earliest branch that listed it among its own commits (the newest 250
+        of each branch are recorded when Pando compares the branch with main),
+        else a branch whose head it is or was, else the branch a session saw it
+        on. `merge_of` is set when the commit is Pando's merge of a branch into
+        the default branch. `author_person` is the person whose sign-in email
+        (or `<login>@users.pando.invalid`) is the author's, when they can open
+        the monorepo.
+      tags: [statuses]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommitPage" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/monorepos/{owner}/{monorepo}/repos/{repo}/commits/{sha}/diff:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - $ref: "#/components/parameters/repo"
+      - name: sha
+        in: path
+        required: true
+        description: The full sha.
+        schema: { type: string }
+    get:
+      operationId: commitDiffStream
+      summary: What a commit changed against its first parent, streamed as Files changed is
+      description: |
+        `application/x-ndjson`, one `CommitDiffLine` a line: `start` (the
+        commit, its first parent, null for a first commit, `files_total`,
+        `too_many_files`), then one `file` per changed file in a file tree's
+        order, then `end`; `error` if the diff fails after its start. The
+        limits are Files changed's: at most 5,000 files, 32 MiB of patches in
+        all, a text file over 8 MiB on either side not diffed. The whole answer
+        is kept by the sha once streamed, with the sha as its `ETag` (a 304
+        with `If-None-Match`).
+      tags: [statuses]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/CommitDiffLine" }
+        "304": { description: "With `If-None-Match` naming this sha." }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/monorepos/{owner}/{monorepo}/repos/{repo}/summary:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -5159,6 +5226,39 @@ components:
             type: { type: string, enum: [error] }
             code: { type: string }
             message: { type: string }
+    CommitBranch:
+      type: object
+      required: [name, title, state, merge_commit]
+      properties:
+        name: { type: string }
+        title: { type: [string, "null"] }
+        state: { type: string, enum: [open, merged, deleted] }
+        merge_commit: { type: [string, "null"], description: Its merge into the default branch, once merged. }
+    CommitPage:
+      type: object
+      required: [commit, author_person, branch, merge_of, checks]
+      properties:
+        commit: { $ref: "#/components/schemas/Commit" }
+        author_person:
+          type: [object, "null"]
+          properties:
+            login: { type: string }
+            picture_url: { type: [string, "null"] }
+        branch: { oneOf: [{ $ref: "#/components/schemas/CommitBranch" }, { type: "null" }] }
+        merge_of: { oneOf: [{ $ref: "#/components/schemas/CommitBranch" }, { type: "null" }] }
+        checks: { $ref: "#/components/schemas/Checks" }
+    CommitDiffLine:
+      description: "One line of a commit's streamed diff, by `type`: `file`, `end` and `error` as in BranchDiffLine."
+      oneOf:
+        - type: object
+          required: [type, sha, parent, files_total, too_many_files]
+          properties:
+            type: { type: string, enum: [start] }
+            sha: { type: string }
+            parent: { type: [string, "null"], description: The first parent it is compared with; null for a first commit. }
+            files_total: { type: integer }
+            too_many_files: { type: boolean }
+        - $ref: "#/components/schemas/BranchDiffLine"
     BranchDiff:
       type: object
       required: [base_branch, base, head, merge_base, truncated, too_many_files, files_total, stats, files]

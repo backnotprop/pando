@@ -20,7 +20,7 @@ import (
 func Clone(e *Env, args []string) error {
 	fs := flags("clone")
 	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
-	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse, for worktrees/main and references (default: the mount when this machine has one)")
+	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "sparse (a clone, the default), fuse or fskit (a mount), for worktrees/main and references")
 	textOnly := fs.Bool("text-only", false, "keep large files and binaries outside projects/ as pointers until pando fetch (sandboxes)")
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -93,6 +93,10 @@ func Clone(e *Env, args []string) error {
 		ptrs, err := refs.List(dir)
 		if err != nil {
 			e.warnf("references: %v", err)
+		}
+		if len(ptrs) > 0 && !e.mountsByDefault(*kind) {
+			e.printf("%d reference(s) not made here: pando reference sync clones them, read-only at their pinned commits\n", len(ptrs))
+			ptrs = nil
 		}
 		for _, p := range ptrs {
 			if err := mountReference(e, root, p, *kind); err != nil {

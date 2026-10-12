@@ -102,8 +102,16 @@ cd cli && GIT_CONFIG_NOSYSTEM=1 go test ./...
 cd cli && go build -o ~/.local/bin/pando ./cmd/pando   # install it
 ```
 
-The FUSE mount is tested only inside a privileged Linux container
+A worktree is a git clone by default, on every machine (the sparse driver,
+`cli/internal/worktree/sparse.go`). The mount (ArtifactFS, `--kind fuse` or
+`--kind fskit`) is the default only in Pando's cloud agents' containers
+(`PANDO_AGENT_CONTAINER`, set in `agents/container/Dockerfile`). The FUSE
+mount is tested only inside a privileged Linux container
 (`cli/testbed/run.sh`, on Colima). Never mount FUSE on a Mac host.
+
+`worker/test/clone.mjs` checks the clone end to end against `wrangler dev`
+(every file on disk, few requests) and prints its times; `--from <repo>`
+measures a real repo.
 
 ### Docs site
 

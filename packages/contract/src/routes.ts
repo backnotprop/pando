@@ -3,6 +3,7 @@
 // Path segments are encoded here, so callers pass plain values; a branch's
 // `/` is sent as %2F.
 import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
+import { Artifact, ArtifactComment, ArtifactDetail, ArtifactList, ArtifactThreads, type ArtifactCommentState } from "./artifact.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
@@ -750,3 +751,80 @@ export const setSessionExclusions = { method: "PUT", path: "/v1/user/session-exc
 
 /** GET /v1/user/session-machines: each of your machines, as it last reported its recording. */
 export const sessionMachines = { path: "/v1/user/session-machines", response: SessionMachines };
+
+// ── Artifacts (artifact.ts): documents on a branch's page, and their comments ──
+
+const artifactBase = (owner: Login, name: MonorepoName, id: string): string => `${monorepoBase(owner, name)}/artifacts/${encodeURIComponent(id)}`;
+
+const artifactCommentBase = (owner: Login, name: MonorepoName, id: string): string => `${monorepoBase(owner, name)}/artifact-comments/${encodeURIComponent(id)}`;
+
+const stateQuery = (state: ArtifactCommentState | "all"): string => (state === "all" ? "" : `?state=${state}`);
+
+/** GET .../branches/{branch}/artifacts: the branch's artifacts, newest first, each with its newest version and comment counts. */
+export const listArtifacts = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) => ({ path: `${branchBase(owner, name, repo, branch)}/artifacts`, response: ArtifactList });
+
+/**
+ * POST .../branches/{branch}/artifacts, multipart: `file` (the Markdown or HTML document, or an image) and `image`
+ * fields (the images it uses, each file's name its path relative to the document, `img/hero.png`). A new name is a
+ * new artifact (201); a name already on the branch is its next version (200). Refused: 413 `too_large` (over
+ * 10 MiB in all, or a document over 1.5 MiB), 400 `too_many_files` (over 20), 409 `too_many_artifacts` (100 on the
+ * branch), 400 `bad_request` (a name, path or kind Pando does not take).
+ */
+export const addArtifact = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) =>
+  ({ method: "POST", path: `${branchBase(owner, name, repo, branch)}/artifacts`, response: Artifact }) as const;
+
+/** GET .../artifacts/{id}: one artifact with every version. */
+export const getArtifact = (owner: Login, name: MonorepoName, id: string) => ({ path: artifactBase(owner, name, id), response: ArtifactDetail });
+
+/** DELETE .../artifacts/{id} (204): any member; every version, its bytes and its comments go, with no undo. */
+export const deleteArtifact = (owner: Login, name: MonorepoName, id: string) => ({ method: "DELETE", path: artifactBase(owner, name, id) }) as const;
+
+/**
+ * GET .../artifacts/{id}/versions/{n}/files/{path}: one file's bytes (no schema), its type from its extension,
+ * served with `content-security-policy: sandbox; default-src 'none'` so opening it never runs it on Pando's address.
+ */
+export const artifactFilePath = (owner: Login, name: MonorepoName, id: string, n: number, path: string): string =>
+  `${artifactBase(owner, name, id)}/versions/${n}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+
+/**
+ * GET .../artifacts/{id}/versions/{n}/document: the version's Markdown or HTML (no schema), with the images it uses
+ * from its own files written in as `data:` addresses, ready for the viewer's frame (which cannot fetch from Pando).
+ * Same sandbox policy as a file. An image artifact answers its image.
+ */
+export const artifactDocumentPath = (owner: Login, name: MonorepoName, id: string, n: number): string => `${artifactBase(owner, name, id)}/versions/${n}/document`;
+
+/** GET .../artifacts/{id}/comments[?state=open|resolved]: its threads on every version (the default: all). */
+export const listArtifactThreads = (owner: Login, name: MonorepoName, id: string, state: ArtifactCommentState | "all" = "all") => ({
+  path: `${artifactBase(owner, name, id)}/comments${stateQuery(state)}`,
+  response: ArtifactThreads,
+});
+
+/** GET .../branches/{branch}/artifact-comments[?state=]: every artifact's threads on the branch (the panel's All files). */
+export const listBranchArtifactThreads = (owner: Login, name: MonorepoName, repo: RepoName, branch: string, state: ArtifactCommentState | "all" = "all") => ({
+  path: `${branchBase(owner, name, repo, branch)}/artifact-comments${stateQuery(state)}`,
+  response: ArtifactThreads,
+});
+
+/**
+ * POST .../artifacts/{id}/comments {body, version?, anchor?, quote?, in_reply_to?} (201; 200 with `pando-replayed`
+ * for an `Idempotency-Key` seen before). A root takes `anchor` (Plannotator's, as written) or `quote` (plain words,
+ * stored as Plannotator's external annotation); neither: on the whole artifact. `version` defaults to the newest.
+ * A reply names `in_reply_to` and takes neither. Refused: 409 `too_many_threads` (500 on one version) or
+ * `too_many_replies` (100 in a thread); 400 `too_many_mentions` (over 10 people named); 413 `too_large`.
+ */
+export const addArtifactComment = (owner: Login, name: MonorepoName, id: string) =>
+  ({ method: "POST", path: `${artifactBase(owner, name, id)}/comments`, response: ArtifactComment }) as const;
+
+/** GET .../artifact-comments/{id}: one comment, whole (a live event leaves a body over 16 KB out). */
+export const getArtifactComment = (owner: Login, name: MonorepoName, id: string) => ({ path: artifactCommentBase(owner, name, id), response: ArtifactComment });
+
+/**
+ * PATCH .../artifact-comments/{id}: `{body, base_version?}` edits your own (409 `edited` with `current` when
+ * base_version is stale); `{state: "resolved" | "open"}` resolves or reopens its thread (any member). Answers the
+ * comment changed (the thread's root for a state change).
+ */
+export const updateArtifactComment = (owner: Login, name: MonorepoName, id: string) =>
+  ({ method: "PATCH", path: artifactCommentBase(owner, name, id), response: ArtifactComment }) as const;
+
+/** DELETE .../artifact-comments/{id} (204): your own. A root with replies keeps its place with its body gone. */
+export const deleteArtifactComment = (owner: Login, name: MonorepoName, id: string) => ({ method: "DELETE", path: artifactCommentBase(owner, name, id) }) as const;

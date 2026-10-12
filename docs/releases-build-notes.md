@@ -124,3 +124,50 @@ needs no new resource; the first deploy with this branch adds it.
 - Not built (after the cut, as decided): Cloudflare's own CI runner, "Deploy
   this release", CI uploading files with its token, the deployments strip,
   mirroring tags to GitHub (a gap for the mirror lane), `pando version`.
+- 2026-10-12: stage 4, the web (owner: "the release mocks is probably approved
+  as shown, let's go ahead and get it done and we can iterate from there").
+  Branch at main 59ecd7f. Built as the mocks show, with the app's own parts:
+  - Contract: routes.ts gets getRepoSummary, listReleases, getRelease,
+    releaseFilePath and setReleasesPublic. Their answers were recorded in
+    stages 1 to 3 (repo-summary*.json, releases.json, release.json,
+    release-draft.json, release-with-file.json, repo-releases-public.json),
+    so no new recording; contract check 159 of 159.
+  - web/src/api/releases.ts (queries under the repo's key), the Releases tab
+    (projects/<p>/releases and a plain repo's /releases; -project/Releases.tsx),
+    a release's page (.../releases/<tag>: files with size, SHA-256 and
+    Download, notes through the issue page's Markdown, which is Plannotator's
+    viewer, its commit on main and the branch page's CheckRows, now exported
+    and given a branch name and sha), the strip (-project/Strip.tsx, on the
+    default branch's root folder only, read with the tree so the files do
+    not move), the Settings switch (-settings/Releases.tsx, the Mirror
+    section's Toggle), a Releases tab with its count on RepoHead, crumbs
+    "Releases / v0.3.0" (a tag crumb in mono), TagIcon and DownloadIcon.
+  - Live: the tab and the page follow release.created, updated, published
+    and deleted on the page's row socket (live/rows.ts RELEASE_TOPICS), and
+    poll every 5 s while it is down (the app's fallback). The strip is read
+    on load, not live.
+  - No Publish or Delete buttons (the mocks' INDEX): CLI and API only.
+  - web/e2e/slice8.spec.ts: a project built by the Buildkite stand-in, a
+    release with a file and a draft made through the API, the strip, the
+    tab, the page, Download (bytes checked), the public URL refused, the
+    switch turned on in Settings and the URL then answering without signing
+    in (code still refused), a live publish, 390 px fit, a plain repo's
+    empty tab and switch. PANDO_E2E_RELEASE_SHOTS=1 saves dark and light at
+    1440 and 390 in web/e2e/shots/releases (gitignored).
+  - Docs: releases.mdx "In the web app"; changelog 2026-10-12.
+- Final run on fb83c56 (ports 8867, stand-in 8868, inspector 9367): web
+  e2e 8 of 8 (slices 1 to 7 and slice 8), slice 8 again with shots;
+  contract 159 of 159; npm run lint clean; web typecheck clean; docs check
+  clean. The built pages, dark and light at 1440 and 390, are in
+  research/design/pando-ui-2026-10-03/releases/built/ beside the mocks.
+  Dev server stopped.
+- Limits chosen in the web (for the board): the tab shows 30 releases a
+  page, the server's page (Older loads more) and counts "30+" past the
+  first page; a SHA-256 shows its first 12 characters (all 64 on hover);
+  sizes are decimal (1 MB = 1,000,000 bytes), as the 100,000,000-byte limit
+  is written; Settings reads each project's switch with one request per
+  project (the repos list does not carry it), fine for tens of projects;
+  the strip shows on the default branch's root folder only and is read on
+  load, not live.
+- Not built: Publish and Delete buttons (CLI and API only, as the mocks
+  show); the strip live on new builds (a reload shows them).

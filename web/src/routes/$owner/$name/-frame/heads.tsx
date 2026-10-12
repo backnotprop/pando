@@ -1,7 +1,7 @@
 // The heads pages carry under a monorepo: the monorepo's (its avatar, its
 // name, its tabs), and a repo's (a project's path, or a plain repo's name,
-// with Code and Branches). A branch's page has neither: its title is its head.
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+// with Code, Branches and Releases). A branch's page has neither: its title is its head.
+import { useInfiniteQuery, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { Machine, Repo } from "@pando/contract";
@@ -9,8 +9,9 @@ import { workingCountQuery } from "../../../../api/agents";
 import { openCountQuery } from "../../../../api/issues";
 import { activeCountQuery } from "../../../../api/sessions";
 import { machinesQuery, membersQuery, monorepoQuery, openBranchesQuery, reposQuery } from "../../../../api/queries";
+import { releasesQuery } from "../../../../api/releases";
 import { Avatar } from "../../../../ui/Avatar";
-import { agentsLink, branchesLink, issuesLink, monoLink, ownerLink, repoLink, sessionsLink, tabLink } from "../../../../ui/paths";
+import { agentsLink, branchesLink, issuesLink, monoLink, ownerLink, releasesLink, repoLink, sessionsLink, tabLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
 
@@ -103,12 +104,21 @@ export function MonorepoHead({ tab }: { tab: MonorepoTab }) {
 /** Machines connected now: the Machines tab's count. */
 const connectedNow = (machines: readonly Machine[]) => machines.filter((x) => x.connected).length;
 
+/** The Releases tab's count: the first page's (30), "30+" while more wait; none while it is read or when there are none. */
+function useReleaseCount(m: ReturnType<typeof useMonorepo>["monorepo"], repo: Repo) {
+  const list = useInfiniteQuery(releasesQuery(m, repo.name));
+  const n = list.data?.pages[0]?.releases.length;
+
+  return n ? (list.data?.pages[0]?.next_cursor ? `${n}+` : n) : undefined;
+}
+
 /** A project's head (its path), or a plain repo's (its name), with the repo's tabs. */
-export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "issues" | "agents" | "sessions" | "branches" | "members" | "settings"; right?: ReactNode }) {
+export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "issues" | "agents" | "sessions" | "branches" | "releases" | "members" | "settings"; right?: ReactNode }) {
   const { monorepo, info } = useMonorepo();
   const full = monorepo.full;
   const plain = repo.path === ".";
   const open = useQuery(openBranchesQuery(monorepo, repo.name)).data;
+  const releases = useReleaseCount(monorepo, repo);
   const members = useQuery({ ...membersQuery(monorepo), enabled: plain, select: (l) => l.length }).data;
   const issues = useQuery({ ...openCountQuery(monorepo), enabled: plain }).data;
   const working = useQuery({ ...workingCountQuery(monorepo), enabled: plain }).data;
@@ -123,6 +133,7 @@ export function RepoHead({ repo, tab, right }: { repo: Repo; tab: "code" | "issu
         {plain ? <Tab link={agentsLink(full)} current={tab === "agents"} label="Agents" count={working || undefined} /> : null}
         {plain ? <Tab link={sessionsLink(full)} current={tab === "sessions"} label="Sessions" count={active || undefined} /> : null}
         <Tab link={branchesLink(full, repo.path)} current={tab === "branches"} label="Branches" count={open} />
+        <Tab link={releasesLink(full, repo.path)} current={tab === "releases"} label="Releases" count={releases} />
         {plain ? <Tab link={tabLink(full, "members")} current={tab === "members"} label="Members" count={members} /> : null}
         {plain && info.role === "owner" ? <Tab link={tabLink(full, "settings")} current={tab === "settings"} label="Settings" /> : null}
       </TabBar>

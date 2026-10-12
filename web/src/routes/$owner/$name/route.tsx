@@ -13,7 +13,7 @@ import { monorepoQuery } from "../../../api/queries";
 import { startMonorepoFeed } from "../../../live/monorepo";
 import { Lnk } from "../../../ui/controls";
 import { Page, Title } from "../../../ui/pages";
-import { agentsLink, blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, sessionsLink, tabLink, treeLink } from "../../../ui/paths";
+import { agentsLink, blobLink, ciPipelineLink, codeBlobLink, codeLink, issuesLink, ownerLink, releasesLink, sessionsLink, tabLink, treeLink } from "../../../ui/paths";
 import type { Crumb } from "../../../ui/TopBar";
 
 export const Route = createFileRoute("/$owner/$name")({
@@ -63,12 +63,14 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
   if (kind === "projects" && !plain) {
     const [, sub = "", ...path] = parts;
-    const deeper = sub === "branches" ? [{ label: path.length ? path.join("/") : "branches" }] : codeCrumbs(full, repoPath, sub, path);
+    const deeper = sub === "branches" ? [{ label: path.length ? path.join("/") : "branches" }] : sub === "releases" ? releaseCrumbs(full, repoPath, path) : codeCrumbs(full, repoPath, sub, path);
     // On a phone the project crumb drops out whenever a deeper crumb follows, so the breadcrumb never overlaps.
     const project: Crumb = { label: repoPath, link: deeper.length ? codeLink(full, repoPath, "") : undefined, project: repoPath, wide: deeper.length > 0 };
 
     return [project, ...deeper];
   }
+
+  if (plain && kind === "releases") return releaseCrumbs(full, ".", parts);
 
   if (plain && kind === "branches") return parts.length ? [{ label: parts.join("/") }] : [{ label: "branches" }];
 
@@ -90,6 +92,11 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   if (kind === "sessions" && parts.length) return [{ label: "sessions", link: sessionsLink(full) }, { label: "session" }];
 
   return kind ? [{ label: kind }] : [];
+}
+
+/** Releases, or Releases / v0.3.0 (the tag in SF Mono). */
+function releaseCrumbs(full: string, repoPath: string, path: string[]): Crumb[] {
+  return path.length ? [{ label: "Releases", link: releasesLink(full, repoPath), wide: true }, { label: path.join("/"), mono: true }] : [{ label: "Releases" }];
 }
 
 /** A repo's code pages: folders, a file, a file's history. */

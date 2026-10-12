@@ -9,6 +9,7 @@ import type { MonorepoRef } from "../../../../api/names";
 import type { CommitLine, Repo } from "@pando/contract";
 import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQuery } from "../../../../api/projects";
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
+import { releasesQuery, summaryQuery } from "../../../../api/releases";
 import { Empty, lnk } from "../../../../ui/controls";
 import { useHeld, useLastAnswer } from "../../../../ui/held";
 import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
@@ -17,17 +18,25 @@ import { BarSpace, ChangeBar, FileList, Readme, type Row } from "../-code/FileLi
 import { PathTrail } from "../-code/PathTrail";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 import { BranchPicker } from "./Picker";
+import { Strip } from "./Strip";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
 /** A full commit sha is a pinned ref, not a branch. */
 export const isBranch = (ref: string | null): ref is string => !!ref && !/^[0-9a-f]{40}$/.test(ref);
 
+/** The root folder of the default branch: where the strip shows. */
+const onMainRoot = (repo: Repo, dir: string, ref: string | null) => !dir && (ref ?? repo.default_branch) === repo.default_branch;
+
 const readmeIn = (names: readonly string[]) => names.find((n) => /^readme\.md$/i.test(n)) ?? null;
 
 export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir: string, ref: string | null) {
   // The Branches tab's count and "N open branches", read alongside the tree (quicker than it), so neither draws late.
   const open = qc.prefetchQuery(openBranchesQuery(m, repo.name));
+  // The strip over main's root folder, read alongside the tree and waited for with the README, so the files never move
+  // under it; and the Releases tab's count, never waited for.
+  const strip = onMainRoot(repo, dir, ref) ? qc.prefetchQuery(summaryQuery(m, repo.name)) : null;
+  void qc.prefetchInfiniteQuery(releasesQuery(m, repo.name));
   const tree = await qc.ensureQueryData(codeTreeQuery(m, repo.name, ref, dir));
 
   if (!tree) return open;
@@ -40,7 +49,7 @@ export async function loadCode(qc: QueryClient, m: MonorepoRef, repo: Repo, dir:
 
   if (isBranch(ref)) void qc.prefetchQuery(branchQuery(m, repo.name, ref));
 
-  await Promise.all([readme ? qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme))) : null, open]);
+  await Promise.all([readme ? qc.ensureQueryData(codeFileQuery(m, repo, tree.commit, join(dir, readme))) : null, open, strip]);
 }
 
 /** "web-api is 2 commits ahead of main." with its page a click away. */
@@ -149,6 +158,7 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
       <div className="max-w-[1000px]">
         {toolbar}
         {isBranch(gitRef) ? <AheadLine repo={repo} gitRef={gitRef} /> : null}
+        {onMainRoot(repo, dir, gitRef) ? <Strip repo={repo} /> : null}
         <FileList
           bar={
             newest ? (

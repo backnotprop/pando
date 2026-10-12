@@ -63,7 +63,16 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
   if (kind === "projects" && !plain) {
     const [, sub = "", ...path] = parts;
-    const deeper = sub === "branches" ? [{ label: path.length ? path.join("/") : "branches" }] : sub === "releases" ? releaseCrumbs(full, repoPath, path) : codeCrumbs(full, repoPath, sub, path);
+
+    const deeper =
+      sub === "branches"
+        ? [{ label: path.length ? path.join("/") : "branches" }]
+        : sub === "releases"
+          ? releaseCrumbs(full, repoPath, path)
+          : sub === "commit"
+            ? commitCrumb(path)
+            : codeCrumbs(full, repoPath, sub, path);
+
     // On a phone the project crumb drops out whenever a deeper crumb follows, so the breadcrumb never overlaps.
     const project: Crumb = { label: repoPath, link: deeper.length ? codeLink(full, repoPath, "") : undefined, project: repoPath, wide: deeper.length > 0 };
 
@@ -73,6 +82,8 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   if (plain && kind === "releases") return releaseCrumbs(full, ".", parts);
 
   if (plain && kind === "branches") return parts.length ? [{ label: parts.join("/") }] : [{ label: "branches" }];
+
+  if (plain && kind === "commit") return commitCrumb(parts);
 
   if (plain) return codeCrumbs(full, ".", kind, parts);
 
@@ -93,6 +104,9 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
   return kind ? [{ label: kind }] : [];
 }
+
+/** A commit's page: "commit 94cf890". */
+const commitCrumb = ([sha = ""]: string[]): Crumb[] => [{ label: `commit ${sha.slice(0, 7)}` }];
 
 /** Releases, or Releases / v0.3.0 (the tag in SF Mono). */
 function releaseCrumbs(full: string, repoPath: string, path: string[]): Crumb[] {

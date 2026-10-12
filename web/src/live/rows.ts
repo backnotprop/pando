@@ -5,7 +5,7 @@
 // its data once more (rows from before the socket opened); on a reconnect it
 // asks for what it missed with since=<last seq>, and a resync reads again.
 // While the socket is down, the page polls as a fallback (`fallback`).
-import { type BranchEventRow, type CiBuild, type CiBuildDetail, type CiJob, decodeMonorepoEventFrame, type FeedEvent, type Machine, type MonorepoEventFrame, type RepoName, Routes } from "@pando/contract";
+import { type BranchEventRow, type CiBuild, type CommitPage, type CiBuildDetail, type CiJob, decodeMonorepoEventFrame, type FeedEvent, type Machine, type MonorepoEventFrame, type RepoName, Routes } from "@pando/contract";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
@@ -95,6 +95,13 @@ function patchJob(qc: QueryClient, m: MonorepoRef, repo: RepoName | null, buildI
   }
 }
 
+/** A commit's page at `sha` (by any address, full or short) reads again: a status arrived on it. */
+function refreshCommit(qc: QueryClient, m: MonorepoRef, repo: RepoName, sha: string) {
+  for (const [key, page] of qc.getQueriesData<CommitPage>({ queryKey: [...repoKey(m, repo), "commit"] })) {
+    if (page?.commit.sha === sha) void qc.invalidateQueries({ queryKey: key, exact: true });
+  }
+}
+
 /** A row event (not caught_up, resync or error). */
 type RowEvent = Extract<MonorepoEventFrame, { type: "event" }>;
 
@@ -148,7 +155,8 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     }
 
     case "status":
-      // The branches at that commit follow as branch.updated, with their checks and gate.
+      // The branches at that commit follow as branch.updated, with their checks and gate; a commit's page at it reads again.
+      if (f.repo) refreshCommit(qc, m, f.repo, f.row.sha);
       break;
     case "issue.opened":
     case "issue.commented":

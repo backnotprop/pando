@@ -513,6 +513,8 @@ try {
     ["branch-diff.json", "BranchDiff", "GET .../branches/{branch}/diff?patches=1 (Files changed)", `${repoPath}/branches/feat%2Fready/diff?patches=1`],
     ["reviews.json", "ReviewList", "GET .../branches/{branch}/reviews", `${repoPath}/branches/feat%2Fready/reviews`],
     ["status.json", "Checks", "GET .../repos/{repo}/commits/{ref}/status", `${repoPath}/commits/${readyHead}/status`],
+    ["commit.json", "CommitPage", "GET .../repos/{repo}/commits/{sha} (a branch's head, its checks)", `${repoPath}/commits/${readyHead}`],
+    ["commit-short.json", "CommitPage", "GET .../repos/{repo}/commits/{sha} (its first 7 characters)", `${repoPath}/commits/${readyHead.slice(0, 7)}`],
     ["ci-builds.json", "CiBuildList", "GET .../ci/builds?branch=", `${base}/ci/builds?branch=feat%2Fready`],
   ]) {
     r = await call("GET", path, secret);
@@ -532,12 +534,31 @@ try {
     }
   }
 
+  // A commit's diff against its parent, streamed (NDJSON, one CommitDiffLine a line): its start, a file and its end.
+  {
+    const res = await fetch(`${BASE}${repoPath}/commits/${readyHead}/diff`, { headers: { authorization: `Bearer ${secret}` } });
+    const lines = (await res.text()).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+    for (const type of ["start", "file", "end"]) {
+      const line = lines.find((l) => l.type === type);
+
+      if (!line) throw new Error(`the streamed commit diff has no ${type} line`);
+      record(`commit-diff-stream-${type}.json`, "CommitDiffLine", `GET .../repos/{repo}/commits/{sha}/diff (a ${type} line)`, res.status, line);
+    }
+  }
+
   // Merges: the forced one from before; a refused one (ci/test failed: 412 with checks); a clean one.
   record("merge-forced.json", "MergeResult", "POST .../branches/{branch}/merge?force=1", merged.status, merged.json);
   r = await call("POST", `${repoPath}/branches/feat%2Ffailing/merge?force=0`, secret, { expected_head: failingHead });
   record("merge-refused.json", "ErrorBody", "POST .../branches/{branch}/merge (checks not green)", r.status, r.json);
   r = await call("POST", `${repoPath}/branches/feat%2Fready/merge?force=0`, secret, { expected_head: readyHead });
   record("merge.json", "MergeResult", "POST .../branches/{branch}/merge", r.status, r.json);
+  const readyMerge = r.json?.sha;
+
+  r = await call("GET", `${repoPath}/commits/${readyMerge}`, secret);
+  record("commit-merge.json", "CommitPage", "GET .../repos/{repo}/commits/{sha} (a merge commit: merge_of)", r.status, r.json);
+  r = await call("GET", `${repoPath}/commits/0000000`, secret);
+  record("error-404-commit.json", "ErrorBody", "GET .../repos/{repo}/commits/{sha} (no such commit)", r.status, r.json);
   r = await call("GET", `${repoPath}/branches?state=merged`, secret);
   record("branches-merged.json", "BranchList", "GET .../repos/{repo}/branches?state=merged", r.status, r.json);
   r = await call("GET", `${base}/heads`, secret);

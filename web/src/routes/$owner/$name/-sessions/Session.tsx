@@ -18,7 +18,7 @@ import { AgentMark, agentAndModel } from "../../../../ui/AgentMark";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Refusal } from "../../../../ui/controls";
 import { NotFoundPage } from "../../../../ui/pages";
-import { branchLink, codeBlobLink, codeLink, issueLink, sessionsLink } from "../../../../ui/paths";
+import { branchLink, codeBlobLink, commitLink, issueLink, sessionsLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { clock } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
@@ -75,7 +75,7 @@ function CommitList({ commits, paths }: { commits: readonly SessionCommit[]; pat
         return (
           <li key={`${c.repo}:${c.sha}`} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-[13px]">
             {path ? (
-              <Ref kind="object" mono link={codeLink(monorepo.full, path, "", c.sha)}>
+              <Ref kind="object" mono link={commitLink(monorepo.full, path, c.sha)}>
                 {c.sha.slice(0, 7)}
               </Ref>
             ) : (

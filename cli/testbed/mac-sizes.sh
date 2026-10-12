@@ -16,6 +16,7 @@
 # FUSE. Deletes the monorepo it made and unmounts its worktrees.
 set -euo pipefail
 export GIT_CONFIG_NOSYSTEM=1           # no osxkeychain prompts
+export PANDO_WORKTREE_KIND=fskit       # the mount (a clone is the default)
 SERVER="$1"
 P="${PANDO_BIN:-pando}"
 HYD="$(cd "$(dirname "$0")/../../mac/Tests/diligence" && pwd)/hyd.sh"

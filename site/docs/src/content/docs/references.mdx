@@ -32,7 +32,7 @@ ref = "refs/heads/main"
 commit = "0123456789abcdef0123456789abcdef01234567"
 ```
 
-On every other machine, and in every agent's sandbox, `pando clone` shows the folder read-only at that commit, fetched straight from the original repo. So the code you keep for reference follows you, and your agents, everywhere.
+On another machine, `pando reference sync` clones the folder read-only at that commit, fetched straight from the original repo. A reference is cloned only when you ask, since a clone downloads every file: `pando clone` says how many references it left out, and `pando status` lists each one as `not here` until it is cloned. In an agent's sandbox that Pando runs, where worktrees are mounted, `pando clone` mounts every reference at once. So the code you keep for reference follows you, and your agents, everywhere.
 
 The machine that has the real repo keeps it as it is.
 
@@ -42,7 +42,7 @@ The machine that has the real repo keeps it as it is.
 pando reference update research/infra/workers-oauth-provider
 ```
 
-That moves the pointer to the newest commit of the branch it follows. Every machine running `pando sync` receives the new pointer and moves its folder to that commit. `pando reference sync` makes this machine's reference folders match every pointer, if one is missing or behind.
+That moves the pointer to the newest commit of the branch it follows. Every machine running `pando sync` receives the new pointer and moves its folder to that commit, if it has the folder. `pando reference sync` makes this machine's reference folders match every pointer: it clones the missing ones and moves the ones behind.
 
 ## Exceptions
 

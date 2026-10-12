@@ -127,9 +127,19 @@ func SyncReferences(e *Env, root *config.Root, kind string) error {
 		return err
 	}
 	for _, p := range ptrs {
-		syncReference(e, root, p, kind)
+		syncReference(e, root, p, kind, true)
 	}
 	return nil
+}
+
+// mountsByDefault reports whether a new worktree of this kind is a mount
+// (fuse or fskit), which downloads a file only when it is opened. Then pando
+// clone and another machine's new pointer make reference folders on their
+// own. A clone downloads every file, so a reference is cloned only when
+// asked: pando reference sync or update.
+func (e *Env) mountsByDefault(kind string) bool {
+	drv, err := worktree.Pick(kind, e.Home.Dir)
+	return err == nil && drv.Kind() != "sparse"
 }
 
 // ReferencesHook is the meta layer's hook (meta.Hooks.References): another
@@ -147,6 +157,7 @@ func ReferencesHook(rootDir string, pointers []string) {
 		return
 	}
 	kind := os.Getenv("PANDO_WORKTREE_KIND")
+	create := e.mountsByDefault(kind)
 	for _, ptr := range pointers {
 		if !strings.HasPrefix(ptr, ".pando/references/") || !strings.HasSuffix(ptr, ".toml") {
 			continue
@@ -161,12 +172,13 @@ func ReferencesHook(rootDir string, pointers []string) {
 			e.warnf("%s: %v", path, err)
 			continue
 		}
-		syncReference(e, root, p, kind)
+		syncReference(e, root, p, kind, create)
 	}
 }
 
-// syncReference mounts one reference, or moves this machine's mount of it.
-func syncReference(e *Env, root *config.Root, p refs.Pointer, kind string) {
+// syncReference moves this machine's folder of one reference to its
+// pointer's commit, or with create, makes the folder when it is not here.
+func syncReference(e *Env, root *config.Root, p refs.Pointer, kind string, create bool) {
 	dir := root.Abs(p.Path)
 	unavailable := filepath.Join(dir, "PANDO-UNAVAILABLE.txt")
 	if _, err := os.Stat(unavailable); err == nil {
@@ -174,6 +186,9 @@ func syncReference(e *Env, root *config.Root, p refs.Pointer, kind string) {
 		_ = os.Remove(unavailable)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+		if !create {
+			return
+		}
 		if err := mountReference(e, root, p, kind); err != nil {
 			e.warnf("%s: %v", p.Path, err)
 		}

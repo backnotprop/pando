@@ -12,7 +12,7 @@ import type { FeedEvent } from "@pando/contract";
 import { lineKey, takeArrived } from "../live/arrivals";
 import { Avatar } from "./Avatar";
 import buildkiteMark from "./buildkite-mark.svg";
-import { type AppLink, blobLink, branchesLink, branchLink, ciBuildLink, historyLink, issueLink, monoLink, ownerLink, repoLink } from "./paths";
+import { type AppLink, blobLink, branchesLink, branchLink, ciBuildLink, commitLink, historyLink, issueLink, monoLink, ownerLink, repoLink } from "./paths";
 import { type IssueState, IssueRef, Ref } from "./Ref";
 import { duration, since, useNow } from "./time";
 import { Older } from "./Older";
@@ -113,8 +113,8 @@ function sentence(e: FeedEvent): Omit<Sentence, "target"> {
       const app = d?.app ?? null;
       const took = d?.duration_s == null ? null : duration(d.duration_s);
 
-      // On a commit no branch is at (main's, or a deleted branch's): the branch the server names, else the commit itself (its project's page: the app has no commit page).
-      const on: LineObject | null = base.object ?? (d?.sha ? { kind: "commit", text: d.sha.slice(0, 7), link: base.repoLink } : null);
+      // On a commit no branch is at (main's, or a deleted branch's): the branch the server names, else the commit itself, opening its page.
+      const on: LineObject | null = base.object ?? (d?.sha ? { kind: "commit", text: d.sha.slice(0, 7), link: e.repo_path ? commitLink(e.monorepo, e.repo_path, d.sha) : null } : null);
 
       return {
         ...base,

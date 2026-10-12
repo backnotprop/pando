@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "GET .../repos/{repo}/commits/{sha} (no such commit)",
+  "status": 404,
+  "body": {
+    "error": {
+      "code": "not_found",
+      "message": "no commit 0000000"
+    }
+  }
+}

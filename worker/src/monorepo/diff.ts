@@ -274,7 +274,7 @@ export function treeOrder(a: string, b: string): number {
 }
 
 /** `order`: git's path order (the default), or a file tree's (treeOrder), which the streamed Files changed uses. */
-export async function planDiff(repo: ArtifactsRepo, fromTree: string, toTree: string, opts: Pick<DiffOptions, "paths" | "maxFiles"> & { order?: "path" | "tree" }): Promise<DiffPlan> {
+export async function planDiff(repo: ArtifactsRepo, fromTree: string | null, toTree: string, opts: Pick<DiffOptions, "paths" | "maxFiles"> & { order?: "path" | "tree" }): Promise<DiffPlan> {
   const removed: Entry[] = [];
   const added: Entry[] = [];
   const changed: [Entry, Entry][] = [];

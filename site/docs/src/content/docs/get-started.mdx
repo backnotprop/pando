@@ -67,6 +67,8 @@ acme/
 
 Every project under `projects/` gets a read-only `worktrees/main/`. It moves to the new main after each merge. You never edit it.
 
+Each worktree is a git clone: every file of its branch is on disk, so your editor, search and git work as they do in any clone.
+
 The shared files around the projects (notes, decisions, plans) are the same on every machine. `pando sync` keeps them live while it runs; see [Shared files](/cli/#shared-files).
 
 To start a repository of your own, run `pando init` in a folder that holds your git repos under `projects/`. To use Pando with one ordinary git repo, see [A plain git repository](/plain-git/).
@@ -105,6 +107,10 @@ pando merge                       # land it on main with a merge commit
 ```
 
 The same branch has a page in the web app: its commits, the diff, reviews, checks and a Merge button.
+
+### A commit's page
+
+Each commit has its own page at `/<owner>/<repo>/projects/<project>/commit/<sha>` (in a plain repository, `/<owner>/<repo>/commit/<sha>`). It shows the commit's message, its author and when it was committed, the branch it came from (or, for a merge commit, the branch it merged), its checks, and the files it changed against its first parent, in the same view as the branch's Files changed. Copy sha copies the full sha. The short sha in a branch's commit list, a file's history, a session's commits, the Merge box and a check's line in the activity (on a commit no branch is at) all open it. The address also takes the first 7 characters of a sha or more.
 
 Merge waits for the checks the project requires (see [Checks and CI](/ci/)). Pando merges whole files: if the branch and main both changed a file in different ways, the merge stops and lists the files. Merge main into your branch, fix them, push, and merge again.
 

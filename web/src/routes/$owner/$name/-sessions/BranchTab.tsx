@@ -8,7 +8,8 @@ import type { BranchSessions, Commit, Repo, SessionCommit } from "@pando/contrac
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AgentMark, agentAndModel } from "../../../../ui/AgentMark";
-import { sessionLink } from "../../../../ui/paths";
+import { commitLink, sessionLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { useMonorepo } from "../-frame/heads";
 import { dayClock, Person, When } from "./Row";
 import { CommitChecks } from "./Session";
@@ -34,12 +35,16 @@ export function SessionNumbers({ sha, on }: { sha: string; on: BranchSessions | 
 const ROW = "col-span-full grid grid-cols-subgrid items-center min-h-[46px] border-t border-rule-faint px-1 text-[13.5px] text-bark-dim";
 
 function CommitLines({ repo, commits }: { repo: Repo; commits: readonly SessionCommit[] }) {
+  const { monorepo } = useMonorepo();
+
   return (
     <ul aria-label="Its commits on this branch" className="col-span-full grid grid-cols-subgrid pb-2">
       {commits.map((c) => (
         <li key={c.sha} className="col-span-full grid grid-cols-[subgrid] items-center py-1 text-[13px]">
           <span className="col-start-2 col-end-4 flex min-w-0 gap-4 pl-1">
-            <span className="font-mono text-[12.5px] text-ash">{c.sha.slice(0, 7)}</span>
+            <Ref kind="object" mono link={commitLink(monorepo.full, repo.path, c.sha)} className="text-[12.5px]">
+              {c.sha.slice(0, 7)}
+            </Ref>
             <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-bark-dim">{c.title}</span>
           </span>
           <span className="col-start-4 col-end-[-1] text-right text-[12.5px] whitespace-nowrap">

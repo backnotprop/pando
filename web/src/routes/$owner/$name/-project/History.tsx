@@ -10,7 +10,8 @@ import { Avatar } from "../../../../ui/Avatar";
 import { lnk } from "../../../../ui/controls";
 import { CommitIcon } from "../../../../ui/Icons";
 import { Older } from "../../../../ui/Older";
-import { codeBlobLink } from "../../../../ui/paths";
+import { codeBlobLink, commitLink } from "../../../../ui/paths";
+import { Ref } from "../../../../ui/Ref";
 import { ago, day, useNow } from "../../../../ui/time";
 import { RepoHead, useMonorepo } from "../-frame/heads";
 
@@ -56,13 +57,19 @@ export function ProjectHistory({ repo, path, gitRef }: { repo: Repo; path: strin
               {d.commits.map((c) => (
                 <li key={c.sha} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-t border-rule-faint px-4 py-2.5 first:border-t-0">
                   <div>
-                    <p className="overflow-hidden text-[14px] text-ellipsis whitespace-nowrap text-bark">{c.title}</p>
+                    <p className="overflow-hidden text-[14px] text-ellipsis whitespace-nowrap text-bark">
+                      <Link {...commitLink(monorepo.full, repo.path, c.sha)} className="hover:text-link hover:underline">
+                        {c.title}
+                      </Link>
+                    </p>
                     <p className="mt-[5px] flex items-center gap-[7px] text-[12.5px] text-ash">
                       {c.author.name ? <Avatar name={c.author.name} size={16} /> : null}
                       <b className="font-normal text-bark-dim">{c.author.name ?? ""}</b> committed, {ago(c.at, clock)}
                     </p>
                   </div>
-                  <span className="font-mono text-[12.5px] leading-[15px] text-ash">{c.sha.slice(0, 7)}</span>
+                  <Ref kind="object" mono link={commitLink(monorepo.full, repo.path, c.sha)} className="text-[12.5px] leading-[15px]">
+                    {c.sha.slice(0, 7)}
+                  </Ref>
                 </li>
               ))}
             </ul>

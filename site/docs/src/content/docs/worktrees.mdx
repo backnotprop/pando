@@ -33,26 +33,36 @@ If you know `git worktree`, this is the difference that matters:
 | | `git worktree` | Pando worktree |
 | --- | --- | --- |
 | What it is | a second checkout of a repo, sharing that repo's `.git` folder | a folder of its own, with its own git folder |
-| Its git folder | shared by every worktree of the repo | its own: the history and the folder lists, without file contents until they are needed |
+| Its git folder | shared by every worktree of the repo | its own: the history and the folder lists, and the files of its branch |
 | Git inside it | normal | normal: `git status`, `diff`, `log`, `commit` and `push` all work |
 | One agent can break another's worktree | yes, through the shared `.git` | no, nothing is shared |
 | The same branch on two machines | no | yes; the branch lives on the server |
 
 ## How the files get there
 
-`pando worktree add` picks the best way this machine has. `--kind` chooses one yourself.
+A worktree is a git clone, on every machine. `pando worktree add` and `pando clone` fetch the history and the folder lists, then every file of the branch in one batched download, and say `ready in N s` when the whole tree is on disk. Your editor, a search across the tree and `git status` then run at the speed of your disk.
+
+To check out only some folders, name them after the branch:
+
+```sh
+pando worktree add projects/web fix-login apps/web packages/ui
+```
+
+The worktree then holds those folders and the files at the top of the repo. `git sparse-checkout add <folder>` inside it brings in more.
+
+Cloud agents that Pando runs on Cloudflare work in a mount instead: ArtifactFS lists every file at once and downloads a file the first time something opens it, which is quick there because the agent runs next to the storage. You can ask for a mount on your own machine with `--kind`:
 
 | Kind | Where | Files on disk |
 | --- | --- | --- |
-| `fuse` | Linux with ArtifactFS installed | The folder is mounted. Every file is listed at once, and a file downloads the first time something opens it. Your edits stay in the worktree's own layer until you push. |
+| `sparse` | every machine (the default) | A git clone: the history and folder lists, and every file of the branch. Old versions of files download only when git needs them. |
+| `fuse` | Linux with ArtifactFS installed | A mount. Every file is listed at once; a file downloads the first time something opens it. Your edits stay in the worktree's own layer until you push. |
 | `fskit` | a Mac with Pando.app and its file system extension turned on | The same, through macOS's own file system extensions. |
-| `sparse` | everywhere else | A partial clone: the history and folder lists first, file contents as git checks them out. Add folder names after the branch to check out only those folders. |
 
-On a Mac without Pando.app, worktrees use `sparse`, and `pando` says why once.
+A mount is slow for people's tools, which open many files at once: an editor opening a large repo, or a search across the whole tree, waits for each file in turn.
 
 ## What it costs
 
-Each worktree keeps its own git folder. It is small, because it holds no file contents up front. Two worktrees of the same repo on one machine each download a file they both open. Opening a file the first time takes a moment; after that it is on disk.
+Each worktree holds the files of its branch, like a clone, and its own git folder with the history but not the old versions of files. Two worktrees of the same repo on one machine each have their own copy. To keep a large repo smaller on disk, name only the folders you work in (above).
 
 ## Read-only main
 

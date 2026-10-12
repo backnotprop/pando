@@ -469,7 +469,7 @@ export interface HistoryMessage {
   path: string;
 }
 
-export function answerKey(kind: "last" | "hist" | "diff", commit: string, pathHash: string): string {
+export function answerKey(kind: "last" | "hist" | "diff" | "commit", commit: string, pathHash: string): string {
   return `${kind}/${commit}/${pathHash}`;
 }
 

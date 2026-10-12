@@ -18,12 +18,12 @@ import { Avatar } from "../../../../ui/Avatar";
 import { button, Cmd, Empty, SectionHead } from "../../../../ui/controls";
 import { DownloadIcon, FileIcon, TagIcon } from "../../../../ui/Icons";
 import { Older } from "../../../../ui/Older";
-import { codeLink, releaseLink } from "../../../../ui/paths";
+import { commitLink, releaseLink } from "../../../../ui/paths";
 import { refClass } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { Markdown } from "../-issues/Markdown";
 import { RepoHead, useMonorepo } from "../-frame/heads";
-import { CheckRows } from "./Branch";
+import { CheckRows } from "./Checks";
 
 export const loadReleases = (qc: QueryClient, m: MonorepoRef, repo: Repo) =>
   Promise.all([qc.ensureInfiniteQueryData(releasesQuery(m, repo.name)), qc.prefetchQuery(openBranchesQuery(m, repo.name))]);
@@ -194,7 +194,7 @@ function CommitBlock({ repo, r }: { repo: Repo; r: Release }) {
       <SectionHead title="Commit" className="mb-3" />
       <div className="grid gap-2 text-[13.5px] text-bark-dim">
         <span>
-          <Link {...codeLink(monorepo.full, repo.path, "", r.sha)} className={refClass("object", { mono: true })}>
+          <Link {...commitLink(monorepo.full, repo.path, r.sha)} className={refClass("object", { mono: true })}>
             {r.sha.slice(0, 7)}
           </Link>{" "}
           on <span className="font-mono text-[13px] text-bark">{repo.default_branch}</span>
@@ -212,7 +212,7 @@ function Side({ repo, r, live }: { repo: Repo; r: Release; live: boolean }) {
       {r.checks ? (
         <div>
           <SectionHead title="Checks" className="mb-3" />
-          <CheckRows repo={repo} branch={repo.default_branch} sha={r.sha} checks={r.checks} live={live} />
+          <CheckRows repo={repo} sha={r.sha} checks={r.checks} live={live} />
         </div>
       ) : null}
     </aside>

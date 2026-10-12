@@ -146,12 +146,12 @@ A name is lower-case letters, digits, `.`, `_` and `-`, at most 39 characters, w
 pando clone <owner/name | name> [folder] [--text-only]
 ```
 
-Sets up a repository on this machine: the shared files outside `projects/`, a read-only main for every project, and the references. The folder defaults to the name. A bare `name` means the one in your own account, else the only one so named that you belong to.
+Sets up a repository on this machine: the shared files outside `projects/` and a read-only main for every project, each a git clone. References are cloned when you ask, with `pando reference sync`. The folder defaults to the name. A bare `name` means the one in your own account, else the only one so named that you belong to.
 
 | Flag | What it does |
 | --- | --- |
 | `--text-only` | Keep large shared files and binaries as pointers until `pando fetch`. For sandboxes. |
-| `--kind <kind>` | How to check out each read-only main and reference: `fuse`, `fskit` or `sparse`. Default: a mount when this machine has one. |
+| `--kind <kind>` | How to check out each read-only main: `sparse` (a git clone, the default), or a mount, `fuse` (Linux with ArtifactFS) or `fskit` (a Mac with Pando.app on). |
 | `--server <url>` | The Pando server. Default: the configured one. |
 
 ### pando status
@@ -174,7 +174,7 @@ pando worktree add <repo> <branch> [--issue n] | list | remove <path> | follow |
 
 | Subcommand | What it does |
 | --- | --- |
-| `add <repo> <branch> [folders...]` | Makes the branch off main if it is new, and checks it out at `<repo>/worktrees/<branch>` (a `/` in the branch name becomes `-`). Branch `main` gives a read-only main. Folders, with the sparse kind, check out only those folders. |
+| `add <repo> <branch> [folders...]` | Makes the branch off main if it is new, and checks it out at `<repo>/worktrees/<branch>` (a `/` in the branch name becomes `-`). Branch `main` gives a read-only main. Folders, with the sparse kind, check out only those folders and the top-level files. |
 | `list` | Every worktree of the repository on every machine: path, branch, machine, kind, ahead, behind, and when it was last seen. |
 | `remove <path>` | Takes a worktree off this machine. It refuses when there is uncommitted or unpushed work. The branch stays on the server until it merges. |
 | `follow` | Keeps this machine's read-only mains at the server's main until stopped. `pando sync` runs the same follower. |
@@ -182,7 +182,7 @@ pando worktree add <repo> <branch> [--issue n] | list | remove <path> | follow |
 
 | Flag | What it does |
 | --- | --- |
-| `--kind <kind>` | With `add`: `fuse` (Linux with ArtifactFS), `fskit` (a Mac with Pando.app on) or `sparse` (a plain sparse checkout, everywhere). Default: the first of these this machine can use. |
+| `--kind <kind>` | With `add`: `sparse` (a git clone with every file of the branch, the default on every machine), or a mount: `fuse` (Linux with ArtifactFS) or `fskit` (a Mac with Pando.app on). Pando's cloud agents get `fuse`. |
 | `--issue <n>` | With `add`: link the branch to issue `n`, so merging it closes the issue. A wrong number stops before anything is made. |
 | `--json` | With `list`: print JSON. |
 | `--force` | With `remove`: remove even with uncommitted or unpushed work, which is lost. |
@@ -346,9 +346,9 @@ A reference is someone else's repo inside the repository, kept as a pointer to o
 | Subcommand | What it does |
 | --- | --- |
 | `update <path>` | Moves the reference to the newest commit of its branch. The pointer is a shared file, so every machine running `pando sync` follows. |
-| `sync` | Mounts each reference on this machine, or moves it to its pointer's commit. |
+| `sync` | Clones each reference that is not on this machine, read-only at its pointer's commit, and moves the others to it. |
 
-`--kind <kind>` (`fuse`, `fskit` or `sparse`) sets how a new reference folder is checked out.
+`--kind <kind>` (`sparse`, the default, `fuse` or `fskit`) sets how a new reference folder is checked out.
 
 ## Members, credentials and repositories
 
@@ -739,7 +739,7 @@ Downloads the bytes of large shared files that a `--text-only` clone keeps as po
 pando mac broker [--dry-run]
 ```
 
-macOS only. Loads Pando.app's background helper, which mounting worktrees through Pando.app needs. The first mount runs this step on its own.
+macOS only. Loads Pando.app's background helper, which a worktree mounted through Pando.app (`--kind fskit`) needs. The first mount runs this step on its own.
 
 | Flag | What it does |
 | --- | --- |
@@ -755,7 +755,7 @@ macOS only. Loads Pando.app's background helper, which mounting worktrees throug
 | `PANDO_TOKEN` | A credential to use instead of the stored one, for sandboxes. Make one with `pando credential create`. |
 | `PANDO_MACHINE` | This machine's name in Pando. Default: the host name up to its first dot. |
 | `PANDO_NO_BROWSER` | Any value: `pando login` prints the link and opens no browser. |
-| `PANDO_WORKTREE_KIND` | The default for `--kind`: `fuse`, `fskit` or `sparse`. |
+| `PANDO_WORKTREE_KIND` | The default for `--kind`: `sparse`, `fuse` or `fskit`. |
 
 Pando sets these in a build it starts:
 

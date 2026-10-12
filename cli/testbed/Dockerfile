@@ -28,5 +28,7 @@ COPY --chmod=0755 testbed/e2e.sh /testbed/e2e.sh
 COPY --chmod=0755 testbed/follow-latency.sh /testbed/follow-latency.sh
 COPY --chmod=0755 testbed/burst.sh /testbed/burst.sh
 ENV PANDO_MACHINE=linux-testbed
+# The test bed is for the mount; a worktree is a clone by default elsewhere.
+ENV PANDO_WORKTREE_KIND=fuse
 WORKDIR /work
 CMD ["/testbed/e2e.sh"]

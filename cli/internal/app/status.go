@@ -118,7 +118,7 @@ func referenceState(e *Env, root *config.Root, p refs.Pointer) string {
 		return "unavailable here"
 	}
 	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
-		return "not here"
+		return "not here (pando reference sync clones it)"
 	}
 	head, _ := gitx.In(dir).Run(e.Ctx, "rev-parse", "HEAD")
 	if head == p.Commit {

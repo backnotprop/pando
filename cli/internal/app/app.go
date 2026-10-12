@@ -187,20 +187,23 @@ func (e *Env) agentFor(root *config.Root) string {
 	return ""
 }
 
-// pickNew picks the driver for a new worktree or reference, and says once
-// per command why a Mac is not using the Pando mount, when it is not.
+// pickNew picks the driver for a new worktree or reference. Asked for an
+// fskit mount on a Mac whose Pando extension is off, it says so once per
+// command.
 func (e *Env) pickNew(kind string) (worktree.Driver, error) {
 	drv, err := worktree.Pick(kind, e.Home.Dir)
 	if err != nil {
 		return nil, err
 	}
-	if n, ok := drv.(worktree.Noter); ok && n.Note() != "" {
-		e.noteMu.Lock()
-		first := !e.noted
-		e.noted = true
-		e.noteMu.Unlock()
-		if first {
-			e.warnf("%s", n.Note())
+	if kind == "fskit" {
+		if why := worktree.FSKitOff(); why != "" {
+			e.noteMu.Lock()
+			first := !e.noted
+			e.noted = true
+			e.noteMu.Unlock()
+			if first {
+				e.warnf("--kind fskit: %s", why)
+			}
 		}
 	}
 	return drv, nil

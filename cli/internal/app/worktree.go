@@ -103,7 +103,7 @@ func worktreeAdd(e *Env, args []string) error {
 	// help or usage line names it. Still taken, with PANDO_AGENT, for the
 	// Pando-Agent trailer.
 	agent := fs.String("agent", "", "")
-	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "fuse, fskit or sparse (default: fuse on Linux with artifact-fs, fskit on a Mac with Pando.app on, else sparse)")
+	kind := fs.String("kind", os.Getenv("PANDO_WORKTREE_KIND"), "sparse (a clone, the default), fuse (a mount on Linux with artifact-fs) or fskit (a mount on a Mac with Pando.app on)")
 	issue := fs.Int("issue", 0, "link the branch to this issue: merging it closes the issue")
 	pos, err := parse(fs, args)
 	if err != nil {

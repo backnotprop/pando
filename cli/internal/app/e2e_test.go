@@ -20,8 +20,8 @@ import (
 	"pando/internal/server"
 )
 
-// The commands end to end against a file:// server with the sparse driver:
-// real git, no FUSE, safe on a Mac.
+// The commands end to end against a file:// server with the default driver,
+// a clone (sparse): real git, no FUSE, safe on a Mac.
 
 type harness struct {
 	t      *testing.T
@@ -44,7 +44,8 @@ func newHarness(t *testing.T) *harness {
 	t.Setenv("PANDO_HOME", filepath.Join(base, "home"))
 	t.Setenv("USER", "pat") // the file:// server's one user, so monorepos are pat/<name>
 	t.Setenv("PANDO_MACHINE", "test-box")
-	t.Setenv("PANDO_WORKTREE_KIND", "sparse")
+	t.Setenv("PANDO_WORKTREE_KIND", "") // the default: a clone on every machine
+	t.Setenv("PANDO_AGENT_CONTAINER", "")
 	t.Setenv("PANDO_AGENT", "")
 	t.Setenv("PANDO_TOKEN", "")
 	t.Setenv("PANDO_SERVER", "")

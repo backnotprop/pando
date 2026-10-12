@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { applyAgentRow } from "../api/agents";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import { mirrorQuery } from "../api/mirror";
+import { releasesKey } from "../api/releases";
 import { sessionGone, sessionsChanged } from "../api/sessions";
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
@@ -176,6 +177,13 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     case "agent.updated":
       applyAgentRow(qc, m, f.row);
       break;
+    case "release.created":
+    case "release.updated":
+    case "release.published":
+    case "release.deleted":
+      // A release made, edited (a file, its notes), published or deleted: the repo's releases and its strip read again.
+      void qc.invalidateQueries({ queryKey: releasesKey(m, f.row.repo) });
+      break;
     case "mirror.updated":
       // A run ended or a setting changed: Settings reads its section again (the event's row has no paths or counts behind).
       void qc.invalidateQueries({ queryKey: mirrorQuery(m).queryKey });
@@ -234,6 +242,9 @@ export function useRows(m: MonorepoRef, topics: readonly string[], sync: () => v
 
   return live;
 }
+
+/** A repo's releases pages' rows. */
+export const RELEASE_TOPICS = ["kind:release.created", "kind:release.updated", "kind:release.published", "kind:release.deleted"];
 
 /** The CI pages' rows. */
 export const CI_TOPICS = ["kind:ci.build", "kind:ci.job", "kind:ci.connection"];

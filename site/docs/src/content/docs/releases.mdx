@@ -94,6 +94,17 @@ A file's address, where `latest` is the newest published release:
 https://<server>/v1/monorepos/<owner>/<name>/repos/<repo>/releases/<tag>/files/<file>
 ```
 
+## In the web app
+
+Each project's page has a **Releases** tab beside Code and Branches (a plain repository has it beside its other tabs):
+
+- **The list**, newest first: a draft by when it was made, a published release by when it was published, 30 a page. Each row has the tag, the title, **Latest** (the newest published release), **Draft** or **Forced** (published past red or missing checks), who and when, the commit, and how many files. Members see drafts too.
+- **A release's page**: its title and tag, who published it and when, its files with their size and SHA-256 (hover the short one for all of it) and a **Download** button, and its notes, shown with the same viewer as issues. On the right: its commit on main and that commit's checks. Beside **Files** it says **Members only**, or **Anyone can download** when the project's switch is on. A draft says "no tag until published" and gives the command that uploads its files.
+- **The line over the files** on the project page, described in [Main's build](#mains-build): the build links to its page in the CI tab, the release to its page.
+- **Settings**, for owners: **Anyone can download releases**, one switch per project (one switch for a plain repository).
+
+The web shows releases. Making, publishing, uploading and deleting stay with `pando release` and the API, so a person or an agent does them the same way.
+
 ## Deployments
 
 Pando records deployments; it never deploys. Your CI, or a deploy script, tells Pando which commit reached which environment:

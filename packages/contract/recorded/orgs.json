@@ -6,11 +6,11 @@
     "orgs": [
       {
         "type": "org",
-        "login": "org-muu2mhw1",
+        "login": "org-mv5508dy",
         "name": "Rec Org",
         "description": "A recorded organization",
         "website": "https://example.com",
-        "created_at": "2026-10-04T17:05:17.249Z",
+        "created_at": "2026-10-12T10:57:29.454Z",
         "role": "owner",
         "members": 2
       }

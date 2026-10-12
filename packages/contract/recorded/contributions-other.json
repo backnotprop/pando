@@ -3,10 +3,10 @@
   "route": "GET /v1/users/{login}/contributions?tz=0 (another viewer: only repositories they can open)",
   "status": 200,
   "body": {
-    "login": "rec-muu4ew7h",
+    "login": "rec-mv5508dy",
     "tz": 0,
-    "from": "2025-10-05",
-    "to": "2026-10-04",
+    "from": "2025-10-12",
+    "to": "2026-10-12",
     "total": 17,
     "levels": [
       1,
@@ -16,7 +16,7 @@
     ],
     "days": [
       {
-        "date": "2026-10-04",
+        "date": "2026-10-12",
         "n": 17,
         "commit": 8,
         "branch": 7,
@@ -26,7 +26,7 @@
     ],
     "monorepos": [
       {
-        "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+        "full_name": "org-mv5508dy/rec-mv5508dy-renamed",
         "owner_type": "org",
         "kind": "monorepo",
         "n": 17,
@@ -58,26 +58,26 @@
         "period": "2026-10",
         "commit": [
           {
-            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "full_name": "org-mv5508dy/rec-mv5508dy-renamed",
             "n": 8
           }
         ],
         "branch": [
           {
-            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "full_name": "org-mv5508dy/rec-mv5508dy-renamed",
             "n": 7
           }
         ],
         "review": [
           {
-            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
+            "full_name": "org-mv5508dy/rec-mv5508dy-renamed",
             "n": 1
           }
         ],
         "created": [
           {
-            "full_name": "org-muu4ew7h/rec-muu4ew7h-renamed",
-            "at": "2026-10-04T17:54:38.895Z"
+            "full_name": "org-mv5508dy/rec-mv5508dy-renamed",
+            "at": "2026-10-12T10:56:42.395Z"
           }
         ],
         "joined": []

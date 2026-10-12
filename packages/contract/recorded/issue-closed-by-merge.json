@@ -11,19 +11,19 @@
     "project_path": null,
     "labels": [],
     "assignees": [],
-    "author": "rec-muu2mhw1",
+    "author": "rec-mv5508dy",
     "comments": 0,
     "tasks": null,
     "linked_branches": 1,
-    "created_at": "2026-10-04T17:05:12.853Z",
-    "updated_at": "2026-10-04T17:05:16.983Z",
-    "closed_at": "2026-10-04T17:05:16.983Z",
-    "closed_by": "rec-muu2mhw1",
+    "created_at": "2026-10-12T10:57:25.291Z",
+    "updated_at": "2026-10-12T10:57:29.192Z",
+    "closed_at": "2026-10-12T10:57:29.192Z",
+    "closed_by": "rec-mv5508dy",
     "closed_by_merge": {
       "repo": "projects-web",
       "repo_path": "projects/web",
       "branch": "fix/login",
-      "merge_commit": "45b18812493e6c01b13f1a99d559ca822ef8ca08"
+      "merge_commit": "5b000fe500fc40d38109bb659194f224845ee4f6"
     },
     "body": "",
     "body_version": 1,
@@ -36,15 +36,15 @@
         "sources": [
           "commit"
         ],
-        "sha": "e4bb41e74cdb1bedd61bfa6523a112dde2e0516a",
+        "sha": "1a0223a9a02b66f77d29215eb8ef030bd403ae5b",
         "linked_by": null,
         "branch_state": "merged",
-        "merged_at": "2026-10-04T17:05:15.978Z",
+        "merged_at": "2026-10-12T10:57:28.189Z",
         "closed_issue": true
       }
     ],
     "participants": [
-      "rec-muu2mhw1"
+      "rec-mv5508dy"
     ],
     "reactions": []
   }

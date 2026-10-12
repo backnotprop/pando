@@ -1,0 +1,55 @@
+{
+  "schema": "CommitPage",
+  "route": "GET .../repos/{repo}/commits/{sha} (a merge commit: merge_of)",
+  "status": 200,
+  "body": {
+    "commit": {
+      "sha": "fd6abc1adb36d3c7f5721d30c7b48e0c308ba24c",
+      "parents": [
+        "c15a3388ac8c4714eb00a015e89e6c387070a8a9",
+        "c640463c9489db1bed65a0d656cb1429b06f17ae"
+      ],
+      "title": "Merge branch 'feat/ready'",
+      "message": "Merge branch 'feat/ready'",
+      "author": {
+        "name": "Ana Lima",
+        "email": "ana@pando.invalid",
+        "date": "2026-10-12T10:57:08.000Z"
+      },
+      "committer": {
+        "name": "Pando",
+        "email": "pando@pando.invalid",
+        "date": "2026-10-12T10:57:08.000Z"
+      },
+      "trailers": {
+        "agent": null,
+        "worktree": null,
+        "machine": null
+      },
+      "co_authors": []
+    },
+    "author_person": {
+      "login": "rec-mv5508dy",
+      "picture_url": null
+    },
+    "branch": null,
+    "merge_of": {
+      "name": "feat/ready",
+      "title": null,
+      "state": "merged",
+      "merge_commit": "fd6abc1adb36d3c7f5721d30c7b48e0c308ba24c"
+    },
+    "checks": {
+      "sha": "fd6abc1adb36d3c7f5721d30c7b48e0c308ba24c",
+      "state": "missing",
+      "required": [
+        "ci/test"
+      ],
+      "missing": [
+        "ci/test"
+      ],
+      "statuses": [],
+      "checks_unknown": null
+    }
+  }
+}

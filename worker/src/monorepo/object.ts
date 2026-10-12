@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEX
 CREATE TABLE IF NOT EXISTS unrecorded (
   id INTEGER PRIMARY KEY AUTOINCREMENT, repo TEXT NOT NULL, identity TEXT NOT NULL, commands TEXT NOT NULL, origin TEXT, at TEXT NOT NULL,
   ref TEXT, old TEXT, new TEXT, landed TEXT NOT NULL DEFAULT 'yes');
+CREATE TABLE IF NOT EXISTS commit_branches (repo TEXT NOT NULL, sha TEXT NOT NULL, branch TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (repo, sha, branch));
 CREATE TABLE IF NOT EXISTS object_sizes (repo TEXT NOT NULL, oid TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (repo, oid));
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL, machine TEXT NOT NULL,
@@ -115,6 +116,16 @@ CREATE TABLE IF NOT EXISTS worktrees (
 `;
 
 type Row = Record<string, SqlStorageValue>;
+
+/** A branch as a commit's page names it (Contract.CommitBranch). */
+type CommitBranchRow = typeof Contract.CommitBranch.Encoded;
+
+/** What a commit's page knows beyond git (commitFacts). */
+interface CommitFacts {
+  branch: CommitBranchRow | null;
+  merge_of: CommitBranchRow | null;
+  statuses: StatusRecord[];
+}
 
 /** A record read with SELECT *: every column is there (NULL where unset), so no field is missing. */
 type Stored<T> = { [K in keyof T]-?: Exclude<T[K], undefined> };
@@ -2301,6 +2312,55 @@ export class MonorepoObject extends DurableObject<Env> {
     return Object.fromEntries(merged);
   }
 
+  /**
+   * A commit's page, beyond git: the branch it came from (the earliest that listed it among its own commits, else one
+   * whose head it is or was, else the one a session saw it on), the branch it merges when it is Pando's merge commit,
+   * and its statuses.
+   */
+  commitFacts(repo: string, sha: string): CommitFacts {
+    const from =
+      this.row<{ branch: string }>("SELECT branch FROM commit_branches WHERE repo = ? AND sha = ? ORDER BY at LIMIT 1", repo, sha) ??
+      this.row<{ branch: string }>("SELECT name AS branch FROM branches WHERE repo = ? AND (head = ? OR merged_head = ?) ORDER BY created_at LIMIT 1", repo, sha, sha) ??
+      this.row<{ branch: string }>("SELECT branch FROM merges WHERE repo = ? AND head = ? ORDER BY id LIMIT 1", repo, sha) ??
+      this.row<{ branch: string }>("SELECT branch FROM session_commits WHERE repo = ? AND sha = ? AND branch IS NOT NULL LIMIT 1", repo, sha);
+
+    const merged = this.row<{ branch: string }>("SELECT branch FROM merges WHERE repo = ? AND merge_commit = ? ORDER BY id DESC LIMIT 1", repo, sha);
+
+    return { branch: from && this.commitBranch(repo, from.branch), merge_of: merged && this.commitBranch(repo, merged.branch), statuses: this.statuses(repo, sha) };
+  }
+
+  private commitBranch(repo: string, name: string): CommitBranchRow {
+    const b = this.row<{ title: string | null; merge_commit: string | null; deleted_at: string | null }>(
+      "SELECT title, merge_commit, deleted_at FROM branches WHERE repo = ? AND name = ?",
+      repo, name,
+    );
+
+    const state = !b || b.deleted_at ? "deleted" : b.merge_commit ? "merged" : "open";
+
+    return { name, title: b?.title ?? null, state, merge_commit: b?.merge_commit ?? null };
+  }
+
+  /** The commits Pando has recorded in a repo whose sha starts with `prefix` (lower-case hex): at most two, enough to tell one from many. */
+  shasStartingWith(repo: string, prefix: string): string[] {
+    const end = `${prefix}g`;
+    const found = new Set<string>();
+
+    for (const q of [
+      "SELECT sha FROM commit_branches WHERE repo = ? AND sha >= ? AND sha < ?",
+      "SELECT sha FROM statuses WHERE repo = ? AND sha >= ? AND sha < ?",
+      "SELECT sha FROM session_commits WHERE repo = ? AND sha >= ? AND sha < ?",
+      "SELECT head AS sha FROM branches WHERE repo = ? AND head >= ? AND head < ?",
+      "SELECT merge_commit AS sha FROM merges WHERE repo = ? AND merge_commit >= ? AND merge_commit < ?",
+      "SELECT default_head AS sha FROM repos WHERE name = ? AND default_head >= ? AND default_head < ?",
+    ]) {
+      for (const r of this.rows<{ sha: string }>(`${q} LIMIT 2`, repo, prefix, end)) found.add(r.sha);
+
+      if (found.size > 1) break;
+    }
+
+    return [...found];
+  }
+
   currentMain(repo: string): string | null {
     return this.row<{ default_head: string | null }>("SELECT default_head FROM repos WHERE name = ?", repo)?.default_head ?? null;
   }
@@ -2343,6 +2403,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
     // The agent sessions its own commits name (sessions/commits.ts).
     if (f.session_commits) this.sessions.linkBranch(repo, name, f.session_commits);
+
+    // Its own commits, for a commit's page: the branch each came from. Kept after a rebase or a merge (they did come from it).
+    for (const sha of f.commits ?? []) this.sql.exec("INSERT OR IGNORE INTO commit_branches (repo, sha, branch, at) VALUES (?, ?, ?, ?)", repo, sha, name, now());
     // `required` is for this row only: the kept list changes only through storedRequired's owners.
     this.publishBranchRow(repo, name, required);
 

@@ -5,6 +5,7 @@
 import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
+import { CommitDiffLine, CommitPage } from "./commit.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
 import { HistoryPage, LastCommits, TreePage } from "./files.ts";
 import { Issue, IssueComment, IssueList, Label, LabelList, ReactionsAnswer, Timeline, type IssueState, type ReactionContent } from "./issue.ts";
@@ -221,13 +222,33 @@ export const combinedStatus = (owner: Login, name: MonorepoName, repo: RepoName,
   response: Checks,
 });
 
-/** GET .../ci/builds, newest first; narrowed to one branch (and repo) when given. */
-export const listCiBuilds = (owner: Login, name: MonorepoName, repo: RepoName | null, branch: string | null) => {
+/**
+ * GET .../repos/{repo}/commits/{sha}: one commit, the branch it came from and its checks. `sha` is a full sha or
+ * 7 to 39 of its first characters (404 when none or more than one commit Pando knows starts so).
+ */
+export const getCommit = (owner: Login, name: MonorepoName, repo: RepoName, sha: string) => ({
+  path: `${repoBase(owner, name, repo)}/commits/${encodeURIComponent(sha)}`,
+  response: CommitPage,
+});
+
+/**
+ * GET .../repos/{repo}/commits/{sha}/diff: what it changed against its first parent, as NDJSON, a CommitDiffLine
+ * per line (decodeCommitDiffLine), with Files changed's limits. `sha` is the full sha. ETag: the sha.
+ */
+export const commitDiffStream = (owner: Login, name: MonorepoName, repo: RepoName, sha: string) => ({
+  path: `${repoBase(owner, name, repo)}/commits/${encodeURIComponent(sha)}/diff`,
+  line: CommitDiffLine,
+});
+
+/** GET .../ci/builds, newest first; narrowed to one repo, branch or commit when given. */
+export const listCiBuilds = (owner: Login, name: MonorepoName, repo: RepoName | null, branch: string | null, sha: string | null = null) => {
   const params = new URLSearchParams();
 
   if (repo !== null) params.set("repo", repo);
 
   if (branch !== null) params.set("branch", branch);
+
+  if (sha !== null) params.set("sha", sha);
 
   return { path: `${monorepoBase(owner, name)}/ci/builds${query(params)}`, response: CiBuildList };
 };

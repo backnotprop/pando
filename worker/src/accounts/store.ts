@@ -1007,15 +1007,15 @@ export class Accounts {
   }
 
   /**
-   * Who a commit credits in a monorepo: the people whose sign-in email is one
+   * Who a commit credits in a monorepo (and whose picture its page shows): the people whose sign-in email is one
    * of `emails` (lower case), or whose login is one of `logins` (Pando's own
    * <login>@users.pando.invalid), and who can open the monorepo now, directly
    * or by its org. Read on a replica.
    */
-  async creditees(monorepoId: string, emails: string[], logins: string[]): Promise<{ login: string; email: string | null }[]> {
-    const res = await this.read<{ login: string; email: string | null }>(
+  async creditees(monorepoId: string, emails: string[], logins: string[]): Promise<{ login: string; email: string | null; picture_url: string | null }[]> {
+    const res = await this.read<{ login: string; email: string | null; picture_url: string | null }>(
       this.db.withSession("first-unconstrained"),
-      `SELECT u.login, lower(u.email) AS email FROM users u
+      `SELECT u.login, lower(u.email) AS email, u.picture_url FROM users u
        WHERE (lower(u.email) IN (SELECT value FROM json_each(?2)) OR u.login IN (SELECT value FROM json_each(?3)))
          AND (EXISTS (SELECT 1 FROM members WHERE monorepo_id = ?1 AND login = u.login)
               OR EXISTS (SELECT 1 FROM org_members om JOIN monorepos mo ON mo.owner = om.org WHERE mo.id = ?1 AND om.login = u.login))`,

@@ -31,6 +31,8 @@ export interface Crumb {
   project?: string;
   /** Dropped on a phone, so the breadcrumb fits. */
   wide?: boolean;
+  /** A tag or a commit: SF Mono. */
+  mono?: boolean;
 }
 
 // A crumb that has no room ends in an ellipsis rather than running into the next one.
@@ -254,7 +256,7 @@ export function TopBar({ crumbs = [] }: { crumbs?: Crumb[] }) {
                 <ProjectSwitcher full={full(crumbs)} current={c.project} />
               </>
             ) : (
-              <span aria-current="page" className="overflow-hidden px-1.5 py-1 text-ellipsis whitespace-nowrap text-bark">
+              <span aria-current="page" className={`overflow-hidden px-1.5 py-1 text-ellipsis whitespace-nowrap text-bark ${c.mono ? "font-mono text-[13.5px]" : ""}`}>
                 {c.label}
               </span>
             )}

@@ -38,6 +38,8 @@ export * from "./ci.ts";
 
 export * from "./release.ts";
 
+export * from "./artifact.ts";
+
 export * from "./mirror.ts";
 
 export * from "./files.ts";

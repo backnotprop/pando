@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/artifacts (the 101st)",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "too_many_artifacts",
+      "message": "full has 100 artifacts, the most a branch keeps; delete one first"
+    }
+  }
+}

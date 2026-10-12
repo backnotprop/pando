@@ -1,6 +1,7 @@
 // Records the monorepo object keeps, as the API returns them.
 
 import type { CommentView, IssueView } from "../issues/store";
+import type { CommentView as ArtifactCommentView } from "../branch-artifacts/store";
 
 export type Kind = "monorepo" | "repo";
 
@@ -141,6 +142,8 @@ export interface StreamEvent {
   reactions?: unknown[];
   /** label.updated: its name before a rename. */
   from?: string;
+  /** Artifact and artifact comment events: the branch's name. */
+  branch?: string;
 }
 
 /**
@@ -259,7 +262,7 @@ export interface RefusalExtra {
   /** 409 not_at_end: where the session ends, the cursor the sender resumes from (sessions/). */
   end?: number;
   /** 409 edited: the issue or comment as it is now. */
-  current?: IssueView | CommentView;
+  current?: IssueView | CommentView | ArtifactCommentView;
 }
 
 /**

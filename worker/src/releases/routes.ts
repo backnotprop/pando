@@ -21,6 +21,7 @@ import type { Context, Hono } from "hono";
 import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { HttpError } from "../http";
+import { deletePrefix, putHashed } from "../hashput";
 import type { ApiVars } from "../monorepo/api";
 import { branchesOf, listRefs, tagCommits, withRepo } from "../monorepo/artifacts";
 import { buildState, combine, requiredKept } from "../monorepo/checks";
@@ -190,10 +191,6 @@ type Api = Hono<{ Bindings: Env; Variables: ApiVars }>;
 /** A release file's name: letters, digits, '.', '_', '+' and '-', starting with a letter or digit, at most 200 characters. */
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$/;
 
-function hex(buf: ArrayBuffer): string {
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 /** A file's bytes from R2, as a download. */
 async function serveFile(env: Env, found: FileFound, isPublic: boolean): Promise<Response> {
   const obj = await env.BLOBS.get(found.key);
@@ -210,16 +207,6 @@ async function serveFile(env: Env, found: FileFound, isPublic: boolean): Promise
       "cache-control": isPublic ? "public, max-age=60" : "private, no-cache",
     },
   });
-}
-
-/** Delete every R2 object under a prefix (a release's files). */
-async function deletePrefix(bucket: R2Bucket, prefix: string): Promise<void> {
-  for (let more = true; more; ) {
-    const listed = await bucket.list({ prefix, limit: 1000 });
-
-    if (listed.objects.length) await bucket.delete(listed.objects.map((o) => o.key));
-    more = listed.truncated;
-  }
 }
 
 /**
@@ -379,12 +366,7 @@ export function releaseRoutes(api: Api): void {
     const slot = unwrap(await stub.releaseFileSlot(r.name, tag, name));
     const key = `${filesPrefix(c.get("m"), r.name, slot.release_id)}${name}`;
     const contentType = (c.req.header("content-type") ?? "").slice(0, 100) || "application/octet-stream";
-    const body = c.req.raw.body ?? new Blob([]).stream();
-    // The bytes go to R2 and through SHA-256 at once; R2 needs the length up front (FixedLengthStream).
-    const [toR2, toHash] = body.tee();
-    const digest = new crypto.DigestStream("SHA-256");
-    await Promise.all([c.env.BLOBS.put(key, toR2.pipeThrough(new FixedLengthStream(size)), { httpMetadata: { contentType } }), toHash.pipeTo(digest)]);
-    const sha256 = hex(await digest.digest);
+    const sha256 = await putHashed(c.env.BLOBS, key, c.req.raw.body ?? new Blob([]).stream(), size, contentType);
     const expected = c.req.header("x-pando-sha256")?.toLowerCase();
 
     if (expected && expected !== sha256) {

@@ -1,0 +1,11 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/artifacts (a document over 1.5 MiB)",
+  "status": 413,
+  "body": {
+    "error": {
+      "code": "too_large",
+      "message": "a document is at most 1.5 MiB; big.md is 1.6 MiB"
+    }
+  }
+}

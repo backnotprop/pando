@@ -1,0 +1,380 @@
+{
+  "schema": "MonorepoEventFrame[]",
+  "route": "GET .../events?topics=repo:{repo} (WebSocket), artifact kinds",
+  "status": 101,
+  "body": [
+    {
+      "type": "event",
+      "seq": 109,
+      "at": "2026-10-12T11:15:19.086Z",
+      "kind": "artifact.added",
+      "collection": "artifacts",
+      "key": "art-mv55o0nn/art_a00dc1b21d6ce5f1",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "full",
+      "actor": "art-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "art_a00dc1b21d6ce5f1",
+        "repo": "art-mv55o0nn",
+        "branch": "full",
+        "name": "a99.png",
+        "kind": "image",
+        "title": null,
+        "latest": {
+          "n": 1,
+          "size": 70,
+          "sha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
+          "files": [
+            {
+              "path": "a99.png",
+              "size": 70,
+              "sha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
+              "type": "image/png"
+            }
+          ],
+          "uploaded_by": "art-mv55o0nn",
+          "machine": "bootstrap",
+          "via": "cli",
+          "created_at": "2026-10-12T11:15:19.086Z"
+        },
+        "versions": 1,
+        "comments": {
+          "open": 0,
+          "resolved": 0
+        },
+        "created_by": "art-mv55o0nn",
+        "created_at": "2026-10-12T11:15:19.086Z",
+        "updated_at": "2026-10-12T11:15:19.086Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 110,
+      "at": "2026-10-12T11:15:19.094Z",
+      "kind": "artifact.versioned",
+      "collection": "artifacts",
+      "key": "art-mv55o0nn/art_78053b5def9920bf",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "full",
+      "actor": "art-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "art_78053b5def9920bf",
+        "repo": "art-mv55o0nn",
+        "branch": "full",
+        "name": "a0.png",
+        "kind": "image",
+        "title": null,
+        "latest": {
+          "n": 2,
+          "size": 70,
+          "sha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
+          "files": [
+            {
+              "path": "a0.png",
+              "size": 70,
+              "sha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
+              "type": "image/png"
+            }
+          ],
+          "uploaded_by": "art-mv55o0nn",
+          "machine": "bootstrap",
+          "via": "cli",
+          "created_at": "2026-10-12T11:15:19.094Z"
+        },
+        "versions": 2,
+        "comments": {
+          "open": 0,
+          "resolved": 0
+        },
+        "created_by": "art-mv55o0nn",
+        "created_at": "2026-10-12T11:15:18.863Z",
+        "updated_at": "2026-10-12T11:15:19.094Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 725,
+      "at": "2026-10-12T11:15:19.841Z",
+      "kind": "artifact_comment.added",
+      "collection": "artifact_comments",
+      "key": "art-mv55o0nn/ac_cce68e3dabf9281b",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "ac_cce68e3dabf9281b",
+        "artifact": "art_ca254e2563df1aec",
+        "version": 1,
+        "thread": "ac_cce68e3dabf9281b",
+        "in_reply_to": null,
+        "anchor": null,
+        "body": "thread 498",
+        "body_version": 1,
+        "author": "art-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.841Z",
+        "updated_at": "2026-10-12T11:15:19.841Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 116,
+      "at": "2026-10-12T11:15:19.111Z",
+      "kind": "artifact_comment.edited",
+      "collection": "artifact_comments",
+      "key": "art-mv55o0nn/ac_9b92c91dda744223",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-b-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "ac_9b92c91dda744223",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 2,
+        "thread": "ac_9b92c91dda744223",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "Ship it on Wednesday",
+          "blockId": "block-3",
+          "startOffset": 0,
+          "endOffset": 20,
+          "startMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 0
+          },
+          "endMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 20
+          },
+          "context": {
+            "prefix": "the chart\n\n",
+            "suffix": "."
+          }
+        },
+        "body": "Wednesday clashes with the freeze.",
+        "body_version": 2,
+        "author": "art-b-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.097Z",
+        "updated_at": "2026-10-12T11:15:19.111Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 117,
+      "at": "2026-10-12T11:15:19.117Z",
+      "kind": "artifact_comment.resolved",
+      "collection": "artifact_comments",
+      "key": "art-mv55o0nn/ac_9b92c91dda744223",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "ac_9b92c91dda744223",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 2,
+        "thread": "ac_9b92c91dda744223",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "Ship it on Wednesday",
+          "blockId": "block-3",
+          "startOffset": 0,
+          "endOffset": 20,
+          "startMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 0
+          },
+          "endMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 20
+          },
+          "context": {
+            "prefix": "the chart\n\n",
+            "suffix": "."
+          }
+        },
+        "body": "Wednesday clashes with the freeze.",
+        "body_version": 2,
+        "author": "art-b-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "resolved",
+        "resolved_by": "art-mv55o0nn",
+        "resolved_at": "2026-10-12T11:15:19.117Z",
+        "created_at": "2026-10-12T11:15:19.097Z",
+        "updated_at": "2026-10-12T11:15:19.117Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 118,
+      "at": "2026-10-12T11:15:19.122Z",
+      "kind": "artifact_comment.reopened",
+      "collection": "artifact_comments",
+      "key": "art-mv55o0nn/ac_9b92c91dda744223",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-b-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "ac_9b92c91dda744223",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 2,
+        "thread": "ac_9b92c91dda744223",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "Ship it on Wednesday",
+          "blockId": "block-3",
+          "startOffset": 0,
+          "endOffset": 20,
+          "startMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 0
+          },
+          "endMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 20
+          },
+          "context": {
+            "prefix": "the chart\n\n",
+            "suffix": "."
+          }
+        },
+        "body": "Wednesday clashes with the freeze.",
+        "body_version": 2,
+        "author": "art-b-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.097Z",
+        "updated_at": "2026-10-12T11:15:19.122Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 120,
+      "at": "2026-10-12T11:15:19.142Z",
+      "kind": "artifact_comment.deleted",
+      "collection": "artifact_comments",
+      "key": "art-mv55o0nn/ac_9b92c91dda744223",
+      "op": "upsert",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-b-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "ac_9b92c91dda744223",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 2,
+        "thread": "ac_9b92c91dda744223",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "Ship it on Wednesday",
+          "blockId": "block-3",
+          "startOffset": 0,
+          "endOffset": 20,
+          "startMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 0
+          },
+          "endMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 20
+          },
+          "context": {
+            "prefix": "the chart\n\n",
+            "suffix": "."
+          }
+        },
+        "body": null,
+        "body_version": 2,
+        "author": "art-b-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.097Z",
+        "updated_at": "2026-10-12T11:15:19.142Z"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 123,
+      "at": "2026-10-12T11:15:19.149Z",
+      "kind": "artifact_comment.deleted",
+      "collection": "artifact_comments",
+      "key": "art-mv55o0nn/ac_9b92c91dda744223",
+      "op": "delete",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-b-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "id": "ac_9b92c91dda744223",
+        "artifact": "art_9bfe688f25153d21",
+        "thread": "ac_9b92c91dda744223"
+      }
+    },
+    {
+      "type": "event",
+      "seq": 726,
+      "at": "2026-10-12T11:15:19.852Z",
+      "kind": "artifact.deleted",
+      "collection": "artifacts",
+      "key": "art-mv55o0nn/art_9bfe688f25153d21",
+      "op": "delete",
+      "repo": "art-mv55o0nn",
+      "branch": "feat/refresh-margin",
+      "actor": "art-b-mv55o0nn",
+      "machine": "bootstrap",
+      "agent": null,
+      "row": {
+        "repo": "art-mv55o0nn",
+        "branch": "feat/refresh-margin",
+        "id": "art_9bfe688f25153d21",
+        "name": "refresh-plan.md"
+      }
+    }
+  ]
+}

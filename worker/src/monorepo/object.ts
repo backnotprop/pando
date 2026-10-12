@@ -44,6 +44,7 @@ import {
   IssueStore, type BranchWord, type IssueFilters, type IssueInput, type IssuePatch, type IssueWho, type ReactionContent,
 } from "../issues/store";
 import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/store";
+import { ArtifactStore, type ArtifactView, type CommentView as ArtifactCommentView, type NewComment, type NewVersion, type ThreadsView, type VersionFound, type VersionView } from "../branch-artifacts/store";
 import { ReleaseStore, type DeploymentState, type DeploymentView, type FileFound, type FileSlot, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
 import type { BuildView } from "../ci/store";
 import type { Json } from "../parse";
@@ -386,6 +387,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private mirror: MirrorOut;
   /** Tags and releases (releases/store.ts). */
   private releases: ReleaseStore;
+  /** Artifacts on branch pages and their comments (branch-artifacts/store.ts). */
+  private artifacts: ArtifactStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -417,6 +420,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.sessions = new SessionStore(this.sql, { publish: (e) => this.publish(e) });
     this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.releases = new ReleaseStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
+    this.artifacts = new ArtifactStore(this.sql, { publish: (e) => this.publish(e) });
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
@@ -536,6 +540,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.ci.ensureSchema();
     this.mirror?.ensureSchema();
     this.releases?.ensureSchema();
+    this.artifacts?.ensureSchema();
   }
 
   private rows<T extends Row>(query: string, ...args: SqlStorageValue[]): T[] {
@@ -2817,6 +2822,60 @@ export class MonorepoObject extends DurableObject<Env> {
     const allowed = this.releases.releasesPublic(repo);
 
     return { allowed, found: allowed ? this.releases.file(this.info()!.id, repo, tag, name) : null };
+  }
+
+  // ── Artifacts on branch pages (branch-artifacts/store.ts) ────────────────
+
+  artifactSlot(repo: string, branch: string, name: string): Promise<Outcome<{ id: string; branch_created_at: string }>> {
+    return this.guard(() => this.artifacts.slot(repo, branch, name));
+  }
+
+  artifactAddVersion(repo: string, branch: string, v: NewVersion, identity: Identity): Promise<Outcome<{ artifact: ArtifactView; created: boolean }>> {
+    return this.guard(() => this.artifacts.addVersion(repo, branch, v, identity));
+  }
+
+  artifactList(repo: string, branch: string): Promise<Outcome<ArtifactView[]>> {
+    return this.guard(() => this.artifacts.list(repo, branch));
+  }
+
+  artifactGet(id: string): (ArtifactView & { all_versions: VersionView[] }) | null {
+    return this.artifacts.get(id);
+  }
+
+  artifactVersion(id: string, n: number): VersionFound | null {
+    return this.artifacts.version(id, n);
+  }
+
+  artifactDelete(id: string, identity: Identity, machine: string | null): Promise<Outcome<string[]>> {
+    return this.guard(() => this.artifacts.delete(id, identity, machine));
+  }
+
+  artifactComment(id: string, input: NewComment, identity: Identity, key: string | null): Promise<Outcome<{ comment: ArtifactCommentView; replayed: boolean }>> {
+    return this.guard(() => this.artifacts.addComment(id, input, identity, key));
+  }
+
+  artifactGetComment(id: string): ArtifactCommentView | null {
+    return this.artifacts.getComment(id);
+  }
+
+  artifactEditComment(id: string, body: string, mentions: string[], baseVersion: number | null, identity: Identity, machine: string | null): Promise<Outcome<ArtifactCommentView>> {
+    return this.guard(() => this.artifacts.editComment(id, body, mentions, baseVersion, identity, machine));
+  }
+
+  artifactCommentState(id: string, state: "open" | "resolved", identity: Identity, machine: string | null): Promise<Outcome<ArtifactCommentView>> {
+    return this.guard(() => this.artifacts.setState(id, state, identity, machine));
+  }
+
+  artifactDeleteComment(id: string, identity: Identity, machine: string | null): Promise<Outcome<void>> {
+    return this.guard(() => this.artifacts.deleteComment(id, identity, machine));
+  }
+
+  artifactThreads(id: string, state: "open" | "resolved" | null): Promise<Outcome<ThreadsView>> {
+    return this.guard(() => this.artifacts.artifactThreads(id, state));
+  }
+
+  artifactBranchThreads(repo: string, branch: string, state: "open" | "resolved" | null): Promise<Outcome<ThreadsView>> {
+    return this.guard(() => this.artifacts.branchThreads(repo, branch, state));
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────

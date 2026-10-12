@@ -1,0 +1,6 @@
+{
+  "schema": "NoContent",
+  "route": "DELETE .../artifacts/{id}",
+  "status": 204,
+  "body": null
+}

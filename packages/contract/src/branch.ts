@@ -156,6 +156,21 @@ export const BranchDiff = Schema.Struct({
 
 export interface BranchDiff extends Schema.Schema.Type<typeof BranchDiff> {}
 
+/** A streamed diff's lines after its start, the same for a branch (BranchDiffLine) and a commit (CommitDiffLine): one changed file. */
+export const DiffFileLine = Schema.Struct({ type: Schema.tag("file"), ...ChangedFile.fields });
+
+/** The last line of a whole streamed diff. */
+export const DiffEndLine = Schema.Struct({
+  type: Schema.tag("end"),
+  /** Some patches were left out past the budget (`patch_omitted: budget`). */
+  truncated: Schema.Boolean,
+  /** Of the listed files. */
+  stats: Schema.Struct({ files: Count, additions: Count, deletions: Count }),
+});
+
+/** The diff failed after its start. */
+export const DiffErrorLine = Schema.Struct({ type: Schema.tag("error"), code: Schema.String, message: Schema.String });
+
 /**
  * GET .../branches/{branch}/diff?patches=1&stream=1: Files changed for a large
  * branch, as NDJSON, one line as each part is known: "start", then one "file"
@@ -174,15 +189,9 @@ export const BranchDiffLine = Schema.Union([
     /** More than 5,000 files changed: the first 5,000 by path are listed. */
     too_many_files: Schema.Boolean,
   }),
-  Schema.Struct({ type: Schema.tag("file"), ...ChangedFile.fields }),
-  Schema.Struct({
-    type: Schema.tag("end"),
-    /** Some patches were left out past the budget (`patch_omitted: budget`). */
-    truncated: Schema.Boolean,
-    /** Of the listed files. */
-    stats: Schema.Struct({ files: Count, additions: Count, deletions: Count }),
-  }),
-  Schema.Struct({ type: Schema.tag("error"), code: Schema.String, message: Schema.String }),
+  DiffFileLine,
+  DiffEndLine,
+  DiffErrorLine,
 ]);
 
 export type BranchDiffLine = typeof BranchDiffLine.Type;

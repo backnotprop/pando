@@ -22,6 +22,8 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **Files changed lists at most 5,000 files,** and shows at most 32 MiB of diffs in all. Past that, the later files are listed without their diff. A branch that changes more files says how many there are.
 - **Code with more than 12,000 lines on a side shows without colour,** in Files changed and in the code view. Colouring that much at once would stall scrolling.
 - **A branch's commit list shows its newest 250 commits.**
+- **A commit's page shows the files it changed with the same limits as Files changed:** 5,000 files, 32 MiB of diffs in all, and no diff for a text file over 8 MiB on either side. It names the branch a commit came from when the commit is one of that branch's newest 250 commits, or its head.
+- **A short sha in a commit's address** (7 to 39 characters) finds the commits Pando has recorded (branch heads, branches' newest 250 commits, merges, commits with checks or sessions) and main's newest 1,000 commits along its first parents. An older commit opens by its full sha.
 - **Finding where a branch left main stops after 5,000 commits.** Past that, the answer is `too_large`.
 - **After main moves,** Pando re-checks the open branches pushed in the last 7 days, at most 100, most recently pushed first. Any other branch shows "pending", with its last known answer, for at least 30 seconds; a branch list then works out at most 25 such branches at a time.
 

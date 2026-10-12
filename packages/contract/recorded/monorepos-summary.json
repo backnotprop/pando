@@ -5,27 +5,27 @@
   "body": {
     "monorepos": [
       {
-        "id": "m_45d69c4a03ba6d4e",
-        "owner": "rec-muu2mhw1",
-        "name": "rec-muu2mhw1",
-        "full_name": "rec-muu2mhw1/rec-muu2mhw1",
+        "id": "m_9f5ba36b26db5990",
+        "owner": "rec-mv5508dy",
+        "name": "rec-mv5508dy",
+        "full_name": "rec-mv5508dy/rec-mv5508dy",
         "kind": "monorepo",
-        "created_at": "2026-10-04T17:04:34.363Z",
+        "created_at": "2026-10-12T10:56:42.395Z",
         "owner_type": "user",
         "description": null,
         "role": "owner",
-        "last_activity_at": "2026-10-04T17:04:51.710Z",
+        "last_activity_at": "2026-10-12T10:56:55.988Z",
         "worktrees_active": 0,
         "machines_active": 0,
         "needs": {
           "ready": 1,
-          "conflicts": 1,
+          "conflicts": 0,
           "failing": 1
         },
         "members": 1,
         "large": false,
         "repos": 1,
-        "open_branches": 3,
+        "open_branches": 4,
         "assigned": {},
         "open_issues": 0
       }

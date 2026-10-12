@@ -19,7 +19,7 @@ import { fallback, useRows } from "../../../../live/rows";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, SectionHead } from "../../../../ui/controls";
 import { Leaf } from "../../../../ui/Leaf";
-import { branchLink, issueLink, ownerLink } from "../../../../ui/paths";
+import { branchLink, commitLink, issueLink, ownerLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { ago, dayAndTime, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
@@ -60,7 +60,13 @@ function Side({ s, repo, messages }: { s: AgentSession; repo: Repo | undefined; 
           <ul className="grid gap-2">
             {commits.commits.slice(0, 8).map((c) => (
               <li key={c.sha} className="grid grid-cols-[64px_minmax(0,1fr)] gap-2 text-[13px]">
-                <code className="font-mono text-[12.5px] text-link">{c.sha.slice(0, 7)}</code>
+                {repo ? (
+                  <Ref kind="object" mono link={commitLink(monorepo.full, repo.path, c.sha)} className="text-[12.5px]">
+                    {c.sha.slice(0, 7)}
+                  </Ref>
+                ) : (
+                  <code className="font-mono text-[12.5px] text-link">{c.sha.slice(0, 7)}</code>
+                )}
                 <span className="truncate text-bark">{c.title}</span>
               </li>
             ))}

@@ -151,7 +151,8 @@ test("slice 8: releases: the strip, the Releases tab, a release's page, Download
       await expect(page.getByRole("region", { name: "Notes" }).getByRole("link", { name: "#1" })).toHaveAttribute("href", `/${full}/issues/1`);
       const side = page.getByRole("complementary", { name: "Commit and checks" });
 
-      await expect(side.getByRole("link", { name: sha.slice(0, 7) })).toBeVisible();
+      // The commit opens its own page.
+      await expect(side.getByRole("link", { name: sha.slice(0, 7) })).toHaveAttribute("href", `/${full}/projects/cli/commit/${sha}`);
       await expect(side.getByText("Start the CLI")).toBeVisible();
       await expect(side.getByRole("list", { name: "Checks" }).getByText("passed")).toBeVisible();
       await expect(side.getByRole("list", { name: "Checks" }).getByText("3 min 12 s")).toBeVisible();

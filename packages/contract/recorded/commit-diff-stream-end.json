@@ -1,0 +1,14 @@
+{
+  "schema": "CommitDiffLine",
+  "route": "GET .../repos/{repo}/commits/{sha}/diff (a end line)",
+  "status": 200,
+  "body": {
+    "type": "end",
+    "truncated": false,
+    "stats": {
+      "files": 1,
+      "additions": 1,
+      "deletions": 0
+    }
+  }
+}

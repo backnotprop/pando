@@ -11,7 +11,7 @@ import { branchesQuery, branchQuery, codeFileQuery, codeTreeQuery, lastCommitsQu
 import { openBranchesQuery, reposQuery } from "../../../../api/queries";
 import { Empty, lnk } from "../../../../ui/controls";
 import { useHeld, useLastAnswer } from "../../../../ui/held";
-import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref } from "../../../../ui/paths";
+import { branchesLink, branchLink, codeBlobLink, codeLink, codeRawHref, commitLink } from "../../../../ui/paths";
 import { Clone } from "../-code/Clone";
 import { BarSpace, ChangeBar, FileList, Readme, type Row } from "../-code/FileList";
 import { PathTrail } from "../-code/PathTrail";
@@ -152,7 +152,7 @@ export function ProjectCode({ repo, dir, gitRef }: { repo: Repo; dir: string; gi
         <FileList
           bar={
             newest ? (
-              <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha at={Date.parse(newest.at)} history={history} />
+              <ChangeBar who={newest.author.name ?? ""} title={newest.title} id={newest.sha.slice(0, 7)} sha idLink={commitLink(full, repo.path, newest.sha)} at={Date.parse(newest.at)} history={history} />
             ) : last?.complete ? null : (
               <BarSpace />
             )

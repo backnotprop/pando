@@ -63,7 +63,7 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
   if (kind === "projects" && !plain) {
     const [, sub = "", ...path] = parts;
-    const deeper = sub === "branches" ? [{ label: path.length ? path.join("/") : "branches" }] : codeCrumbs(full, repoPath, sub, path);
+    const deeper = sub === "branches" ? [{ label: path.length ? path.join("/") : "branches" }] : sub === "commit" ? commitCrumb(path) : codeCrumbs(full, repoPath, sub, path);
     // On a phone the project crumb drops out whenever a deeper crumb follows, so the breadcrumb never overlaps.
     const project: Crumb = { label: repoPath, link: deeper.length ? codeLink(full, repoPath, "") : undefined, project: repoPath, wide: deeper.length > 0 };
 
@@ -71,6 +71,8 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
   }
 
   if (plain && kind === "branches") return parts.length ? [{ label: parts.join("/") }] : [{ label: "branches" }];
+
+  if (plain && kind === "commit") return commitCrumb(parts);
 
   if (plain) return codeCrumbs(full, ".", kind, parts);
 
@@ -91,6 +93,9 @@ function crumbsFor(full: string, plain: boolean, rest: string[]): Crumb[] {
 
   return kind ? [{ label: kind }] : [];
 }
+
+/** A commit's page: "commit 94cf890". */
+const commitCrumb = ([sha = ""]: string[]): Crumb[] => [{ label: `commit ${sha.slice(0, 7)}` }];
 
 /** A repo's code pages: folders, a file, a file's history. */
 function codeCrumbs(full: string, repoPath: string, kind: string, path: string[]): Crumb[] {

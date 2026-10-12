@@ -2,7 +2,7 @@
 // files at a ref, its branches and a branch's page. Keys sit under
 // ["m", owner, name, "r", repo], so a line on the monorepo's socket can
 // refresh one repo's data.
-import { type BranchDiffLine, type ChangedFile, type CiBuild, type CiJob, decodeBranchDiffLine, type Repo, type RepoName, Routes } from "@pando/contract";
+import { type BranchDiffLine, type ChangedFile, type CiBuild, type CiJob, type CommitDiffLine, decodeBranchDiffLine, decodeCommitDiffLine, type Repo, type RepoName, Routes } from "@pando/contract";
 import { infiniteQueryOptions, queryOptions, experimental_streamedQuery as streamedQuery } from "@tanstack/react-query";
 import type * as Schema from "effect/Schema";
 import { codeRawHref } from "../ui/paths";
@@ -32,24 +32,27 @@ export const branchQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
 export const commitsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
   queryOptions({ queryKey: [...repoKey(m, repo), "branch", branch, "commits"], queryFn: () => read(Routes.branchCommits(m.owner, m.name, repo, branch)) });
 
-type DiffLine = typeof BranchDiffLine.Type;
+/** A streamed diff's lines: a branch's Files changed or a commit's; only their start lines differ. */
+type DiffLine = BranchDiffLine | CommitDiffLine;
 
 /** Files changed as far as it has come: its start (the ends, how many files), its files in path order, its end, or why it stopped. */
-export interface FilesSoFar {
-  start: Extract<DiffLine, { type: "start" }> | null;
+export interface FilesSoFar<L extends DiffLine = BranchDiffLine> {
+  start: Extract<L, { type: "start" }> | null;
   files: readonly ChangedFile[];
   end: Extract<DiffLine, { type: "end" }> | null;
   error: string | null;
 }
 
-const NONE_YET: FilesSoFar = { start: null, files: [], end: null, error: null };
+const noneYet = <L extends DiffLine>(): FilesSoFar<L> => ({ start: null, files: [], end: null, error: null });
 
-function withLines(so: FilesSoFar, lines: readonly DiffLine[]): FilesSoFar {
+function withLines<L extends DiffLine>(so: FilesSoFar<L>, lines: readonly L[]): FilesSoFar<L> {
   const next = { ...so, files: [...so.files] };
 
   for (const line of lines) {
-    if (line.type === "start") next.start = line;
-    else if (line.type === "file") next.files.push(line);
+    if (line.type === "start") {
+      // SAFETY: the start line of a stream of L is L's own start.
+      next.start = line as Extract<L, { type: "start" }>;
+    } else if (line.type === "file") next.files.push(line);
     else if (line.type === "end") next.end = line;
     else next.error = line.message;
   }
@@ -70,10 +73,26 @@ export const branchDiffQuery = (m: MonorepoRef, repo: RepoName, branch: string) 
     queryKey: [...repoKey(m, repo), "branch", branch, "diff"],
     queryFn: streamedQuery({
       streamFn: ({ signal }) => getLines(Routes.branchDiffStream(m.owner, m.name, repo, branch).path, decodeBranchDiffLine, signal),
-      reducer: withLines,
-      initialValue: NONE_YET,
+      reducer: withLines<BranchDiffLine>,
+      initialValue: noneYet<BranchDiffLine>(),
       refetchMode: "replace",
     }),
+  });
+
+/** One commit (a full sha, or the start of one as an address gives it), the branch it came from and its checks. */
+export const commitQuery = (m: MonorepoRef, repo: RepoName, ref: string) =>
+  queryOptions({ queryKey: [...repoKey(m, repo), "commit", ref], queryFn: () => read(Routes.getCommit(m.owner, m.name, repo, ref)) });
+
+/** What a commit changed against its first parent, streamed as Files changed is; a commit never changes, so it is read once. */
+export const commitDiffQuery = (m: MonorepoRef, repo: RepoName, sha: string) =>
+  queryOptions({
+    queryKey: [...repoKey(m, repo), "commit-diff", sha],
+    queryFn: streamedQuery({
+      streamFn: ({ signal }) => getLines(Routes.commitDiffStream(m.owner, m.name, repo, sha).path, decodeCommitDiffLine, signal),
+      reducer: withLines<CommitDiffLine>,
+      initialValue: noneYet<CommitDiffLine>(),
+    }),
+    staleTime: Infinity,
   });
 
 export const reviewsQuery = (m: MonorepoRef, repo: RepoName, branch: string) =>
@@ -106,15 +125,15 @@ export const reports = (job: CiJob, build: CiBuild, held: CheckRun | undefined) 
   !job.retried && (!held || held.build.id === build.id || (build.created_at ?? "") > (held.build.created_at ?? ""));
 
 /**
- * Each check's run on the branch's head, from the CI service's stored builds
+ * Each check's run on a commit (a branch's head, or a commit's page), from the CI service's stored builds
  * (Pando's rows, no call to the service). The page's row socket keeps it
  * current from ci.build and ci.job rows (live/rows.ts).
  */
-export const checkRunsQuery = (m: MonorepoRef, repo: RepoName, branch: string, sha: string) =>
+export const checkRunsQuery = (m: MonorepoRef, repo: RepoName, sha: string) =>
   queryOptions({
     queryKey: [...repoKey(m, repo), "runs", sha],
     queryFn: async (): Promise<CheckRuns> => {
-      const builds = (await read(Routes.listCiBuilds(m.owner, m.name, repo, branch))).builds.filter((b) => b.sha === sha);
+      const builds = (await read(Routes.listCiBuilds(m.owner, m.name, repo, null, sha))).builds;
       const runs = new Map<string, CheckRun>();
 
       for (const b of builds) {

@@ -33,6 +33,7 @@ import { Route as OwnerNameBlobSplatRouteImport } from './routes/$owner/$name/bl
 import { Route as OwnerNameBranchesIndexRouteImport } from './routes/$owner/$name/branches/index'
 import { Route as OwnerNameBranchesSplatRouteImport } from './routes/$owner/$name/branches/$'
 import { Route as OwnerNameCiIndexRouteImport } from './routes/$owner/$name/ci/index'
+import { Route as OwnerNameCommitShaRouteImport } from './routes/$owner/$name/commit/$sha'
 import { Route as OwnerNameHistorySplatRouteImport } from './routes/$owner/$name/history/$'
 import { Route as OwnerNameIssuesIndexRouteImport } from './routes/$owner/$name/issues/index'
 import { Route as OwnerNameIssuesNumberRouteImport } from './routes/$owner/$name/issues/$number'
@@ -47,6 +48,7 @@ import { Route as OwnerNameProjectsProjectIndexRouteImport } from './routes/$own
 import { Route as OwnerNameProjectsProjectBlobSplatRouteImport } from './routes/$owner/$name/projects/$project/blob/$'
 import { Route as OwnerNameProjectsProjectBranchesIndexRouteImport } from './routes/$owner/$name/projects/$project/branches/index'
 import { Route as OwnerNameProjectsProjectBranchesSplatRouteImport } from './routes/$owner/$name/projects/$project/branches/$'
+import { Route as OwnerNameProjectsProjectCommitShaRouteImport } from './routes/$owner/$name/projects/$project/commit/$sha'
 import { Route as OwnerNameProjectsProjectHistorySplatRouteImport } from './routes/$owner/$name/projects/$project/history/$'
 import { Route as OwnerNameProjectsProjectTreeSplatRouteImport } from './routes/$owner/$name/projects/$project/tree/$'
 
@@ -170,6 +172,11 @@ const OwnerNameCiIndexRoute = OwnerNameCiIndexRouteImport.update({
   path: '/ci/',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
+const OwnerNameCommitShaRoute = OwnerNameCommitShaRouteImport.update({
+  id: '/commit/$sha',
+  path: '/commit/$sha',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
 const OwnerNameHistorySplatRoute = OwnerNameHistorySplatRouteImport.update({
   id: '/history/$',
   path: '/history/$',
@@ -247,6 +254,12 @@ const OwnerNameProjectsProjectBranchesSplatRoute =
     path: '/branches/$',
     getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
   } as any)
+const OwnerNameProjectsProjectCommitShaRoute =
+  OwnerNameProjectsProjectCommitShaRouteImport.update({
+    id: '/commit/$sha',
+    path: '/commit/$sha',
+    getParentRoute: () => OwnerNameProjectsProjectRouteRoute,
+  } as any)
 const OwnerNameProjectsProjectHistorySplatRoute =
   OwnerNameProjectsProjectHistorySplatRouteImport.update({
     id: '/history/$',
@@ -283,6 +296,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
+  '/$owner/$name/commit/$sha': typeof OwnerNameCommitShaRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
   '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
@@ -298,6 +312,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
   '/$owner/$name/projects/$project/blob/$': typeof OwnerNameProjectsProjectBlobSplatRoute
   '/$owner/$name/projects/$project/branches/$': typeof OwnerNameProjectsProjectBranchesSplatRoute
+  '/$owner/$name/projects/$project/commit/$sha': typeof OwnerNameProjectsProjectCommitShaRoute
   '/$owner/$name/projects/$project/history/$': typeof OwnerNameProjectsProjectHistorySplatRoute
   '/$owner/$name/projects/$project/tree/$': typeof OwnerNameProjectsProjectTreeSplatRoute
   '/$owner/$name/projects/$project/branches/': typeof OwnerNameProjectsProjectBranchesIndexRoute
@@ -322,6 +337,7 @@ export interface FileRoutesByTo {
   '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
+  '/$owner/$name/commit/$sha': typeof OwnerNameCommitShaRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
   '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
@@ -337,6 +353,7 @@ export interface FileRoutesByTo {
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectIndexRoute
   '/$owner/$name/projects/$project/blob/$': typeof OwnerNameProjectsProjectBlobSplatRoute
   '/$owner/$name/projects/$project/branches/$': typeof OwnerNameProjectsProjectBranchesSplatRoute
+  '/$owner/$name/projects/$project/commit/$sha': typeof OwnerNameProjectsProjectCommitShaRoute
   '/$owner/$name/projects/$project/history/$': typeof OwnerNameProjectsProjectHistorySplatRoute
   '/$owner/$name/projects/$project/tree/$': typeof OwnerNameProjectsProjectTreeSplatRoute
   '/$owner/$name/projects/$project/branches': typeof OwnerNameProjectsProjectBranchesIndexRoute
@@ -365,6 +382,7 @@ export interface FileRoutesById {
   '/$owner/$name/agents/$n': typeof OwnerNameAgentsNRoute
   '/$owner/$name/blob/$': typeof OwnerNameBlobSplatRoute
   '/$owner/$name/branches/$': typeof OwnerNameBranchesSplatRoute
+  '/$owner/$name/commit/$sha': typeof OwnerNameCommitShaRoute
   '/$owner/$name/history/$': typeof OwnerNameHistorySplatRoute
   '/$owner/$name/issues/$number': typeof OwnerNameIssuesNumberRoute
   '/$owner/$name/issues/new': typeof OwnerNameIssuesNewRoute
@@ -380,6 +398,7 @@ export interface FileRoutesById {
   '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
   '/$owner/$name/projects/$project/blob/$': typeof OwnerNameProjectsProjectBlobSplatRoute
   '/$owner/$name/projects/$project/branches/$': typeof OwnerNameProjectsProjectBranchesSplatRoute
+  '/$owner/$name/projects/$project/commit/$sha': typeof OwnerNameProjectsProjectCommitShaRoute
   '/$owner/$name/projects/$project/history/$': typeof OwnerNameProjectsProjectHistorySplatRoute
   '/$owner/$name/projects/$project/tree/$': typeof OwnerNameProjectsProjectTreeSplatRoute
   '/$owner/$name/projects/$project/branches/': typeof OwnerNameProjectsProjectBranchesIndexRoute
@@ -409,6 +428,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
+    | '/$owner/$name/commit/$sha'
     | '/$owner/$name/history/$'
     | '/$owner/$name/issues/$number'
     | '/$owner/$name/issues/new'
@@ -424,6 +444,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/projects/$project/'
     | '/$owner/$name/projects/$project/blob/$'
     | '/$owner/$name/projects/$project/branches/$'
+    | '/$owner/$name/projects/$project/commit/$sha'
     | '/$owner/$name/projects/$project/history/$'
     | '/$owner/$name/projects/$project/tree/$'
     | '/$owner/$name/projects/$project/branches/'
@@ -448,6 +469,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
+    | '/$owner/$name/commit/$sha'
     | '/$owner/$name/history/$'
     | '/$owner/$name/issues/$number'
     | '/$owner/$name/issues/new'
@@ -463,6 +485,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/projects/$project'
     | '/$owner/$name/projects/$project/blob/$'
     | '/$owner/$name/projects/$project/branches/$'
+    | '/$owner/$name/projects/$project/commit/$sha'
     | '/$owner/$name/projects/$project/history/$'
     | '/$owner/$name/projects/$project/tree/$'
     | '/$owner/$name/projects/$project/branches'
@@ -490,6 +513,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/agents/$n'
     | '/$owner/$name/blob/$'
     | '/$owner/$name/branches/$'
+    | '/$owner/$name/commit/$sha'
     | '/$owner/$name/history/$'
     | '/$owner/$name/issues/$number'
     | '/$owner/$name/issues/new'
@@ -505,6 +529,7 @@ export interface FileRouteTypes {
     | '/$owner/$name/projects/$project/'
     | '/$owner/$name/projects/$project/blob/$'
     | '/$owner/$name/projects/$project/branches/$'
+    | '/$owner/$name/projects/$project/commit/$sha'
     | '/$owner/$name/projects/$project/history/$'
     | '/$owner/$name/projects/$project/tree/$'
     | '/$owner/$name/projects/$project/branches/'
@@ -693,6 +718,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameCiIndexRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
+    '/$owner/$name/commit/$sha': {
+      id: '/$owner/$name/commit/$sha'
+      path: '/commit/$sha'
+      fullPath: '/$owner/$name/commit/$sha'
+      preLoaderRoute: typeof OwnerNameCommitShaRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
     '/$owner/$name/history/$': {
       id: '/$owner/$name/history/$'
       path: '/history/$'
@@ -791,6 +823,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameProjectsProjectBranchesSplatRouteImport
       parentRoute: typeof OwnerNameProjectsProjectRouteRoute
     }
+    '/$owner/$name/projects/$project/commit/$sha': {
+      id: '/$owner/$name/projects/$project/commit/$sha'
+      path: '/commit/$sha'
+      fullPath: '/$owner/$name/projects/$project/commit/$sha'
+      preLoaderRoute: typeof OwnerNameProjectsProjectCommitShaRouteImport
+      parentRoute: typeof OwnerNameProjectsProjectRouteRoute
+    }
     '/$owner/$name/projects/$project/history/$': {
       id: '/$owner/$name/projects/$project/history/$'
       path: '/history/$'
@@ -812,6 +851,7 @@ interface OwnerNameProjectsProjectRouteRouteChildren {
   OwnerNameProjectsProjectIndexRoute: typeof OwnerNameProjectsProjectIndexRoute
   OwnerNameProjectsProjectBlobSplatRoute: typeof OwnerNameProjectsProjectBlobSplatRoute
   OwnerNameProjectsProjectBranchesSplatRoute: typeof OwnerNameProjectsProjectBranchesSplatRoute
+  OwnerNameProjectsProjectCommitShaRoute: typeof OwnerNameProjectsProjectCommitShaRoute
   OwnerNameProjectsProjectHistorySplatRoute: typeof OwnerNameProjectsProjectHistorySplatRoute
   OwnerNameProjectsProjectTreeSplatRoute: typeof OwnerNameProjectsProjectTreeSplatRoute
   OwnerNameProjectsProjectBranchesIndexRoute: typeof OwnerNameProjectsProjectBranchesIndexRoute
@@ -824,6 +864,8 @@ const OwnerNameProjectsProjectRouteRouteChildren: OwnerNameProjectsProjectRouteR
       OwnerNameProjectsProjectBlobSplatRoute,
     OwnerNameProjectsProjectBranchesSplatRoute:
       OwnerNameProjectsProjectBranchesSplatRoute,
+    OwnerNameProjectsProjectCommitShaRoute:
+      OwnerNameProjectsProjectCommitShaRoute,
     OwnerNameProjectsProjectHistorySplatRoute:
       OwnerNameProjectsProjectHistorySplatRoute,
     OwnerNameProjectsProjectTreeSplatRoute:
@@ -847,6 +889,7 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameAgentsNRoute: typeof OwnerNameAgentsNRoute
   OwnerNameBlobSplatRoute: typeof OwnerNameBlobSplatRoute
   OwnerNameBranchesSplatRoute: typeof OwnerNameBranchesSplatRoute
+  OwnerNameCommitShaRoute: typeof OwnerNameCommitShaRoute
   OwnerNameHistorySplatRoute: typeof OwnerNameHistorySplatRoute
   OwnerNameIssuesNumberRoute: typeof OwnerNameIssuesNumberRoute
   OwnerNameIssuesNewRoute: typeof OwnerNameIssuesNewRoute
@@ -872,6 +915,7 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameAgentsNRoute: OwnerNameAgentsNRoute,
   OwnerNameBlobSplatRoute: OwnerNameBlobSplatRoute,
   OwnerNameBranchesSplatRoute: OwnerNameBranchesSplatRoute,
+  OwnerNameCommitShaRoute: OwnerNameCommitShaRoute,
   OwnerNameHistorySplatRoute: OwnerNameHistorySplatRoute,
   OwnerNameIssuesNumberRoute: OwnerNameIssuesNumberRoute,
   OwnerNameIssuesNewRoute: OwnerNameIssuesNewRoute,

@@ -129,6 +129,12 @@ export const branchLink = (full: string, repoPath: string, branch: string, files
         search: files ? { tab: "files" } : {},
       });
 
+/** A commit's page (/commit/{sha}, as GitHub's): its message, checks and the files it changed. */
+export const commitLink = (full: string, repoPath: string, sha: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/commit/$sha", params: { ...split(full), sha } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/commit/$sha", params: { ...split(full), project: project(repoPath), sha } });
+
 /** A branch's Sessions tab. */
 export const branchSessionsLink = (full: string, repoPath: string, branch: string) =>
   repoPath === "."
@@ -179,6 +185,7 @@ export type AppLink =
   | ReturnType<typeof branchesLink>
   | ReturnType<typeof branchLink>
   | ReturnType<typeof branchSessionsLink>
+  | ReturnType<typeof commitLink>
   | ReturnType<typeof sessionsLink>
   | ReturnType<typeof sessionLink>
   | ReturnType<typeof personSessionsLink>;

@@ -16,6 +16,7 @@ import { sessionGone, sessionsChanged } from "../api/sessions";
 import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
+import { artifactsKey } from "../api/artifacts";
 import { applyIssueFrame, touchLinkedIssues } from "./issues";
 import { keepOpen } from "./socket";
 
@@ -167,6 +168,17 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
       break;
     case "agent.updated":
       applyAgentRow(qc, m, f.row);
+      break;
+    case "artifact.added":
+    case "artifact.versioned":
+    case "artifact.deleted":
+    case "artifact_comment.added":
+    case "artifact_comment.edited":
+    case "artifact_comment.resolved":
+    case "artifact_comment.reopened":
+    case "artifact_comment.deleted":
+      // An artifact, a version or a comment on a branch's page: its lists and threads are read again (a hundred artifacts at most, small).
+      void qc.invalidateQueries({ queryKey: artifactsKey(m) });
       break;
     case "mirror.updated":
       // A run ended or a setting changed: Settings reads its section again (the event's row has no paths or counts behind).

@@ -6,8 +6,7 @@
 // kept by their paths from that document. Files of other kinds are left out
 // and named. Pando's limits (SPEC.md 9) are checked here too, so a row says
 // what is wrong before the upload is tried.
-
-export type ArtifactKind = "markdown" | "html" | "image";
+import type { ArtifactKind } from "@pando/contract";
 
 /** A file as it was dropped or picked: `path` is from the dropped folder (`plans/img/a.png`), else its name. */
 export interface Picked<F = File> {
@@ -95,12 +94,12 @@ function fromFolder<F>(files: readonly Picked<F>[], skipped: string[]): Group<F>
     return null;
   }
 
-  skipped.push(...docs.filter((d) => d !== main).map((d) => d.path));
+  for (const d of docs) if (d !== main) skipped.push(d.path);
   const from = dir(main.path);
   const images = files.filter((f) => kindOf(f.path) === "image");
   const under = images.filter((i) => i.path.startsWith(from));
 
-  skipped.push(...images.filter((i) => !i.path.startsWith(from)).map((i) => i.path));
+  for (const i of images) if (!i.path.startsWith(from)) skipped.push(i.path);
 
   return make(
     main,

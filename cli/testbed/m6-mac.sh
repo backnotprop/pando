@@ -23,7 +23,7 @@ ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
 echo "== $N worktrees at once ($REPO)"
 t0=$(ms)
 for i in $(seq 1 "$N"); do
-  ( set +e; PANDO_AGENT="agent-$i" "$P" worktree add "$REPO" "m6-$run-$i" > "$out/add-$i.log" 2>&1; echo $? > "$out/add-$i.rc" ) &
+  ( set +e; PANDO_AGENT="agent-$i" "$P" worktree add --kind fskit "$REPO" "m6-$run-$i" > "$out/add-$i.log" 2>&1; echo $? > "$out/add-$i.rc" ) &
 done
 wait
 t1=$(ms)

@@ -1,5 +1,7 @@
 # Pando.app
 
+Shelved for the contest: on a Mac a worktree is a git clone (the default), and this app is used only with `--kind fskit`.
+
 The Mac app that carries Pando's FSKit file system extension. With it, a
 Pando worktree mounts as an ordinary folder: the whole tree is listed at
 once, and a file's bytes are fetched the first time something opens it. No

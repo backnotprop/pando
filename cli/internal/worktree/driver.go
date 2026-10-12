@@ -1,9 +1,9 @@
 // Package worktree makes, refreshes and removes Pando worktrees: one branch
 // of one repo in its own folder, with its own git folder (formats.md,
-// section 1). The ArtifactFS fork mounts them: through FUSE on Linux (fuse)
-// and through Pando.app's FSKit extension on a Mac (fskit). A blobless
-// sparse clone (sparse) is the fallback everywhere else, and on a Mac
-// without Pando.app or with its extension off.
+// section 1). A worktree is a git clone (sparse) on every machine by
+// default. The ArtifactFS fork mounts one instead, through FUSE on Linux
+// (fuse) or Pando.app's FSKit extension on a Mac (fskit): the default only
+// inside a cloud agent's container, and by --kind anywhere else.
 package worktree
 
 import (
@@ -55,9 +55,11 @@ type Driver interface {
 }
 
 // Pick chooses a driver. kind is "", "fuse", "fskit" or "sparse". With "",
-// Linux with /dev/fuse and an artifact-fs binary gets fuse; a Mac with
-// Pando.app's file system extension turned on and an artifact-fs binary gets
-// fskit; everything else gets sparse, whose Note says why.
+// every machine gets sparse, a clone with every working file on disk. Inside
+// a cloud agent's container (PANDO_AGENT_CONTAINER, set by its image) with
+// /dev/fuse and an artifact-fs binary, "" gets fuse: the mount sits next to
+// the storage there. A lazy mount on a person's machine took 10 minutes to
+// open Next.js in an editor against 8.7 s for a clone (RULINGS, Mount).
 func Pick(kind, pandoHome string) (Driver, error) {
 	switch kind {
 	case "sparse":
@@ -83,35 +85,29 @@ func Pick(kind, pandoHome string) (Driver, error) {
 		}
 		return &Fuse{Bin: bin, Home: pandoHome, FSKit: true}, nil
 	case "":
-		switch runtime.GOOS {
-		case "linux":
+		if runtime.GOOS == "linux" && os.Getenv("PANDO_AGENT_CONTAINER") != "" {
 			if _, err := os.Stat("/dev/fuse"); err == nil {
 				if bin, err := artifactFSBinary(); err == nil {
 					return &Fuse{Bin: bin, Home: pandoHome}, nil
 				}
 			}
-		case "darwin":
-			st := macState()
-			if !st.Enabled {
-				return Sparse{Why: st.Why}, nil
-			}
-			bin, err := artifactFSBinary()
-			if err != nil {
-				return Sparse{Why: err.Error()}, nil
-			}
-			return &Fuse{Bin: bin, Home: pandoHome, FSKit: true, App: st.App}, nil
 		}
 		return Sparse{}, nil
 	}
 	return nil, fmt.Errorf("unknown worktree kind %q (fuse, fskit or sparse)", kind)
 }
 
-// macState asks macOS once per run whether the FSKit extension is on.
-var macState = sync.OnceValue(func() macbroker.State { return macbroker.Check(context.Background()) })
+// FSKitOff is why a new fskit mount cannot work on this Mac (Pando.app's
+// file system extension is missing or off), or "" when it can. macOS is
+// asked once per run.
+func FSKitOff() string {
+	if st := macState(); !st.Enabled {
+		return st.Why
+	}
+	return ""
+}
 
-// Noter is a driver with something to tell the person, such as why a Mac
-// fell back to the sparse driver.
-type Noter interface{ Note() string }
+var macState = sync.OnceValue(func() macbroker.State { return macbroker.Check(context.Background()) })
 
 // artifactFSBinary is PANDO_ARTIFACT_FS, else artifact-fs next to the pando
 // binary, else artifact-fs on PATH.

@@ -10,24 +10,15 @@ import (
 	"pando/internal/gitx"
 )
 
-// Sparse is the fallback driver: a blobless clone (history and folder
-// lists, no file contents until checkout needs them), with
-// `git sparse-checkout` when only some folders are wanted. A read-only main
-// has its files and folders made read-only, and is refreshed after merges.
-type Sparse struct {
-	// Why, on a Mac, is why worktrees are not mounted through Pando.app.
-	Why string
-}
+// Sparse is the default driver: a blobless clone (history and folder
+// lists, no old file versions), whose checkout fetches every working file
+// in one batched request, so the whole tree is on disk when it returns.
+// Named folders only, with `git sparse-checkout`, when asked. A read-only
+// main has its files and folders made read-only, and is refreshed after
+// merges.
+type Sparse struct{}
 
 func (Sparse) Kind() string { return "sparse" }
-
-// Note is one line for the person when a Mac fell back to this driver.
-func (s Sparse) Note() string {
-	if s.Why == "" {
-		return ""
-	}
-	return "worktrees on this Mac use the sparse driver (a partial clone), not the Pando mount: " + s.Why
-}
 
 func (Sparse) Add(ctx context.Context, s Spec) error {
 	dst := s.Abs()
@@ -45,8 +36,17 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 	if !s.Reference {
 		args = CredentialArgs(s.CloneURL)
 	}
-	args = append(args, "clone", "--quiet", "--filter=blob:none", "--sparse", "--branch", s.Branch, s.CloneURL, dst)
-	if _, err := (gitx.Cmd{}).Run(ctx, args...); err != nil {
+	// The clone's checkout fetches the branch's working files in one
+	// batched request. A pinned commit skips it and checks out the commit
+	// instead; named folders start from the top-level files only.
+	args = append(args, "clone", "--quiet", "--filter=blob:none", "--branch", s.Branch)
+	if len(s.Paths) > 0 {
+		args = append(args, "--sparse")
+	}
+	if s.Commit != "" {
+		args = append(args, "--no-checkout")
+	}
+	if _, err := (gitx.Cmd{}).Run(ctx, append(args, s.CloneURL, dst)...); err != nil {
 		return err
 	}
 	g := gitx.In(dst)
@@ -66,8 +66,6 @@ func (Sparse) Add(ctx context.Context, s Spec) error {
 		if _, err := g.Run(ctx, append([]string{"sparse-checkout", "set", "--"}, s.Paths...)...); err != nil {
 			return err
 		}
-	} else if _, err := g.Run(ctx, "sparse-checkout", "disable"); err != nil {
-		return err
 	}
 	if s.Reference {
 		for _, kv := range [][2]string{{"pando.reference", "true"}, {"pando.kind", "sparse"}} {

@@ -25,5 +25,8 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/artifact-fs /out/pando /usr/local/bin/
 COPY --chmod=0755 agents/container/workspace.sh /usr/local/bin/pando-agent-workspace
+# Here pando's default worktree is the FUSE mount, next to the storage; on
+# every other machine it is a clone (decisions/RULINGS.md, Mount).
+ENV PANDO_AGENT_CONTAINER=1
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

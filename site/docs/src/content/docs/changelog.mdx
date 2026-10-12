@@ -13,6 +13,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 A commit has its own page in the web app: its message, author, checks with the CI service's mark, the branch it came from, and the files it changed, in the same diff view as a branch's Files changed. A branch's commits, a file's history, a session's commits, the Merge box and a check's line in the activity link to it, and the address takes a short sha. See [Get started](/get-started/#a-commits-page) and [Limits](/limits/).
 
+### A worktree is a git clone on every machine
+
+`pando clone` and `pando worktree add` now make a git clone everywhere, a Mac included: the history and folder lists, then every file of the branch in one batched download. Editors, searches and `git status` run at disk speed. Name folders after the branch to check out only those. A mount (`--kind fuse` or `--kind fskit`) is still there for anyone who asks, and Pando's cloud agents work in one. References are cloned when you run `pando reference sync`. See [Worktrees](/worktrees/#how-the-files-get-there).
+
 ### Releases in the web app
 
 Each project has a Releases tab: its releases newest first, drafts marked, with who published each, its commit and how many files. A release's page shows its files with their size and SHA-256 and a Download button, its notes, and its commit on main with that commit's checks. The project page shows main's build and the latest release over its files, and an owner turns on "Anyone can download releases" in Settings. Releases are still made, published and deleted with `pando release` or the API. See [Releases](/releases/#in-the-web-app).

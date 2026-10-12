@@ -236,10 +236,10 @@ export function Panel({ artifact, version, threads, branch, me, actions, unancho
       {filter === "open" && resolved.length ? (
         <ul aria-label="Resolved threads" className="grid gap-1.5 px-2 pb-2">
           {resolved.map((t) => (
-            <li key={t.id}>
+            <li key={t.id} className="min-w-0">
               <button
                 type="button"
-                className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-rule-faint px-3 py-2 text-left text-[12.5px] text-bark-dim hover:border-rootline"
+                className="flex w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-rule-faint px-3 py-2 text-left text-[12.5px] text-bark-dim hover:border-rootline"
                 onClick={() => {
                   onFilter("resolved");
                   onSelect(t.id);

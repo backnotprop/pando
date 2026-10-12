@@ -177,8 +177,9 @@ function Artifacts({ b }: { b: CiBuildDetail }) {
 
   return (
     <div className="mt-10">
-      <SectionHead title="Artifacts" count={list.length} />
-      <ul aria-label="Artifacts">
+      {/* "Build files" (owner, artifacts question 7): on screen "Artifacts" means a branch page's documents. */}
+      <SectionHead title="Build files" count={list.length} />
+      <ul aria-label="Build files">
         {list.map((a, i) => (
           <li key={a.id ?? i} className="border-t border-rule-faint">
             <div className="-mx-2.5 grid min-h-[38px] grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-4 rounded-[7px] px-2.5 py-2">

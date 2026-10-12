@@ -118,6 +118,13 @@ export default function Review({ artifact, version, text, image, code, threads, 
   const [filter, setFilter] = useState<Filter>("open");
   const [selected, setSelected] = useState<string | null>(null);
   const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(new Set());
+  // Each version gets its own viewer (keyed below), which reports afresh.
+  const [shownVersion, setShownVersion] = useState(version);
+
+  if (shownVersion !== version) {
+    setShownVersion(version);
+    setUnanchored(new Set());
+  }
 
   // The composer stamps the signed-in person, and the panel marks their cards "(me)".
   useEffect(() => setPerson(me ?? ""), [me]);
@@ -146,14 +153,14 @@ export default function Review({ artifact, version, text, image, code, threads, 
     );
   } else if (artifact.kind === "html") {
     body = (
-      <div className={frame}>
-        <HtmlDoc {...doc} title={artifact.title ?? artifact.name} />
+      <div className={`${frame} pn-html`}>
+        <HtmlDoc key={version} {...doc} title={artifact.title ?? artifact.name} />
       </div>
     );
   } else {
     body = (
       <div className={`${frame} px-12 py-10 phone:px-5 phone:py-6`}>
-        <MarkdownDoc {...doc} />
+        <MarkdownDoc key={version} {...doc} />
       </div>
     );
   }

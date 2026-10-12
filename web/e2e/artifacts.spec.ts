@@ -196,25 +196,29 @@ test("artifacts: drop, comment, reply, live, resolve, v2 and Unanchored, an HTML
         { name: "refresh-plan.md", type: "text/markdown", body: PLAN_V1 },
         { name: "banner.html", type: "text/html", body: BANNER },
         { name: "hero.png", type: "image/png", body: PNG },
+        { name: "token-timeline.png", type: "image/png", body: PNG },
       ]);
       const dialog = page.getByRole("dialog");
       const rows = dialog.getByRole("list", { name: "What will be added" }).getByRole("listitem");
 
-      await expect(rows).toHaveCount(2);
+      await expect(rows).toHaveCount(3);
       await expect(rows.nth(0)).toContainText("refresh-plan.md");
       await expect(rows.nth(0)).toContainText("New");
       await expect(rows.nth(1)).toContainText("banner.html");
       await expect(rows.nth(1)).toContainText("with hero.png");
+      // No document names it: an image artifact of its own.
+      await expect(rows.nth(2)).toContainText("token-timeline.png");
       await shots(page, "add");
-      await dialog.getByRole("button", { name: "Add 2 artifacts" }).click();
+      await dialog.getByRole("button", { name: "Add 3 artifacts" }).click();
       await expect(dialog).toBeHidden({ timeout: 30_000 });
       const list = page.getByRole("list", { name: "Artifacts" });
 
-      await expect(list.getByRole("listitem")).toHaveCount(2);
+      await expect(list.getByRole("listitem")).toHaveCount(3);
       await expect(list).toContainText("Refresh the sign-in token before it runs out");
       await expect(list).toContainText("refresh-plan.md");
       await expect(list.getByRole("listitem").nth(0)).toContainText("No comments");
-      await expect(page.getByRole("navigation", { name: "Branch" }).getByRole("link", { name: /Artifacts\s*2/ })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Branch" }).getByRole("link", { name: /Artifacts\s*3/ })).toBeVisible();
+      await shots(page, "list");
     });
 
     await test.step("the plan: words selected and commented, a reply", async () => {
@@ -223,7 +227,7 @@ test("artifacts: drop, comment, reply, live, resolve, v2 and Unanchored, an HTML
       await expect(page.locator(".pn-doc").getByRole("heading", { name: "Refresh the sign-in token before it runs out" })).toBeVisible(HARD_LOAD);
       await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("1");
       await select(page, QUOTE);
-      await page.getByRole("button", { name: /^Comment/ }).first().click();
+      await page.locator(".annotation-toolbar").getByRole("button", { name: "Comment" }).click();
       await page.locator("[data-comment-popover] textarea").fill("Why 80? Say it in minutes.");
       await page.locator("[data-comment-popover]").getByRole("button", { name: /^Save|^Add/ }).click();
       await expect(card(page, "Why 80? Say it in minutes.")).toBeVisible();
@@ -275,7 +279,8 @@ test("artifacts: drop, comment, reply, live, resolve, v2 and Unanchored, an HTML
 
       await expect(lost.locator("[data-annotation-unanchored]")).toBeVisible();
       await shots(page, "unanchored");
-      await lost.getByRole("button", { name: "Made on v1" }).click();
+      // At the thread's foot, after its reply.
+      await panel(page).getByRole("button", { name: "Made on v1", exact: true }).click();
       await expect(page).toHaveURL(/[?&]v=1/);
       await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("1");
       await expect(card(page, "Why 80?").locator("[data-annotation-unanchored]")).toHaveCount(0);
@@ -300,6 +305,17 @@ test("artifacts: drop, comment, reply, live, resolve, v2 and Unanchored, an HTML
       await expect(card(page, "Say how long")).toContainText("Stay signed in");
       await expect(frame.locator("[data-plannotator-marker], [data-annotation-marker]").first()).toBeVisible();
       await shots(page, "html");
+    });
+
+    await test.step("an image: the picture, and a comment on the whole of it", async () => {
+      await page.getByRole("link", { name: "Artifacts" }).first().click();
+      await page.getByRole("link", { name: "token-timeline.png" }).click();
+      await expect(page.getByRole("img", { name: "token-timeline.png" })).toBeVisible(HARD_LOAD);
+      await panel(page).getByRole("button", { name: "Comment on the file" }).click();
+      await page.locator("[data-comment-popover] textarea").fill("Mark where the CLI refreshes too.");
+      await page.locator("[data-comment-popover]").getByRole("button", { name: /^Save|^Add/ }).click();
+      await expect(card(page, "Mark where the CLI refreshes too.")).toBeVisible();
+      await shots(page, "image");
     });
 
     expect(errors).toEqual([]);

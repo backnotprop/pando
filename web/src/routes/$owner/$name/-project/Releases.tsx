@@ -18,7 +18,7 @@ import { Avatar } from "../../../../ui/Avatar";
 import { button, Cmd, Empty, SectionHead } from "../../../../ui/controls";
 import { DownloadIcon, FileIcon, TagIcon } from "../../../../ui/Icons";
 import { Older } from "../../../../ui/Older";
-import { codeLink, releaseLink } from "../../../../ui/paths";
+import { commitLink, releaseLink } from "../../../../ui/paths";
 import { refClass } from "../../../../ui/Ref";
 import { ago, useNow } from "../../../../ui/time";
 import { Markdown } from "../-issues/Markdown";
@@ -194,7 +194,7 @@ function CommitBlock({ repo, r }: { repo: Repo; r: Release }) {
       <SectionHead title="Commit" className="mb-3" />
       <div className="grid gap-2 text-[13.5px] text-bark-dim">
         <span>
-          <Link {...codeLink(monorepo.full, repo.path, "", r.sha)} className={refClass("object", { mono: true })}>
+          <Link {...commitLink(monorepo.full, repo.path, r.sha)} className={refClass("object", { mono: true })}>
             {r.sha.slice(0, 7)}
           </Link>{" "}
           on <span className="font-mono text-[13px] text-bark">{repo.default_branch}</span>

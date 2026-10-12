@@ -194,6 +194,21 @@ export class Sandbox {
     return this.container.exec(argv, { ...options, env: { ...this.env(), ...options.env } });
   }
 
+  /**
+   * Sends the shared files' saves still waiting in the container (pando
+   * sync, container/sync.sh), so an edit in a run's last seconds reaches
+   * Pando before a snapshot or a stop. Returns the conflict lines it found.
+   */
+  async flushSync(): Promise<string[]> {
+    if (!this.running) return [];
+    const out = await this.exec(["pando-agent-sync", "flush"], { timeoutSeconds: 90 });
+
+    // 3: a path frozen after a conflict waits for pando resolve, as on any machine; its line was said when it happened.
+    if (out.exitCode !== 0 && out.exitCode !== 3) console.warn(`shared files: pando sync --once exit ${out.exitCode} (/workspace/pando-sync.log in the sandbox)`);
+
+    return out.stdout.split("\n").filter((line) => line.startsWith("[Pando] "));
+  }
+
   /** Saves the container's files for the next start; the container keeps running. */
   async snapshot(): Promise<ContainerSnapshot | undefined> {
     if (!this.running) return undefined;

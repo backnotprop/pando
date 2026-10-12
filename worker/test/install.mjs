@@ -16,7 +16,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describeError, retryResetFetch, throwaways } from "./errors.mjs";
+import { describeError, isConnectionReset, retryResetFetch, throwaways } from "./errors.mjs";
 import { request } from "./http.mjs";
 
 retryResetFetch();
@@ -34,7 +34,16 @@ const check = (name, ok, detail = "") => {
   console.log(scrub(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`));
 };
 
-const call = (method, path, secret, body) => request(URL_, method, path, { secret, body, redirect: "manual" });
+/**
+ * One API call. wrangler dev closes idle keep-alive connections (the CLI's build leaves one idle for a while), and a
+ * request sent on one never reached it, so a reset is sent again once, whatever the method (as releases.mjs does).
+ */
+const call = (method, path, secret, body) =>
+  request(URL_, method, path, { secret, body, redirect: "manual" }).catch((err) => {
+    if (!isConnectionReset(err)) throw err;
+
+    return request(URL_, method, path, { secret, body, redirect: "manual" });
+  });
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 

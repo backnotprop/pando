@@ -162,6 +162,11 @@ export class Machine {
     });
   }
 
+  /** A multipart POST with this credential, as `pando artifact add` sends a document and its images. */
+  upload(path: string, form: FormData): Promise<Response> {
+    return fetch(BASE + path, { method: "POST", headers: { authorization: `Bearer ${this.secret}` }, body: form });
+  }
+
   /**
    * Follows the monorepo as `pando` does: its event socket, then hello with
    * this machine's worktrees, so the machine counts as connected until the

@@ -191,6 +191,31 @@ export const ReviewIcon = (p: Props) => (
   </svg>
 );
 
+/** An HTML artifact: angle brackets. */
+export const CodeIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/** An image artifact: a frame with a hill and a sun. */
+export const ImageIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="m2.5 11 3.2-3.2 2.8 2.8 1.6-1.6 3.4 3.2" />
+    </g>
+    <circle cx="10.5" cy="6" r="1.1" fill="currentColor" />
+  </svg>
+);
+
+/** Add, upload: an arrow up from a line. */
+export const UploadIcon = (p: Props) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>
+    <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13.5h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /** A tag: a release's. */
 export const TagIcon = (p: Props) => (
   <svg viewBox="0 0 16 16" aria-hidden="true" {...p}>

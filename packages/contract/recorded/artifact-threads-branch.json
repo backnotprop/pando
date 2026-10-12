@@ -1,0 +1,161 @@
+{
+  "schema": "ArtifactThreads",
+  "route": "GET .../branches/{branch}/artifact-comments",
+  "status": 200,
+  "body": {
+    "threads": [
+      {
+        "id": "ac_9b92c91dda744223",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 2,
+        "thread": "ac_9b92c91dda744223",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "Ship it on Wednesday",
+          "blockId": "block-3",
+          "startOffset": 0,
+          "endOffset": 20,
+          "startMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 0
+          },
+          "endMeta": {
+            "parentTagName": "P",
+            "parentIndex": 3,
+            "textOffset": 20
+          },
+          "context": {
+            "prefix": "the chart\n\n",
+            "suffix": "."
+          }
+        },
+        "body": "Wednesday clashes with the freeze.",
+        "body_version": 2,
+        "author": "art-b-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.097Z",
+        "updated_at": "2026-10-12T11:15:19.122Z",
+        "replies": [
+          {
+            "id": "ac_754b3ef860e624a3",
+            "artifact": "art_9bfe688f25153d21",
+            "version": 2,
+            "thread": "ac_9b92c91dda744223",
+            "in_reply_to": "ac_9b92c91dda744223",
+            "anchor": null,
+            "body": "Yes, Thursday then.",
+            "body_version": 1,
+            "author": "art-mv55o0nn",
+            "machine": "bootstrap",
+            "mentions": [],
+            "state": "open",
+            "resolved_by": null,
+            "resolved_at": null,
+            "created_at": "2026-10-12T11:15:19.105Z",
+            "updated_at": "2026-10-12T11:15:19.105Z"
+          },
+          {
+            "id": "ac_32efbb4286d5944d",
+            "artifact": "art_9bfe688f25153d21",
+            "version": 2,
+            "thread": "ac_9b92c91dda744223",
+            "in_reply_to": "ac_9b92c91dda744223",
+            "anchor": null,
+            "body": "Thursday works.",
+            "body_version": 1,
+            "author": "art-b-mv55o0nn",
+            "machine": "bootstrap",
+            "mentions": [],
+            "state": "open",
+            "resolved_by": null,
+            "resolved_at": null,
+            "created_at": "2026-10-12T11:15:19.106Z",
+            "updated_at": "2026-10-12T11:15:19.106Z"
+          }
+        ]
+      },
+      {
+        "id": "ac_54809c2df9f35517",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 2,
+        "thread": "ac_54809c2df9f35517",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "second draft",
+          "blockId": "external",
+          "startOffset": 0,
+          "endOffset": 0
+        },
+        "body": "Is this the last draft?",
+        "body_version": 1,
+        "author": "art-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.100Z",
+        "updated_at": "2026-10-12T11:15:19.100Z",
+        "replies": []
+      },
+      {
+        "id": "ac_54b409e85afb8d62",
+        "artifact": "art_9bfe688f25153d21",
+        "version": 1,
+        "thread": "ac_54b409e85afb8d62",
+        "in_reply_to": null,
+        "anchor": null,
+        "body": "On the whole plan: fine.",
+        "body_version": 1,
+        "author": "art-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.103Z",
+        "updated_at": "2026-10-12T11:15:19.103Z",
+        "replies": []
+      },
+      {
+        "id": "ac_5de350d26005aaea",
+        "artifact": "art_9cf5b8355592ff2a",
+        "version": 1,
+        "thread": "ac_5de350d26005aaea",
+        "in_reply_to": null,
+        "anchor": {
+          "type": "COMMENT",
+          "originalText": "Banner",
+          "htmlAnchor": {
+            "selector": "h1",
+            "tagName": "H1",
+            "text": "Banner"
+          },
+          "htmlAdditionalTargets": []
+        },
+        "body": "Bigger, please.",
+        "body_version": 1,
+        "author": "art-mv55o0nn",
+        "machine": "bootstrap",
+        "mentions": [],
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "created_at": "2026-10-12T11:15:19.124Z",
+        "updated_at": "2026-10-12T11:15:19.124Z",
+        "replies": []
+      }
+    ],
+    "counts": {
+      "open": 4,
+      "resolved": 0
+    }
+  }
+}

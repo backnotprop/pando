@@ -13,6 +13,7 @@ import { IssueComment, IssueRow, Label, Reactions, TimelineItem } from "./issue.
 import { Session, SessionDeleted } from "./session.ts";
 import { AgentSession } from "./agent.ts";
 import { Release, Tag } from "./release.ts";
+import { Artifact, ArtifactComment } from "./artifact.ts";
 
 /** What every event frame carries: its place in the stream, its key, and who did it (null when no person did). */
 const envelope = {
@@ -205,6 +206,46 @@ export const ReleaseEvent = Schema.Union([
   Schema.Struct({ ...envelope, kind: Schema.Literal("release.deleted"), collection: Schema.Literal("releases"), op: Schema.Literal("delete"), row: Schema.Struct({ repo: RepoName, tag: Schema.String }) }),
 ]);
 
+/**
+ * An artifact on a branch's page was added (a new name), got its next version, or was deleted (`op: delete`, the
+ * row is `{repo, branch, id, name}`). Topics `repo:<repo>` and `kind:<kind>`; `branch` is the branch's name.
+ */
+export const ArtifactEvent = Schema.Union([
+  Schema.Struct({ ...envelope, kind: Schema.Literals(["artifact.added", "artifact.versioned"]), collection: Schema.Literal("artifacts"), op: Schema.Literal("upsert"), branch: Schema.String, row: Artifact }),
+  Schema.Struct({
+    ...envelope,
+    kind: Schema.Literal("artifact.deleted"),
+    collection: Schema.Literal("artifacts"),
+    op: Schema.Literal("delete"),
+    branch: Schema.String,
+    row: Schema.Struct({ repo: RepoName, branch: Schema.String, id: Schema.String, name: Schema.String }),
+  }),
+]);
+
+/**
+ * A comment on an artifact: added (a thread or a reply), edited, its thread resolved or reopened (the row is the
+ * root), or deleted: `op: delete` with `{id, artifact, thread}` when the row went, or an upsert with its body null
+ * when a root with replies stays. A body over 16 KB is null here: GET .../artifact-comments/{id} reads it whole.
+ */
+export const ArtifactCommentEvent = Schema.Union([
+  Schema.Struct({
+    ...envelope,
+    kind: Schema.Literals(["artifact_comment.added", "artifact_comment.edited", "artifact_comment.resolved", "artifact_comment.reopened", "artifact_comment.deleted"]),
+    collection: Schema.Literal("artifact_comments"),
+    op: Schema.Literal("upsert"),
+    branch: Schema.String,
+    row: ArtifactComment,
+  }),
+  Schema.Struct({
+    ...envelope,
+    kind: Schema.Literal("artifact_comment.deleted"),
+    collection: Schema.Literal("artifact_comments"),
+    op: Schema.Literal("delete"),
+    branch: Schema.String,
+    row: Schema.Struct({ id: Schema.String, artifact: Schema.String, thread: Schema.String }),
+  }),
+]);
+
 /** The row kinds the web subscribes to, each a `kind:<kind>` topic. */
 export const ROW_KINDS = ["branch.updated", "push", "branch.opened", "merged", "status", "machine.updated", "ci.build", "ci.job", "ci.connection", "mirror.updated", "agent.updated"] as const;
 
@@ -225,6 +266,8 @@ export const MonorepoEventFrame = Schema.Union([
   AgentEvent,
   TagEvent,
   ReleaseEvent,
+  ArtifactEvent,
+  ArtifactCommentEvent,
   /** The replay after `since` is done; keep the highest `seq` and send it as `since` on reconnect. */
   Schema.Struct({ type: Schema.tag("caught_up"), seq: Count }),
   /** More was missed than the stream replays: refetch what is on screen, then reconnect from `seq`. */

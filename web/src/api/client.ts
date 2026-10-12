@@ -6,6 +6,7 @@ import { type ActivityFrame, type ApiFailure, type MonorepoFeedFrame, BadRespons
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
+import type { JsonBody } from "./json";
 
 declare module "@tanstack/react-query" {
   interface Register {
@@ -62,13 +63,7 @@ export async function post<A, I>(schema: Schema.Codec<A, I>, path: string, body:
   return decoded(schema, res, path);
 }
 
-/** A value in a JSON request body. */
-export type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonBody;
-
-/** A JSON request body. */
-export interface JsonBody {
-  readonly [key: string]: JsonValue;
-}
+export type { JsonBody, JsonValue } from "./json";
 
 /**
  * A write a route names (POST, PATCH, PUT or DELETE), with an optional JSON
@@ -86,6 +81,13 @@ export async function write<A, I>(
 
   if (idempotencyKey) headers.set("idempotency-key", idempotencyKey);
   const res = await send(route.path, { method: route.method, headers, body: body ? JSON.stringify(body) : undefined });
+
+  return decoded(route.response, res, route.path);
+}
+
+/** A multipart POST a route names (an upload): the form as the browser encodes it, and its decoded answer. */
+export async function sendForm<A, I>(route: { method: "POST"; path: string; response: Schema.Codec<A, I> }, form: FormData): Promise<A> {
+  const res = await send(route.path, { method: route.method, headers: { accept: "application/json" }, body: form });
 
   return decoded(route.response, res, route.path);
 }

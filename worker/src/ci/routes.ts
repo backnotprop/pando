@@ -171,7 +171,7 @@ async function call(c: C, conn: CiRef["connection"], method: string, path: strin
     throw new HttpError(502, "ci_unauthorized", "Buildkite refused the token: BUILDKITE_API_TOKEN needs read_builds, read_build_logs, read_artifacts, read_pipelines and write_builds");
   }
 
-  if (res.status === 404) throw new HttpError(404, "not_found", "Buildkite has no such build, job, artifact or pipeline");
+  if (res.status === 404) throw new HttpError(404, "not_found", "Buildkite has no such build, job, build file or pipeline");
 
   if (res.status === 400 || res.status === 409 || res.status === 422) throw new HttpError(409, "ci_refused", `Buildkite refused: ${message}`);
   throw new HttpError(502, "ci_service", `Buildkite answered ${res.status}`);
@@ -462,10 +462,10 @@ export function ciRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }>): void
 
   api.get(`${base}/builds/:build/artifacts/:artifact/download`, async (c) => {
     const ref = await refOf(c);
-    // Only an artifact of this build: the token could reach any build in the organization.
+    // Only a build file of this build (Buildkite calls them artifacts): the token could reach any build in the organization.
     const a = (await artifactsOf(c, ref)).list.find((x) => x.id === c.req.param("artifact"));
 
-    if (!a?.job || !a.id) throw new HttpError(404, "not_found", "no such artifact in this build");
+    if (!a?.job || !a.id) throw new HttpError(404, "not_found", "no such build file in this build");
     const res = await call(c, ref.connection, "GET", `/pipelines/${p(ref.build.pipeline)}/builds/${ref.build.number}/jobs/${p(a.job)}/artifacts/${p(a.id)}/download`, { manual: true });
     const to = res.headers.get("location");
     await res.body?.cancel();

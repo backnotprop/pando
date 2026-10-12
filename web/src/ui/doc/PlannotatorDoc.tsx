@@ -2,82 +2,19 @@
 // through its Viewer, HTML through its HtmlViewer, read-only. This module is
 // the lazy chunk (Doc.tsx loads it), so the package, its CSS and DOMPurify
 // reach the browser only when a document is on screen.
+// First: Plannotator is configured before any of its modules renders.
+import { FollowPando, pandoFences, remote, scriptless } from "./setup";
 import "./doc.css";
 import { HtmlViewer } from "@plannotator/ui/components/html-viewer";
 import bridgeScriptUrl from "@plannotator/ui/components/html-viewer/bridge-script.asset.js?url";
-import { ThemeProvider, useTheme } from "@plannotator/ui/components/ThemeProvider";
+import { ThemeProvider } from "@plannotator/ui/components/ThemeProvider";
 import { Viewer } from "@plannotator/ui/components/Viewer";
-import { configurePlannotatorUI } from "@plannotator/ui/configure";
 import { extractFrontmatter, parseMarkdownToBlocks } from "@plannotator/ui/utils/parser";
-import DOMPurify from "dompurify";
-import { use, useEffect, useMemo } from "react";
-import { shownMode, useShownMode } from "../theme";
+import { use, useMemo } from "react";
+import { shownMode } from "../theme";
 import type { DocProps } from "./Doc";
 
-const remote = /^(https?:|data:|blob:|mailto:)/i;
-
-/** `path` from the file at `base` (a raw URL), as a raw URL at the same `?ref=`; web links pass through. */
-function rawFrom(path: string, base?: string): string {
-  if (!base || remote.test(path)) return path;
-  const from = new URL(base, location.origin);
-  const url = new URL(path, from);
-  const ref = from.searchParams.get("ref");
-
-  if (url.origin !== location.origin) return path;
-
-  return url.pathname + (ref ? `?ref=${encodeURIComponent(ref)}` : "");
-}
-
-// Settings the viewer keeps (its theme pair among them) stay in memory: no
-// cookies, nothing in localStorage. No identity, no agent tools on the page.
-const settings = new Map<string, string>();
-
-// Code fences take the code view's colours (ui/syntax.ts, the --diffs-token-*
-// palette in theme.css), not a stock Shiki theme: once that theme is
-// registered, every fence asks for it; before, the viewer keeps its default.
-let fenceTheme: string | undefined;
-
-configurePlannotatorUI({
-  webmcp: { enabled: false },
-  storageBackend: {
-    getItem: (key) => settings.get(key) ?? null,
-    setItem: (key, value) => void settings.set(key, value),
-    removeItem: (key) => void settings.delete(key),
-  },
-  identityProvider: { getIdentity: () => "", isCurrentUser: () => false, isEditable: () => false },
-  imageSrcResolver: rawFrom,
-  docPreviewFetcher: () => Promise.resolve(null),
-  // KaTeX and its stylesheet load together, on a document's first formula.
-  mathRendererLoader: () => Promise.all([import("katex"), import("katex/dist/katex.min.css")]).then(([katex]) => katex.default),
-  fenceTheme: () => fenceTheme,
-});
-
-/** Keeps the viewer's mode on Pando's, also when the theme changes in the name menu (its code colours and diagrams follow it). */
-function FollowPando() {
-  const { mode, setMode } = useTheme();
-  const want = useShownMode();
-
-  useEffect(() => {
-    if (mode !== want) setMode(want);
-  }, [mode, want, setMode]);
-
-  return null;
-}
-
 const none = () => undefined;
-
-// A document with a fence waits for Pando's theme to be registered (Pierre,
-// which colours the fence, loads then anyway); one without never loads it.
-let syntax: Promise<void> | null = null;
-
-const pandoFences = () =>
-  (syntax ??= import("../syntax").then(
-    ({ SYNTAX_THEME }) => {
-      fenceTheme = SYNTAX_THEME;
-    },
-    // If the chunk cannot load (a deploy replaced it), the document still shows; its fences stay plain.
-    () => undefined,
-  ));
 
 function MarkdownDoc({ text, raw, open }: { text: string; raw: string; open: (href: string) => void }) {
   const { frontmatter, blocks } = useMemo(() => ({ frontmatter: extractFrontmatter(text).frontmatter, blocks: parseMarkdownToBlocks(text) }), [text]);
@@ -105,9 +42,6 @@ function MarkdownDoc({ text, raw, open }: { text: string; raw: string; open: (hr
     />
   );
 }
-
-/** An HTML file's text with every script removed (elements, handlers, javascript: links); its styles stay. */
-const scriptless = (html: string) => DOMPurify.sanitize(html, { WHOLE_DOCUMENT: true, ADD_TAGS: ["style"] });
 
 function HtmlDoc({ name, text, open }: { name: string; text: string; open: (href: string) => void }) {
   const html = useMemo(() => scriptless(text), [text]);

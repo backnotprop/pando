@@ -153,6 +153,19 @@ export const branchSessionsLink = (full: string, repoPath: string, branch: strin
     ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: { tab: "sessions" } })
     : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch }, search: { tab: "sessions" } });
 
+/** Where on a branch's Artifacts tab: one artifact (by its name), at a version, on its code. */
+export interface ArtifactAt {
+  artifact?: string;
+  v?: string;
+  plain?: string;
+}
+
+/** A branch's Artifacts tab, or one artifact on it (`at`). */
+export const branchArtifactsLink = (full: string, repoPath: string, branch: string, at: ArtifactAt = {}) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: { tab: "artifacts", ...at } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch }, search: { tab: "artifacts", ...at } });
+
 /** A code file's bytes (the Worker's raw route; members only). */
 export const codeRawHref = (full: string, repoPath: string, path: string, ref: string | null) =>
   `/${full}${repoPath === "." ? "" : `/projects/${project(repoPath)}`}/raw/${path.split("/").map(encodeURIComponent).join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
@@ -199,6 +212,7 @@ export type AppLink =
   | ReturnType<typeof releaseLink>
   | ReturnType<typeof branchLink>
   | ReturnType<typeof branchSessionsLink>
+  | ReturnType<typeof branchArtifactsLink>
   | ReturnType<typeof commitLink>
   | ReturnType<typeof sessionsLink>
   | ReturnType<typeof sessionLink>

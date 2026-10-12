@@ -937,7 +937,7 @@ test("fidelity shots of slices 1 to 3 beside the prototype", async ({ page, brow
       await pair(page, proto, "mono-ci-workspaces", "/ramos/workspaces/ci", { proto: "/plannotator/workspaces/ci", marks: ["projects/workspaces-cli", "Add pipeline", "Connect another CI service"] });
       await pair(page, proto, "ci-pipeline", "/ramos/pando/ci/pando-ci", { marks: ["Open in Buildkite", "New build", "pipeline.yml", "Copy", "Builds"] });
       await pair(page, proto, "ci-build", "/ramos/pando/ci/pando-ci/1285", {
-        marks: ["Merge branch 'main' into web-api", "#1285", "Open in Buildkite", "Rebuild", "test-summary", "typecheck", "exit status 1", "Retry", "Artifacts", "test-results/junit.xml", "Download"],
+        marks: ["Merge branch 'main' into web-api", "#1285", "Open in Buildkite", "Rebuild", "test-summary", "typecheck", "exit status 1", "Retry", "Build files", "test-results/junit.xml", "Download"],
       });
       await pair(page, proto, "ci-build-running", "/ramos/pando/ci/pando-ci/1288", { marks: ["#1288", "Cancel", "typecheck", "running"] });
       // The running job open on its log (the prototype's job opened by a click).

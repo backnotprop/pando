@@ -1,0 +1,53 @@
+---
+title: Artifacts
+description: Plans, diagrams, designs and guided reviews uploaded to a branch's page, versioned, with comments.
+sidebar:
+  order: 8
+---
+
+An artifact is a document uploaded to a branch's page: a Markdown file, an HTML file (alone, or with the images it uses), or an image. It belongs to the review, not to the code. It never goes into git, never shows in the file tree and never lands on main, so nobody has to pull.
+
+Use them for plans, diagrams, designs, screenshots, and the guided reviews Plannotator exports (an HTML file).
+
+## The Artifacts tab
+
+Every branch page has an **Artifacts** tab, between Sessions and Files changed. It lists what was uploaded to the branch: the title (or the file's name), its version, size, open comments, and who uploaded the newest version and from where (`web` from the browser, or the machine's name).
+
+- **Add** at the top, or drop files on the tab. A document with its images is one artifact; several documents are one each; an image alone is one; a dropped folder is one (its one document, or its `index.html`).
+- **The same name again is the next version** (v2, v3). Every version is kept and opens from the version menu.
+- **Open one** to read it with its comments on the right. Select words (or click an element in an HTML page) to comment. Reply and Resolve sit at each comment's foot; a resolved thread folds to one line.
+- **A comment stays on the version it was made on** and is placed again on the newest. One that cannot be placed says **Unanchored**, with a link to the version it was made on.
+- **HTML runs no scripts of its own.** Its images are written into the page itself.
+- **After the merge,** the branch page keeps its Artifacts tab, readable and open for comments, as it keeps its commits and reviews.
+- **Any member may delete an artifact.** Every version, its files and its comments go at once, with no undo.
+
+## From the command line
+
+Agents use `pando artifact`. With no branch, the branch of the worktree you are in.
+
+```sh
+pando artifact add refresh-margin plan.md img/chart.png   # the plan and the image it links
+pando artifact list                                        # name, kind, version, open comments
+pando artifact comments refresh-margin plan.md             # open threads: the quote, the comment, replies, ids
+pando artifact get refresh-margin plan.md -o .             # download the newest version to revise it
+pando artifact add refresh-margin plan.md img/chart.png    # v2
+pando artifact reply ac_1f2e3d4c5b6a7980 -m "Moved to Friday in v2."
+pando artifact resolve ac_1f2e3d4c5b6a7980
+```
+
+| Command | What it does |
+| --- | --- |
+| `pando artifact add [<branch>] <file> [<image>...]` | Uploads one artifact: the first file, and the images it uses, kept by their paths from the document's folder so its links resolve. The same name again is its next version. Each file is checked by SHA-256. |
+| `pando artifact list [<branch>]` | The branch's artifacts. |
+| `pando artifact get [<branch>] <name> [--version n] [-o dir]` | Downloads a version's files (default: the newest, into this folder). |
+| `pando artifact open [<branch>] <name>` | Prints its page's address, and opens it in the browser. |
+| `pando artifact comments [<branch>] [<name>] [--all]` | Open threads, or all with `--all`: each with its version, the words it is on, its replies and ids. |
+| `pando artifact comment [<branch>] <name> [--quote "<words>"] -m "<comment>"` | Comments on those words, or with no quote on the whole file. A quote is plain words from one line; Pando warns when they are not in the file as written. |
+| `pando artifact reply <id> -m "<reply>"` | Replies in a thread. |
+| `pando artifact resolve <id> [--reopen]` | Resolves the thread, or opens it again. |
+
+Every command takes `--json` (the API's answer), `--repo <path>` and `--monorepo <owner/name>`.
+
+## Limits
+
+One artifact is at most 10 MiB with its images, its document at most 1.5 MiB, 20 files; a branch holds 100. See [Limits](/limits/#artifacts-on-a-branchs-page) for every number and why.

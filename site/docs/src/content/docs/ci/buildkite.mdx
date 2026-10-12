@@ -10,7 +10,7 @@ When this is set up, a push to a branch of a repo starts a Buildkite build. The 
 You need a Buildkite organization, and you must be an owner of the repository.
 
 <Aside type="note" title="The Pando server's Buildkite token">
-Pando starts builds, and reads their logs and artifacts, with one Buildkite API token set on the Pando server (the Worker secret `BUILDKITE_API_TOKEN`). Your Buildkite organization must be one that token can reach. A token of your own per repository is not built yet. If you run your own Pando server, make that token in Buildkite with the scopes `read_builds`, `read_build_logs`, `read_artifacts`, `read_pipelines` and `write_builds`.
+Pando starts builds, and reads their logs and build files (Buildkite calls them artifacts), with one Buildkite API token set on the Pando server (the Worker secret `BUILDKITE_API_TOKEN`). Your Buildkite organization must be one that token can reach. A token of your own per repository is not built yet. If you run your own Pando server, make that token in Buildkite with the scopes `read_builds`, `read_build_logs`, `read_artifacts`, `read_pipelines` and `write_builds`.
 </Aside>
 
 ## 1. A hosted Linux queue

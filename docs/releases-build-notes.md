@@ -155,3 +155,19 @@ needs no new resource; the first deploy with this branch adds it.
     empty tab and switch. PANDO_E2E_RELEASE_SHOTS=1 saves dark and light at
     1440 and 390 in web/e2e/shots/releases (gitignored).
   - Docs: releases.mdx "In the web app"; changelog 2026-10-12.
+- Final run on fb83c56 (ports 8867, stand-in 8868, inspector 9367): web
+  e2e 8 of 8 (slices 1 to 7 and slice 8), slice 8 again with shots;
+  contract 159 of 159; npm run lint clean; web typecheck clean; docs check
+  clean. The built pages, dark and light at 1440 and 390, are in
+  research/design/pando-ui-2026-10-03/releases/built/ beside the mocks.
+  Dev server stopped.
+- Limits chosen in the web (for the board): the tab shows 30 releases a
+  page, the server's page (Older loads more) and counts "30+" past the
+  first page; a SHA-256 shows its first 12 characters (all 64 on hover);
+  sizes are decimal (1 MB = 1,000,000 bytes), as the 100,000,000-byte limit
+  is written; Settings reads each project's switch with one request per
+  project (the repos list does not carry it), fine for tens of projects;
+  the strip shows on the default branch's root folder only and is read on
+  load, not live.
+- Not built: Publish and Delete buttons (CLI and API only, as the mocks
+  show); the strip live on new builds (a reload shows them).

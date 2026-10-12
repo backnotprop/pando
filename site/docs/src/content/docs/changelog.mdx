@@ -9,6 +9,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 ## 2026-10-12
 
+### Pando at gitpando.com, with a one-line install
+
+Pando's app and API are at app.gitpando.com, these docs at docs.gitpando.com, and gitpando.com is Pando's home page. `curl -fsSL https://gitpando.com/install | sh` installs `pando` for your Mac or Linux machine from the latest release, after checking its SHA-256 against the release's `SHA256SUMS`. `pando login` with no `--server` signs in to app.gitpando.com. The old address, pando-dev.plannotator.workers.dev, keeps working. See [Get started](/get-started/).
+
 ### Releases in the web app
 
 Each project has a Releases tab: its releases newest first, drafts marked, with who published each, its commit and how many files. A release's page shows its files with their size and SHA-256 and a Download button, its notes, and its commit on main with that commit's checks. The project page shows main's build and the latest release over its files, and an owner turns on "Anyone can download releases" in Settings. Releases are still made, published and deleted with `pando release` or the API. See [Releases](/releases/#in-the-web-app).

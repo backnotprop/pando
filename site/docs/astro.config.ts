@@ -9,7 +9,7 @@ import { sfFonts } from "./scripts/sf-fonts.ts";
 const nimbusConfig = defineNimbusConfig({
   // The docs site's own address: canonical URLs, the sitemap, llms.txt and
   // the What's new link. docs.<domain> once the domain is bought.
-  site: "https://pando-docs.plannotator.workers.dev",
+  site: "https://docs.gitpando.com",
   title: "Pando",
   description: "A git platform for monorepos, built on Cloudflare Workers and Artifacts, for many agents working at once.",
   locale: "en",

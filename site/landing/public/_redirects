@@ -1,0 +1,4 @@
+# Workers static assets apply these rules; the file itself is not served.
+# The one-line install: curl -fsSL https://gitpando.com/install | sh (curl -L follows the redirect).
+/install https://app.gitpando.com/install 302
+/install.sh https://app.gitpando.com/install.sh 302

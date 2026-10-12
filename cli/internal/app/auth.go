@@ -102,7 +102,7 @@ func (e *Env) serverURL(flagValue string) string {
 // as this user.
 func Login(e *Env, args []string) error {
 	fs := flags("login")
-	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER)")
+	srv := fs.String("server", "", "the Pando server URL (default: ~/.pando/config.toml or PANDO_SERVER, else "+config.DefaultServer+")")
 	bootstrap := fs.Bool("bootstrap", false, "self-hosted: make your user with the server's bootstrap secret (asked for with no echo)")
 	withCred := fs.Bool("with-credential", false, "sign in with a credential from pando credential create (typed with no echo, or piped)")
 	kind := fs.String("kind", "machine", "with the browser sign-in: machine or sandbox")
@@ -114,7 +114,7 @@ func Login(e *Env, args []string) error {
 	}
 	serverURL := e.serverURL(*srv)
 	if serverURL == "" {
-		return UsageError{"pando login --server <url>"}
+		serverURL = config.DefaultServer
 	}
 	var (
 		me     *server.Me

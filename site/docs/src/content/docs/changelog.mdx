@@ -9,6 +9,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 ## 2026-10-13
 
+### CI can build a cloud agent's push
+
+A push from an agent that Pando runs on Cloudflare used to send its CI build and web hooks clone and status addresses that only the agent's sandbox could reach, so the build failed at its first `git fetch`. It now sends https://app.gitpando.com, as a push from your machine does. See [Limits](/limits/#hooks).
+
 ### Pando's MCP server: connect Claude Code, Codex or Cursor with one click
 
 Add `https://app.gitpando.com/mcp` to your agent's app (`claude mcp add --transport http pando https://app.gitpando.com/mcp`), sign in to Pando in the browser when it opens, and click Allow. Nothing is pasted. Your agent then reads your repositories, branches with their checks and merge state, diffs, issues, artifacts and recorded sessions, opens and comments on issues, comments on artifacts, merges, and launches cloud agents, all as you and with your access. Each app's sign-in shows in Settings, Your machines, and Revoke disconnects it. See [MCP](/mcp/) and [Limits](/limits/#mcp).

@@ -11,6 +11,7 @@ interface __BaseEnv_Env {
 	ASSETS: Fetcher;
 	WORKOS_CLIENT_ID: "client_01M3ZW5WYKNDQZE358DYA7VHY5";
 	DOCS_URL: "https://docs.gitpando.com";
+	PUBLIC_ORIGIN: "https://app.gitpando.com";
 	META_COMMIT_GROUPING: "window";
 	PANDO_BOOTSTRAP: string;
 	BUILDKITE_API_TOKEN: string;
@@ -35,7 +36,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "WORKOS_CLIENT_ID" | "DOCS_URL" | "META_COMMIT_GROUPING" | "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "WORKOS_API_BASE" | "WORKOS_API_KEY" | "HOOK_RETRY_DELAYS" | "PANDO_STATUS_SECRET">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "WORKOS_CLIENT_ID" | "DOCS_URL" | "PUBLIC_ORIGIN" | "META_COMMIT_GROUPING" | "PANDO_BOOTSTRAP" | "BUILDKITE_API_TOKEN" | "WORKOS_API_BASE" | "WORKOS_API_KEY" | "HOOK_RETRY_DELAYS" | "PANDO_STATUS_SECRET">> {}
 }
 declare module "*.yaml" {
 	const value: string;

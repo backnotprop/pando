@@ -69,11 +69,14 @@ message naming the zone, and changes nothing else.
      default and set Initiate login URI to
      `https://app.gitpando.com/v1/login/browser`.
 
-   No Worker setting changes. The Worker builds the redirect URI from the
+   No sign-in setting changes. The Worker builds the redirect URI from the
    address the browser used (`worker/src/accounts/signin.ts`:
    `${origin}/v1/login/callback`, and `${origin}/` after sign-out), so both
-   addresses work once WorkOS lists both. There is no PUBLIC_URL. `pando login`
-   uses WorkOS's own device page and needs nothing new.
+   addresses work once WorkOS lists both. The one setting that names the
+   public address is `PUBLIC_ORIGIN` (`worker/wrangler.jsonc`,
+   `https://app.gitpando.com`), and only a cloud agent's push uses it (see
+   "What stays on the old address"). `pando login` uses WorkOS's own device
+   page and needs nothing new.
 2. **GitHub App "Pando"** (and "pando-mirror-dev" if it should work there
    too): set Homepage URL to `https://app.gitpando.com` and add the Callback
    URL `https://app.gitpando.com/v1/github/callback`, keeping the pando-dev one
@@ -136,8 +139,11 @@ prints the full command either way.
   (`~/.pando/credentials/<host>` is per host). To move one:
   `pando login --server https://app.gitpando.com`.
 - Clones keep their remotes at pando-dev.plannotator.workers.dev, which keeps
-  working. A push through either address sends CI the clone and status URLs
-  of the address it came in on.
+  working. A person's push through either address sends CI the clone and
+  status URLs of the address it came in on. A cloud agent's push comes in
+  through its sandbox's gateway, http://pando.internal, which no CI machine
+  can reach, so CI gets `PUBLIC_ORIGIN`'s instead (`worker/wrangler.jsonc`,
+  `https://app.gitpando.com`; `worker/src/monorepo/hooks.ts`).
 - Browser sessions are per host (the `__Host-pando_session` cookie), so people
   sign in again on app.gitpando.com.
 - Buildkite webhook URLs already given out (`.../v1/integrations/buildkite/<id>`

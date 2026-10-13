@@ -196,11 +196,24 @@ export function hookView(h: HookRow) {
   };
 }
 
-function urls(p: StoredPayload, statusSha = p.head) {
-  const repoBase = `${p.origin}/v1/monorepos/${p.monorepo}/repos/${p.repo}`;
+/**
+ * The address a receiver clones from and reports to: the one the change came in on, except a
+ * `.internal` host (a cloud agent's gateway, http://pando.internal, reachable only from its
+ * sandbox), where it is PUBLIC_ORIGIN, the Worker's public address. Anything else, no origin
+ * included, stays as it was: a local server never sends CI to the public address.
+ */
+function hookOrigin(origin: string, publicOrigin: string | undefined): string {
+  if (!publicOrigin || !URL.canParse(origin)) return origin;
+
+  return new URL(origin).hostname.endsWith(".internal") ? publicOrigin.replace(/\/+$/, "") : origin;
+}
+
+function urls(env: Env, p: StoredPayload, statusSha = p.head) {
+  const origin = hookOrigin(p.origin, env.PUBLIC_ORIGIN);
+  const repoBase = `${origin}/v1/monorepos/${p.monorepo}/repos/${p.repo}`;
 
   return {
-    clone_url: p.plain ? `${p.origin}/${p.monorepo}.git` : `${p.origin}/${p.monorepo}/${p.repo}.git`,
+    clone_url: p.plain ? `${origin}/${p.monorepo}.git` : `${origin}/${p.monorepo}/${p.repo}.git`,
     diff_url: `${repoBase}/branches/${encodeURIComponent(p.branch)}/diff?format=patch`,
     status_url: `${repoBase}/statuses/${statusSha}`,
   };
@@ -226,7 +239,7 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
     const read = await token(hook.type === "buildkite" ? "ci" : "web");
     const status = await statusToken(env, hook, p);
     const target = buildTarget(p);
-    const u = urls(p, hook.type === "buildkite" ? target.commit : p.head);
+    const u = urls(env, p, hook.type === "buildkite" ? target.commit : p.head);
 
     if (due !== undefined) note({ post_wait_ms: Math.max(0, Date.now() - due) }); // from the row being due to the POST leaving
 

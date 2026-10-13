@@ -13,6 +13,8 @@
 //
 //   PANDO_URL=http://localhost:8917 node test/ci-cost.mjs
 //
+// It writes its real answers for the contract's check (packages/contract/recorded/).
+//
 // Reads PANDO_BOOTSTRAP and BUILDKITE_API_TOKEN from worker/.dev.vars; never prints them.
 import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
@@ -38,6 +40,11 @@ const scrub = (s) =>
     .replace(/art_v\d+_[A-Za-z0-9]+(\?expires=\d+)?/g, "<token>")
     .replace(/pst1\.[A-Za-z0-9_.-]+/g, "<status-token>")
     .replace(/pando_[a-f0-9]{20,}/g, "<credential>");
+
+const RECORDED = new URL("../../packages/contract/recorded/", import.meta.url);
+
+/** A real answer, for the contract's check (packages/contract/scripts/check-recorded.ts). */
+const record = (file, schema, route, status, body) => writeFileSync(new URL(file, RECORDED), `${scrub(JSON.stringify({ schema, route, status, body }, null, 2))}\n`);
 
 const results = [];
 
@@ -196,6 +203,8 @@ try {
 
   check("the first head's check ci reads superseded, not failed: '#2 superseded by <sha>', still Buildkite's", sup?.description === `#${b1.number} superseded by ${head2.slice(0, 7)}` && sup.app === "buildkite", JSON.stringify(sup?.description));
   const c1 = await checksOf(head1);
+
+  record("status-superseded.json", "Checks", "GET .../repos/{repo}/commits/{ref}/status (its build cancelled for a newer push: superseded, so missing)", 200, c1);
   check("a superseded required check counts as not reported: the gate says missing", c1?.state === "missing" && c1.missing?.includes("ci"), c1?.state);
   r = await call("POST", statusPath(head1), S, { state: "superseded", context: "x" });
   check("no one posts superseded (Pando's own state): 400", r.status === 400);
@@ -251,6 +260,7 @@ try {
   });
 
   check("the build's row: superseded by the new head (the CI page shows it)", row?.superseded_by === headW2, row?.superseded_by);
+  record("ci-build-superseded.json", "CiBuildDetail", "GET .../ci/builds/{build} (cancelled for a newer push: superseded_by)", 200, row);
   bw.state = "canceled";
   await send("job.finished", { build: bkBuild({ ...bw, state: "canceling" }), pipeline: bkPipeline, job: job("job-w1", "canceled") });
   await send("build.finished", { build: bkBuild(bw), pipeline: bkPipeline });
@@ -269,8 +279,10 @@ try {
   check("an unknown policy: 400", r.status === 400);
   r = await call("PATCH", base, S, { ci_policy: "on_merge" });
   check("an owner sets on_merge", r.status === 200 && r.json?.ci_policy === "on_merge" && r.json.releases_public === false);
+  record("repo-ci-policy.json", "Repo", "PATCH .../repos/{repo} {ci_policy: on_merge}", r.status, r.json);
   r = await call("GET", `/v1/monorepos/${O}/${M}/repos`, B);
   check("the repo list says so too", r.json?.repos?.[0]?.ci_policy === "on_merge");
+  record("repos-ci-policy.json", "RepoList", "GET .../repos (each with its ci_policy)", r.status, r.json);
 
   const before = bk.builds.length;
   const headO1 = pushTo("om", "main");
@@ -278,6 +290,7 @@ try {
   check("on_merge: a push starts no build", bk.builds.length === before && builtFor(headO1).length === 0);
   // The agents' merge tool sends "{}": the same route and body.
   r = await call("POST", `${base}/branches/om/merge`, S, {});
+  record("merge-checks-started.json", "ErrorBody", "POST .../branches/{branch}/merge (on_merge: 412 checks_not_green, checks_started)", r.status, r.json);
   check("the first merge: 412 checks_not_green, checks_started, in words", r.status === 412 && r.json?.error?.code === "checks_not_green" && r.json.error.checks_started === true && /checks started for this merge/.test(r.json.error.message), r.json?.error?.message);
   const bo1 = await waitFor(() => builtFor(headO1)[0]);
   check("and one build of the branch's head, for the merge", !!bo1 && bo1.branch === "om" && bo1.message.startsWith("Checks for merging om"), bo1?.message);

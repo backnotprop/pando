@@ -4,26 +4,26 @@
   "status": 201,
   "body": {
     "monorepo": {
-      "id": "m_b544d974c13a6528",
-      "owner": "org-mv5508dy",
-      "name": "in-mv5508dy",
-      "full_name": "org-mv5508dy/in-mv5508dy",
+      "id": "m_dba93fa51d94f575",
+      "owner": "org-mv7am39t",
+      "name": "in-mv7am39t",
+      "full_name": "org-mv7am39t/in-mv7am39t",
       "kind": "repo",
-      "created_at": "2026-10-12T10:57:29.490Z",
+      "created_at": "2026-10-13T23:10:06.863Z",
       "owner_type": "org",
       "description": null,
       "role": "owner"
     },
     "repos": [
       {
-        "monorepo": "org-mv5508dy/in-mv5508dy",
-        "name": "in-mv5508dy",
+        "monorepo": "org-mv7am39t/in-mv7am39t",
+        "name": "in-mv7am39t",
         "path": ".",
         "description": null,
         "default_branch": "main",
-        "clone_url": "http://localhost:8877/org-mv5508dy/in-mv5508dy.git",
-        "created_at": "2026-10-12T10:57:31.579Z",
-        "created_by": "rec-mv5508dy"
+        "clone_url": "http://localhost:8917/org-mv7am39t/in-mv7am39t.git",
+        "created_at": "2026-10-13T23:10:10.376Z",
+        "created_by": "rec-mv7am39t"
       }
     ],
     "replaced_alias": null

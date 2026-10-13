@@ -3,16 +3,17 @@
   "route": "GET .../repos/{repo} (pando.toml broken: required_checks null, checks_unknown)",
   "status": 200,
   "body": {
-    "monorepo": "rec-mv5508dy/rec-mv5508dy",
+    "monorepo": "rec-mv7am39t/rec-mv7am39t",
     "name": "projects-web",
     "path": "projects/web",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8877/rec-mv5508dy/rec-mv5508dy/projects-web.git",
+    "clone_url": "http://localhost:8917/rec-mv7am39t/rec-mv7am39t/projects-web.git",
     "required_checks": null,
     "checks_unknown": "pando.toml line 3: expected comma or end of structure; fix it on main, or merge with force",
-    "created_at": "2026-10-12T10:56:47.221Z",
-    "created_by": "rec-mv5508dy",
+    "ci_policy": "every_push",
+    "created_at": "2026-10-13T23:09:19.782Z",
+    "created_by": "rec-mv7am39t",
     "releases_public": false
   }
 }

@@ -5,14 +5,14 @@
   "body": {
     "branches": [
       {
-        "monorepo": "rec-mv5508dy/rec-mv5508dy",
-        "monorepo_id": "m_9f5ba36b26db5990",
+        "monorepo": "rec-mv7am39t/rec-mv7am39t",
+        "monorepo_id": "m_ad86bce2ea2fd58b",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/clash",
         "title": null,
-        "head": "0ae995b27b15cf3faee2b4b7dcce88447bbda393",
-        "author": "rec-mv5508dy",
+        "head": "560f880857af8a4df38365737e3ac32f80e4a469",
+        "author": "rec-mv7am39t",
         "pushed_machine": "ana-mbp",
         "state": "conflicts",
         "checks": {
@@ -20,17 +20,17 @@
           "failing": [],
           "failing_apps": {}
         },
-        "updated_at": "2026-10-12T10:56:54.278Z"
+        "updated_at": "2026-10-13T23:09:27.800Z"
       },
       {
-        "monorepo": "rec-mv5508dy/rec-mv5508dy",
-        "monorepo_id": "m_9f5ba36b26db5990",
+        "monorepo": "rec-mv7am39t/rec-mv7am39t",
+        "monorepo_id": "m_ad86bce2ea2fd58b",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
         "title": null,
-        "head": "1500a0594e9f6575b44b3dd7e15126d12280a4db",
-        "author": "rec-mv5508dy",
+        "head": "130462630730124883e8c104373783199830174c",
+        "author": "rec-mv7am39t",
         "pushed_machine": "ana-mbp",
         "state": "failing",
         "checks": {
@@ -42,18 +42,18 @@
             "ci/test": null
           }
         },
-        "updated_at": "2026-10-12T10:56:53.045Z"
+        "updated_at": "2026-10-13T23:09:26.389Z"
       }
     ],
     "issues": [
       {
-        "monorepo": "rec-mv5508dy/rec-mv5508dy",
-        "monorepo_id": "m_9f5ba36b26db5990",
+        "monorepo": "rec-mv7am39t/rec-mv7am39t",
+        "monorepo_id": "m_ad86bce2ea2fd58b",
         "count": 1,
         "newest": {
           "number": 1,
           "title": "Login fails an hour after sign-in",
-          "updated_at": "2026-10-12T10:57:25.316Z"
+          "updated_at": "2026-10-13T23:10:01.108Z"
         }
       }
     ],

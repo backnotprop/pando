@@ -3,26 +3,26 @@
   "route": "PUT .../releases/{tag}/files/{name}",
   "status": 201,
   "body": {
-    "repo": "rel-muw5rrqb",
+    "repo": "rel-mv7ankp5",
     "tag": "v0.4.0",
-    "sha": "285975408bd5aa467288897580c71a2e2bab135f",
+    "sha": "44ec29e6a9285edb3dd7792e557f9f89bb412ccf",
     "title": "Fourth",
     "notes": "## Changes since v0.3.0\n\nNo branches were merged since v0.3.0.\n",
     "draft": false,
     "forced": true,
-    "created_by": "rel-muw5rrqb",
-    "created_at": "2026-10-06T04:08:57.980Z",
-    "updated_at": "2026-10-06T04:08:59.429Z",
-    "published_by": "rel-muw5rrqb",
-    "published_at": "2026-10-06T04:08:58.505Z",
+    "created_by": "rel-mv7ankp5",
+    "created_at": "2026-10-13T23:11:07.673Z",
+    "updated_at": "2026-10-13T23:11:09.365Z",
+    "published_by": "rel-mv7ankp5",
+    "published_at": "2026-10-13T23:11:08.351Z",
     "files": [
       {
         "name": "hello.txt",
         "size": 21,
         "sha256": "7868a0a5a1ed4466361ce656fec4ac0bc89ef94b90eb3a717e04a0fd87e31c50",
         "content_type": "text/plain",
-        "uploaded_by": "rel-b-muw5rrqb",
-        "uploaded_at": "2026-10-06T04:08:59.429Z"
+        "uploaded_by": "rel-b-mv7ankp5",
+        "uploaded_at": "2026-10-13T23:11:09.365Z"
       }
     ]
   }

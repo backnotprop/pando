@@ -5,36 +5,36 @@
   "body": {
     "releases": [
       {
-        "repo": "rel-muw5rrqb",
+        "repo": "rel-mv7ankp5",
         "tag": "v0.3.0",
-        "sha": "285975408bd5aa467288897580c71a2e2bab135f",
+        "sha": "44ec29e6a9285edb3dd7792e557f9f89bb412ccf",
         "title": "v0.3.0",
         "notes": "",
         "draft": false,
         "forced": true,
-        "created_by": "rel-muw5rrqb",
-        "created_at": "2026-10-06T04:08:53.765Z",
-        "updated_at": "2026-10-06T04:08:54.279Z",
-        "published_by": "rel-muw5rrqb",
-        "published_at": "2026-10-06T04:08:54.279Z",
+        "created_by": "rel-mv7ankp5",
+        "created_at": "2026-10-13T23:11:02.047Z",
+        "updated_at": "2026-10-13T23:11:02.633Z",
+        "published_by": "rel-mv7ankp5",
+        "published_at": "2026-10-13T23:11:02.633Z",
         "files": []
       },
       {
-        "repo": "rel-muw5rrqb",
+        "repo": "rel-mv7ankp5",
         "tag": "v0.2.0",
-        "sha": "425646d676676202988f5852aa2946aa853ff48f",
+        "sha": "0cbd56062760505511f0d0a5c69bd3683f986a25",
         "title": "v0.2.0",
-        "notes": "## Changes since v0.1.0\n\n- Add release notes (`feat-d`) by rel-muw5rrqb\n",
+        "notes": "## Changes since v0.1.0\n\n- Add release notes (`feat-d`) by rel-mv7ankp5\n",
         "draft": false,
         "forced": false,
-        "created_by": "rel-b-muw5rrqb",
-        "created_at": "2026-10-06T04:08:49.694Z",
-        "updated_at": "2026-10-06T04:08:50.220Z",
-        "published_by": "rel-b-muw5rrqb",
-        "published_at": "2026-10-06T04:08:50.220Z",
+        "created_by": "rel-b-mv7ankp5",
+        "created_at": "2026-10-13T23:10:56.935Z",
+        "updated_at": "2026-10-13T23:10:57.462Z",
+        "published_by": "rel-b-mv7ankp5",
+        "published_at": "2026-10-13T23:10:57.462Z",
         "files": []
       }
     ],
-    "next_cursor": "MjAyNi0xMC0wNlQwNDowODo1MC4yMjBaIHJlbF9jMWVlYjY1MGQzZjZmYzVm"
+    "next_cursor": "MjAyNi0xMC0xM1QyMzoxMDo1Ny40NjJaIHJlbF9jNDBmMzU4MTlkODIxNjJh"
   }
 }

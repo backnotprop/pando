@@ -8,13 +8,16 @@
 //
 //   PANDO_URL=http://localhost:8794 node test/ci.mjs
 //
+// A server run with --var PUBLIC_ORIGIN:<address> takes PANDO_PUBLIC_ORIGIN=<address>
+// (default https://app.gitpando.com, worker/wrangler.jsonc's).
+//
 // Reads PANDO_BOOTSTRAP and PANDO_STATUS_SECRET from worker/.dev.vars (to
 // make users, and to mint expired and forged tokens). Credentials and tokens
 // are never printed.
 import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +53,29 @@ const call = (method, path, secret, body, headers = {}) => request(URL_, method,
 
 /** A body sent exactly as given (a signed webhook body keeps its bytes). */
 const callRaw = (method, path, raw, headers = {}) => request(URL_, method, path, { raw, headers, redirect: "manual" });
+
+/**
+ * A GET with Host: pando.internal, the address a cloud agent's gateway sends: the Worker takes it as the
+ * request's origin. Answers the JSON body, or null.
+ */
+const asGateway = (path, secret) =>
+  new Promise((ok) => {
+    const req = httpRequest(URL_ + path, { headers: { host: "pando.internal", authorization: `Bearer ${secret}` } }, (res) => {
+      let text = "";
+
+      res.on("data", (d) => (text += d));
+      res.on("end", () => {
+        try {
+          ok(JSON.parse(text));
+        } catch {
+          ok(null);
+        }
+      });
+    });
+
+    req.on("error", () => ok(null));
+    req.end();
+  });
 
 const waitFor = async (pred, ms = 30_000) => {
   const end = Date.now() + ms;
@@ -262,6 +288,31 @@ try {
   check("a web hook's payload carries status_token", (ghaGot?.body?.status_token ?? "").startsWith("pst1.") && !!ghaGot.body.status_token_expires_at);
   const webRead = Number(/\?expires=(\d+)/.exec(ghaGot?.body?.read_token ?? "")?.[1]);
   check("a web hook's read token still lives 30 minutes", webRead * 1000 - Date.now() <= 31 * 60_000);
+
+  // The address CI is sent: the one the push came in on, except a cloud agent's gateway
+  // (http://pando.internal, reachable only from its sandbox), where it is PUBLIC_ORIGIN
+  // (worker/wrangler.jsonc; PANDO_PUBLIC_ORIGIN when the server runs with another --var).
+  check("a push through this server: CI gets this server's clone and status URLs", benv.PANDO_CLONE_URL === url && benv.PANDO_STATUS_URL === `${URL_}${base}/statuses/${head}` && ghaGot?.body?.clone_url === url, benv.PANDO_CLONE_URL);
+  const PUBLIC = (process.env.PANDO_PUBLIC_ORIGIN ?? "https://app.gitpando.com").replace(/\/$/, "");
+  git(["checkout", "-qb", "agent-push"], src);
+  writeFileSync(join(src, "agent"), "z\n");
+  git(["add", "-A"], src);
+  git(["commit", "-qm", "an agent's push"], src);
+
+  // Without this, the checks below would pass on an unfixed hooks.ts.
+  const internalClone = (await asGateway(base, S))?.clone_url;
+  check("Host: pando.internal reaches the Worker as the origin http://pando.internal", internalClone === `http://pando.internal/${O}/${M}.git`, internalClone);
+
+  const viaGateway = git(["-c", "http.extraHeader=Host: pando.internal", "push", "-q", url, "agent-push"], src);
+  check("a push with the gateway's address (Host: pando.internal)", viaGateway.status === 0, viaGateway.status === 0 ? "" : scrub(viaGateway.stderr ?? "").trim());
+  const agentHead = git(["rev-parse", "HEAD"], src).stdout.trim();
+  git(["checkout", "-q", "feat"], src);
+  const agentEnv = (await waitFor(() => got.buildkite.find((b) => b?.commit === agentHead)))?.env ?? {};
+  check("its build gets the public clone and status URLs, never pando.internal",
+    agentEnv.PANDO_CLONE_URL === `${PUBLIC}/${O}/${M}.git` && agentEnv.PANDO_STATUS_URL === `${PUBLIC}${base}/statuses/${agentHead}`, `${agentEnv.PANDO_CLONE_URL} ${agentEnv.PANDO_STATUS_URL}`);
+  const agentWeb = (await waitFor(() => got.web.find((w) => w.route === "/gha" && w.body?.head === agentHead)))?.body ?? {};
+  check("and a web hook's payload too: clone, status and diff URLs",
+    agentWeb.clone_url === `${PUBLIC}/${O}/${M}.git` && agentWeb.status_url === `${PUBLIC}${base}/statuses/${agentHead}` && (agentWeb.diff_url ?? "").startsWith(`${PUBLIC}${base}/branches/agent-push/diff`), agentWeb.clone_url);
 
   const statusPath = `${base}/statuses/${head}`;
   r = await call("POST", statusPath, token, { state: "pending", context: "ci", target_url: "https://buildkite.example/b/1" });

@@ -14,6 +14,7 @@
 // secret is printed.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { agents, call, check, done, git, makeRepo, say, scrub, tool } from "./lib.mjs";
 
@@ -37,7 +38,26 @@ if (!after) {
   const t = await makeRepo("agents-s1", { "README.md": "# Agents\n\nThis line has a tpyo.\n", "src/app.js": "export const answer = 41;\n" });
 
   try {
-    let r = await call("POST", "/v1/user/credentials", t.secret, { name: "cloud-1", kind: "sandbox" });
+    // A web hook on this machine: the agent's push comes in through the gateway (http://pando.internal),
+    // and the payload must carry the public address (PUBLIC_ORIGIN; PANDO_PUBLIC_ORIGIN when the server runs with another).
+    const hooked = [];
+
+    const receiver = createServer((req, res) => {
+      let body = "";
+
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        hooked.push(JSON.parse(body));
+        res.end("ok");
+      });
+    }).listen(0, "127.0.0.1");
+
+    receiver.unref();
+    await new Promise((ok) => receiver.once("listening", ok));
+    let r = await call("POST", `/v1/monorepos/${t.full}/repos/${t.name}/hooks`, t.secret, { type: "web", url: `http://127.0.0.1:${receiver.address().port}/hook`, secret: "s", events: ["push"] });
+    check("a web hook on the repository", r.status === 201, r.status);
+
+    r = await call("POST", "/v1/user/credentials", t.secret, { name: "cloud-1", kind: "sandbox" });
     check("a sandbox credential for the session", r.status === 201, r.status);
 
     const spec = {
@@ -77,6 +97,13 @@ if (!after) {
     check("five tool calls, none failed", results.length === 5 && results.every((p) => !p.error), results.map((p) => p.text.slice(0, 200)).join("\n"));
     check("bash ran in the branch's worktree, a FUSE mount", /\/workspace\/repo\/worktrees\/agent-1-readme\nagent\/1-readme\nfuse\.artifact-fs/.test(results[0]?.text ?? ""), results[0]?.text);
     check("edit, commit and push", /pushed=0/.test(results[2]?.text ?? ""), results[2]?.text);
+    const PUBLIC = (process.env.PANDO_PUBLIC_ORIGIN ?? "https://app.gitpando.com").replace(/\/$/, "");
+    const until = Date.now() + 30_000;
+
+    while (!hooked.some((h) => h.branch === "agent/1-readme") && Date.now() < until) await new Promise((ok) => setTimeout(ok, 250));
+    const pushed = hooked.find((h) => h.branch === "agent/1-readme") ?? {};
+    check("the push's hook sends the public clone and status URLs, never pando.internal",
+      pushed.clone_url === `${PUBLIC}/${t.full}.git` && (pushed.status_url ?? "").startsWith(`${PUBLIC}/v1/monorepos/${t.full}/repos/${t.name}/statuses/`), `${pushed.clone_url} ${pushed.status_url}`);
     check("the model's answer carries what read returned", /This line has a typo\./.test(lastText(tr)), lastText(tr).slice(0, 300));
 
     r = await call("GET", `/v1/monorepos/${t.full}/repos/${t.name}/branches`, t.secret);

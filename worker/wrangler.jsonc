@@ -31,6 +31,11 @@
     // The docs site (site/docs, the Worker pando-docs): the app's /docs
     // redirects here, and the home reads What's new from it.
     "DOCS_URL": "https://docs.gitpando.com",
+    // The app's public address. A change that came in through a cloud agent's
+    // gateway (http://pando.internal, reachable only from its sandbox) sends
+    // CI and web hooks their clone and status URLs here instead
+    // (monorepo/hooks.ts). Every other change keeps the address it came in on.
+    "PUBLIC_ORIGIN": "https://app.gitpando.com",
     // Shared files (the meta layer): everything due in one quiet window is
     // one git commit, the others as Co-authored-by ("author": one per person).
     // The owner's choice, 2026-10-04 (docs/contracts/meta-sync.md).

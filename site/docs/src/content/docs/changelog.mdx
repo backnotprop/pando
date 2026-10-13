@@ -7,6 +7,12 @@ sidebar:
 
 What changed in Pando, newest first. Dates are UTC.
 
+## 2026-10-13
+
+### CI can build a cloud agent's push
+
+A push from an agent that Pando runs on Cloudflare used to send its CI build and web hooks clone and status addresses that only the agent's sandbox could reach, so the build failed at its first `git fetch`. It now sends https://app.gitpando.com, as a push from your machine does. See [Limits](/limits/#hooks).
+
 ## 2026-10-12
 
 ### Cloud agents get the shared files live

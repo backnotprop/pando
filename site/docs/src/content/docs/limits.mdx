@@ -121,6 +121,7 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **The latest 1,000 deliveries per hook are kept,** with the last 10 tries of each. One replay re-sends at most 1,000 deliveries.
 - **A payload is under about 30 KB.** Its read token lasts 30 minutes.
 - **Deliveries arrive at least once and not in order.** Drop a repeat by its `seq`, and sort by it.
+- **A hook's clone, status and diff addresses are the address the push came in on,** so a push to pando-dev.plannotator.workers.dev sends CI that address. A cloud agent's push comes in inside Pando, through its sandbox, so its hooks and CI builds get the server's public address, https://app.gitpando.com.
 - **A hook never reaches a Worker on the Pando server's own Cloudflare account** through that Worker's workers.dev address: Cloudflare refuses it. The delivery shows as 404. Hooks to any other address are not affected.
 
 ## CI with Buildkite

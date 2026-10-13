@@ -329,6 +329,13 @@ try {
   g = git(["push", url, "d-sweep"], a, [...header("X-Pando-Test-Record-Fail", "1"), ...header("X-Pando-Test-Keep-Fail", "1"), ...header("X-Pando-Test-Refs-Check-Ms", "1000")]);
   const found = await waitFor(async () => ((await branch("d-sweep"))?.head === yd ? true : null), 5_000);
   check("(d) a push whose record and keep both fail is recorded by the refs compare (every 1 s here)", g.ok && !!found, `${found ? Date.now() - t0 : "never"} ms after the push started`);
+
+  // Its hook comes from the compare, with no address the push came in on: the URLs stay as they always were
+  // (paths on no address), never PUBLIC_ORIGIN's (hooks.ts sends that only for a cloud agent's .internal gateway).
+  const dGot = (await waitFor(() => got.find((x) => x.event === "push" && x.body?.branch === "d-sweep" && x.body?.head === yd) ?? null, 10_000))?.body;
+
+  check("(d) its hook, with no origin, keeps the clone and status paths as they were, never the public address",
+    dGot?.clone_url === `/${O}/${M}.git` && dGot?.status_url === `${base}/statuses/${yd}`, `${dGot?.clone_url} ${dGot?.status_url}`);
 } catch (err) {
   check("no exception", false, describeError(err));
 } finally {

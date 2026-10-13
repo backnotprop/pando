@@ -63,6 +63,7 @@ try {
   r = await untilSettled(t, 1);
   const first = (await results(t, 1)).find((p) => p.name === "merge");
   check("its merge tool: Pando refuses with checks started for this merge", first?.error && /Pando refused \(412\) checks_not_green: checks started for this merge/.test(first.text), first?.text);
+
   for (let i = 0; i < 40 && created.length === 0; i++) await sleep(250);
   check("and the build of the branch's head is started, for the merge", created.length === 1 && created[0].commit === head && created[0].message.startsWith("Checks for merging fix"), JSON.stringify(created.map((b) => b.message)));
 

@@ -105,7 +105,7 @@ If Buildkite keeps its own token instead of yours, run `pando ci disconnect --or
 pando ci pipeline add projects/web <pipeline-slug> --monorepo <owner/name>
 ```
 
-Each push to a branch of `projects/web` now starts a build, and so does each merge: Pando builds main's new merge commit, on main, so main's checks are its own. Push a branch and watch the check appear on the branch's page in the web app, and in `pando branch list`. After a merge, the project's page shows main's build (see [Releases](/releases/#mains-build)).
+Each push to a branch of `projects/web` now starts a build, and so does each merge: Pando builds main's new merge commit, on main, so main's checks are its own. A newer push to a branch cancels the build of its previous commit, and an owner can make a project build only when a merge asks, or main only (see [When checks run](/ci/#when-checks-run-and-what-ci-costs)). Push a branch and watch the check appear on the branch's page in the web app, and in `pando branch list`. After a merge, the project's page shows main's build (see [Releases](/releases/#mains-build)).
 
 To make Merge wait for it, require the check named by the step's `key` (see [Checks and CI](/ci/)):
 
@@ -119,6 +119,8 @@ To make Merge wait for it, require the check named by the step's `key` (see [Che
 | `last refused ... does not match` | `pando ci status` | the token in Buildkite is not the one Pando made; see the end of step 4 |
 | A push starts no build | `pando ci status` | the pipeline is not added (step 5), or the Pando server's Buildkite token cannot reach your organization or lacks `write_builds` |
 | The job waits and never starts | the build's page in Buildkite | the queue key in the YAML does not match a hosted queue in the pipeline's cluster |
+| A build shows canceled, "superseded by" another commit | the CI page | a newer push to the same branch replaced it; its commit's checks read `superseded` |
+| A push starts no build, but merges do | Settings, When checks run | the project builds on merge or main only |
 | The job fails at `git fetch` with 401 | the job's log in Buildkite | a build started in Buildkite rather than by a push, or a Retry more than 25 hours after the push; push again, or [rebuild it through the API](/api/ci/rebuildCiBuild/), which gives fresh tokens |
 
 A pipeline added before merges were built starts builds for pushes only. Remove it and add it again (`pando ci pipeline remove`, then `add`) to build merges too.

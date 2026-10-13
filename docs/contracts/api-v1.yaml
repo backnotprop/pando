@@ -2481,17 +2481,26 @@ paths:
     patch:
       operationId: updateRepo
       summary: A project's settings (owners)
-      description: "`releases_public`: the switch \"Anyone can download releases\" (release files only, never code)."
-      tags: [repos, releases]
+      description: |
+        Either or both. `releases_public`: the switch "Anyone can download
+        releases" (release files only, never code). `ci_policy`: when the
+        project's CI builds run. `every_push` (the default) builds each push to
+        a branch; a newer push cancels the build of the branch's old head.
+        `on_merge` builds nothing on push: the first unforced merge of a head
+        starts its build and answers 412 `checks_not_green` with
+        `checks_started`, and the merge lands once the required checks are
+        green. `main_only` never builds a branch. Main's merge commit builds
+        under all three, and is never cancelled.
+      tags: [repos, releases, ci]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [releases_public]
               properties:
                 releases_public: { type: boolean }
+                ci_policy: { $ref: "#/components/schemas/CiPolicy" }
       responses:
         "200":
           description: OK
@@ -3071,7 +3080,7 @@ paths:
               type: object
               required: [state]
               properties:
-                state: { $ref: "#/components/schemas/StatusState" }
+                state: { type: string, enum: [pending, success, failure, error], description: "GitHub's four; `superseded` is Pando's own." }
                 context: { type: string, default: default }
                 target_url: { type: string }
                 description: { type: string }
@@ -4564,6 +4573,7 @@ components:
               type: array
               items: { type: string }
             checks: { $ref: "#/components/schemas/Checks" }
+            checks_started: { type: boolean, description: "A refused merge started the branch's checks (the project's ci_policy is on_merge)." }
     Monorepo:
       type: object
       required: [id, owner, name, full_name, kind, created_at]
@@ -4986,6 +4996,7 @@ components:
         releases_public:
           type: boolean
           description: The switch "Anyone can download releases" (getRepo only). On, the project's release files download without signing in; never its code.
+        ci_policy: { $ref: "#/components/schemas/CiPolicy" }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
     Branch:
@@ -5106,6 +5117,7 @@ components:
         finished_at: { type: [string, "null"], format: date-time }
         duration_s: { type: [integer, "null"] }
         rebuilt_from: { type: [string, "null"], description: The service's id of the build this one rebuilt. }
+        superseded_by: { type: [string, "null"], description: "The newer head of its branch that Pando cancelled it for (a push superseded it)." }
     CiJob:
       type: object
       required: [id, build, type, state, service_state, check]
@@ -5149,7 +5161,12 @@ components:
         state: { type: [string, "null"] }
     StatusState:
       type: string
-      enum: [pending, success, failure, error]
+      enum: [pending, success, failure, error, superseded]
+      description: "GitHub's four, and `superseded`: written by Pando when a newer push cancelled the build reporting the check. A superseded check counts as not reported."
+    CiPolicy:
+      type: string
+      enum: [every_push, on_merge, main_only]
+      description: "When a project's CI builds run (updateRepo). In the repo list and getRepo."
     Status:
       type: object
       required: [sha, context, state, created_at]

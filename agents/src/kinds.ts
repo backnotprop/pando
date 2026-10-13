@@ -8,7 +8,7 @@
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 import type { SessionSpec } from "./protocol";
-import { worktreeDir } from "./sandbox";
+import { ROOT, worktreeDir } from "./sandbox";
 
 /** The spec without the credential's secret: what the prompt may name. */
 export type PublicSpec = Omit<SessionSpec, "credential"> & { credential: Omit<SessionSpec["credential"], "secret"> };
@@ -18,6 +18,13 @@ const NOT_IN_A_REVIEW = new Set(["merge", "comment_issue"]);
 
 /** The Pando tools a chat answers questions with. */
 const READING = new Set(["read_file", "list_files", "issue", "branch_diff"]);
+
+/** A monorepo's shared files in the sandbox, kept live by pando sync (container/sync.sh). */
+function shared(s: PublicSpec): string[] {
+  if (s.monorepo.kind !== "monorepo") return [];
+
+  return [`The repository's shared files (every file outside projects/: plans, decisions, notes) are in ${ROOT}, live: what people save there reaches you within seconds, and what you save there reaches them and is committed.`];
+}
 
 /** `working`: a chat that has started its branch is told and given what a task is. */
 export function preamble(s: PublicSpec, working = false): string {
@@ -38,6 +45,7 @@ export function preamble(s: PublicSpec, working = false): string {
       `You are reviewing branch ${s.branch} of ${s.repo.name} in Pando, a git platform, on the repository ${s.monorepo.full}, ${who}`,
       `The branch is checked out at ${dir}, a Linux sandbox. Use read and bash there to read the code and run its tests. Do not change, commit or push anything.`,
       sandbox,
+      ...shared(s),
       "Pando's own tools reach the repository on the server: read_file, list_files, issue, branch_diff, post_review.",
       `When you are done, post one review of ${s.branch} with post_review: comment or request_changes, a short summary, and comments on the lines that need them. Then say what you found in a few lines.`,
     ].join("\n");
@@ -48,6 +56,7 @@ export function preamble(s: PublicSpec, working = false): string {
     `Your working folder is ${dir}: branch ${s.branch} of ${s.repo.name}, a Linux sandbox. Use bash, read, write and edit there.`,
     `Commit with git as you go and push the branch after each working step (git push origin ${s.branch}). Main is protected: never push to it.`,
     sandbox,
+    ...shared(s),
     "Pando's own tools reach the repository on the server: read_file, list_files, issue, branch_diff, comment_issue, post_review, merge.",
     `When your work is done and pushed, merge ${s.branch} with the merge tool. Pando merges only when the required checks are green; if it refuses, say why and stop.`,
   ].join("\n");

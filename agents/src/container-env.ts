@@ -266,9 +266,11 @@ export class ContainerEnv implements ExecutionEnv {
     const linesLimit = options?.spill?.afterLines ?? Number.MAX_SAFE_INTEGER;
 
     // Output goes through tee into the spill file. Afterwards the file is
-    // removed unless it passed a limit, and "spilled" on stderr says so.
+    // removed unless it passed a limit, and "spilled" on stderr says so. A
+    // conflict copy the shared files' sync made since the last command gets
+    // a line at the end (container/sync.sh), for the agent and the live view.
     const script = [
-      'bash -c "$1" 2>&1 | tee "$2"',
+      '{ bash -c "$1" 2>&1; s=$?; pando-agent-sync conflicts 2>/dev/null; exit "$s"; } | tee "$2"',
       "status=${PIPESTATUS[0]}",
       'if [ "$(wc -c < "$2")" -gt "$3" ] || [ "$(wc -l < "$2")" -gt "$4" ]; then echo spilled >&2; else rm -f "$2"; fi',
       'exit "$status"',

@@ -716,6 +716,8 @@ It exits 0 on a 2xx or 3xx answer; a 3xx with no body (an artifact's download) p
 
 A repository's shared files are every file outside `projects/` and outside references: notes, decisions, plans. They are plain files on every machine. While `pando sync` runs, a save on one machine goes to the others as soon as it is made, and becomes a git commit after 10 seconds without changes.
 
+Agents that Pando runs on Cloudflare get the shared files live too. Their sandbox runs `pando sync` as any machine does, under the agent's machine name (such as `cloud-3`). A save on your machine reaches a running agent within seconds, and a note the agent saves reaches every machine and becomes a commit like anyone's, authored by the person who launched the agent. A run ends only once its last saves are on Pando. If the agent's save of a file loses to someone else's, its sandbox keeps the conflict copy, and the result of the agent's next command says `shared file <path> has a conflict copy`. The file stops syncing there until the agent runs `pando resolve <path>`.
+
 Each of these commands takes `--root <folder>` for a repository in another folder than the one you are in.
 
 ### pando sync

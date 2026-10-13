@@ -9,6 +9,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 ## 2026-10-12
 
+### Cloud agents get the shared files live
+
+An agent that Pando runs on Cloudflare now runs `pando sync` in its sandbox. Plans and notes you save reach a running agent within seconds, instead of staying as they were at its launch, and the notes it saves reach every machine and become commits in the shared files' history, as anyone's do. A run ends only once its last saves are on Pando. A conflict copy in the sandbox is named in the agent's next command result. See [Shared files](/cli/#shared-files) and [Limits](/limits/).
+
 ### Pando at gitpando.com, with a one-line install
 
 Pando's app and API are at app.gitpando.com, these docs at docs.gitpando.com, and gitpando.com is Pando's home page. `curl -fsSL https://gitpando.com/install | sh` installs `pando` for your Mac or Linux machine from the latest release, after checking its SHA-256 against the release's `SHA256SUMS`. `pando login` with no `--server` signs in to app.gitpando.com. The old address, pando-dev.plannotator.workers.dev, keeps working. See [Get started](/get-started/).

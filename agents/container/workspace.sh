@@ -5,7 +5,9 @@
 # machine: pando clone, then the branch's worktree with pando worktree add.
 # Through ArtifactFS (FUSE) where it works, else pando's sparse clone. After a
 # start from a snapshot the files are there but the mounts and the daemon are
-# not, so pando worktree mount brings them back. Prints one last line:
+# not, so pando worktree mount brings them back. Either way pando sync then
+# keeps the shared files live (pando-agent-sync start, sync.sh). Prints one
+# last line:
 #   workspace <folder> <mount|clone>
 set -uo pipefail
 
@@ -17,6 +19,7 @@ if [ "$repo" = . ]; then wt="$root/worktrees/$folder"; else wt="$root/$repo/work
 works() { git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1; }
 
 say() {
+  pando-agent-sync start
   if [ "$(findmnt -no FSTYPE "$wt" 2>/dev/null)" = fuse.artifact-fs ]; then
     echo "workspace $wt mount"
   else

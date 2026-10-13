@@ -2,3 +2,4 @@
 *
 !cli
 !agents/container/workspace.sh
+!agents/container/sync.sh

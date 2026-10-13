@@ -4,9 +4,13 @@
 // repository and only what pando and git need inside the sandbox:
 //
 //   git smart HTTP          /<owner>/<name>.git/... and /<owner>/<name>/<repo>.git/...
-//   GET                     /v1/monorepos/<owner>/<name>[/...]   (pando clone, worktree add, reads)
+//   GET, HEAD               /v1/monorepos/<owner>/<name>[/...]   (pando clone, worktree add, reads)
 //   POST                    .../repos/<repo>/branches             (pando worktree add makes the branch)
 //   PUT                     .../worktrees/<id>                    (pando reports its worktree)
+//   PUT                     .../meta/blobs/<sha256>               (pando sync sends a large shared file)
+//
+// pando sync's socket (GET .../meta/socket) and the follower's event socket
+// are GETs: the shared files go both ways over the socket.
 //
 // Everything else is refused with 403, merges included: an agent merges
 // through its merge tool in the session object, never from the sandbox.
@@ -45,11 +49,12 @@ export function allowed(method: string, url: URL, monorepo: string): boolean {
 
   switch (method) {
     case "GET":
+    case "HEAD":
       return true;
     case "POST":
       return /^\/repos\/[^/]+\/branches$/.test(tail);
     case "PUT":
-      return /^\/worktrees\/[^/]+$/.test(tail);
+      return /^\/worktrees\/[^/]+$/.test(tail) || /^\/meta\/blobs\/[0-9a-f]{64}$/.test(tail);
     default:
       return false;
   }

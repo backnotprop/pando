@@ -114,6 +114,7 @@ export class AgentSession extends DurableObject<Env> {
     await this.lifecycle.start();
     this.#setStatus("stopped", reason);
     await this.harness.abort();
+    await this.#flushSync();
     // Its files are kept for a later message: unpushed work included.
     await this.#saveSandbox();
     await this.sandbox.destroy();
@@ -265,11 +266,21 @@ export class AgentSession extends DurableObject<Env> {
       const ws = await this.sandbox.workspace().catch(() => undefined);
 
       if (ws) this.ctx.storage.kv.put("workspace", ws.kind);
+      await this.#flushSync();
       await this.#saveSandbox();
     }
 
     if (result.status === "done") this.#setStatus("waiting");
     else this.#setStatus("failed", result.reason ?? "the run ended without an answer");
+  }
+
+  /** The run's last saves to the shared files reach Pando; a conflict copy goes to the Worker's log. */
+  async #flushSync(): Promise<void> {
+    try {
+      for (const line of await this.sandbox.flushSync()) console.warn(`session ${this.#spec().number}: ${line}`);
+    } catch (error) {
+      console.warn("shared files", String(error));
+    }
   }
 
   /** A snapshot of the sandbox's files, for the next start; the sandbox keeps running. */

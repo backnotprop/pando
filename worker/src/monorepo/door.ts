@@ -244,8 +244,8 @@ async function door(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
 
   const auth = await authenticate(env, secret, ref);
 
-  // A browser session never works at the git door (it only travels as the /v1 cookie).
-  if (!auth || auth.credential.kind === "browser") return unauthorized();
+  // A browser session never works at the git door (it only travels as the /v1 cookie), nor an MCP host's (/mcp only).
+  if (!auth || auth.credential.kind === "browser" || auth.credential.kind === "mcp") return unauthorized();
 
   if (!auth.monorepo) return errorJson(404, "not_found", `no monorepo ${shown}`);
 

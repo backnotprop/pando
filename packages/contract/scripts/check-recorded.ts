@@ -109,6 +109,11 @@ import {
   ArtifactDetail,
   ArtifactList,
   ArtifactThreads,
+  AuthorizationServerMetadata,
+  OAuthClientRegistration,
+  OAuthError,
+  OAuthToken,
+  ProtectedResourceMetadata,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -222,6 +227,11 @@ const decoders = {
   ArtifactList: refuses(ArtifactList),
   ArtifactComment: refuses(ArtifactComment),
   ArtifactThreads: refuses(ArtifactThreads),
+  ProtectedResourceMetadata: refuses(ProtectedResourceMetadata),
+  AuthorizationServerMetadata: refuses(AuthorizationServerMetadata),
+  OAuthClientRegistration: refuses(OAuthClientRegistration),
+  OAuthToken: refuses(OAuthToken),
+  OAuthError: refuses(OAuthError),
 };
 
 const isDecoderName = (name: string): name is keyof typeof decoders => Object.hasOwn(decoders, name);

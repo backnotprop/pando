@@ -1,0 +1,101 @@
+---
+title: MCP
+description: Connect Claude Code, Codex or Cursor to Pando. Your agent reads repositories, branches, checks, issues, artifacts and sessions, and merges, as you.
+sidebar:
+  order: 9
+---
+
+Pando has an MCP server at `https://app.gitpando.com/mcp`. Add it to your agent's app, sign in to Pando in the browser when the app opens it, and click **Allow**. Nothing is pasted: the app keeps the sign-in.
+
+Your agent then acts as you, with your access: the repositories you can open, and nothing else.
+
+## Connect your app
+
+### Claude Code
+
+```sh
+claude mcp add --transport http pando https://app.gitpando.com/mcp
+```
+
+Then type `/mcp` in Claude Code, pick **pando** and choose **Authenticate** (or run `claude mcp login pando`). Your browser opens Pando.
+
+### Codex
+
+```sh
+codex mcp add pando --url https://app.gitpando.com/mcp
+```
+
+Codex opens your browser to sign in at once. Later, `codex mcp login pando` signs in again.
+
+### Cursor
+
+Add Pando to `~/.cursor/mcp.json`:
+
+```json
+{ "mcpServers": { "pando": { "url": "https://app.gitpando.com/mcp" } } }
+```
+
+Cursor lists pando in its MCP settings as needing a sign-in; start it there and your browser opens Pando.
+
+### What you see
+
+1. Your browser opens Pando. Sign in if you are not signed in already.
+2. The page says **Connect Claude Code to Pando** (or the app's name), who you are signed in as, what the app may do as you, and where your browser goes next: for a command-line app, a program on this computer.
+3. Click **Allow**. The browser hands the answer back to the app, and the tab can be closed.
+
+The next time the same app asks (a new project, another terminal), Pando remembers your Allow and does not ask again.
+
+## What the sign-in makes
+
+Allow makes a credential named after the app (**Claude Code**, **Codex**, **Cursor**) in **Settings**, **Your machines**, with the kind `mcp`. It works only for Pando's MCP server: not for git, and not for the API directly. It lasts until you revoke it.
+
+**Revoke** it there to disconnect the app. That ends every sign-in that app has for you, at once, and the app asks you to sign in again next time. Signing the app out does the same (`claude mcp logout pando`, `codex mcp logout pando`).
+
+## The tools
+
+Start with `whoami`: it says who the agent acts as and which repositories you can reach. A repository is `owner/name`; a project is a code repo inside it (`repository` lists them); a branch is its git name.
+
+| Tool | What it does |
+| --- | --- |
+| `whoami` | You (login, name, email), this connection's credential, and the repositories you can reach with your role in each. |
+| `list_repositories` | Your repositories, most recently active first: kind, your role, description, projects, open branches, open issues, people, last activity. |
+| `repository` | One repository: its projects (default branch, clone URL), each project's open branches with checks and merge state, and its issue counts. |
+| `branch` | One branch as its page shows it: head, ahead and behind, merge state and conflicting paths, required checks and each status, merged or not, its agent sessions, its artifacts, and the issues linked to it. |
+| `branch_diff` | The files a branch changes against main, with line counts, and the patch. |
+| `merge` | Merges a branch into main with a merge commit, as you. Refused while checks are failing, pending or missing, unless `force` is set; `expected_head` refuses if the branch moved. Linked issues close. |
+| `issues` | One issue with its comments, or a page of issues with words to find. |
+| `write_issue` | Opens an issue (optionally linked to branches), or comments on one. |
+| `read_artifact` | An artifact on a branch (a plan, a report): its text, its versions and its comment threads. |
+| `comment_artifact` | Comments on an artifact: on the whole, on quoted words, or as a reply. |
+| `session` | A recorded agent session: who ran it, its commits, and its conversation. |
+| `launch_agent` | Starts a Pando cloud agent on a branch, as you. |
+
+Everything goes through the same checks as the web and the CLI: a person who is not a member is refused, and a merge is refused while checks are red, as on the branch page.
+
+Long text is cut (each tool says where). The whole of it is in three resources your app can read:
+
+- `pando://owner/name/project/ref/path`: a file at a branch, tag or commit.
+- `pando-diff://owner/name/project/branch`: a branch's whole patch.
+- `pando-artifact://owner/name/id/version`: an artifact's document.
+
+The tools are one door. Git (`pando clone`, `git push`), the [CLI](/cli/) and the API (`https://app.gitpando.com/v1/openapi.yaml`) do the rest.
+
+## For scripts and CI
+
+A script with no browser can use a credential of its own instead: make one with `pando credential create --name ci` and send it as a header.
+
+```sh
+claude mcp add --transport http pando https://app.gitpando.com/mcp --header "Authorization: Bearer $PANDO_CREDENTIAL"
+```
+
+Keep that for scripts. On your own machine, the browser sign-in above is the way: nothing to paste or store.
+
+## Limits
+
+- **A sign-in lasts until revoked.** Pando issues no refresh token; the token's answer says ten years, because apps read a missing value as one hour and would ask again every hour.
+- **Revoking takes effect within 15 seconds** on every Cloudflare server.
+- **Long answers are cut at 60,000 characters:** a diff's patch, a document, a session's conversation, an issue's body. `repository` lists at most 20 projects with 20 open branches each, `branch_diff` 300 files, `whoami` 100 repositories, `issues` 100 issues or 100 comments.
+- **A branch's whole diff as a resource is at most 8 MiB.**
+- **One MCP request is at most 1 MiB.**
+
+See [Limits](/limits/#mcp) for every number and why.

@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import { BASE, browserPost, HARD_LOAD, Machine, nextSignIn, saveRootFiles } from "./seed";
 
 const id = Date.now().toString(36);
@@ -81,7 +81,96 @@ const CARD = `<!doctype html><html><head><style>h1 { color: #2a6; }</style><scri
 <body onload="window.__ran = 'onload'"><h1>Brand card</h1><p><a href="NOTES.md">The notes</a></p><script>document.body.dataset.ran = "body";</script></body></html>
 `;
 
-test("slice 1: sign in, home, live activity, code, file, raw, history, sign out", async ({ page }) => {
+const HEADLINE = "Everything everywhere all at once";
+
+/** Where the sign-in page's shots go (git-ignored): Pando dark and light, at 1440 and 390, for the owner's look. */
+const SHOTS = fileURLToPath(new URL("shots/login/", import.meta.url));
+
+/** How many of the root canvas's pixels carry ink, in a 1-in-16 sample (enough to tell drawn from blank). */
+const inked = (page: Page) =>
+  page.locator("canvas[data-roots]").evaluate((c: HTMLCanvasElement) => {
+    const data = c.getContext("2d")?.getImageData(0, 0, c.width, c.height).data ?? new Uint8ClampedArray();
+    let n = 0;
+
+    for (let i = 3; i < data.length; i += 64) if ((data[i] ?? 0) > 0) n++;
+
+    return n;
+  });
+
+/**
+ * The sign-in page in a context of its own (so its theme and motion settings
+ * never reach the slice's page): what it says, the roots it grows (or shows
+ * still), that 390 px never scrolls sideways, and the shots.
+ */
+async function signInPage(browser: Browser) {
+  for (const motion of ["no-preference", "reduce"] as const) {
+    for (const width of [1440, 390]) {
+      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, reducedMotion: motion, deviceScaleFactor: 2 });
+      const page = await context.newPage();
+      const errors: string[] = [];
+
+      page.on("pageerror", (e) => errors.push(e.message));
+      // The roots' states as they come, from the first one, kept on <html> as data-roots-seen.
+      await page.addInitScript(() => {
+        new MutationObserver((list) => {
+          // Read here, not when the script starts: <html> is not there yet then.
+          const html = document.documentElement;
+
+          for (const m of list) {
+            if (m.target instanceof HTMLElement && m.target.dataset.roots) html.dataset.rootsSeen = [html.dataset.rootsSeen, m.target.dataset.roots].filter(Boolean).join(",");
+          }
+        }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-roots"] });
+      });
+      await page.goto("/login?return_to=/settings/profile");
+      await expect(page.getByRole("heading", { level: 1, name: HEADLINE })).toBeVisible(HARD_LOAD);
+      await expect(page.getByText("A git platform for monorepos, built on Cloudflare, where many agents work at once.")).toBeVisible();
+      // The button keeps where the person was going; the Worker takes it to WorkOS.
+      await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/v1/login/browser?return_to=%2Fsettings%2Fprofile");
+      await expect(page.getByRole("link", { name: "Docs" })).toHaveAttribute("href", "/docs");
+      await expect(page.getByRole("link", { name: "gitpando.com" })).toHaveAttribute("href", "https://gitpando.com");
+      const roots = page.locator("canvas[data-roots]");
+
+      if (motion === "reduce") {
+        // A still: drawn whole at once, never grown.
+        await expect(roots).toHaveAttribute("data-roots", "still");
+        await expect(page.locator("html")).toHaveAttribute("data-roots-seen", "still");
+      } else {
+        await expect(roots).toHaveAttribute("data-roots", "grown");
+        await expect(page.locator("html")).toHaveAttribute("data-roots-seen", "growing,grown");
+      }
+
+      expect(await inked(page)).toBeGreaterThan(500);
+      // Nothing scrolls sideways, and the button sits inside the page.
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+      const box = await page.getByRole("link", { name: "Sign in" }).boundingBox();
+
+      expect(box && box.x >= 0 && box.x + box.width <= width).toBe(true);
+
+      if (motion === "reduce") {
+        for (const mode of ["dark", "light"] as const) {
+          await page.evaluate((m) => window.pandoTheme?.set({ theme: "pando", mode: m }), mode);
+          await expect(page.locator("html")).toHaveAttribute("data-theme", `pando-${mode}`);
+          // The roots draw again in the new colours on the next frame.
+          await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+          await page.screenshot({ path: `${SHOTS}login-pando-${mode}-${width}.png` });
+        }
+      }
+
+      expect(errors).toEqual([]);
+      await context.close();
+    }
+  }
+
+  // A return_to off this host is dropped: the button goes home.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await page.goto("/login?return_to=//evil.example/x");
+  await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/v1/login/browser?return_to=%2F", HARD_LOAD);
+  await context.close();
+}
+
+test("slice 1: sign in, home, live activity, code, file, raw, history, sign out", async ({ page, browser }) => {
   // Script errors and console errors (a CSP refusal among them) fail the run. A 401 while signed out is expected.
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -153,11 +242,23 @@ test("slice 1: sign in, home, live activity, code, file, raw, history, sign out"
       await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
     });
 
+    await test.step("the sign-in page: its headline, line and button, the roots grown (or still with reduced motion), 390 px with no sideways scroll, and its shots", async () => {
+      await expect(page.getByRole("heading", { level: 1, name: HEADLINE })).toBeVisible();
+      await signInPage(browser);
+    });
+
     await test.step("sign in through WorkOS (the stand-in) returns to the home", async () => {
       await nextSignIn(person);
       await page.getByRole("link", { name: "Sign in" }).click();
       await expect(page).toHaveURL(`${BASE}/`);
       await expect(page.getByRole("button", { name: login })).toBeVisible();
+    });
+
+    await test.step("signed in, the sign-in page sends you on to return_to", async () => {
+      await page.goto("/login?return_to=/settings/profile");
+      await expect(page).toHaveURL(`${BASE}/settings/profile`, HARD_LOAD);
+      await page.goto("/");
+      await expect(page.getByRole("button", { name: login })).toBeVisible(HARD_LOAD);
     });
 
     let cloneUrl = "";

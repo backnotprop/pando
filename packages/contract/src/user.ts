@@ -3,7 +3,8 @@ import * as Schema from "effect/Schema";
 
 import { Login, Timestamp } from "./ids.ts";
 
-export const CredentialKind = Schema.Literals(["machine", "sandbox", "bootstrap", "browser"]);
+/** `mcp`: an MCP host's sign-in (Claude Code, Codex, Cursor), named after the app; it works only at /mcp. */
+export const CredentialKind = Schema.Literals(["machine", "sandbox", "bootstrap", "browser", "mcp"]);
 
 export const User = Schema.Struct({
   login: Login,

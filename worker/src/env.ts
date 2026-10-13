@@ -22,6 +22,13 @@ export interface Env extends Omit<Cloudflare.Env, Secrets> {
   WORKOS_CLIENT_ID?: string;
   /** Its API key: the browser sign-in's code exchange. */
   WORKOS_API_KEY?: string;
+  /**
+   * The public origin of the MCP endpoint and its sign-in (mcp/): the resource is <origin>/mcp and the
+   * authorization server's issuer is <origin>. Unset: /mcp, /oauth/* and their discovery documents answer 404.
+   */
+  MCP_ORIGIN?: string;
+  /** Registrations at POST /oauth/register per client address (wrangler.jsonc ratelimits). */
+  MCP_REGISTER_LIMITER?: RateLimit;
   /** Tests only: a stand-in WorkOS on localhost (any other value is ignored). */
   WORKOS_API_BASE?: string;
   /** Tests only: hook retry delays in seconds, comma-separated (default 10,60,300,1800). */

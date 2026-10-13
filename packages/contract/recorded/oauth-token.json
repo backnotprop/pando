@@ -1,0 +1,11 @@
+{
+  "schema": "OAuthToken",
+  "route": "POST /oauth/token (200)",
+  "status": 200,
+  "body": {
+    "access_token": "<credential>",
+    "token_type": "Bearer",
+    "expires_in": 315360000,
+    "scope": "mcp"
+  }
+}

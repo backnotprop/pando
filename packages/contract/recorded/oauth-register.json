@@ -1,0 +1,22 @@
+{
+  "schema": "OAuthClientRegistration",
+  "route": "POST /oauth/register (201)",
+  "status": 201,
+  "body": {
+    "client_id": "<client>",
+    "client_id_issued_at": 1791913673,
+    "client_name": "Test Host A",
+    "redirect_uris": [
+      "http://127.0.0.1/callback",
+      "testhost://oauth/callback"
+    ],
+    "grant_types": [
+      "authorization_code"
+    ],
+    "response_types": [
+      "code"
+    ],
+    "token_endpoint_auth_method": "none",
+    "scope": "mcp"
+  }
+}

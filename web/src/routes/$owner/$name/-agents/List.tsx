@@ -165,7 +165,7 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
             </div>
             <ul aria-label="Agents" className="col-span-full grid grid-cols-subgrid">
               {rows.map((s) => (
-                <Row key={s.number} s={s} full={full} repoPath={paths.get(s.repo) ?? "."} me={me} />
+                <Row key={s.number} s={s} full={full} repoPath={(s.repo === null ? undefined : paths.get(s.repo)) ?? "."} me={me} />
               ))}
             </ul>
           </div>

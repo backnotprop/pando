@@ -138,11 +138,20 @@ async function sessionOf(c: C, n: number): Promise<AgentView> {
 
 /** The session's state, recorded as failed with this reason. */
 async function failed(c: C, s: AgentView, reason: string): Promise<AgentView> {
-  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo, sandbox: "stopped", updated_at: now() })) ?? s;
+  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo ?? "", sandbox: "stopped", updated_at: now() })) ?? s;
 }
 
 /** A chat's first message as its Chats list keeps it. */
 const FIRST_MESSAGE_MAX = 200;
+
+/**
+ * No project named, with more than one: an assistant's chat is about the
+ * whole repository (null; it names a project when it starts a branch); any
+ * other session must say which project it works in.
+ */
+function wholeRepository(kind: SessionKind): null {
+  return kind === "chat" ? null : bad("repo: which project the agent works in");
+}
 
 export interface LaunchInput {
   kind: SessionKind;
@@ -166,8 +175,8 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
   const info = c.get("info");
   const identity = c.get("identity");
   const repos = await c.get("stub").listRepos();
-  const repo = input.repo === null ? (repos.length === 1 ? repos[0] : bad("repo: which project the agent works in")) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
-  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo.name, branch: input.branch, model: input.model, issue: input.issue, first_message: input.kind === "chat" ? input.prompt.slice(0, FIRST_MESSAGE_MAX) : null }, identity));
+  const repo = input.repo === null ? (repos.length === 1 ? repos[0] : wholeRepository(input.kind)) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
+  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo?.name ?? null, branch: input.branch, model: input.model, issue: input.issue, first_message: input.kind === "chat" ? input.prompt.slice(0, FIRST_MESSAGE_MAX) : null }, identity));
   const secret = newToken();
   const cred = await accounts(c.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox", monorepo_id: info.id });
 
@@ -177,7 +186,8 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
     number: session.number,
     kind: input.kind,
     monorepo: { id: info.id, full: info.full_name, kind: info.kind },
-    repo: { name: repo.name, path: repo.path },
+    repo: repo ? { name: repo.name, path: repo.path } : null,
+    projects: repos.map((r) => ({ name: r.name, path: r.path })),
     branch: session.branch ?? "",
     model: input.model,
     launcher: { login: identity.login, name: identity.name ?? identity.login, email: identity.email ?? `${identity.login}@users.pando.invalid` },

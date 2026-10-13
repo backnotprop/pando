@@ -138,8 +138,9 @@ export const agentQuery = (m: MonorepoRef, n: number) =>
     },
   });
 
-/** A new chat with the assistant, starting with the person's first message. */
-export const newChat = (m: MonorepoRef, prompt: string): Promise<AgentSession> => write(Routes.newChat(m.owner, m.name), { prompt });
+/** A new chat with the assistant, starting with the person's first message: about one project, or (null) the whole repository. */
+export const newChat = (m: MonorepoRef, prompt: string, project: string | null): Promise<AgentSession> =>
+  write(Routes.newChat(m.owner, m.name), project === null ? { prompt } : { prompt, repo: project });
 
 /** A person's follow-up to a session (taken after the current step). */
 export const sendAgent = (m: MonorepoRef, n: number, prompt: string): Promise<AgentSession> => write(Routes.sendAgent(m.owner, m.name, n), { prompt });

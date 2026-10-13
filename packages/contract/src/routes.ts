@@ -682,7 +682,7 @@ export const listChats = (owner: Login, name: MonorepoName, page: { before?: num
   response: AgentSessionList,
 });
 
-/** POST .../assistant {prompt, repo?, model?} (201): a new chat. Follow-ups: sendAgent; its transcript and socket: agentTranscript, agentLivePath. */
+/** POST .../assistant {prompt, repo?, model?} (201): a new chat; with no repo in a monorepo of more than one project, about the whole repository. Follow-ups: sendAgent; its transcript and socket: agentTranscript, agentLivePath. */
 export const newChat = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${monorepoBase(owner, name)}/assistant`, response: AgentSession }) as const;
 
 /** GET .../agents/{n}. */

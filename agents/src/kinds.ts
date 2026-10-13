@@ -7,8 +7,8 @@
 
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
-import type { SessionSpec } from "./protocol";
-import { ROOT, worktreeDir } from "./sandbox";
+import type { Project, SessionSpec } from "./protocol";
+import { ROOT, workDir } from "./sandbox";
 
 /** The spec without the credential's secret: what the prompt may name. */
 export type PublicSpec = Omit<SessionSpec, "credential"> & { credential: Omit<SessionSpec["credential"], "secret"> };
@@ -26,9 +26,34 @@ function shared(s: PublicSpec): string[] {
   return [`The repository's shared files (every file outside projects/: plans, decisions, notes) are in ${ROOT}, live: what people save there reaches you within seconds, and what you save there reaches them and is committed.`];
 }
 
+const named = (ps: Project[]) => ps.map((p) => `${p.name} (${p.path})`).join(", ");
+
+/**
+ * A chat's lines on what it reads, in a monorepo with more than one project:
+ * the whole repository (no project chosen) or the project the person chose.
+ */
+function chatScope(s: PublicSpec): string[] {
+  const projects = s.projects ?? [];
+
+  if (projects.length < 2) return [];
+
+  if (s.repo === null) {
+    return [
+      `The person asked about the repository as a whole. Its projects: ${named(projects)}.`,
+      "With repo left out, read_file and list_files read the repository's shared files (everything outside projects/: plans, decisions, notes). Give repo, a project's name, to read that project; branch_diff needs one.",
+    ];
+  }
+
+  const own = s.repo.name;
+
+  return [`The person chose the project ${own} (${s.repo.path}): read_file, list_files and branch_diff read it when repo is left out. The other projects, read with repo: ${named(projects.filter((p) => p.name !== own))}.`];
+}
+
 /** `working`: a chat that has started its branch is told and given what a task is. */
 export function preamble(s: PublicSpec, working = false): string {
-  const dir = worktreeDir(s.repo.path, s.branch);
+  const dir = workDir(s);
+  // A review, a task and a working chat always have a project; a chat about the whole repository has none until start_branch.
+  const project = s.repo?.name ?? "the repository";
   const who = `for ${s.launcher.name} (${s.launcher.login}), who started you. You act as them.`;
   const sandbox = "The sandbox has no internet. It reaches only this repository, through git and the pando command.";
 
@@ -36,13 +61,14 @@ export function preamble(s: PublicSpec, working = false): string {
     return [
       `You are the assistant of the repository ${s.monorepo.full} in Pando, a git platform, talking with ${s.launcher.name} (${s.launcher.login}). You act as them and see only what they can open.`,
       "Answer questions about the repository with read_file, list_files, issue and branch_diff, which read it on the server. Name the files and lines you rely on.",
-      "If the person asks you to change something, you need a branch first, named by the person: ask what to call it (suggest a short name for the change), and when they answer, call start_branch with exactly the name they wrote. It gives you a Linux sandbox on that branch with bash, read, write and edit, where you commit, push and then merge.",
+      ...chatScope(s),
+      `If the person asks you to change something, you need a branch first, named by the person: ask what to call it (suggest a short name for the change), and when they answer, call start_branch with exactly the name they wrote${s.repo === null ? ", and repo, the project the change belongs in" : ""}. It gives you a Linux sandbox on that branch with bash, read, write and edit, where you commit, push and then merge.`,
     ].join("\n");
   }
 
   if (s.kind === "review") {
     return [
-      `You are reviewing branch ${s.branch} of ${s.repo.name} in Pando, a git platform, on the repository ${s.monorepo.full}, ${who}`,
+      `You are reviewing branch ${s.branch} of ${project} in Pando, a git platform, on the repository ${s.monorepo.full}, ${who}`,
       `The branch is checked out at ${dir}, a Linux sandbox. Use read and bash there to read the code and run its tests. Do not change, commit or push anything.`,
       sandbox,
       ...shared(s),
@@ -53,7 +79,7 @@ export function preamble(s: PublicSpec, working = false): string {
 
   return [
     `You are a coding agent working in Pando, a git platform, on the repository ${s.monorepo.full}, ${who}`,
-    `Your working folder is ${dir}: branch ${s.branch} of ${s.repo.name}, a Linux sandbox. Use bash, read, write and edit there.`,
+    `Your working folder is ${dir}: branch ${s.branch} of ${project}, a Linux sandbox. Use bash, read, write and edit there.`,
     `Commit with git as you go and push the branch after each working step (git push origin ${s.branch}). Main is protected: never push to it.`,
     sandbox,
     ...shared(s),

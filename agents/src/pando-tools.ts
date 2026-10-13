@@ -41,8 +41,18 @@ export class PandoApi {
     return `/v1/monorepos/${this.spec().monorepo.full}`;
   }
 
+  /** A project's API path: the named one, else the session's own (a chat about the whole repository has none). */
   repo(name?: string): string {
-    return `${this.base()}/repos/${encodeURIComponent(name ?? this.spec().repo.name)}`;
+    const project = name ?? this.spec().repo?.name;
+
+    if (project === undefined) throw new Error("Give repo, a project's name: this chat is about the whole repository, not one project.");
+
+    return `${this.base()}/repos/${encodeURIComponent(project)}`;
+  }
+
+  /** Whether a tool call with no repo reads the shared files: a chat about the whole repository. */
+  shared(repo: string | undefined): boolean {
+    return repo === undefined && this.spec().repo === null;
   }
 
   /** Calls Pando with an optional JSON body; a refusal becomes an Error with Pando's code and message, for the model to read. */
@@ -93,7 +103,14 @@ async function mergeTrying(merge: () => Promise<Answer>): Promise<Answer> {
   return merge();
 }
 
-const RepoParam = Type.Optional(Type.String({ description: "A project's name; the session's own when left out." }));
+const RepoParam = Type.Optional(Type.String({ description: "A project's name; the session's own when left out (in a chat about the whole repository: the shared files)." }));
+
+/** The shared files' answers are about these fields only (Contract.MetaTree). */
+interface SharedFolder {
+  folders?: { name: string }[];
+  files?: { path: string }[];
+  next?: string | null;
+}
 
 export function pandoTools(api: PandoApi, spec: () => SessionSpec): ToolRegistration[] {
   const branchOf = (b?: string) => encodeURIComponent(b ?? spec().branch);
@@ -105,6 +122,7 @@ export function pandoTools(api: PandoApi, spec: () => SessionSpec): ToolRegistra
       parameters: Type.Object({ path: Type.String({ description: "Path from the project's root" }), ref: Type.Optional(Type.String()), repo: RepoParam }),
       replay: "safe",
       async execute({ path, ref, repo }) {
+        if (api.shared(repo)) return text(clip((await api.call("GET", `${api.base()}/meta/file?path=${encodeURIComponent(path)}`)).text, path));
         const q = ref ? `?ref=${encodeURIComponent(ref)}` : "";
         const r = await api.call("GET", `${api.repo(repo)}/files/${path.split("/").map(encodeURIComponent).join("/")}${q}`);
 
@@ -117,6 +135,15 @@ export function pandoTools(api: PandoApi, spec: () => SessionSpec): ToolRegistra
       parameters: Type.Object({ path: Type.Optional(Type.String({ description: "A folder; the root when left out" })), ref: Type.Optional(Type.String()), repo: RepoParam }),
       replay: "safe",
       async execute({ path, ref, repo }) {
+        if (api.shared(repo)) {
+          const r = await api.call("GET", `${api.base()}/meta/tree?dir=${encodeURIComponent(path ?? "")}`);
+          // SAFETY: the shared files' tree route answers Contract.MetaTree; only folder names and file paths are read.
+          const page = JSON.parse(r.text) as SharedFolder;
+          const lines = [...(page.folders ?? []).map((f) => `${f.name}/`), ...(page.files ?? []).map((f) => f.path.split("/").at(-1) ?? f.path)];
+
+          return text((lines.join("\n") || "(empty)") + (page.next ? "\n[more files: this folder is long]" : ""));
+        }
+
         const q = new URLSearchParams();
 
         if (path) q.set("path", path);

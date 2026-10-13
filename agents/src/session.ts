@@ -20,7 +20,7 @@ import { preamble, toolsFor, type PublicSpec } from "./kinds";
 import { LiveSockets } from "./live";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
 import { PandoApi, pandoTools } from "./pando-tools";
-import { Sandbox, worktreeDir } from "./sandbox";
+import { Sandbox, workDir } from "./sandbox";
 import type { SessionSpec, SessionState, Status, TranscriptMessage } from "./protocol";
 import { projectEntries } from "./transcript";
 
@@ -42,7 +42,7 @@ export class AgentSession extends DurableObject<Env> {
     () => {
       const s = this.#spec();
 
-      return { monorepo: s.monorepo.full, repoPath: s.repo.path, branch: s.branch, machine: s.credential.name, author: { name: s.launcher.name, email: s.launcher.email } };
+      return { monorepo: s.monorepo.full, repoPath: s.repo?.path ?? ".", branch: s.branch, machine: s.credential.name, author: { name: s.launcher.name, email: s.launcher.email } };
     },
   );
   readonly harness = new PiHarness({
@@ -58,7 +58,7 @@ export class AgentSession extends DurableObject<Env> {
           env: () => {
             const spec = this.#spec();
 
-            return new ContainerEnv(this.sandbox, `container:${this.ctx.id.toString()}`, worktreeDir(spec.repo.path, spec.branch));
+            return new ContainerEnv(this.sandbox, `container:${this.ctx.id.toString()}`, workDir(spec));
           },
           onReport: (error) => console.warn("pi report", error),
         },
@@ -131,7 +131,7 @@ export class AgentSession extends DurableObject<Env> {
       status: st.status,
       model: spec.model,
       branch: spec.branch,
-      repo: spec.repo.name,
+      repo: spec.repo?.name ?? "",
       sandbox: this.sandbox.running ? "running" : "stopped",
       updated_at: st.at,
     };
@@ -202,20 +202,29 @@ export class AgentSession extends DurableObject<Env> {
       name: "start_branch",
       description:
         "Start making a change the person asked for, on a branch they named: gives you a Linux sandbox on it with bash, read, write and edit, and merge. The name must be one the person wrote in their latest message; if they have not named one, ask them (you may suggest a short name for the change) and wait.",
-      parameters: Type.Object({ name: Type.String({ description: "The branch name, exactly as the person wrote it" }) }),
-      execute: async ({ name }) => {
+      parameters: Type.Object({
+        name: Type.String({ description: "The branch name, exactly as the person wrote it" }),
+        repo: Type.Optional(Type.String({ description: "The project the change belongs in, by name; the chat's own when left out" })),
+      }),
+      execute: async ({ name, repo }) => {
         const said = await this.#lastPersonText();
 
         if (!BRANCH_NAME.test(name)) throw new Error(`"${name}" is not a branch name: letters, digits and . _ / -, not main`);
 
         if (!said.split(/[\s`'",.;:!?()]+/).includes(name)) throw new Error(`The person has not named "${name}" in their latest message. Ask them for the branch's name, and wait for their answer.`);
-        const spec = { ...this.#spec(), branch: name };
+        const current = this.#spec();
+        const projects = current.projects ?? [];
+        const project = repo === undefined ? current.repo : (projects.find((p) => p.name === repo) ?? null);
+
+        if (!project) throw new Error(`${repo === undefined ? "Give repo, the project the change belongs in" : `There is no project ${repo}`}: ${projects.map((p) => p.name).join(", ")}.`);
+        const spec = { ...current, repo: project, branch: name };
 
         this.ctx.storage.kv.put("spec", spec);
         this.#installTools(spec);
-        this.ctx.waitUntil(this.#report());
+        // Pando's record learns the branch and its project before the agent can merge it.
+        await this.#report();
 
-        return { content: [{ type: "text", text: `Your branch is ${name}. Commit and push there, then merge it.` }] };
+        return { content: [{ type: "text", text: `Your branch is ${name}${repo === undefined ? "" : ` of ${project.name}`}. Commit and push there, then merge it.` }] };
       },
     });
   }

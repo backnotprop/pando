@@ -42,6 +42,20 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **A revoked credential, or a removed member, keeps working for up to 15 seconds.** Each Cloudflare server remembers a sign-in check that long.
 - **For up to about 15 seconds after a repository is deleted,** a git request can still be answered from a Cloudflare server that cached the repository's record. After that, git gets "this monorepo was deleted" (the server's own words).
 
+## MCP
+
+- **An MCP sign-in lasts until it is revoked.** Pando issues no refresh token. The token's answer says it expires in ten years (315,360,000 seconds), because apps read a missing value as one hour and would open the browser again every hour.
+- **Revoking an app's sign-in ends every sign-in that app has for you,** in Settings or when the app signs out. Like any revoked credential, it keeps working for up to 15 seconds.
+- **An authorization code lasts 5 minutes and works once.** A wrong PKCE verifier spends it too.
+- **The consent page waits 10 minutes** for Allow or Deny; after that, start the connection again from the app.
+- **A sign-in request is at most 1,000 characters.** It rides the browser sign-in's return address, which keeps that many.
+- **Apps that register (dynamic registration): 10 a minute from one address.** Registrations never used for a sign-in are dropped after a day, and at most 1,000 unused ones are kept, the oldest going first, so one address cannot fill the list and lock new apps out.
+- **An app that names itself by a document at an https address** (Claude Code, Codex): Pando fetches it with a 5-second limit and at most 64 KiB, follows no redirects, and keeps it a day. chatgpt.com refuses a Cloudflare Worker's fetch of Codex's document (403), so Pando also keeps its own copy of Claude Code's and Codex's documents, as they read on 2026-10-13, used only when the fetch fails.
+- **Tool answers cut long text at 60,000 characters:** a branch's patch, an artifact's document, a session's conversation, an issue's body. Each says when it cut. `repository` lists at most 20 projects with 20 open branches each; `branch_diff` lists at most 300 files; `whoami` names at most 100 repositories; `issues` gives at most 100 issues or 100 comments.
+- **A branch's whole diff, read as a resource, is at most 8 MiB** of patch, the most the diff route gives.
+- **One MCP request is at most 1 MiB.**
+- **No change events.** The tool list never changes while the server runs, so the server refuses `subscriptions/listen`; apps read the list again after an hour.
+
 ## Your home
 
 - **Your activity feed keeps 7 days,** up to 1,000,000 lines. Older pages are read from each repository's own log.

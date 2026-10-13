@@ -1,5 +1,5 @@
 // Settings, for owners: the name (Rename; the old name keeps leading here),
-// its one-line description (shown under its name), who can download releases, the issue labels, Transfer to an org you are in or to yourself (mock
+// its one-line description (shown under its name), who can download releases, when checks run, the issue labels, Transfer to an org you are in or to yourself (mock
 // `transfer`; the old address keeps leading here too), and Delete, which you
 // type the full owner/name to enable (ruling).
 import type { Login } from "@pando/contract";
@@ -15,6 +15,7 @@ import { Select } from "../../../ui/dropdown";
 import { OwnHead, useMonorepo } from "./-frame/heads";
 import { LabelsSettings } from "./-issues/LabelsSettings";
 import { Mirror } from "./-settings/Mirror";
+import { CiPolicySwitch } from "./-settings/CiPolicy";
 import { ReleasesSwitch } from "./-settings/Releases";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
@@ -202,6 +203,7 @@ function Settings() {
             <Rename />
             <Description />
             <ReleasesSwitch />
+            <CiPolicySwitch />
             <Mirror />
             <LabelsSettings />
             <Transfer />

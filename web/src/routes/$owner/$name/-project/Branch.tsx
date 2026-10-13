@@ -176,6 +176,8 @@ interface Answer {
   head: string;
   code: string;
   paths: readonly string[];
+  /** The refusal started the branch's checks (the project's checks run on merge). */
+  started: boolean;
 }
 
 /** The Merge box: ready, conflicting, failing, waiting, merged; and what a refused Merge said. */
@@ -190,7 +192,7 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
   const landing = useMutation({
     mutationFn: (force: boolean) => merge(monorepo, repo.name, b.name, b.head, force),
     onSuccess: async (out) => {
-      if (out.refused) setAnswer({ head: b.head, code: out.refused.error.code, paths: out.refused.error.paths ?? [] });
+      if (out.refused) setAnswer({ head: b.head, code: out.refused.error.code, paths: out.refused.error.paths ?? [], started: out.refused.error.checks_started === true });
 
       await refresh();
     },
@@ -271,9 +273,20 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
       </>
     );
   } else {
-    const force = s.tone !== "ready";
+    // Checks run on merge and none has reported: Merge starts them (not a forced merge), once per head.
+    const startsChecks = repo.ci_policy === "on_merge" && b.checks.statuses.every((x) => x.state === "superseded") && !said;
+    const started = said?.started === true && b.checks.statuses.every((x) => x.state === "superseded");
+    const force = s.tone !== "ready" && !startsChecks;
 
-    const heading = failed ? (
+    const heading = started ? (
+      <p key="started" className={`${big} text-bark-dim ${arrives}`}>
+        Checks started for this merge
+      </p>
+    ) : startsChecks && !failed ? (
+      <p key="on-merge" className={`${big} text-bark-dim ${arrives}`}>
+        Checks run when you merge
+      </p>
+    ) : failed ? (
       <p key={line} className={`${big} text-rust ${arrives}`}>
         {failed.app === "buildkite" ? <CheckMark height={12} big /> : null}
         {failed.context} failed

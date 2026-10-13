@@ -20,6 +20,8 @@ function checkWord(s: Status | undefined, run: CheckRun | undefined): string {
 
   if (!s) return "not reported";
 
+  if (s.state === "superseded") return "superseded";
+
   return s.state === "success" ? "passed" : s.state === "pending" ? "running" : s.state === "failure" ? "failed" : "errored";
 }
 

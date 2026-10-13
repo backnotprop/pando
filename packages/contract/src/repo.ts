@@ -7,6 +7,16 @@ import { Count, FullName, Login, RepoName, Timestamp } from "./ids.ts";
 import { MemberRole, MonorepoEntry, ReplacedAlias } from "./monorepo.ts";
 import { CredentialKind } from "./user.ts";
 
+/**
+ * When a repo's CI builds run: `every_push` (each push to a branch, the
+ * default), `on_merge` (a push builds nothing; the first merge asked for a
+ * head starts its build and waits for it), `main_only` (only main's merge
+ * commits and pushes to main build). Main's merge commit builds under all three.
+ */
+export const CiPolicy = Schema.Literals(["every_push", "on_merge", "main_only"]);
+
+export type CiPolicy = typeof CiPolicy.Type;
+
 export const Repo = Schema.Struct({
   /** The monorepo's `owner/name`. */
   monorepo: FullName,
@@ -24,6 +34,8 @@ export const Repo = Schema.Struct({
   checks_unknown: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The switch "Anyone can download releases": its release files download without signing in (never its code). Only when the repo is fetched alone (getRepo). */
   releases_public: Schema.optionalKey(Schema.Boolean),
+  /** When its CI builds run (owners set it): in the list and getRepo. */
+  ci_policy: Schema.optionalKey(CiPolicy),
   created_at: Timestamp,
   created_by: Schema.NullOr(Login),
 });

@@ -366,7 +366,9 @@ type APIError struct {
 	Message string
 	Paths   []string
 	Checks  *Checks
-	Body    []byte
+	// ChecksStarted: a refused merge started the branch's checks (the repo's checks run on merge).
+	ChecksStarted bool
+	Body          []byte
 }
 
 func (e *APIError) Error() string {

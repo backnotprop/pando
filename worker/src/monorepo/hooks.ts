@@ -14,9 +14,9 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Env } from "../env";
 import { redact } from "../http";
-import { isRecord, isText, isTextList, parseJson, type Json } from "../parse";
+import { isInteger, isRecord, isText, isTextList, parseJson, type Json } from "../parse";
 import { note, timed } from "../timing";
-import type { HookJob, HookResult } from "./hooks-out";
+import type { CancelJob, CancelResult, HookJob, HookResult } from "./hooks-out";
 import type { HookEvent } from "./types";
 import { deliveryReadToken, withRepo } from "./artifacts";
 import { CI_READ_REUSE_MS, CI_READ_TTL_S, pandoBuildEnv } from "../ci/buildkite";
@@ -130,6 +130,56 @@ export class HooksDrain extends WorkerEntrypoint<Env> {
 
     return out;
   }
+
+  /** Cancel superseded builds (hooks-out.ts sendCancels), 6 at once; never throws. */
+  async cancel(jobs: CancelJob[]): Promise<CancelResult[]> {
+    const out: CancelResult[] = jobs.map(() => ({ outcome: "failed", error: "not sent" }));
+    await pool(jobs.map((_, i) => i), 6, async (i) => {
+      out[i] = await cancelBuild(this.env, jobs[i].hook, jobs[i].number);
+    });
+
+    return out;
+  }
+}
+
+/**
+ * Buildkite's create-build URL for a hook: its pipeline's builds (a test
+ * api_url stands in for it); a build's cancel is `<this>/<number>/cancel`.
+ */
+function buildsUrl(hook: HookRow): string {
+  const config = hookConfig(hook);
+
+  return (
+    config.api_url ??
+    `https://api.buildkite.com/v2/organizations/${encodeURIComponent(config.organization ?? "")}/pipelines/${encodeURIComponent(config.pipeline ?? "")}/builds`
+  );
+}
+
+/**
+ * Cancel one build Pando started (Buildkite REST: PUT .../builds/{number}/cancel,
+ * scope write_builds). Buildkite cancels a build that is scheduled, running or
+ * failing, and answers 422 for any other: it had finished, which is no failure.
+ */
+export async function cancelBuild(env: Env, hook: HookRow, number: number): Promise<CancelResult> {
+  if (!env.BUILDKITE_API_TOKEN) return { outcome: "failed", error: "the Worker secret BUILDKITE_API_TOKEN is not set" };
+
+  try {
+    const res = await fetch(`${buildsUrl(hook)}/${number}/cancel`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${env.BUILDKITE_API_TOKEN}`, accept: "application/json" },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    const text = (await res.text()).slice(0, 300);
+
+    if (res.ok) return { outcome: "canceled", error: null };
+
+    if (res.status === 422) return { outcome: "finished", error: null };
+
+    return { outcome: "failed", error: `Buildkite answered ${res.status}: ${redact(text)}` };
+  } catch (err) {
+    return { outcome: "failed", error: redact(err instanceof Error ? err.message : String(err)).slice(0, 300) };
+  }
 }
 
 async function deliverOne(env: Env, j: HookJob): Promise<HookResult> {
@@ -176,6 +226,8 @@ export interface StoredPayload extends RepoEvent {
   /** A plain repo: its git URL is /owner/name.git. */
   plain?: boolean;
   origin: string;
+  /** A build a merge asked for (the repo's CI policy is on_merge): Buildkite only. */
+  for_merge?: boolean;
 }
 
 export function hookView(h: HookRow) {
@@ -218,6 +270,8 @@ export interface AttemptResult {
   ok: boolean;
   code: number | null;
   error: string | null;
+  /** The build Buildkite made (its number in the pipeline), so a newer push can cancel it. */
+  build_number?: number | null;
 }
 
 /** One delivery attempt. Never throws; never logs the token. */
@@ -265,18 +319,19 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
     }
 
     // buildkite
-    const config = hookConfig(hook);
-
     if (!env.BUILDKITE_API_TOKEN) return { ok: false, code: null, error: "the Worker secret BUILDKITE_API_TOKEN is not set" };
 
-    const url =
-      config.api_url ??
-      `https://api.buildkite.com/v2/organizations/${encodeURIComponent(config.organization ?? "")}/pipelines/${encodeURIComponent(config.pipeline ?? "")}/builds`;
+    const url = buildsUrl(hook);
+
+    const message =
+      p.event === "merged" ? `Merge ${p.branch}${p.title ? `: ${p.title}` : ""}`
+      : p.for_merge ? `Checks for merging ${p.branch}${p.title ? `: ${p.title}` : ""}`
+      : (p.title ?? `${p.event} ${p.branch}`);
 
     const body = JSON.stringify({
       commit: target.commit,
       branch: target.branch,
-      message: p.event === "merged" ? `Merge ${p.branch}${p.title ? `: ${p.title}` : ""}` : (p.title ?? `${p.event} ${p.branch}`),
+      message,
       author: { name: p.pusher ?? "" },
       env: pandoBuildEnv({
         clone_url: u.clone_url, read_token: read.token, status_url: u.status_url, status_token: status?.token ?? null,
@@ -293,12 +348,13 @@ export async function attempt(env: Env, hook: HookRow, deliveryId: string, p: St
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
-    let error: string | null = null;
+    const text = await res.text();
 
-    if (!res.ok) error = `Buildkite answered ${res.status}: ${redact((await res.text()).slice(0, 300))}`;
-    else await res.body?.cancel();
+    if (!res.ok) return { ok: false, code: res.status, error: `Buildkite answered ${res.status}: ${redact(text.slice(0, 300))}` };
+    // The build's number, kept so a newer push to the branch can cancel it.
+    const made = parseJson(text);
 
-    return { ok: res.ok, code: res.status, error };
+    return { ok: true, code: res.status, error: null, build_number: isRecord(made) && isInteger(made.number) ? made.number : null };
   } catch (err) {
     return { ok: false, code: null, error: redact(err instanceof Error ? err.message : String(err)).slice(0, 300) };
   }

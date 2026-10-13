@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { agentHeader, credential, HttpError, toErrorResponse } from "../http";
-import { isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
+import { isOneOf, isRecord, isText, isWholeNumber, type Json, type JsonObject } from "../parse";
 import { APP_SLUG, authorizeStatusToken, isStatusToken, type StatusStamp } from "../ci/statustoken";
 import { ciRoutes } from "../ci/routes";
 import { mirrorRoutes } from "../mirror/routes";
@@ -45,7 +45,7 @@ import {
 } from "./names";
 import type { MonorepoObject } from "./object";
 import { cachedRepo, forgetRepos, hashToken, monorepoStub, newToken } from "./session";
-import type { BranchRecord, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, ReviewComment, StatusRecord } from "./types";
+import type { BranchRecord, CiPolicy, Identity, Kind, MonorepoInfo, Outcome, RepoRecord, ReviewComment, StatusRecord } from "./types";
 
 import { accounts, authenticateRequest, forgetCachedAuth, identityOf } from "../accounts/auth";
 import type { Auth } from "../accounts/object";
@@ -63,6 +63,7 @@ function isBranchState(v: string): v is BranchState {
   return v === "open" || v === "merged" || v === "all";
 }
 
+/** A state a client may post: GitHub's four (Pando alone writes `superseded`). */
 function isStatusState(v: Json | undefined): v is StatusRecord["state"] {
   return v === "pending" || v === "success" || v === "failure" || v === "error";
 }
@@ -192,6 +193,8 @@ function repoView(home: GitHome, r: RepoRecord, required?: Required) {
     // Left out of the JSON when not asked for; null with the reason while unknown.
     required_checks: required?.list,
     checks_unknown: required?.unknown,
+    // On rows read from the object (the list); getRepo reads it fresh.
+    ci_policy: r.ci_policy,
     created_at: r.created_at,
     created_by: r.created_by,
   };
@@ -727,24 +730,40 @@ api.get("/v1/monorepos/:o/:m/repos", async (c) => {
   return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(homeOf(c), r)) } satisfies typeof Contract.RepoList.Encoded);
 });
 
-api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => {
-  const r = await repoOf(c);
-  const releasesPublic = await c.get("stub").releasesPublic(r.name);
+/** The repo alone: its required checks and its two settings, read fresh. */
+async function oneRepo(c: C, r: RepoRecord) {
+  const stub = c.get("stub");
+  const [releasesPublic, ciPolicy, required] = await Promise.all([stub.releasesPublic(r.name), stub.ciPolicy(r.name), requiredKept(c.env, c.get("info"), r)]);
 
-  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: releasesPublic } satisfies typeof Contract.Repo.Encoded);
-});
+  return { ...repoView(homeOf(c), r, required), releases_public: releasesPublic, ci_policy: ciPolicy } satisfies typeof Contract.Repo.Encoded;
+}
 
-// A project's settings (owners): releases_public, the switch "Anyone can download releases" (release files only, never code).
+const CI_POLICIES: readonly CiPolicy[] = ["every_push", "on_merge", "main_only"];
+
+api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => c.json(await oneRepo(c, await repoOf(c))));
+
+// A project's settings (owners), either or both: releases_public, the switch "Anyone can download releases"
+// (release files only, never code); ci_policy, when its CI builds run (every_push, on_merge or main_only).
 api.patch("/v1/monorepos/:o/:m/repos/:r", async (c) => {
-  owner(c, "change who can download a project's releases");
+  owner(c, "change a project's settings");
   const r = await repoOf(c);
   const b = await body(c.req);
   const on = b.releases_public;
+  const policy = b.ci_policy;
 
-  if (on !== true && on !== false) bad("releases_public is true (anyone can download release files) or false (members only)");
-  await c.get("stub").setReleasesPublic(r.name, on);
+  if (on === undefined && policy === undefined) bad("send releases_public, ci_policy, or both");
 
-  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: on } satisfies typeof Contract.Repo.Encoded);
+  if (on !== undefined && on !== true && on !== false) bad("releases_public is true (anyone can download release files) or false (members only)");
+
+  if (policy !== undefined && !(isText(policy) && isOneOf(CI_POLICIES, policy))) {
+    bad("ci_policy is every_push (each push builds), on_merge (a build starts when a merge asks for it) or main_only (only main builds)");
+  }
+
+  if (on !== undefined) await c.get("stub").setReleasesPublic(r.name, on);
+
+  if (policy !== undefined) await c.get("stub").setCiPolicy(r.name, policy);
+
+  return c.json(await oneRepo(c, r));
 });
 
 // ── Branches ──────────────────────────────────────────────────────────────

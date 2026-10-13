@@ -4,7 +4,12 @@ import * as Schema from "effect/Schema";
 
 import { Sha, Timestamp } from "./ids.ts";
 
-export const StatusState = Schema.Literals(["pending", "success", "failure", "error"]);
+/**
+ * GitHub's four, and `superseded`: Pando's own, when a newer push cancelled
+ * the build that was reporting the check. A superseded check counts as not
+ * reported (the gate's `missing` when it is required). Clients post only the four.
+ */
+export const StatusState = Schema.Literals(["pending", "success", "failure", "error", "superseded"]);
 
 export type StatusState = typeof StatusState.Type;
 

@@ -346,6 +346,10 @@ func Merge(e *Env, args []string) error {
 				if ae.Checks != nil && ae.Checks.SHA != "" {
 					on += " at " + short(ae.Checks.SHA)
 				}
+				if ae.ChecksStarted {
+					e.printf("Checks started for this merge on %s (this repo's checks run on merge).\n", on)
+					return errors.New("not merged yet; run pando merge again when the checks are green")
+				}
 				e.printf("Checks are not green on %s:\n", on)
 				if ae.Checks != nil {
 					for _, s := range ae.Checks.Statuses {

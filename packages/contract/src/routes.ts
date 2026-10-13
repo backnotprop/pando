@@ -165,6 +165,9 @@ export const getRepo = (owner: Login, name: MonorepoName, repo: RepoName) => ({ 
 /** PATCH .../repos/{repo} {releases_public} (owners): "Anyone can download releases", the project's release files only, never its code. */
 export const setReleasesPublic = (owner: Login, name: MonorepoName, repo: RepoName) => ({ method: "PATCH", path: repoBase(owner, name, repo), response: Repo }) as const;
 
+/** PATCH .../repos/{repo} {ci_policy} (owners): when the project's CI builds run (every_push, on_merge, main_only). */
+export const setCiPolicy = (owner: Login, name: MonorepoName, repo: RepoName) => ({ method: "PATCH", path: repoBase(owner, name, repo), response: Repo }) as const;
+
 // ── Builds of main and releases (research/plans/releases-2026-10-04). Made, published and deleted with the CLI or the API; the web shows them.
 
 /** GET .../repos/{repo}/summary: main's commit and its state (or not built), the newest build on main, the latest release. */

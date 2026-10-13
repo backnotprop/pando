@@ -1853,8 +1853,11 @@ paths:
       description: |
         One session (kind chat) per conversation, per person. It answers from
         Pando's read tools with the caller's access and no sandbox; asked for
-        a change, it starts its own branch `assistant/<n>` and works as a task
-        does. A chat is its person's alone: not in GET .../agents, and 404 to
+        a change, it starts a branch the person names and works as a task
+        does. `repo` names the project the chat is about; left out in a
+        monorepo of more than one project, the chat is about the whole
+        repository (`repo` null in the answer): it reads the shared files and
+        every project, and names the project when it starts a branch. A chat is its person's alone: not in GET .../agents, and 404 to
         anyone else. Follow-ups, the transcript, the socket and Stop are the
         agents routes'.
       tags: [agents]
@@ -5879,7 +5882,7 @@ components:
         kind: { type: string, enum: [task, issue, review, chat] }
         status: { type: string, enum: [working, waiting, failed, stopped] }
         reason: { type: [string, "null"] }
-        repo: { type: string }
+        repo: { type: [string, "null"], description: "The project it works in; null for an assistant's chat about the whole repository until it starts a branch in one." }
         branch: { type: [string, "null"], description: "Named by a person or from its issue; null for an assistant's chat until the person names one." }
         program: { type: string, description: "pi" }
         model: { type: string }

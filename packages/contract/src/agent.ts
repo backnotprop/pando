@@ -26,8 +26,8 @@ export const AgentSession = Schema.Struct({
   kind: AgentKind,
   status: AgentStatus,
   reason: Schema.NullOr(Schema.String),
-  /** The project it works in. */
-  repo: RepoName,
+  /** The project it works in; null for an assistant's chat about the whole repository until it starts a branch in one. */
+  repo: Schema.NullOr(RepoName),
   /** Its branch, named by a person or from its issue; null for an assistant's chat until the person names one. */
   branch: Schema.NullOr(Schema.String),
   /** The agent program: `pi` (Pi Durable). */

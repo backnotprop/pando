@@ -46,7 +46,8 @@ export interface AgentView {
   kind: SessionKind;
   status: Status;
   reason: string | null;
-  repo: string;
+  /** null: an assistant's chat about the whole repository, before it starts a branch in a project. */
+  repo: string | null;
   /** null: a chat before it names its branch. */
   branch: string | null;
   program: string;
@@ -101,7 +102,8 @@ export interface AgentFilters {
 
 export interface AgentInput {
   kind: SessionKind;
-  repo: string;
+  /** null: an assistant's chat about the whole repository. */
+  repo: string | null;
   /** The branch it works on; null only for a chat, which names one later (start_branch). */
   branch: string | null;
   model: string;
@@ -122,7 +124,7 @@ export function machineName(number: number): string {
 
 function view(r: AgentRow): AgentView {
   return {
-    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo, branch: r.branch || null, program: PROGRAM, model: r.model,
+    number: r.number, kind: r.kind, status: r.status, reason: r.reason, repo: r.repo || null, branch: r.branch || null, program: PROGRAM, model: r.model,
     issue: r.issue, launched_by: r.launched_by, machine: r.machine, workspace: r.workspace, awaiting_checks: r.awaiting_checks === 1,
     first_message: r.first_message, created_at: r.created_at, updated_at: r.updated_at,
   };
@@ -154,7 +156,7 @@ export class AgentStore {
 
     this.sql.exec(
       "INSERT INTO agent_sessions (number, kind, repo, branch, model, issue, launched_by, machine, status, first_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?, ?)",
-      number, input.kind, input.repo, branch, input.model, input.issue, login, machineName(number), input.first_message, at, at,
+      number, input.kind, input.repo ?? "", branch, input.model, input.issue, login, machineName(number), input.first_message, at, at,
     );
     this.publish(this.must(number), login);
 
@@ -228,12 +230,12 @@ export class AgentStore {
     if (!r || state.updated_at < r.updated_at) return null;
 
     this.sql.exec(
-      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), branch = COALESCE(NULLIF(?, ''), branch), updated_at = ? WHERE number = ?",
-      state.status, state.reason ?? null, state.workspace ?? null, state.branch, state.updated_at, state.number,
+      "UPDATE agent_sessions SET status = ?, reason = ?, workspace = COALESCE(?, workspace), repo = COALESCE(NULLIF(?, ''), repo), branch = COALESCE(NULLIF(?, ''), branch), updated_at = ? WHERE number = ?",
+      state.status, state.reason ?? null, state.workspace ?? null, state.repo, state.branch, state.updated_at, state.number,
     );
     const next = this.must(state.number);
 
-    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace || next.branch !== r.branch) this.publish(next, null);
+    if (next.status !== r.status || next.reason !== r.reason || next.workspace !== r.workspace || next.repo !== r.repo || next.branch !== r.branch) this.publish(next, null);
 
     return view(next);
   }
@@ -281,7 +283,7 @@ export class AgentStore {
     if (r.issue !== null) topics.push(`issue:${r.issue}`);
 
     this.host.publish({
-      kind: "agent.updated", collection: "agents", key: String(r.number), op: "upsert", repo: r.repo,
+      kind: "agent.updated", collection: "agents", key: String(r.number), op: "upsert", repo: r.repo || null,
       actor, machine: actor ? null : r.machine, agent: null, number: r.number, row: { ...view(r), first_message: null }, topics,
     });
   }

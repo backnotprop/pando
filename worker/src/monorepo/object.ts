@@ -1223,7 +1223,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   agentCreate(input: AgentInput, identity: Identity) {
     return this.guard(() => {
-      if (!this.repoRow(input.repo)) throw new HttpError(400, "bad_request", `no repo ${input.repo}`);
+      if (input.repo !== null && !this.repoRow(input.repo)) throw new HttpError(400, "bad_request", `no repo ${input.repo}`);
 
       return this.agents.create(input, identity.login);
     });
@@ -1249,7 +1249,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   /** A session with its branch's facts now (state, commits ahead, merge, checks) and its issue's title and state. */
   private withFacts(v: AgentView): AgentView {
-    const b = v.branch === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
+    const b = v.branch === null || v.repo === null ? undefined : this.branchRows(v.repo, { names: [v.branch], state: "all" }).branches[0];
 
     v.branch_facts = b ? { state: b.state, ahead: b.ahead, stale: b.stale, merged_at: b.merged_at, checks: b.checks.state } : null;
 

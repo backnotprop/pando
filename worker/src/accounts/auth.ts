@@ -120,6 +120,19 @@ export function sameOrigin(req: Request): boolean {
 }
 
 /**
+ * The requests the MCP endpoint makes to the API for its tools, as the caller (mcp/handler.ts). A
+ * credential of kind "mcp" is good for /mcp alone (its OAuth audience), so it opens the API only through these.
+ */
+const mcpCalls = new WeakSet<Request>();
+
+/** Mark a request the MCP endpoint made itself, in this isolate (never anything that came over the network). */
+export function asMcpCall(req: Request): Request {
+  mcpCalls.add(req);
+
+  return req;
+}
+
+/**
  * The caller of a /v1 request: a Bearer credential (or none), else the
  * browser session cookie. With the cookie, a write or a WebSocket upgrade must
  * come from Pando's own origin (other Workers on the same workers.dev
@@ -132,7 +145,9 @@ export async function authenticateRequest(env: Env, req: Request, monorepo: Mono
   if (bearer) {
     const auth = await authenticate(env, bearer, monorepo);
 
-    return auth && auth.credential.kind !== "browser" ? auth : null;
+    if (!auth || auth.credential.kind === "browser") return null;
+
+    return auth.credential.kind !== "mcp" || mcpCalls.has(req) ? auth : null;
   }
 
   const cookie = readCookie(req, SESSION_COOKIE);

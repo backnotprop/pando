@@ -34,8 +34,14 @@
     // Shared files (the meta layer): everything due in one quiet window is
     // one git commit, the others as Co-authored-by ("author": one per person).
     // The owner's choice, 2026-10-04 (docs/contracts/meta-sync.md).
-    "META_COMMIT_GROUPING": "window"
+    "META_COMMIT_GROUPING": "window",
+    // The MCP endpoint (worker/src/mcp): the resource is <origin>/mcp and Pando's own authorization
+    // server is <origin>. A local dev server sets its own with --var MCP_ORIGIN:http://127.0.0.1:<port>.
+    "MCP_ORIGIN": "https://app.gitpando.com"
   },
+  // POST /oauth/register (dynamic client registration for MCP hosts): 10 a minute per client address,
+  // checked before the body is read. Local dev simulates it.
+  "ratelimits": [{ "name": "MCP_REGISTER_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }],
   "observability": { "enabled": true },
   // Which version runs: /healthz answers its tag, the commit deploy.sh passes
   // with `wrangler deploy --tag <sha>` (releases lane). No new resource.

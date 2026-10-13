@@ -1,0 +1,9 @@
+{
+  "schema": "OAuthError",
+  "route": "POST /oauth/token (a wrong verifier)",
+  "status": 400,
+  "body": {
+    "error": "invalid_grant",
+    "error_description": "the code is unknown, used, expired, or does not match this request"
+  }
+}

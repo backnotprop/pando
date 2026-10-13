@@ -25,7 +25,8 @@ import { note, timeD1 } from "../timing";
 
 export type MemberRole = "owner" | "member";
 
-export type CredentialKind = "machine" | "sandbox" | "bootstrap" | "browser";
+/** "mcp": made by an MCP host's sign-in (mcp/oauth.ts), named after the client; it works only at /mcp. */
+export type CredentialKind = "machine" | "sandbox" | "bootstrap" | "browser" | "mcp";
 
 /**
  * A browser session lives while it is used: it ends after this many days
@@ -66,6 +67,8 @@ export interface NewCredentialRow {
   workos_sid?: string | null;
   /** An agent's sandbox credential: the one monorepo it works for. */
   monorepo_id?: string | null;
+  /** An MCP host's credential: the OAuth client it was made for. */
+  client_id?: string | null;
 }
 
 export interface Member {
@@ -580,8 +583,8 @@ export class Accounts {
     const at = now();
     const expires = c.kind === "browser" ? new Date(Date.now() + SESSION_IDLE_DAYS * DAY_MS).toISOString() : null;
     await this.run(
-      "INSERT INTO credentials (id, hash, login, name, kind, created_at, expires_at, workos_sid, monorepo_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-      id, c.hash, login, c.name, c.kind, at, expires, c.workos_sid ?? null, c.monorepo_id ?? null,
+      "INSERT INTO credentials (id, hash, login, name, kind, created_at, expires_at, workos_sid, monorepo_id, client_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+      id, c.hash, login, c.name, c.kind, at, expires, c.workos_sid ?? null, c.monorepo_id ?? null, c.client_id ?? null,
     );
 
     return { id, name: c.name, kind: c.kind, created_at: at, last_used_at: null, expires_at: expires };
@@ -608,8 +611,26 @@ export class Accounts {
     );
   }
 
+  /**
+   * Revoke one credential. An MCP host's credential ends the person's whole grant to that client: every
+   * credential it holds for them, and its codes not yet traded, so the next connection asks again.
+   */
   async revokeCredential(login: string, id: string): Promise<boolean> {
+    const client = await this.row<{ client_id: string }>("SELECT client_id FROM credentials WHERE login = ?1 AND id = ?2 AND kind = 'mcp' AND revoked_at IS NULL", login, id);
+
+    if (client) return (await this.revokeMcpGrant(login, client.client_id)) > 0;
+
     return (await this.run("UPDATE credentials SET revoked_at = ?1 WHERE login = ?2 AND id = ?3 AND revoked_at IS NULL", now(), login, id)) > 0;
+  }
+
+  /** End a person's grant to one MCP client: its credentials and its unused codes. The credentials ended. */
+  async revokeMcpGrant(login: string, clientId: string): Promise<number> {
+    const [revoked] = await this.batch([
+      this.st("UPDATE credentials SET revoked_at = ?1 WHERE login = ?2 AND kind = 'mcp' AND client_id = ?3 AND revoked_at IS NULL", now(), login, clientId),
+      this.st("DELETE FROM oauth_codes WHERE login = ?1 AND client_id = ?2 AND consumed_at IS NULL", login, clientId),
+    ]);
+
+    return revoked.meta.changes;
   }
 
   // ── Monorepos and members ────────────────────────────────────────────────

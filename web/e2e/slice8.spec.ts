@@ -62,7 +62,8 @@ test("slice 8: releases: the strip, the Releases tab, a release's page, Download
 
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
-    if (m.type() === "error" && !/status of (401|404)/.test(m.text())) errors.push(m.text());
+    // 412: the on-merge step's Merge, refused while the checks it started run (an answer the page shows).
+    if (m.type() === "error" && !/status of (401|404|412)/.test(m.text())) errors.push(m.text());
   });
 
   const made: Made = { machine: null, buildkite: null, names: [] };
@@ -194,6 +195,36 @@ test("slice 8: releases: the strip, the Releases tab, a release's page, Download
       await expect(page.getByRole("switch", { name: "Anyone can download projects/cli's releases" })).toBeChecked(HARD_LOAD);
       await page.goto(`${BASE}/${full}/projects/cli/releases/v0.1.0`);
       await expect(page.getByRole("region", { name: "Files" }).getByText("Anyone can download")).toBeVisible(HARD_LOAD);
+    });
+
+    await test.step("Settings: when checks run, set to On merge; a push then builds nothing, and Merge starts the checks", async () => {
+      await page.goto(`${BASE}/${full}/settings`);
+      const policy = page.getByRole("combobox", { name: "When checks run for projects/cli" });
+
+      await expect(policy).toHaveValue("every_push", HARD_LOAD);
+      await policy.selectOption("on_merge");
+      await expect.poll(async () => (await page.request.get(`${BASE}${repoApi}`)).json().then((r: { ci_policy?: string }) => r.ci_policy)).toBe("on_merge");
+      await page.reload();
+      await expect(page.getByRole("combobox", { name: "When checks run for projects/cli" })).toHaveValue("on_merge", HARD_LOAD);
+
+      const m = made.machine!;
+      const bk = made.buildkite!;
+      const repo: { clone_url: string } = await (await page.request.get(`${BASE}${repoApi}`)).json();
+      const url = repo.clone_url;
+      const dir = m.commit("cli", url, "fix-help", { "cmd/help.go": "package main\n" }, "Fix the help text");
+
+      m.push(dir, url, "fix-help");
+      const head = m.git(dir, "rev-parse", "HEAD").trim();
+
+      await page.goto(`${BASE}/${full}/projects/cli/branches/fix-help`);
+      await expect(page.getByText("Checks run when you merge")).toBeVisible(HARD_LOAD);
+      expect(bk.created.some((b) => b.commit === head)).toBe(false);
+      await page.getByRole("button", { name: "Merge", exact: true }).click();
+      await expect(page.getByText("Checks started for this merge")).toBeVisible();
+      await expect.poll(() => bk.created.some((b) => b.commit === head && b.branch === "fix-help")).toBe(true);
+      await page.goto(`${BASE}/${full}/settings`);
+      await page.getByRole("combobox", { name: "When checks run for projects/cli" }).selectOption("every_push");
+      await expect.poll(async () => (await page.request.get(`${BASE}${repoApi}`)).json().then((r: { ci_policy?: string }) => r.ci_policy)).toBe("every_push");
     });
 
     await test.step("publishing the draft while the tab is open moves Latest to it, with no reload", async () => {

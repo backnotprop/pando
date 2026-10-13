@@ -81,21 +81,24 @@ export class PandoApi {
   }
 }
 
-/** How long the merge tool waits before trying again after a 503 (Artifacts busy with other writes to the repo). */
-const MERGE_RETRY_MS = [2000, 5000];
+/** How long the merge tool waits before trying again after a 503 (Artifacts busy) or a 412 risk_pending (a head being scored: clef answers in seconds). */
+const MERGE_RETRY_MS = [2000, 5000, 10000];
 
 /**
- * A merge, tried again after a 503: Pando answers repo_busy when Artifacts is
- * busy with other writes to the repo (a push just landed, another merge), and
- * says to try again. A model may not; an agent's merge right after its push
- * should not fail on that. Any other refusal is the agent's to read.
+ * A merge, tried again after a 503 or a 412 risk_pending: Pando answers
+ * repo_busy when Artifacts is busy with other writes to the repo (a push just
+ * landed, another merge), and risk_pending while it scores a head just pushed;
+ * both say to try again. A model may not; an agent's merge right after its
+ * push should not fail on that. Any other refusal is the agent's to read.
  */
 async function mergeTrying(merge: () => Promise<Answer>): Promise<Answer> {
   for (const wait of MERGE_RETRY_MS) {
     try {
       return await merge();
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.startsWith("Pando refused (503)")) throw error;
+      const again = error instanceof Error && (error.message.startsWith("Pando refused (503)") || error.message.startsWith("Pando refused (412) risk_pending"));
+
+      if (!again) throw error;
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
@@ -220,7 +223,7 @@ export function pandoTools(api: PandoApi, spec: () => SessionSpec): ToolRegistra
     }),
     defineTool({
       name: "merge",
-      description: "Merge a branch into main through Pando, as the person who started you, with a merge commit. Pando refuses while required checks are red or still running; it is never forced. The session's own branch when left out.",
+      description: "Merge a branch into main through Pando, as the person who started you, with a merge commit. Pando refuses while required checks are red or still running, and with review_required while the branch's risk calls for a review (reviewer agents, or a person's approval): then stop, and tell the person why and what the branch page asks for. It is never forced. The session's own branch when left out.",
       parameters: Type.Object({ branch: Type.Optional(Type.String()), repo: RepoParam }),
       async execute({ branch, repo }) {
         const r = await mergeTrying(() => api.call("POST", `${api.repo(repo)}/branches/${branchOf(branch)}/merge`, "{}"));

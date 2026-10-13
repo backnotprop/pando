@@ -28,6 +28,7 @@ import { runReconcile } from "./reconcile";
 import { closingsIn, COMMITS_READ_MAX, commitClosings } from "../issues/commits";
 import { sessionCommitsIn, type SessionCommitRef } from "../sessions/commits";
 import { runCredit, type CreditMessage } from "./credit";
+import { runGuide, runReview, type ReviewJob } from "../review/run";
 
 /** A sweep covers branches pushed within this many days (an owner limit). */
 export const SWEEP_DAYS = 7;
@@ -71,6 +72,9 @@ export type FactsMessage = (
   | { type: "merge_refs"; monorepo: string; repo: string; merge: number; base: string; head: string }
   // Contributions (credit.ts): commits that reached main, a branch opened, a review.
   | CreditMessage
+  // Risk-based review (review/run.ts): score a branch head and start its reviewers; write its guided review.
+  | ({ type: "review"; monorepo: string } & ReviewJob)
+  | { type: "review_guide"; monorepo: string; repo: string; branch: string; head: string }
 ) & {
   /** The push behind this job (C25): its event waits for the commit count and head title computed here. */
   push?: { seq: number; before: string };
@@ -152,9 +156,11 @@ export class FactsDrain extends WorkerEntrypoint<Env> {
     };
 
     const idx = jobs.map((_, i) => i);
-    await pool(idx.filter((i) => jobs[i].type === "branch"), SWEEP_PARALLEL, one);
+    // One-branch jobs and review jobs (each its own head: a clef call, a guide) side by side; the rest in order.
+    const side = (t: string) => t === "branch" || t === "review" || t === "review_guide";
+    await pool(idx.filter((i) => side(jobs[i].type)), SWEEP_PARALLEL, one);
 
-    for (const i of idx.filter((i) => jobs[i].type !== "branch")) await one(i);
+    for (const i of idx.filter((i) => !side(jobs[i].type))) await one(i);
 
     return { ok, error };
   }
@@ -172,6 +178,18 @@ export async function runFacts(env: Env, m: FactsMessage): Promise<{ computed: n
     await runCredit(env, r, info, m, (next) => stub.queueCredit(next), (refs) => stub.sessionsOnMain(r.name, refs));
 
     return { computed: 0, abandoned: false };
+  }
+
+  if (m.type === "review") {
+    await runReview(env, stub, r, info, m);
+
+    return { computed: 1, abandoned: false };
+  }
+
+  if (m.type === "review_guide") {
+    await runGuide(env, stub, r, info, m);
+
+    return { computed: 1, abandoned: false };
   }
 
   if (m.type === "merge_refs") {

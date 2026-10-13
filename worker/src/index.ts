@@ -27,6 +27,7 @@ import { monorepoStub } from "./monorepo/session";
 import { signin } from "./accounts/signin";
 import { factsTestRoute } from "./monorepo/facts";
 import { checksTestRoute } from "./monorepo/checks";
+import { riskTestRoute } from "./review/test-route";
 import { hooksTestRoute } from "./monorepo/hooks";
 import { handleFeedBatch } from "./feed/consumer";
 import { handleFeed, isFeedPath } from "./feed/routes";
@@ -193,6 +194,8 @@ const worker = {
     if (url.pathname === "/v1/_meta/test") return metaTestRoute(request, env);
 
     if (url.pathname === "/v1/_checks/test") return checksTestRoute(request, env);
+
+    if (url.pathname === "/v1/_risk/test") return riskTestRoute(request, env);
 
     if (url.pathname === "/v1/_mirror/test") return mirrorTestRoute(request, env);
 

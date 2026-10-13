@@ -8,6 +8,7 @@ interface __BaseEnv_Env {
 	FEED_QUEUE: Queue;
 	HISTORY_QUEUE: Queue;
 	ARTIFACTS: Artifacts;
+	AI: Ai;
 	ASSETS: Fetcher;
 	WORKOS_CLIENT_ID: "client_01M3ZW5WYKNDQZE358DYA7VHY5";
 	DOCS_URL: "https://docs.gitpando.com";

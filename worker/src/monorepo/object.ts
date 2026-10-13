@@ -47,6 +47,9 @@ import { CiStore, type BuildsQuery, type CiRef, type IngestResult } from "../ci/
 import { ArtifactStore, type ArtifactView, type CommentView as ArtifactCommentView, type NewComment, type NewVersion, type ThreadsView, type VersionFound, type VersionView } from "../branch-artifacts/store";
 import { ReleaseStore, type DeploymentState, type DeploymentView, type FileFound, type FileSlot, type GeneratedNotes, type ReleasesPage, type ReleaseView, type TagView } from "../releases/store";
 import type { BuildView } from "../ci/store";
+import { ReviewStore, type BranchReviewOut, type ClassifiedRow, type HeadReview, type Launched, type RiskTest } from "../review/store";
+import { pusherOf } from "../review/run";
+import type { Settings as ReviewSettings } from "../review/policy";
 import type { Json } from "../parse";
 import type {
   BranchRecord,
@@ -400,6 +403,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private releases: ReleaseStore;
   /** Artifacts on branch pages and their comments (branch-artifacts/store.ts). */
   private artifacts: ArtifactStore;
+  /** Risk-based review: each branch head's score, tier, reviewers and guide (review/store.ts). */
+  private review: ReviewStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -432,6 +437,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.releases = new ReleaseStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.artifacts = new ArtifactStore(this.sql, { publish: (e) => this.publish(e) });
+    this.review = new ReviewStore(this.sql, () => this.env.RISK_REVIEW === "on");
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
     // A monorepo made before namespaces has no label yet: read it once from accounts.
@@ -552,6 +558,13 @@ export class MonorepoObject extends DurableObject<Env> {
     this.mirror?.ensureSchema();
     this.releases?.ensureSchema();
     this.artifacts?.ensureSchema();
+    this.review?.ensureSchema();
+    const vcols = this.rows<{ name: string }>("PRAGMA table_info(reviews)").map((c) => c.name);
+
+    // The agent session that posted a review, and the agent on a machine (X-Pando-Agent): neither counts as a person's approval.
+    if (!vcols.includes("session")) this.sql.exec("ALTER TABLE reviews ADD COLUMN session INTEGER");
+
+    if (!vcols.includes("agent")) this.sql.exec("ALTER TABLE reviews ADD COLUMN agent TEXT");
   }
 
   private rows<T extends Row>(query: string, ...args: SqlStorageValue[]): T[] {
@@ -1023,6 +1036,7 @@ export class MonorepoObject extends DurableObject<Env> {
     if (opened && identity) this.queueFacts({ type: "credit_one", repo, login: identity.login, kind: "branch", at, key: `b:${this.info()?.id}:${repo}:${name}:${at}` });
     events.push({ ...e, event: "push" });
     this.queueFacts({ type: "branch", repo, branch: name, head: u.new, push: seq ? { seq, before: u.old } : undefined });
+    this.beginReview(repo, name, u.new, identity);
 
     return true;
   }
@@ -1221,7 +1235,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Agent sessions (agents/store.ts; routes in agents/routes.ts) ─────────
 
-  agentCreate(input: AgentInput, identity: Identity) {
+  agentCreate(input: AgentInput, identity: Pick<Identity, "login">) {
     return this.guard(() => {
       if (input.repo !== null && !this.repoRow(input.repo)) throw new HttpError(400, "bad_request", `no repo ${input.repo}`);
 
@@ -1275,7 +1289,12 @@ export class MonorepoObject extends DurableObject<Env> {
   }
 
   agentReport(state: SessionState) {
-    return this.agents.report(state);
+    const v = this.agents.report(state);
+
+    // A reviewer agent that ended changes its branch's review state.
+    if (v && v.kind === "review" && v.repo && v.branch) this.publishBranchRow(v.repo, v.branch);
+
+    return v;
   }
 
   // ── Issues (issues/store.ts; routes in issues/routes.ts) ─────────────────
@@ -1416,19 +1435,23 @@ export class MonorepoObject extends DurableObject<Env> {
   addReview(repo: string, branch: string, head: string, verdict: ReviewVerdict, body: string | null, comments: ReviewComment[], identity: Identity) {
     const id = randomId("rv_");
     const at = now();
+    const session = this.agents.numberOf(identity.credential_id);
     this.sql.exec(
-      "INSERT INTO reviews (id, repo, branch, head, verdict, body, comments, author, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      id, repo, branch, head, verdict, body, JSON.stringify(comments), identity.login, at,
+      "INSERT INTO reviews (id, repo, branch, head, verdict, body, comments, author, created_at, session, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      id, repo, branch, head, verdict, body, JSON.stringify(comments), identity.login, at, session, identity.agent ?? null,
     );
-    const review = { id, branch, head, verdict, body, comments, author: identity.login, created_at: at };
+    const review = { id, branch, head, verdict, body, comments, author: identity.login, created_at: at, session };
     this.publish({ kind: "review", collection: "reviews", key: `${repo}/${id}`, op: "upsert", repo, ...who(identity), row: review });
+
+    // The head's review state (a reviewer posted, a person approved) is on the branch's row.
+    if (this.review.hasRow(repo, branch, head)) this.publishBranchRow(repo, branch);
     this.queueFacts({ type: "credit_one", repo, login: identity.login, kind: "review", at, key: `r:${this.info()?.id}:${id}` });
 
     return review;
   }
 
   listReviews(repo: string, branch: string) {
-    type ReviewRow = { id: string; branch: string; head: string; verdict: string; body: string | null; comments: string; author: string; created_at: string };
+    type ReviewRow = { id: string; branch: string; head: string; verdict: string; body: string | null; comments: string; author: string; created_at: string; session: number | null };
 
     // addReview is the only writer: a row whose verdict reads back as none of the three is left out.
     return this.rows<ReviewRow>("SELECT * FROM reviews WHERE repo = ? AND branch = ? ORDER BY created_at", repo, branch).flatMap((r) => {
@@ -1439,9 +1462,96 @@ export class MonorepoObject extends DurableObject<Env> {
 
       return [{
         id: r.id, branch: r.branch, head: r.head, verdict, body: r.body, comments: Array.isArray(comments) ? comments.flatMap((x) => reviewCommentOf(x) ?? []) : [],
-        author: r.author, created_at: r.created_at,
+        author: r.author, created_at: r.created_at, session: r.session ?? null,
       }];
     });
+  }
+
+  // ── Risk-based review (review/: store.ts here, run.ts in the facts drain) ──
+
+  /** A new head of a branch: its row, and its job (once per head). Not the meta layer's own repo. */
+  private beginReview(repo: string, branch: string, head: string, identity: Identity | null): void {
+    const r = this.repoRow(repo);
+
+    if (!r || r.artifacts_name === metaArtifactsName(this.info()!.id) || branch === r.default_branch || !this.review.enabled(repo)) return;
+
+    if (this.review.begin(repo, branch, head)) this.queueFacts({ type: "review", repo, branch, head, pusher: pusherOf(identity) });
+  }
+
+  /** The reviews on one head, as the gate reads them. */
+  private headReviews(repo: string, branch: string, head: string): HeadReview[] {
+    return this.rows<{ verdict: string; author: string; session: number | null; agent: string | null }>(
+      "SELECT verdict, author, session, agent FROM reviews WHERE repo = ? AND branch = ? AND head = ? ORDER BY created_at", repo, branch, head,
+    ).flatMap((v) => {
+      const verdict = verdictOf(v.verdict);
+
+      return verdict ? [{ verdict, author: v.author, session: v.session ?? null, agent: v.agent ?? null }] : [];
+    });
+  }
+
+  /** A head's review state for its row and the gate; null when the project has it off or the head was never seen. */
+  private reviewView(repo: string, branch: string, head: string) {
+    return this.review.view(repo, branch, head, this.headReviews(repo, branch, head), (n) => this.agents.statusOf(n));
+  }
+
+  /** The drain's start on a head: its project's settings and the test switch; null when there is nothing to do. */
+  reviewJob(repo: string, branch: string, head: string): { settings: ReviewSettings; test: RiskTest | null } | null {
+    if (!this.review.enabled(repo) || !this.review.classifying(repo, branch, head)) return null;
+
+    return { settings: this.review.settings(repo), test: this.env.RISK_TEST === "1" ? this.review.takeTest() : null };
+  }
+
+  reviewClassified(repo: string, branch: string, head: string, c: ClassifiedRow): boolean {
+    const first = this.review.classified(repo, branch, head, c);
+    this.review.setSensitive(repo, c.patterns);
+
+    if (first) this.publishBranchRow(repo, branch);
+
+    return first;
+  }
+
+  reviewReviewers(repo: string, branch: string, head: string, list: Launched[]): void {
+    this.review.setReviewers(repo, branch, head, list);
+    this.publishBranchRow(repo, branch);
+  }
+
+  /** A human-tier head's guided review: marked as being written, and its job queued. */
+  reviewGuideQueue(repo: string, branch: string, head: string): void {
+    this.review.setGuide(repo, branch, head, "writing", null, null);
+    this.queueFacts({ type: "review_guide", repo, branch, head });
+  }
+
+  reviewGuideState(repo: string, branch: string, head: string): string | null {
+    return this.review.guideState(repo, branch, head);
+  }
+
+  reviewSetGuide(repo: string, branch: string, head: string, state: BranchReviewOut["guide_state"], guide: BranchReviewOut["guide"], error: string | null): void {
+    this.review.setGuide(repo, branch, head, state, guide, error);
+    this.publishBranchRow(repo, branch);
+  }
+
+  /** A project's settings as the API shows them (the server's default filled in), with its sensitive paths. */
+  reviewSettings(repo: string): Contract.ReviewSettings {
+    const s = this.review.settings(repo);
+
+    return { enabled: s.enabled ?? this.env.RISK_REVIEW === "on", auto_below: s.auto_below, human_above: s.human_above, human_for_sensitive: s.human_for_sensitive, sensitive: this.review.sensitive(repo) };
+  }
+
+  setReviewSettings(repo: string, next: ReviewSettings): void {
+    this.review.setSettings(repo, next);
+
+    // Open branches' rows show the new tiers (a head's tier is decided once; the gate reads the settings at merge).
+    for (const b of this.rows<{ name: string }>("SELECT name FROM branches WHERE repo = ? AND deleted_at IS NULL AND head IS NOT NULL AND merged_head IS NOT head", repo)) this.publishBranchRow(repo, b.name);
+  }
+
+  /** The stored settings, before the server's default fills `enabled`. */
+  reviewSettingsRaw(repo: string): ReviewSettings {
+    return this.review.settings(repo);
+  }
+
+  /** Tests only (RISK_TEST): the switch for the next classifications. */
+  testRisk(t: Partial<RiskTest>): RiskTest {
+    return this.review.testSet(t);
   }
 
   // ── Statuses and the gate ────────────────────────────────────────────────
@@ -1527,6 +1637,33 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Merge ────────────────────────────────────────────────────────────────
 
+  /**
+   * Risk-based review's part of the gate: refuses with 412 risk_pending while
+   * the head is being scored, and 412 review_required while its tier's review
+   * is not done (policy.ts gateOf). An owner's force, not an agent's, goes past
+   * either: true then (recorded as forced). A head never seen (pushed before
+   * review was turned on) is scored now.
+   */
+  private reviewGate(a: MergeArgs, head: string): boolean {
+    if (!this.review.enabled(a.repo)) return false;
+    let v = this.reviewView(a.repo, a.branch, head);
+
+    if (!v) {
+      this.beginReview(a.repo, a.branch, head, a.identity);
+      v = this.reviewView(a.repo, a.branch, head);
+    }
+
+    if (!v || v.passes) return false;
+    const id = a.identity;
+    const owner = id.role === "owner" && !id.agent && id.credential_kind !== "sandbox";
+
+    if (a.force && owner) return true;
+    const byForce = a.force ? "; only an owner, not an agent, can force past a required review" : "";
+
+    if (v.state === "classifying") fail(412, "risk_pending", `the risk score for ${head.slice(0, 12)} is still being worked out; try again in a few seconds${byForce}`, { review: v });
+    fail(412, "review_required", `${v.why ?? "a review is needed"}${byForce}`, { review: v });
+  }
+
   merge(args: MergeArgs): Promise<Outcome<MergeResult>> {
     const m = this.info();
 
@@ -1583,6 +1720,8 @@ export class MonorepoObject extends DurableObject<Env> {
       if (checks.state === "pending" || checks.state === "missing") this.agents.awaitChecks(a.identity.credential_id, a.repo, a.branch);
       fail(412, "checks_not_green", `checks are ${checks.state} on ${head.slice(0, 12)}; wait, or merge with force`, { checks });
     }
+
+    const reviewForced = isMeta ? false : this.reviewGate(a, head);
 
     if (!gitwrite) fail(501, "merge_engine_unavailable", "the server-side merge engine (worker/src/gitwrite) is not wired in yet");
     const b = this.branchRecord(a.repo, a.branch);
@@ -1700,7 +1839,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
     if (out.status !== "merged") fail(502, "merge_failed", `unexpected merge result ${out.status}`);
     const at = now();
-    const forced = checks?.state !== "success";
+    const forced = checks?.state !== "success" || reviewForced;
 
     const mergeId = this.sql.exec<{ id: number }>(
       "INSERT INTO merges (repo, branch, head, base_before, merge_commit, merge_base, merged_by, forced, created_at, machine, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -2505,6 +2644,7 @@ export class MonorepoObject extends DurableObject<Env> {
         last_mergeable: !fresh && isMergeable(b.mergeable) ? b.mergeable : null,
         conflict_paths: merged ? null : this.conflictPaths(b),
         facts_at: b.facts_at ?? null,
+        review: this.reviewView(repo, b.name, b.head!),
       });
     }
 

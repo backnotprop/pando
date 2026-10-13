@@ -15,6 +15,7 @@ import { agentRoutes } from "../agents/routes";
 import { deploymentRoutes, publicFileRoutes, releaseRoutes, tagRoutes } from "../releases/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
+import { settingsPatch } from "../review/policy";
 import { assistantRoutes } from "../agents/assistant";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
@@ -729,22 +730,33 @@ api.get("/v1/monorepos/:o/:m/repos", async (c) => {
 
 api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => {
   const r = await repoOf(c);
-  const releasesPublic = await c.get("stub").releasesPublic(r.name);
+  const [releasesPublic, review] = await Promise.all([c.get("stub").releasesPublic(r.name), c.get("stub").reviewSettings(r.name)]);
 
-  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: releasesPublic } satisfies typeof Contract.Repo.Encoded);
+  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: releasesPublic, review } satisfies typeof Contract.Repo.Encoded);
 });
 
-// A project's settings (owners): releases_public, the switch "Anyone can download releases" (release files only, never code).
+// A project's settings (owners): releases_public, the switch "Anyone can download releases" (release files only, never code);
+// review, risk-based review's switch and thresholds (review/policy.ts settingsPatch). Either or both.
 api.patch("/v1/monorepos/:o/:m/repos/:r", async (c) => {
-  owner(c, "change who can download a project's releases");
+  owner(c, "change a project's settings");
   const r = await repoOf(c);
   const b = await body(c.req);
+  const stub = c.get("stub");
   const on = b.releases_public;
 
-  if (on !== true && on !== false) bad("releases_public is true (anyone can download release files) or false (members only)");
-  await c.get("stub").setReleasesPublic(r.name, on);
+  if (on === undefined && b.review === undefined) bad("releases_public (true or false), review ({enabled, auto_below, human_above, human_for_sensitive}), or both");
 
-  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: on } satisfies typeof Contract.Repo.Encoded);
+  if (on !== undefined && on !== true && on !== false) bad("releases_public is true (anyone can download release files) or false (members only)");
+  const next = b.review === undefined ? null : settingsPatch(b.review, await stub.reviewSettingsRaw(r.name));
+
+  if (next && !next.ok) bad(next.why);
+
+  if (on !== undefined) await stub.setReleasesPublic(r.name, on);
+
+  if (next?.ok) await stub.setReviewSettings(r.name, next.settings);
+  const [releasesPublic, review] = await Promise.all([stub.releasesPublic(r.name), stub.reviewSettings(r.name)]);
+
+  return c.json({ ...repoView(homeOf(c), r, await requiredKept(c.env, c.get("info"), r)), releases_public: releasesPublic, review } satisfies typeof Contract.Repo.Encoded);
 });
 
 // ── Branches ──────────────────────────────────────────────────────────────

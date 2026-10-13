@@ -47,6 +47,8 @@ export interface BranchView {
   /** The paths changed differently on both sides, from the dry run behind mergeable (or last_mergeable while stale); null unless that answer is "conflicts". */
   conflict_paths: string[] | null;
   facts_at: string | null;
+  /** Risk-based review of the head (review/store.ts); null when the project has it off or the head was never seen. */
+  review: typeof import("@pando/contract").BranchReview.Encoded | null;
 }
 
 export interface BranchList {

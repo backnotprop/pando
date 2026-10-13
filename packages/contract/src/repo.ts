@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { byActivityKind } from "./feed.ts";
 import { Count, FullName, Login, RepoName, Timestamp } from "./ids.ts";
 import { MemberRole, MonorepoEntry, ReplacedAlias } from "./monorepo.ts";
+import { ReviewSettings } from "./review.ts";
 import { CredentialKind } from "./user.ts";
 
 export const Repo = Schema.Struct({
@@ -24,6 +25,8 @@ export const Repo = Schema.Struct({
   checks_unknown: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The switch "Anyone can download releases": its release files download without signing in (never its code). Only when the repo is fetched alone (getRepo). */
   releases_public: Schema.optionalKey(Schema.Boolean),
+  /** Risk-based review: on or off, its thresholds and sensitive paths. Only when the repo is fetched alone (getRepo). */
+  review: Schema.optionalKey(ReviewSettings),
   created_at: Timestamp,
   created_by: Schema.NullOr(Login),
 });

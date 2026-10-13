@@ -24,7 +24,8 @@ import type { Env } from "../env";
 import { HttpError, now } from "../http";
 import type { ApiVars } from "../monorepo/api";
 import { hashToken, newToken } from "../monorepo/session";
-import type { Outcome } from "../monorepo/types";
+import type { MonorepoObject } from "../monorepo/object";
+import type { Identity, Outcome } from "../monorepo/types";
 import { isRecord, isText, type Json, type JsonObject } from "../parse";
 import { DEFAULT_MODEL, type SessionKind, type SessionSpec, WORKERS_AI_MODELS } from "../../../agents/src/protocol";
 import type { AgentFilters, AgentView } from "./store";
@@ -137,8 +138,8 @@ async function sessionOf(c: C, n: number): Promise<AgentView> {
 }
 
 /** The session's state, recorded as failed with this reason. */
-async function failed(c: C, s: AgentView, reason: string): Promise<AgentView> {
-  return (await c.get("stub").agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo ?? "", sandbox: "stopped", updated_at: now() })) ?? s;
+async function failed(stub: DurableObjectStub<MonorepoObject>, s: AgentView, reason: string): Promise<AgentView> {
+  return (await stub.agentReport({ number: s.number, status: "failed", reason, model: s.model, branch: s.branch ?? "", repo: s.repo ?? "", sandbox: "stopped", updated_at: now() })) ?? s;
 }
 
 /** A chat's first message as its Chats list keeps it. */
@@ -162,25 +163,44 @@ export interface LaunchInput {
   issue: number | null;
 }
 
+/** Who a session acts as and where: a request's caller, or a branch's pusher for a reviewer agent (review/run.ts). */
+export interface Launcher {
+  env: Env;
+  stub: DurableObjectStub<MonorepoObject>;
+  info: { id: string; full_name: string; kind: "monorepo" | "repo" };
+  identity: Pick<Identity, "login" | "name" | "email">;
+}
+
 /**
  * Launches a session for the caller: records it, mints its credential, starts
  * its object. Shared by POST /agents and the issue's "Address with agent".
  */
-export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
-  const agents = c.env.AGENTS;
+export function launch(c: C, input: LaunchInput): Promise<AgentView> {
+  return launchAs({ env: c.env, stub: c.get("stub"), info: c.get("info"), identity: c.get("identity") }, input);
+}
+
+/** launch(), for a launcher named outright (a reviewer agent started by a push has no request). */
+export async function launchAs(l: Launcher, input: LaunchInput): Promise<AgentView> {
+  const agents = l.env.AGENTS;
 
   if (!agents) throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents are not set up on this server");
 
-  await agentsReachable(c);
-  const info = c.get("info");
-  const identity = c.get("identity");
-  const repos = await c.get("stub").listRepos();
-  const repo = input.repo === null ? (repos.length === 1 ? repos[0] : wholeRepository(input.kind)) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
-  const session = unwrap(await c.get("stub").agentCreate({ kind: input.kind, repo: repo?.name ?? null, branch: input.branch, model: input.model, issue: input.issue, first_message: input.kind === "chat" ? input.prompt.slice(0, FIRST_MESSAGE_MAX) : null }, identity));
-  const secret = newToken();
-  const cred = await accounts(c.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox", monorepo_id: info.id });
+  try {
+    await agents.models();
+  } catch (error) {
+    console.error(`pando-agents: ${error instanceof Error ? error.message : String(error)}`);
 
-  await c.get("stub").agentSetCredential(session.number, cred.id);
+    throw new HttpError(503, "agents_unavailable", "Cloudflare-run agents cannot be reached right now; try again in a moment");
+  }
+
+  const { info, identity, stub } = l;
+  const repos = await stub.listRepos();
+  const repo = input.repo === null ? (repos.length === 1 ? repos[0] : wholeRepository(input.kind)) : (repos.find((r) => r.name === input.repo) ?? bad(`no repo ${input.repo}`));
+  const session = unwrap(await stub.agentCreate({ kind: input.kind, repo: repo?.name ?? null, branch: input.branch, model: input.model, issue: input.issue, first_message: input.kind === "chat" ? input.prompt.slice(0, FIRST_MESSAGE_MAX) : null }, identity));
+  const secret = newToken();
+  const cred = await accounts(l.env).addCredential(identity.login, { hash: await hashToken(secret), name: session.machine, kind: "sandbox", monorepo_id: info.id });
+
+  await stub.agentSetCredential(session.number, cred.id);
 
   const spec: SessionSpec = {
     number: session.number,
@@ -198,11 +218,11 @@ export async function launch(c: C, input: LaunchInput): Promise<AgentView> {
   try {
     const state = await agents.start(spec, input.prompt);
 
-    return (await c.get("stub").agentReport(state)) ?? session;
+    return (await stub.agentReport(state)) ?? session;
   } catch (error) {
-    await accounts(c.env).revokeCredential(identity.login, cred.id);
+    await accounts(l.env).revokeCredential(identity.login, cred.id);
 
-    return failed(c, session, `the agent did not start: ${error instanceof Error ? error.message : String(error)}`);
+    return failed(stub, session, `the agent did not start: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

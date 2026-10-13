@@ -107,6 +107,9 @@
   // deployed before this Worker; where it is not running, agent routes answer
   // that agents are not set up.
   "services": [{ "binding": "AGENTS", "service": "pando-agents", "entrypoint": "AgentsApi" }],
+  // Workers AI (review/): clef scores each branch head's risk, GLM-5.3 Flash writes a human-tier head's guided review.
+  // remote: wrangler dev calls the real models (the account's usage, about $0.0004 a typical scoring).
+  "ai": { "binding": "AI", "remote": true },
   // Accounts (C8): users, credentials, monorepos, members, invites. The
   // primary is in ENAM; the owner turns on read replication in the dashboard
   // (D1 > pando-accounts-dev > Settings > Enable Read Replication).

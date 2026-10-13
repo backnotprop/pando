@@ -26,6 +26,8 @@ export * from "./checks.ts";
 
 export * from "./repo.ts";
 
+export * from "./review.ts";
+
 export * from "./branch.ts";
 
 export * from "./commit.ts";

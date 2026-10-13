@@ -171,6 +171,16 @@ export class AgentStore {
     return this.must(number).credential_id;
   }
 
+  /** The session a credential belongs to (its sandbox credential), or null for any other. */
+  numberOf(credentialId: string): number | null {
+    return this.sql.exec<{ number: number }>("SELECT number FROM agent_sessions WHERE credential_id = ?", credentialId).toArray()[0]?.number ?? null;
+  }
+
+  /** A session's status, or null when there is no such session. */
+  statusOf(number: number): string | null {
+    return this.row(number)?.status ?? null;
+  }
+
   get(number: number): AgentView {
     return view(this.must(number));
   }

@@ -13,6 +13,7 @@
   "dependencies": {
     "@letta-ai/trajectory": "0.4.3",
     "@modelcontextprotocol/server": "2.2.0",
+    "@plannotator/core": "0.25.12",
     "hono": "^4.13.12",
     "smol-toml": "^1.9.0",
     "zod": "4.6.7"

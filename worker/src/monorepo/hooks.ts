@@ -199,14 +199,13 @@ export function hookView(h: HookRow) {
 /**
  * The address a receiver clones from and reports to: the one the change came in on, except a
  * `.internal` host (a cloud agent's gateway, http://pando.internal, reachable only from its
- * sandbox) or none, where it is PUBLIC_ORIGIN, the Worker's public address. Unset, the
- * stored origin stays.
+ * sandbox), where it is PUBLIC_ORIGIN, the Worker's public address. Anything else, no origin
+ * included, stays as it was: a local server never sends CI to the public address.
  */
 function hookOrigin(origin: string, publicOrigin: string | undefined): string {
-  if (!publicOrigin) return origin;
-  const host = URL.canParse(origin) ? new URL(origin).hostname : "";
+  if (!publicOrigin || !URL.canParse(origin)) return origin;
 
-  return host === "" || host.endsWith(".internal") ? publicOrigin.replace(/\/+$/, "") : origin;
+  return new URL(origin).hostname.endsWith(".internal") ? publicOrigin.replace(/\/+$/, "") : origin;
 }
 
 function urls(env: Env, p: StoredPayload, statusSha = p.head) {

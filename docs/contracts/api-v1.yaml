@@ -106,6 +106,23 @@ info:
     ends after 30 days without use, on sign-out (`POST /v1/logout`, which also
     ends the WorkOS session), or when revoked.
 
+    An MCP host (Claude Code, Codex, Cursor): `POST /mcp` is Pando's MCP
+    endpoint, and Pando is the OAuth authorization server for it. A host
+    without a token gets 401 with `WWW-Authenticate: Bearer realm="Pando",
+    resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp",
+    scope="mcp"`, reads the two well-known documents, names itself with a
+    Client ID Metadata Document (or registers at `POST /oauth/register`),
+    and opens `/oauth/authorize` in the browser: the person signs in as above
+    if needed and clicks Allow on "Connect <app> to Pando". The host trades
+    the code and its PKCE verifier at `POST /oauth/token` for a credential
+    of kind `mcp`, named after the app, owned by the person. It works at
+    `/mcp` only (never on `/v1` directly, never at the git door), lasts
+    until revoked, and is revoked in Settings (`DELETE
+    /v1/user/credentials/{id}`) or at `POST /oauth/revoke`; either ends every
+    credential that app holds for the person. These routes are outside
+    `/v1`; packages/contract/src/routes.ts (`mcp`, `oauth*`) and its
+    recordings describe them, and docs.gitpando.com/mcp the tools.
+
     Self-hosted, one person: the Worker secret `PANDO_BOOTSTRAP` makes users
     with `POST /v1/users` (it works there only). Either way, a user then makes
     more credentials (`POST /v1/user/credentials`) and monorepos
@@ -4740,7 +4757,7 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [machine, sandbox, bootstrap, browser] }
+        kind: { type: string, enum: [machine, sandbox, bootstrap, browser, mcp] }
         created_at: { type: string, format: date-time }
         last_used_at: { type: [string, "null"], format: date-time }
         expires_at: { type: [string, "null"], format: date-time, description: "Browser sessions only: the end unless used before then (each use pushes it to 30 days)." }
@@ -5619,7 +5636,7 @@ components:
         login: { type: string, description: The person. }
         credential_id: { type: string, description: "With login, the machine's key." }
         name: { type: string, description: "The credential's name: the machine as people see it." }
-        kind: { type: [string, "null"], enum: [machine, sandbox, bootstrap, browser, null] }
+        kind: { type: [string, "null"], enum: [machine, sandbox, bootstrap, browser, mcp, null] }
         connected: { type: boolean, description: "An event socket of this credential said hello and is open." }
         connected_at: { type: [string, "null"], format: date-time }
         last_activity:

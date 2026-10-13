@@ -9,6 +9,8 @@
 //   /v1/monorepos/{o}/{m}/meta/... the meta layer (live; wired at M3)
 //   /v1/integrations/buildkite/... CI services' webhooks (ci/routes.ts)
 //   /v1/...                        the API (server-git)
+//   /mcp                           the MCP endpoint (mcp/handler.ts)
+//   /.well-known/oauth-*, /oauth/* its sign-in: Pando's own OAuth authorization server (mcp/oauth.ts)
 //   any other GET                  the web app (web/, wrangler.jsonc assets)
 import contract from "../../docs/contracts/api-v1.yaml";
 import type { Env } from "./env";
@@ -33,6 +35,8 @@ import { handleIntegration, isIntegrationPath } from "./ci/routes";
 import { githubCallback } from "./mirror/routes";
 import { install, isInstallPath } from "./install";
 import { mirrorTestRoute } from "./mirror/test-route";
+import { handleMcp } from "./mcp/handler";
+import { handleOAuth, isOAuthPath } from "./mcp/oauth";
 
 export { MonorepoObject } from "./monorepo/object";
 
@@ -132,7 +136,7 @@ async function app(request: Request, env: Env): Promise<Response> {
   return page;
 }
 
-export default {
+const worker = {
   /** The queues: last commits (monorepo/files.ts) and the feed. */
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === "pando-history") {
@@ -194,6 +198,13 @@ export default {
 
     if (url.pathname === "/v1/github/callback" && request.method === "GET") return githubCallback(request, env);
 
+    if (url.pathname === "/mcp") {
+      // SAFETY: the tools' own requests to the API, made in this isolate; they carry no cf properties, which every route reads as optional.
+      return handleMcp(request, env, (r) => worker.fetch(r as IncomingRequest, env, ctx));
+    }
+
+    if (isOAuthPath(url.pathname)) return handleOAuth(request, env);
+
     if (isIntegrationPath(url.pathname)) return handleIntegration(request, env);
 
     if (isAppPath(request, url)) return app(request, env);
@@ -201,6 +212,8 @@ export default {
     return api.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env, unknown>;
+
+export default worker;
 
 /**
  * The up check: "ok", read by the docs' Status page from any origin. It also says which commit runs: the Worker

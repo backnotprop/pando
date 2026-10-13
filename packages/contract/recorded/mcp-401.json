@@ -1,0 +1,9 @@
+{
+  "schema": "OAuthError",
+  "route": "POST /mcp (no token: 401)",
+  "status": 401,
+  "body": {
+    "error": "invalid_token",
+    "error_description": "Sign in to Pando: your MCP host opens the browser for it"
+  }
+}

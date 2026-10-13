@@ -22,6 +22,7 @@ import { Release, ReleaseList, RepoSummary } from "./release.ts";
 import { HeadList, InviteList, InviteResult, MachineList, MemberList, MonorepoCreated, Repo, RepoList, WorktreeList } from "./repo.ts";
 import { BranchSessions, PersonSessions, Session, SessionAny, SessionEntries, SessionExclusions, SessionFiles, SessionList, SessionMachines, SessionMarks, SessionsDeleted } from "./session.ts";
 import { CredentialList, Me, SignedOut } from "./user.ts";
+import { AuthorizationServerMetadata, OAuthClientRegistration, OAuthError, OAuthToken, ProtectedResourceMetadata } from "./mcp.ts";
 
 const query = (params: URLSearchParams): string => {
   const text = params.toString();
@@ -874,3 +875,36 @@ export const updateArtifactComment = (owner: Login, name: MonorepoName, id: stri
 
 /** DELETE .../artifact-comments/{id} (204): your own. A root with replies keeps its place with its body gone. */
 export const deleteArtifactComment = (owner: Login, name: MonorepoName, id: string) => ({ method: "DELETE", path: artifactCommentBase(owner, name, id) }) as const;
+
+// ── MCP: the endpoint and its sign-in (worker/src/mcp; docs: site/docs, MCP). Not under /v1: hosts find them by
+// the OAuth well-known paths. Every path answers 404 where MCP_ORIGIN is unset or names another host.
+
+/**
+ * POST /mcp: the MCP endpoint (Streamable HTTP, JSON answers, no sessions; 2026-07-28, and 2025-06-18 and
+ * 2025-11-25 for 2025-era hosts). Bearer: a credential of kind mcp from the sign-in below, or a machine's.
+ * GET and DELETE answer 405. Without a valid bearer: 401 with OAuthError and
+ * `WWW-Authenticate: Bearer realm="Pando", resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp", scope="mcp"`.
+ */
+export const mcp = { method: "POST", path: "/mcp", unauthorized: OAuthError } as const;
+
+/** GET /.well-known/oauth-protected-resource/mcp (also without /mcp), CORS *. */
+export const oauthProtectedResource = { path: "/.well-known/oauth-protected-resource/mcp", response: ProtectedResourceMetadata };
+
+/** GET /.well-known/oauth-authorization-server (also with /mcp), CORS *. */
+export const oauthAuthorizationServer = { path: "/.well-known/oauth-authorization-server", response: AuthorizationServerMetadata };
+
+/** POST /oauth/register, JSON (201), CORS *: a public client; 10 a minute per address (429 after). Refusals: OAuthError. */
+export const oauthRegister = { method: "POST", path: "/oauth/register", response: OAuthClientRegistration, refusal: OAuthError } as const;
+
+/**
+ * GET /oauth/authorize?response_type=code&client_id&redirect_uri&code_challenge&code_challenge_method=S256&state&resource:
+ * a page in the browser (sign in first, then "Connect <app> to Pando"), never fetched; POST is its Allow or Deny.
+ * The answer goes back to the app's redirect URI with code (or error), state and iss. No CORS.
+ */
+export const oauthAuthorizePath = "/oauth/authorize";
+
+/** POST /oauth/token, form (grant_type=authorization_code, code, code_verifier, client_id, redirect_uri, resource), CORS *. */
+export const oauthToken = { method: "POST", path: "/oauth/token", response: OAuthToken, refusal: OAuthError } as const;
+
+/** POST /oauth/revoke, form (token) (RFC 7009): 200 always, no body, no CORS; ends the person's whole grant to that app. */
+export const oauthRevoke = { method: "POST", path: "/oauth/revoke" } as const;

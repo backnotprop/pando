@@ -46,6 +46,8 @@ export * from "./mirror.ts";
 
 export * from "./files.ts";
 
+export * from "./mcp.ts";
+
 export * from "./stream.ts";
 
 export * from "./decode.ts";

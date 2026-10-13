@@ -4,8 +4,11 @@
 //   POST  /v1/monorepos/{owner}/{name}/assistant   a new chat: {prompt, repo?, model?}
 //
 // A chat is a session of kind chat. It answers from Pando's read tools with
-// the caller's access and no sandbox; asked for a change, it starts its own
-// branch, assistant/<n>, and works as a task does. A chat is its person's
+// the caller's access and no sandbox; asked for a change, it starts a branch
+// the person names, and works as a task does. In a monorepo of more than one
+// project, a chat with no repo is about the whole repository: it reads the
+// shared files and every project, and names the project when it starts a
+// branch; with repo, it is about that project. A chat is its person's
 // alone: it is not in the Agents tab, and nobody else can open it. Follow-ups
 // and Stop are the agents routes'.
 

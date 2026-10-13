@@ -1,9 +1,10 @@
 // The message box under a conversation: what to say, a quiet line under it,
 // and Send (or Command-Enter). It is cleared once the message is taken.
-import { useState } from "react";
+// `beside`: a control next to Send (the assistant's project choice).
+import { type ReactNode, useState } from "react";
 import { button, Refusal } from "../ui/controls";
 
-export function Composer({ placeholder, hint, send }: { placeholder: string; hint: string; send: (text: string) => Promise<void> }) {
+export function Composer({ placeholder, hint, send, beside }: { placeholder: string; hint: string; send: (text: string) => Promise<void>; beside?: ReactNode }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -45,6 +46,7 @@ export function Composer({ placeholder, hint, send }: { placeholder: string; hin
       <Refusal error={error} />
       <div className="flex items-center gap-2">
         <span className="mr-auto text-[12.5px] text-ash">{hint}</span>
+        {beside}
         <button type="submit" className={button("solid", 30)} disabled={!text.trim() || busy}>
           Send
         </button>

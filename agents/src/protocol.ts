@@ -21,8 +21,15 @@ export interface SessionSpec {
   number: number;
   kind: SessionKind;
   monorepo: { id: string; full: string; kind: "repo" | "monorepo" };
-  /** The project the agent works in: its name and folder ("." in a plain repository). */
-  repo: { name: string; path: string };
+  /**
+   * The project the agent works in: its name and folder ("." in a plain
+   * repository). null: an assistant's chat about the whole repository (a
+   * monorepo with more than one project, no project chosen) until it starts a
+   * branch in one.
+   */
+  repo: Project | null;
+  /** Every project of the repository; absent in sessions started before 2026-10-13. */
+  projects?: Project[];
   /** The branch it works on; "" for a chat until the person names one (start_branch). */
   branch: string;
   /** The model's id, such as @cf/zai-org/glm-5.3-flash. */
@@ -35,6 +42,11 @@ export interface SessionSpec {
   issue: number | null;
 }
 
+export interface Project {
+  name: string;
+  path: string;
+}
+
 export interface SessionState {
   number: number;
   status: Status;
@@ -42,6 +54,7 @@ export interface SessionState {
   reason?: string;
   model: string;
   branch: string;
+  /** The project's name; "" for a chat about the whole repository. */
   repo: string;
   /** How the sandbox holds the branch, once it has started: mount (pando and ArtifactFS) or clone. */
   workspace?: "mount" | "clone";

@@ -1,0 +1,23 @@
+{
+  "schema": "AgentSession",
+  "route": "POST /v1/monorepos/{owner}/{monorepo}/assistant (no repo, two projects)",
+  "status": 201,
+  "body": {
+    "number": 1,
+    "kind": "chat",
+    "status": "working",
+    "reason": null,
+    "repo": null,
+    "branch": null,
+    "program": "pi",
+    "model": "scripted",
+    "issue": null,
+    "launched_by": "agents-s8-mv6y0cco",
+    "machine": "cloud-1",
+    "workspace": null,
+    "awaiting_checks": false,
+    "first_message": "What is the plan, and which port does the API use?\n> list_files {}\n> read_file {\"path\":\"plans/plan.md\"}\n> read_file {\"path\":\"src/server.js\",\"repo\":\"projects-api\"}\n> branch_diff {}",
+    "created_at": "2026-10-13T17:17:01.890Z",
+    "updated_at": "2026-10-13T17:17:01.905Z"
+  }
+}

@@ -4,13 +4,17 @@
 // Chats (the person's own, newest first), New chat and close. Its body: the
 // chat's conversation, with the message box fixed under it. A chat is its
 // person's alone. It reads the repository and changes something only on a
-// branch the person names (start_branch). On a phone the panel fills the
-// screen.
+// branch the person names (start_branch). In a monorepo of more than one
+// project, a new chat's box has a Project choice beside Send: the
+// repository (the default: the shared files and every project) or one
+// project; the head then names the chat's project. On a phone the panel
+// fills the screen.
 import { Popover } from "@base-ui/react/popover";
 import type { AgentSession } from "@pando/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { agentModelsQuery, agentQuery, chatsQuery, newChat, sendAgent } from "../../../../api/agents";
+import { reposQuery } from "../../../../api/queries";
 import { Composer } from "../../../../conversation/Composer";
 import { Conversation } from "../../../../conversation/Conversation";
 import { fromAgent } from "../../../../conversation/fromAgent";
@@ -18,7 +22,7 @@ import { Thread, useShownFromEnd } from "../../../../conversation/Thread";
 import { useAgentMessages } from "../../../../live/agent";
 import { fallback, useRows } from "../../../../live/rows";
 import { button } from "../../../../ui/controls";
-import { Caret } from "../../../../ui/dropdown";
+import { Caret, Select } from "../../../../ui/dropdown";
 import { Leaf, type LeafState } from "../../../../ui/Leaf";
 import { dayAndTime, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
@@ -107,10 +111,19 @@ function Chat({ chat }: { chat: AgentSession }) {
   );
 }
 
-/** The panel's head: the leaf, "Assistant", the repository and when the chat started, Chats, New chat and close. */
+/** The repository's projects, when there is more than one to choose from; else none. */
+function useProjects() {
+  const { monorepo } = useMonorepo();
+  const repos = useQuery(reposQuery(monorepo)).data ?? [];
+
+  return repos.length > 1 ? repos : [];
+}
+
+/** The panel's head: the leaf, "Assistant", the repository (and the chat's project) and when the chat started, Chats, New chat and close. */
 function Head({ chat, chosen, choose, close }: { chat: AgentSession | undefined; chosen: number | null; choose: (n: number | null) => void; close: () => void }) {
   const { monorepo } = useMonorepo();
   const clock = useNow();
+  const project = useProjects().find((r) => r.name === chat?.repo);
 
   return (
     <header className="flex items-start gap-3 border-b border-rule-faint px-4 py-3.5">
@@ -119,6 +132,7 @@ function Head({ chat, chosen, choose, close }: { chat: AgentSession | undefined;
         <h2 className="text-[15px] font-semibold text-bark">Assistant</h2>
         <p className="text-[12.5px] text-ash">
           {monorepo.full}
+          {project ? ` · ${project.path}` : ""}
           {chat ? ` · ${dayAndTime(chat.created_at, clock, true)}` : ""}
         </p>
       </div>
@@ -154,6 +168,9 @@ export function Assistant() {
   const me = useMe();
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<number | null>(null);
+  // A new chat's project: "" is the whole repository.
+  const [project, setProject] = useState("");
+  const projects = useProjects();
 
   if (!me) return null;
 
@@ -185,8 +202,20 @@ export function Assistant() {
               <Composer
                 placeholder="Ask about this repository"
                 hint={HINT}
+                beside={
+                  projects.length ? (
+                    <Select label="Project" size="small" value={project} onChange={setProject}>
+                      <option value="">The repository</option>
+                      {projects.map((r) => (
+                        <option key={r.name} value={r.name}>
+                          {r.path}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null
+                }
                 send={async (text) => {
-                  const s = await newChat(monorepo, text);
+                  const s = await newChat(monorepo, text, projects.some((r) => r.name === project) ? project : null);
 
                   qc.setQueryData(agentQuery(monorepo, s.number).queryKey, s);
                   void qc.invalidateQueries({ queryKey: chatsQuery(monorepo).queryKey });

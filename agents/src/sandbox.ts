@@ -49,6 +49,11 @@ export interface SavedSnapshot {
   at: string;
 }
 
+/** The session's working folder: its branch's worktree, or the repository's root for a chat about the whole repository. */
+export function workDir(s: { repo: { path: string } | null; branch: string }): string {
+  return s.repo ? worktreeDir(s.repo.path, s.branch) : ROOT;
+}
+
 export function worktreeDir(repoPath: string, branch: string): string {
   const folder = branch.replaceAll("/", "-");
 

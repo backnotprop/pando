@@ -388,6 +388,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private machines: Machines;
   /** Branch facts jobs, drained by RPC (facts-out.ts). */
   private factsOut: FactsOut;
+  /** Guided reviews (review/run.ts runGuide), drained the same way in an outbox of their own: one takes 20 to 60 s. */
+  private guidesOut: FactsOut;
   /** Hook deliveries, sent by RPC (hooks-out.ts). */
   private hooksOut: HooksOut;
   /** Merges into the meta layer, on their way to the live files (meta-apply.ts). */
@@ -412,6 +414,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.feed = new FeedOut(ctx, env, this.sql, () => this.info());
     this.machines = new Machines(ctx, this.sql, (e) => this.publish(e));
     this.factsOut = new FactsOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t));
+    this.guidesOut = new FactsOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), "guides_outbox");
     this.hooksOut = new HooksOut(
       ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t),
       (name) => this.repoRow(name), (repo) => this.currentMain(repo), ATTEMPTS_KEPT,
@@ -552,6 +555,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.feed.ensureSchema();
     this.machines.ensureSchema();
     this.factsOut.ensureSchema();
+    this.guidesOut.ensureSchema();
     this.hooksOut.ensureSchema();
     this.metaApply.ensureSchema();
     this.ci.ensureSchema();
@@ -1518,7 +1522,7 @@ export class MonorepoObject extends DurableObject<Env> {
   /** A human-tier head's guided review: marked as being written, and its job queued. */
   reviewGuideQueue(repo: string, branch: string, head: string): void {
     this.review.setGuide(repo, branch, head, "writing", null, null);
-    this.queueFacts({ type: "review_guide", repo, branch, head });
+    this.guidesOut.add({ type: "review_guide", repo, branch, head });
   }
 
   reviewGuideState(repo: string, branch: string, head: string): string | null {
@@ -2102,6 +2106,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
     if (closesNext !== null) this.feed.armAt(closesNext);
     await this.factsOut.alarm();
+    await this.guidesOut.alarm();
     await this.hooksOut.alarm();
     await this.mirror.alarm();
     await this.metaApply.alarm();

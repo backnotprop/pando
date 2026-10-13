@@ -1,0 +1,83 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch} (risk high or sensitive: human, reviewers posted, guide ready)",
+  "status": 200,
+  "body": {
+    "name": "pay-1",
+    "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+    "base": "c6f1585ec8abd22bd1b33926164606abff28ccd2",
+    "author": "risk-mv7cc9qc",
+    "title": null,
+    "description": null,
+    "ahead": 1,
+    "behind": 2,
+    "mergeable": "clean",
+    "checks": {
+      "sha": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+      "state": "success",
+      "required": [],
+      "missing": [],
+      "statuses": [],
+      "checks_unknown": null
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "tester-mbp",
+    "created_at": "2026-10-13T23:57:42.419Z",
+    "updated_at": "2026-10-13T23:57:42.419Z",
+    "stale": false,
+    "last_mergeable": null,
+    "conflict_paths": null,
+    "facts_at": "2026-10-13T23:57:44.344Z",
+    "review": {
+      "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+      "state": "done",
+      "score": 0.91115,
+      "level": "high",
+      "tier": "human",
+      "reasons": [
+        "Touches sensitive paths: payments/charge.ts",
+        "The model reads it as touching auth, payments, secrets, infrastructure or data (0.99)",
+        "Risk 0.91: mostly high (0.85)"
+      ],
+      "sensitive_paths": [
+        "payments/charge.ts"
+      ],
+      "model": "@cf/cloudflare/clef",
+      "tokens": 754,
+      "cost_usd": 0.00018095999999999998,
+      "error": null,
+      "reviewers": [
+        {
+          "profile": "correctness",
+          "label": "Correctness",
+          "session": 2,
+          "state": "posted",
+          "verdict": "comment"
+        },
+        {
+          "profile": "security",
+          "label": "Security",
+          "session": 1,
+          "state": "posted",
+          "verdict": "comment"
+        }
+      ],
+      "guide_state": "ready",
+      "guide": {
+        "artifact": "art_f3445fa529de8f29",
+        "version": 1,
+        "title": "Charges take a currency and refuse empty amounts"
+      },
+      "approved_by": null,
+      "passes": false,
+      "why": "a person's approval is needed on this head",
+      "classified_at": "2026-10-13T23:57:43.623Z"
+    }
+  }
+}

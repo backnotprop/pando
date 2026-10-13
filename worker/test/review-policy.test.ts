@@ -108,6 +108,7 @@ describe("clef's answer", () => {
       },
       usage: { prompt_tokens: 1000 },
     };
+
     const a = readAnswer(out, 4000, 50);
     expect(a.ok && a.c).toMatchObject({ score: 0.75, levels: { low: 0.1, medium: 0.3, high: 0.6 }, path: { choice: "human" }, sensitive: 0.9, destructive: 0.2, tokens: 1000 });
     expect(a.ok && a.c.cost_usd).toBeCloseTo(0.00024, 8);

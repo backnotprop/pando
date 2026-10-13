@@ -1,0 +1,60 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch} (risk low, auto)",
+  "status": 200,
+  "body": {
+    "name": "docs-1",
+    "head": "01d683136bfe9369860d4ca8de9a7bf6449946b4",
+    "base": "c6f1585ec8abd22bd1b33926164606abff28ccd2",
+    "author": "risk-mv7cc9qc",
+    "title": null,
+    "description": null,
+    "ahead": 1,
+    "behind": 0,
+    "mergeable": "clean",
+    "checks": {
+      "sha": "01d683136bfe9369860d4ca8de9a7bf6449946b4",
+      "state": "success",
+      "required": [],
+      "missing": [],
+      "statuses": [],
+      "checks_unknown": null
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "tester-mbp",
+    "created_at": "2026-10-13T23:57:38.978Z",
+    "updated_at": "2026-10-13T23:57:38.978Z",
+    "stale": false,
+    "last_mergeable": null,
+    "conflict_paths": null,
+    "facts_at": "2026-10-13T23:57:40.364Z",
+    "review": {
+      "head": "01d683136bfe9369860d4ca8de9a7bf6449946b4",
+      "state": "done",
+      "score": 0.0149,
+      "level": "low",
+      "tier": "auto",
+      "reasons": [
+        "Risk 0.01: mostly low (0.98)"
+      ],
+      "sensitive_paths": [],
+      "model": "@cf/cloudflare/clef",
+      "tokens": 711,
+      "cost_usd": 0.00017063999999999998,
+      "error": null,
+      "reviewers": [],
+      "guide_state": "none",
+      "guide": null,
+      "approved_by": null,
+      "passes": true,
+      "why": null,
+      "classified_at": "2026-10-13T23:57:40.355Z"
+    }
+  }
+}

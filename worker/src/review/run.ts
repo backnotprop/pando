@@ -3,7 +3,6 @@
 // agents (ai and human tiers), and queue the guided review (human tier).
 // Each head runs once; the object refuses a second write (store.ts).
 
-import type * as Contract from "@pando/contract";
 import type { Env } from "../env";
 import { putBytes } from "../hashput";
 import { HttpError } from "../http";

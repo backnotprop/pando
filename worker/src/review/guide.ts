@@ -4,7 +4,9 @@
 // is checked for coverage (every changed file placed once), repaired once if
 // nothing survives, wrapped by Plannotator's own exporter into one HTML file,
 // and kept as the branch's artifact guided-review.html. A guide that cannot
-// be written is recorded as failed; it never holds up the review.
+// be written is recorded as failed; it never holds up the review. It runs
+// from an outbox of its own (guides_outbox): a guide takes 20 to 60 s, and
+// branch facts never wait behind it.
 
 import { buildGuideSnapshot, createGuideHtml, listGuidePatchFiles, resolveGuideViewerAssets } from "@plannotator/core/guide-format";
 import { buildGuideUserMessage, GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON, validateGuideOutput } from "@plannotator/core/guide-prompt";

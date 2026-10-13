@@ -187,7 +187,6 @@ export function readAnswer(out: Json, chars: number, ms: number): Scored {
   // Its input tokens when it says (usage.prompt_tokens or input_tokens); else 4 characters a token.
   const tokens = numberIn(usage, "prompt_tokens") ?? numberIn(usage, "input_tokens") ?? Math.ceil(chars / 4);
   const choice = path?.choice;
-  const model = out.model;
 
   return {
     ok: true,
@@ -197,7 +196,8 @@ export function readAnswer(out: Json, chars: number, ms: number): Scored {
       path: { choice: isText(choice) ? choice : "", probabilities: probs },
       sensitive: noul("sensitive"),
       destructive: noul("destructive"),
-      model: isText(model) ? model : CLEF_MODEL,
+      // It names its selector ("clef"); the model id is the one called.
+      model: CLEF_MODEL,
       tokens,
       cost_usd: (tokens * USD_PER_M_INPUT) / 1_000_000,
       ms,

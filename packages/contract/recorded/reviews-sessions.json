@@ -1,0 +1,31 @@
+{
+  "schema": "ReviewList",
+  "route": "GET .../branches/{branch}/reviews (reviewer agents' reviews)",
+  "status": 200,
+  "body": {
+    "reviews": [
+      {
+        "id": "rv_bc2c45435f0da981",
+        "branch": "pay-1",
+        "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+        "verdict": "comment",
+        "body": "Looks fine.",
+        "comments": [],
+        "author": "risk-mv7cc9qc",
+        "created_at": "2026-10-13T23:57:43.828Z",
+        "session": 1
+      },
+      {
+        "id": "rv_040f2cabed37b94f",
+        "branch": "pay-1",
+        "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+        "verdict": "comment",
+        "body": "Looks fine.",
+        "comments": [],
+        "author": "risk-mv7cc9qc",
+        "created_at": "2026-10-13T23:57:43.903Z",
+        "session": 2
+      }
+    ]
+  }
+}

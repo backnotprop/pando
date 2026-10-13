@@ -13,8 +13,9 @@ import type { ObjectInfo } from "./types";
 
 type Row = Record<string, SqlStorageValue>;
 
-export const FACTS_OUTBOX_SCHEMA = `
-CREATE TABLE IF NOT EXISTS facts_outbox (
+/** An outbox's table: facts_outbox, and guides_outbox for guided reviews (slow jobs kept apart, so they never hold up branch facts). */
+const outboxSchema = (table: string) => `
+CREATE TABLE IF NOT EXISTS ${table} (
   id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL, created INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER, dead_at INTEGER, error TEXT)`;
 
@@ -66,10 +67,12 @@ export class FactsOut {
     private info: () => ObjectInfo | null,
     /** The object's one alarm, shared with the feed's outbox (feed/out.ts armAt). */
     private armAt: (t: number) => void,
+    /** facts_outbox, or guides_outbox (review/guide.ts: a model call of 20 to 60 s). */
+    private table = "facts_outbox",
   ) {}
 
   ensureSchema(): void {
-    this.sql.exec(FACTS_OUTBOX_SCHEMA);
+    this.sql.exec(outboxSchema(this.table));
   }
 
   private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
@@ -88,14 +91,14 @@ export class FactsOut {
 
     if (!id) return;
     const job: FactsJob = { ...m, monorepo: id, created: Date.now() };
-    this.sql.exec("INSERT INTO facts_outbox (body, created) VALUES (?, ?)", JSON.stringify(job), job.created);
+    this.sql.exec(`INSERT INTO ${this.table} (body, created) VALUES (?, ?)`, JSON.stringify(job), job.created);
     this.armAt(Date.now() + SAFETY_MS);
 
     if (!this.flushing) this.ctx.waitUntil(Promise.resolve().then(() => this.flush()));
   }
 
   private due(limit: number): { id: number; body: string }[] {
-    return this.rows<{ id: number; body: string }>("SELECT id, body FROM facts_outbox WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?", Date.now(), limit);
+    return this.rows<{ id: number; body: string }>(`SELECT id, body FROM ${this.table} WHERE dead_at IS NULL AND (next_at IS NULL OR next_at <= ?) ORDER BY id LIMIT ?`, Date.now(), limit);
   }
 
   /** Drain the outbox; one drain at a time. Never rejects. */
@@ -120,7 +123,7 @@ export class FactsOut {
 
   private async flushNow(): Promise<boolean> {
     if (!this.info()) {
-      this.sql.exec("DELETE FROM facts_outbox");
+      this.sql.exec(`DELETE FROM ${this.table}`);
 
       return true;
     }
@@ -134,7 +137,7 @@ export class FactsOut {
 
       try {
         if (this.testFail()) throw new Error("facts test: a failed drain");
-        // SAFETY: add() is the only writer of facts_outbox.body, always JSON.stringify of a FactsJob.
+        // SAFETY: add() is the only writer of the outbox's body column, always JSON.stringify of a FactsJob.
         const jobs = rows.map((r) => JSON.parse(r.body) as FactsJob);
         const out = released(await this.ctx.exports.FactsDrain.run(jobs));
         ok = out.ok;
@@ -152,7 +155,7 @@ export class FactsOut {
 
       for (let i = 0; i < done.length; i += 90) {
         const chunk = done.slice(i, i + 90);
-        this.sql.exec(`DELETE FROM facts_outbox WHERE id IN (${chunk.map(() => "?").join(",")})`, ...chunk);
+        this.sql.exec(`DELETE FROM ${this.table} WHERE id IN (${chunk.map(() => "?").join(",")})`, ...chunk);
       }
 
       if (failed.length) {
@@ -172,18 +175,18 @@ export class FactsOut {
     let next = Infinity;
 
     for (const id of ids) {
-      const r = this.rows<{ attempts: number }>("SELECT attempts FROM facts_outbox WHERE id = ?", id)[0];
+      const r = this.rows<{ attempts: number }>(`SELECT attempts FROM ${this.table} WHERE id = ?`, id)[0];
 
       if (!r) continue;
       const attempts = r.attempts + 1;
 
       if (attempts > delays.length) {
-        this.sql.exec("UPDATE facts_outbox SET attempts = ?, dead_at = ?, next_at = NULL, error = ? WHERE id = ?", attempts, t, error.slice(0, 500), id);
+        this.sql.exec(`UPDATE ${this.table} SET attempts = ?, dead_at = ?, next_at = NULL, error = ? WHERE id = ?`, attempts, t, error.slice(0, 500), id);
         console.error(`facts: a job of ${this.info()?.label} is dead after ${attempts} tries: ${error}`);
       } else {
         const at = t + delays[attempts - 1];
         next = Math.min(next, at);
-        this.sql.exec("UPDATE facts_outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts, at, error.slice(0, 500), id);
+        this.sql.exec(`UPDATE ${this.table} SET attempts = ?, next_at = ?, error = ? WHERE id = ?`, attempts, at, error.slice(0, 500), id);
       }
     }
 
@@ -193,10 +196,10 @@ export class FactsOut {
   /** The object's alarm, after the feed's: drain what is due, keep the alarm for the rest. */
   async alarm(): Promise<void> {
     if (!this.info()) return;
-    this.sql.exec("DELETE FROM facts_outbox WHERE dead_at IS NOT NULL AND dead_at < ?", Date.now() - DEAD_KEEP_MS);
+    this.sql.exec(`DELETE FROM ${this.table} WHERE dead_at IS NOT NULL AND dead_at < ?`, Date.now() - DEAD_KEEP_MS);
 
     if (this.due(1).length) await this.flush();
-    const later = this.rows<{ t: number | null }>("SELECT MIN(next_at) AS t FROM facts_outbox WHERE dead_at IS NULL AND next_at > ?", Date.now())[0]?.t;
+    const later = this.rows<{ t: number | null }>(`SELECT MIN(next_at) AS t FROM ${this.table} WHERE dead_at IS NULL AND next_at > ?`, Date.now())[0]?.t;
 
     if (later) this.armAt(later);
   }
@@ -228,7 +231,7 @@ export class FactsOut {
     if (this.env.FACTS_TEST === "1" && set.lose !== undefined) this.testLosses = set.lose;
 
     const rows = this.rows<FactsOutboxRow>(
-      "SELECT attempts, next_at, dead_at, error FROM facts_outbox ORDER BY id",
+      `SELECT attempts, next_at, dead_at, error FROM ${this.table} ORDER BY id`,
     );
 
     return { live: rows.filter((r) => r.dead_at === null).length, dead: rows.filter((r) => r.dead_at !== null).length, rows, losses_left: this.testLosses };

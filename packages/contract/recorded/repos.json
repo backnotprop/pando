@@ -5,14 +5,15 @@
   "body": {
     "repos": [
       {
-        "monorepo": "rec-mv5508dy/rec-mv5508dy",
+        "monorepo": "rec-mv7am39t/rec-mv7am39t",
         "name": "projects-web",
         "path": "projects/web",
         "description": null,
         "default_branch": "main",
-        "clone_url": "http://localhost:8877/rec-mv5508dy/rec-mv5508dy/projects-web.git",
-        "created_at": "2026-10-12T10:56:47.221Z",
-        "created_by": "rec-mv5508dy"
+        "clone_url": "http://localhost:8917/rec-mv7am39t/rec-mv7am39t/projects-web.git",
+        "ci_policy": "every_push",
+        "created_at": "2026-10-13T23:09:19.782Z",
+        "created_by": "rec-mv7am39t"
       }
     ]
   }

@@ -100,7 +100,7 @@ type StatusRow = {
 };
 
 function isStatusState(s: string): s is StatusRecord["state"] {
-  return s === "pending" || s === "success" || s === "failure" || s === "error";
+  return s === "pending" || s === "success" || s === "failure" || s === "error" || s === "superseded";
 }
 
 /** An outbox row's body. Null for a body this code did not write (the row is then dropped). */

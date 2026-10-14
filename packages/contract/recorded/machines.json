@@ -5,26 +5,26 @@
   "body": {
     "machines": [
       {
-        "login": "rec-mv5508dy",
-        "credential_id": "cred_4c6b567c2328042d",
+        "login": "rec-mv7am39t",
+        "credential_id": "cred_ea06961329e1ea4b",
         "name": "ana-mbp",
         "kind": "bootstrap",
         "connected": false,
         "connected_at": null,
         "last_activity": {
-          "seq": 33,
-          "at": "2026-10-12T10:56:56.907Z",
+          "seq": 32,
+          "at": "2026-10-13T23:09:31.436Z",
           "kind": "worktree.reported",
           "repo": "projects-web",
           "repo_path": "projects/web",
           "branch": "feat/ready",
           "summary": {
             "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
-            "worktree": "wt-mv5508dy"
+            "worktree": "wt-mv7am39t"
           }
         },
         "worktrees": [],
-        "updated_at": "2026-10-12T10:56:56.907Z"
+        "updated_at": "2026-10-13T23:09:31.437Z"
       }
     ]
   }

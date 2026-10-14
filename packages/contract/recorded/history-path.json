@@ -7,13 +7,13 @@
     "path": "merged.txt",
     "commits": [
       {
-        "sha": "c15a3388ac8c4714eb00a015e89e6c387070a8a9",
+        "sha": "9f2c8dd9309b611b7e9466ffee802004499f2215",
         "title": "Merge branch 'feat/merge-me'",
         "author": {
           "name": "Ana Lima",
           "email": "ana@pando.invalid"
         },
-        "at": "2026-10-12T10:56:56.000Z",
+        "at": "2026-10-13T23:09:30.000Z",
         "merged_branch": {
           "branch": "feat/merge-me",
           "title": null

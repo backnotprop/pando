@@ -9,6 +9,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 ## 2026-10-13
 
+### CI costs: a newer push cancels the old build, and each project chooses when checks run
+
+A push to a branch whose previous commit is still building now cancels that build in Buildkite and builds the new commit; the old commit's checks read superseded, not failed, and the CI page says which commit replaced it. Main's merge commit builds are never cancelled. An owner can also set, per project in Settings, when checks run: every push (as before), on merge (a push builds nothing; Merge, `pando merge` or an agent's merge tool starts the build and waits for green), or main only. For one agent pushing 1,000 times a day with 10-minute builds, that is 1,000 builds at every push, about 100 when its pushes come in bursts of ten, and one per merge on merge. See [When checks run](/ci/#when-checks-run-and-what-ci-costs) and [Limits](/limits/#ci-with-buildkite).
+
 ### CI can build a cloud agent's push
 
 A push from an agent that Pando runs on Cloudflare used to send its CI build and web hooks clone and status addresses that only the agent's sandbox could reach, so the build failed at its first `git fetch`. It now sends https://app.gitpando.com, as a push from your machine does. See [Limits](/limits/#hooks).

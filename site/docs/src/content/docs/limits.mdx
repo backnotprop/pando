@@ -139,6 +139,8 @@ Pando's side:
 - **A build's clone token reads one repo for 24 to 25 hours,** which lets Buildkite's Retry work for a day after the push. Anyone who can see the pipeline in Buildkite can see it on a job's Environment tab.
 - **A status token posts checks on its one commit for 24 hours.** Other hook deliveries' read tokens last 30 minutes.
 - **A pipeline builds each branch push and main's merge commit at each merge,** so every merge adds one build. A pipeline added before this builds pushes only; add it again to build merges.
+- **A newer push cancels builds of the branch's earlier commits from the last 24 hours, at most 50 per push** (a build older than a day has finished). A cancelled build still costs the minutes it ran. Main's merge commit builds are never cancelled. One cancel is tried per build: if Buildkite cannot be reached, that build runs to its end.
+- **When checks run is per project: every push (the default), on merge, or main only.** At every push, one agent pushing 1,000 times a day with 10-minute builds runs 1,000 builds (about 167 build-hours); with pushes in bursts of ten, the cancels leave about 100. On merge runs one build per merge asked for, plus main's merge commit. Web hooks (a GitHub Actions relay) still receive every push; the setting is for the builds Pando starts in Buildkite.
 
 Buildkite's free plan, after its 30-day trial (Buildkite's numbers, read 2026-10-03):
 

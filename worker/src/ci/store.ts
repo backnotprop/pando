@@ -15,7 +15,7 @@ import type { Identity, ObjectInfo, StatusRecord, StreamEvent } from "../monorep
 import { isOneOf, isRecord, isText, parseJson, type Json, type JsonObject } from "../parse";
 import {
   CHECK_TYPES, duration, jobCheck, normalizeBuild, normalizeJob, normalizePipeline, rank, TERMINAL, verifyWebhook,
-  type CiState, type NormBuild, type NormJob, type NormPipeline,
+  type CiState, type JobCheck, type NormBuild, type NormJob, type NormPipeline,
 } from "./buildkite";
 
 const SCHEMA = `
@@ -100,6 +100,7 @@ export type BuildRow = {
   created_at: string | null;
   started_at: string | null;
   finished_at: string | null;
+  superseded_by: string | null;
   sort_at: string;
   event_ms: number;
   first_seen_at: string;
@@ -181,6 +182,7 @@ export interface BuildView {
   finished_at: string | null;
   duration_s: number | null;
   rebuilt_from: string | null;
+  superseded_by: string | null;
 }
 
 export interface JobView {
@@ -269,6 +271,11 @@ function hexId(prefix: string, bytes: number): string {
   return prefix + [...crypto.getRandomValues(new Uint8Array(bytes))].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
+/** A superseded build's check: "#12 superseded by 1a2b3c4". */
+export function supersededCheck(number: number, by: string): JobCheck {
+  return { state: "superseded", description: `#${number} superseded by ${by.slice(0, 7)}` };
+}
+
 export function encodeCursor(sortAt: string, id: string): string {
   return btoa(`${sortAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -305,6 +312,11 @@ export class CiStore {
 
   ensureSchema(): void {
     for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) this.sql.exec(stmt);
+
+    // The newer head a build was cancelled for (a push superseded it).
+    if (!this.rows<{ name: string }>("PRAGMA table_info(ci_builds)").some((c) => c.name === "superseded_by")) {
+      this.sql.exec("ALTER TABLE ci_builds ADD COLUMN superseded_by TEXT");
+    }
   }
 
   // ── Connections ──────────────────────────────────────────────────────────
@@ -462,7 +474,7 @@ export class CiStore {
    * merge that made the commit. A build carrying another monorepo's marks is
    * not ours (one Buildkite organization can serve several monorepos).
    */
-  private map(c: ConnectionRow, b: NormBuild): { repo: string; delivery: string | null; pushed_by: string | null } | { ignore: string } {
+  private map(c: ConnectionRow, b: NormBuild): { repo: string; delivery: string | null; pushed_by: string | null; superseded_by: string | null } | { ignore: string } {
     const me = this.host.info()!.id;
     const md = b.meta_data;
 
@@ -498,7 +510,12 @@ export class CiStore {
 
     if (!pushedBy && b.commit) pushedBy = this.pusherOf(repo, b.commit);
 
-    return { repo, delivery, pushed_by: pushedBy };
+    // Its delivery's build was cancelled for a newer push before this webhook came.
+    const superseded = delivery
+      ? (this.row<{ by: string | null }>("SELECT superseded_by AS by FROM deliveries WHERE id = ? AND cancel = 'canceled'", delivery)?.by ?? null)
+      : null;
+
+    return { repo, delivery, pushed_by: pushedBy, superseded_by: superseded };
   }
 
   /** A pipeline's repo when one buildkite hook (or an earlier mapped build) says so, and only one repo. */
@@ -539,17 +556,17 @@ export class CiStore {
     return this.row<{ merged_by: string }>("SELECT merged_by FROM merges WHERE repo = ? AND merge_commit = ? ORDER BY id DESC LIMIT 1", repo, sha)?.merged_by ?? null;
   }
 
-  private insertBuild(c: ConnectionRow, b: NormBuild, m: { repo: string; delivery: string | null; pushed_by: string | null }, at: number): BuildRow {
+  private insertBuild(c: ConnectionRow, b: NormBuild, m: { repo: string; delivery: string | null; pushed_by: string | null; superseded_by: string | null }, at: number): BuildRow {
     const id = hexId("cib_", 8);
     const t = now();
     const sha = b.commit && /^[0-9a-f]{40}$/.test(b.commit) ? b.commit : null;
     this.sql.exec(
       `INSERT INTO ci_builds (id, connection_id, external_id, pipeline, number, repo, sha, branch, message, state, service_state, web_url,
-         pushed_by, delivery_id, rebuilt_from, created_at, started_at, finished_at, sort_at, event_ms, first_seen_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         pushed_by, delivery_id, rebuilt_from, created_at, started_at, finished_at, sort_at, event_ms, first_seen_at, updated_at, superseded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, c.id, b.external_id, b.pipeline, b.number, m.repo, sha, b.branch, b.message, b.state, b.service_state, b.web_url,
       m.pushed_by, m.delivery, b.meta_data.pando_rebuild_of ?? b.rebuilt_from, b.created_at, b.started_at, b.finished_at,
-      b.created_at ?? t, at, t, t,
+      b.created_at ?? t, at, t, t, m.superseded_by,
     );
     const row = this.buildRow(id)!;
     this.publishBuild(row);
@@ -653,7 +670,9 @@ export class CiStore {
     );
 
     if ((newestBuild?.n ?? build.number) > build.number) return;
-    const c = jobCheck(this.normJob(job), build.number);
+    const ran = this.normJob(job);
+    // Cancelled for a newer push: not failed, superseded (a result it reached first stands).
+    const c = build.superseded_by && job.state !== "passed" && job.state !== "failed" ? supersededCheck(build.number, build.superseded_by) : jobCheck(ran, build.number);
     const target = job.web_url ?? build.web_url;
 
     const last = this.row<{ state: string; description: string | null; app: string | null; target_url: string | null }>(
@@ -662,6 +681,24 @@ export class CiStore {
 
     if (last && last.state === c.state && last.description === c.description && last.app === BUILDKITE.app && last.target_url === target) return;
     this.host.addStatus(build.repo, build.sha, { state: c.state, context: job.step_key, target_url: target, description: c.description }, null, BUILDKITE);
+  }
+
+  /** A build Pando started for this delivery has finished, as its webhooks told (nothing to cancel). */
+  deliveryBuildFinished(deliveryId: string): boolean {
+    const b = this.row<{ state: CiState }>("SELECT state FROM ci_builds WHERE delivery_id = ? ORDER BY sort_at DESC LIMIT 1", deliveryId);
+
+    return !!b && TERMINAL.has(b.state);
+  }
+
+  /** The build a delivery started was cancelled for a newer head: its row says so, and its jobs' checks read superseded. */
+  superseded(deliveryId: string, by: string): void {
+    for (const b of this.rows<BuildRow>("SELECT * FROM ci_builds WHERE delivery_id = ? AND superseded_by IS NULL", deliveryId)) {
+      this.sql.exec("UPDATE ci_builds SET superseded_by = ?, updated_at = ? WHERE id = ?", by, now(), b.id);
+      const row = this.buildRow(b.id)!;
+      this.publishBuild(row);
+
+      for (const j of this.rows<JobRow>("SELECT * FROM ci_jobs WHERE build_id = ?", b.id)) this.check(row, j);
+    }
   }
 
   private normJob(j: JobRow): NormJob {
@@ -707,6 +744,7 @@ export class CiStore {
       finished_at: b.finished_at,
       duration_s: duration(b.started_at, b.finished_at),
       rebuilt_from: b.rebuilt_from,
+      superseded_by: b.superseded_by,
     };
   }
 

@@ -36,6 +36,9 @@ export interface ObjectInfo {
   created_at: string;
 }
 
+/** When a repo's CI builds run (repos.ci_policy): each push, only when a merge asks, or main only. */
+export type CiPolicy = "every_push" | "on_merge" | "main_only";
+
 export interface RepoRecord {
   name: string;
   path: string;
@@ -45,6 +48,8 @@ export interface RepoRecord {
   description: string | null;
   created_at: string;
   created_by: string;
+  /** Present on rows read from the object's table (listRepos); every_push when missing. */
+  ci_policy?: CiPolicy;
 }
 
 export interface BranchRecord {
@@ -227,10 +232,17 @@ export interface MetaConnection {
   connected_at: string | null;
 }
 
+/**
+ * GitHub's four states, and `superseded`: Pando's own, written when a newer
+ * push cancelled the build that was reporting it (never posted by a client).
+ * A superseded check counts as not reported.
+ */
+export type StatusState = "pending" | "success" | "failure" | "error" | "superseded";
+
 export interface StatusRecord {
   sha: string;
   context: string;
-  state: "pending" | "success" | "failure" | "error";
+  state: StatusState;
   target_url: string | null;
   description: string | null;
   /** A user's login, or `app:<slug>` / `hook:<hook id>` for a status posted with a status token or by a CI integration. */
@@ -257,6 +269,8 @@ export interface RefusalExtra {
   checks?: Checks;
   /** A merge refused with a conflict: the paths changed differently on both sides. */
   paths?: string[];
+  /** A merge refused because checks are not green, which started them (the repo's CI policy is on_merge). */
+  checks_started?: boolean;
   /** A CI service's rate limit: when to try again. */
   retry_after_ms?: number;
   /** 409 not_at_end: where the session ends, the cursor the sender resumes from (sessions/). */

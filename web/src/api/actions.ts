@@ -1,7 +1,7 @@
 // The web's writes (POST, PATCH, DELETE), each checked by the Worker for Pando's own Origin.
 import { post, postOrRefused, remove, write } from "./client";
 import type { MonorepoRef } from "./names";
-import { ErrorBody, type Login, type RepoName, Routes } from "@pando/contract";
+import { type CiPolicy, ErrorBody, type Login, type RepoName, Routes } from "@pando/contract";
 
 /** Ends this browser's session, then WorkOS's (its logout page returns to /). */
 export async function signOut(): Promise<void> {
@@ -28,6 +28,9 @@ export const merge = (m: MonorepoRef, repo: RepoName, branch: string, head: stri
 };
 
 // ── Slice 3: members, settings, your machines, CI ──────────────────────────
+
+/** When a project's CI builds run: every push, on merge, or main only (owners). */
+export const setCiPolicy = (m: MonorepoRef, repo: RepoName, policy: CiPolicy) => write(Routes.setCiPolicy(m.owner, m.name, repo), { ci_policy: policy });
 
 /** Invites by email: a person with an account joins at once (`added`); anyone else gets an invite. */
 export const invite = (m: MonorepoRef, email: string, role: "member" | "owner") => write(Routes.invite(m.owner, m.name), { email, role });

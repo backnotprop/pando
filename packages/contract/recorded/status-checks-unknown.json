@@ -3,7 +3,7 @@
   "route": "GET .../repos/{repo}/commits/{ref}/status (pando.toml broken)",
   "status": 200,
   "body": {
-    "sha": "0ae995b27b15cf3faee2b4b7dcce88447bbda393",
+    "sha": "560f880857af8a4df38365737e3ac32f80e4a469",
     "state": "unknown",
     "required": null,
     "missing": [],

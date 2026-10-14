@@ -1,0 +1,28 @@
+{
+  "schema": "Checks",
+  "route": "GET .../repos/{repo}/commits/{ref}/status (its build cancelled for a newer push: superseded, so missing)",
+  "status": 200,
+  "body": {
+    "sha": "84fb38d0de839c55b2577ed1a0938a4a2217e5e2",
+    "state": "missing",
+    "required": [
+      "ci"
+    ],
+    "missing": [
+      "ci"
+    ],
+    "statuses": [
+      {
+        "sha": "84fb38d0de839c55b2577ed1a0938a4a2217e5e2",
+        "context": "ci",
+        "state": "superseded",
+        "target_url": "https://buildkite.com/o/p/builds/2",
+        "description": "#2 superseded by 60fff73",
+        "creator": "app:buildkite",
+        "app": "buildkite",
+        "created_at": "2026-10-13T23:08:39.018Z"
+      }
+    ],
+    "checks_unknown": null
+  }
+}

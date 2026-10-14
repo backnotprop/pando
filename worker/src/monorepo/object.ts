@@ -21,7 +21,7 @@ import { DEFAULT_BRANCH, metaArtifactsName, ZERO } from "./names";
 import { STALE_GRACE_MS, type Facts } from "./facts";
 import { FactsOut, type FactsRequest, type FactsTestSet } from "./facts-out";
 import type { NextPage } from "./credit";
-import { HooksOut } from "./hooks-out";
+import { HooksOut, type Superseded } from "./hooks-out";
 import { MetaApplyOut, type MetaApplyRow } from "./meta-apply";
 import { isMergeable, type BranchList, type BranchView } from "./views";
 import { EVENT_STREAM, eventTags, parseTopics } from "./stream";
@@ -51,6 +51,7 @@ import type { Json } from "../parse";
 import type {
   BranchRecord,
   Checks,
+  CiPolicy,
   Identity,
   Kind,
   ObjectInfo,
@@ -410,6 +411,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.hooksOut = new HooksOut(
       ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t),
       (name) => this.repoRow(name), (repo) => this.currentMain(repo), ATTEMPTS_KEPT,
+      (sup) => this.buildSuperseded(sup), (delivery) => this.ci.deliveryBuildFinished(delivery),
     );
     this.metaApply = new MetaApplyOut(
       this.sql,
@@ -511,6 +513,9 @@ export class MonorepoObject extends DurableObject<Env> {
 
     // Main's head commit's title (its first line), when Pando knew it as main moved: a merge's message, or the first push's commit.
     if (!rcols.includes("default_head_title")) this.sql.exec("ALTER TABLE repos ADD COLUMN default_head_title TEXT");
+
+    // When the repo's CI builds run (types.ts CiPolicy): every push, as before, unless an owner changes it.
+    if (!rcols.includes("ci_policy")) this.sql.exec("ALTER TABLE repos ADD COLUMN ci_policy TEXT NOT NULL DEFAULT 'every_push'");
     const dcols = this.rows<{ name: string }>("PRAGMA table_info(deliveries)").map((c) => c.name);
 
     if (!dcols.includes("seq")) this.sql.exec("ALTER TABLE deliveries ADD COLUMN seq INTEGER");
@@ -1578,6 +1583,12 @@ export class MonorepoObject extends DurableObject<Env> {
       if (!isChecksUnknown(err) || !a.force) throw err;
     }
 
+    // on_merge: a push builds nothing, so the first unforced merge of a head starts its build and waits for it.
+    if (checks && !a.force && this.startMergeChecks(r, a, head, checks)) {
+      this.agents.awaitChecks(a.identity.credential_id, a.repo, a.branch);
+      fail(412, "checks_not_green", `checks started for this merge on ${head.slice(0, 12)}; they are running. Merge again when they are green`, { checks, checks_started: true });
+    }
+
     if (checks && checks.state !== "success" && !a.force) {
       // An agent session's merge waits for checks still running: Pando tells it when they are green.
       if (checks.state === "pending" || checks.state === "missing") this.agents.awaitChecks(a.identity.credential_id, a.repo, a.branch);
@@ -1878,6 +1889,75 @@ export class MonorepoObject extends DurableObject<Env> {
     return ids.map((r) => this.deliveryView(r.id)!);
   }
 
+  /** When the repo's CI builds run: every push (the default), on merge, or main only. */
+  ciPolicy(repo: string): CiPolicy {
+    const v = this.row<{ v: string }>("SELECT ci_policy AS v FROM repos WHERE name = ?", repo)?.v;
+
+    return v === "on_merge" || v === "main_only" ? v : "every_push";
+  }
+
+  setCiPolicy(repo: string, policy: CiPolicy): void {
+    this.sql.exec("UPDATE repos SET ci_policy = ? WHERE name = ?", policy, repo);
+  }
+
+  /**
+   * on_merge: the build of the branch's head, started by the merge that asks
+   * for it, through each of the repo's Buildkite hooks that has not built
+   * this head yet. Nothing when the policy is another, when the head is
+   * already green with checks reported, or when every hook built it. Answers
+   * whether a build was started.
+   */
+  private startMergeChecks(r: RepoRecord, a: MergeArgs, head: string, checks: Checks): boolean {
+    const m = this.info();
+
+    if (!m || this.ciPolicy(r.name) !== "on_merge") return false;
+
+    if (checks.state === "success" && checks.statuses.some((s) => s.state !== "superseded")) return false;
+    const b = this.branchRecord(r.name, a.branch);
+
+    const e: RepoEvent = {
+      event: "push", repo: r.name, branch: a.branch, ref: `refs/heads/${a.branch}`, before: head, head, base: null,
+      author: b?.creator ?? null, pusher: a.identity.login, title: b?.title ?? null, description: b?.description ?? null,
+      seq: null, machine: a.identity.credential_name, agent: a.identity.agent ?? null,
+    };
+
+    let started = 0;
+
+    for (const h of this.rows<HookRow>("SELECT * FROM hooks WHERE repo = ? AND type = 'buildkite'", r.name).filter((x) => wants(x, e))) {
+      const built = this.row(
+        `SELECT id FROM deliveries WHERE hook_id = ? AND repo = ? AND event IN ('push', 'branch.opened') AND superseded_by IS NULL
+           AND status IN ('queued', 'retrying', 'delivered') AND json_extract(payload, '$.branch') = ? AND json_extract(payload, '$.head') = ? LIMIT 1`,
+        h.id, r.name, a.branch, head,
+      );
+
+      if (built) continue;
+      const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.label, monorepo_id: m.id, plain: m.kind === "repo", origin: a.origin, for_merge: true };
+
+      if (this.insertDelivery(h.id, r.name, "push", null, JSON.stringify(payload))) started++;
+    }
+
+    if (started) this.hooksOut.kick();
+
+    return started > 0;
+  }
+
+  /**
+   * A build Pando started was cancelled for a newer push: its row says
+   * superseded by the new head, and the old head's Buildkite checks still
+   * pending read superseded, not failed (checks.ts: as if never reported).
+   */
+  private buildSuperseded(s: Superseded): void {
+    this.ci.superseded(s.delivery_id, s.by);
+    const latest = new Map<string, StatusRecord>();
+
+    for (const st of this.statuses(s.repo, s.head)) latest.set(st.context, st);
+
+    for (const st of latest.values()) {
+      if (st.state !== "pending" || st.app !== "buildkite") continue;
+      this.addStatus(s.repo, s.head, { state: "superseded", context: st.context, target_url: st.target_url, description: `#${s.number} superseded by ${s.by.slice(0, 7)}` }, null, { app: st.app, creator: st.creator });
+    }
+  }
+
   /** Write a delivery row per (hook, event) the events reach, and send their ids to the queue. */
   private queueDeliveries(events: RepoEvent[], origin: string | null): number {
     const m = this.info();
@@ -1887,9 +1967,23 @@ export class MonorepoObject extends DurableObject<Env> {
 
     for (const e of events) {
       const hooks = this.rows<HookRow>("SELECT * FROM hooks WHERE repo = ?", e.repo).filter((h) => wants(h, e));
+      const branchBuild = (e.event === "push" || e.event === "branch.opened") && e.branch !== (this.repoRow(e.repo)?.default_branch ?? DEFAULT_BRANCH);
 
       for (const h of hooks) {
+        let forMerge = false;
+
+        // A branch's new head: its earlier builds are cancelled, and the repo's CI policy says whether this one builds.
+        if (h.type === "buildkite" && branchBuild) {
+          const mergeWaits = this.hooksOut.supersede(h.id, e.repo, e.branch, e.head);
+          const policy = this.ciPolicy(e.repo);
+
+          if (policy === "main_only" || (policy === "on_merge" && !mergeWaits)) continue;
+          forMerge = policy === "on_merge";
+        }
+
         const payload: StoredPayload = { ...e, occurred_at: now(), monorepo: m.label, monorepo_id: m.id, plain: m.kind === "repo", origin: origin ?? "" };
+
+        if (forMerge) payload.for_merge = true;
         const id = this.insertDelivery(h.id, e.repo, e.event, e.seq ?? null, JSON.stringify(payload));
 
         if (id) ids.push(id);

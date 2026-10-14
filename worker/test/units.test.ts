@@ -213,6 +213,11 @@ describe("the merge gate", () => {
   it("is pending while a reported check is pending", () => {
     expect(combine(A, { list: [], unknown: null }, [st("ci", "pending")]).state).toBe("pending");
   });
+  it("counts a superseded check as not reported, but still lists it", () => {
+    const c = combine(A, { list: ["ci"], unknown: null }, [st("ci", "pending"), st("ci", "superseded")]);
+    expect([c.state, c.missing, c.statuses.map((x) => x.state)]).toEqual(["missing", ["ci"], ["superseded"]]);
+    expect(combine(A, { list: [], unknown: null }, [st("ci", "superseded"), st("lint", "pending")]).state).toBe("pending");
+  });
   it("is unknown, with the reason, while the required checks are", () => {
     const c = combine(A, { list: null, unknown: "pando.toml line 3: expected comma" }, [st("ci", "success")]);
     expect([c.state, c.required, c.checks_unknown]).toEqual(["unknown", null, "pando.toml line 3: expected comma"]);

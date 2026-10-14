@@ -41,6 +41,12 @@ export function BuildFacts({ b, branch }: { b: CiBuild; branch?: ReactNode }) {
       <span>{b.pipeline}</span>
       {branch ?? (b.branch ? <span className="font-mono">{b.branch}</span> : null)}
       {b.sha ? <span className="font-mono">{b.sha.slice(0, 7)}</span> : null}
+      {/* Cancelled by Pando for a newer push to its branch. */}
+      {b.superseded_by ? (
+        <span>
+          superseded by <span className="font-mono">{b.superseded_by.slice(0, 7)}</span>
+        </span>
+      ) : null}
     </>
   );
 }

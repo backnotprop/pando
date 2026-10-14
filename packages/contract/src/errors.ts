@@ -8,7 +8,8 @@ import { ArtifactComment } from "./artifact.ts";
 import { Issue, IssueComment } from "./issue.ts";
 
 /**
- * The wire body of every error response. A refused merge carries `checks` (412 checks_not_green) or `paths`
+ * The wire body of every error response. A refused merge carries `checks` (412 checks_not_green, with
+ * `checks_started` when the refusal started them: the repo's CI policy is on_merge) or `paths`
  * (409 conflicts); a stale body edit (409 edited) carries `current`, the issue or comment (or artifact comment) as it is now.
  */
 export const ErrorBody = Schema.Struct({
@@ -17,6 +18,7 @@ export const ErrorBody = Schema.Struct({
     message: Schema.String,
     paths: Schema.optionalKey(Schema.Array(Schema.String)),
     checks: Schema.optionalKey(Checks),
+    checks_started: Schema.optionalKey(Schema.Boolean),
     current: Schema.optionalKey(Schema.Union([Issue, IssueComment, ArtifactComment])),
     /** 409 not_at_end on a session's piece: where the session ends; resume from there. */
     end: Schema.optionalKey(Schema.Int),

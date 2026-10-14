@@ -4,16 +4,16 @@
   "status": 200,
   "body": {
     "name": "feat/ready",
-    "head": "c640463c9489db1bed65a0d656cb1429b06f17ae",
-    "base": "e73da8281947c127c26bf7546a343762b60d2fef",
-    "author": "rec-mv5508dy",
+    "head": "50fc2cdcccd0d33bffd41144c68424a0284071ea",
+    "base": "2570b4aabb1f7e0b308b45e53696aa6b8690c728",
+    "author": "rec-mv7am39t",
     "title": null,
     "description": null,
     "ahead": 1,
     "behind": 2,
     "mergeable": "clean",
     "checks": {
-      "sha": "c640463c9489db1bed65a0d656cb1429b06f17ae",
+      "sha": "50fc2cdcccd0d33bffd41144c68424a0284071ea",
       "state": "success",
       "required": [
         "ci/test"
@@ -21,24 +21,24 @@
       "missing": [],
       "statuses": [
         {
-          "sha": "c640463c9489db1bed65a0d656cb1429b06f17ae",
+          "sha": "50fc2cdcccd0d33bffd41144c68424a0284071ea",
           "context": "ci/test",
           "state": "success",
           "target_url": "https://ci.example/builds/1",
           "description": null,
-          "creator": "rec-mv5508dy",
+          "creator": "rec-mv7am39t",
           "app": null,
-          "created_at": "2026-10-12T10:56:55.426Z"
+          "created_at": "2026-10-13T23:09:29.313Z"
         },
         {
-          "sha": "c640463c9489db1bed65a0d656cb1429b06f17ae",
+          "sha": "50fc2cdcccd0d33bffd41144c68424a0284071ea",
           "context": "lint",
           "state": "success",
           "target_url": "https://buildkite.com/o/web/builds/1#job-lint-1",
           "description": "#1 passed in 8 s",
           "creator": "app:buildkite",
           "app": "buildkite",
-          "created_at": "2026-10-12T10:56:55.988Z"
+          "created_at": "2026-10-13T23:09:30.306Z"
         }
       ],
       "checks_unknown": null
@@ -51,11 +51,11 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "ana-mbp",
-    "created_at": "2026-10-12T10:56:52.428Z",
-    "updated_at": "2026-10-12T10:56:52.428Z",
+    "created_at": "2026-10-13T23:09:25.571Z",
+    "updated_at": "2026-10-13T23:09:25.571Z",
     "stale": false,
     "last_mergeable": null,
     "conflict_paths": null,
-    "facts_at": "2026-10-12T10:57:03.225Z"
+    "facts_at": "2026-10-13T23:09:33.603Z"
   }
 }

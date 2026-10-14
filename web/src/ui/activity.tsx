@@ -55,7 +55,7 @@ interface Sentence {
 
 const VERDICTS = { approve: "approved", request_changes: "asked for changes on", comment: "commented on" } as const;
 
-const CHECK_STATES = { success: "passed on", failure: "failed on", error: "errored on", pending: "started on" } as const;
+const CHECK_STATES = { success: "passed on", failure: "failed on", error: "errored on", pending: "started on", superseded: "superseded on" } as const;
 
 /** A CI service's name; Buildkite is the only one with a mark for the contest. */
 const appName = (app: string) => (app === "buildkite" ? "Buildkite" : app);

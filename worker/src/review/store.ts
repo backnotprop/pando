@@ -230,7 +230,7 @@ export class ReviewStore {
       error: late ? "the risk score did not arrive within a minute" : r.error,
       reviewers: reviewers.map(({ profile, label, session, state, verdict }) => ({ profile, label, session, state, verdict })),
       guide_state: isOneOf(["none", "writing", "ready", "failed"] as const, r.guide_state) ? r.guide_state : "none",
-      guide: isRecord(g) && isText(g.artifact) && isWholeNumber(g.version) ? { artifact: g.artifact, version: g.version, title: isText(g.title) ? g.title : null } : null,
+      guide: isRecord(g) && isText(g.artifact) && isWholeNumber(g.version) ? { artifact: g.artifact, version: g.version, title: isText(g.title) ? g.title : null, snapshot: isText(g.snapshot) ? g.snapshot : null } : null,
       approved_by: approval?.author ?? null,
       passes: gate.passes,
       why: gate.why,

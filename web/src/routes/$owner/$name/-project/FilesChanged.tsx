@@ -109,8 +109,8 @@ function Why({ repo, what, ends, f }: { repo: Repo; what: "branch" | "commit"; e
 
 const hasLines = (f: ChangedFile) => f.patch !== null && f.patch.includes("\n@@");
 
-/** One file's header in the list: exactly the list's header height (DiffList HEADER_HEIGHT, 44 px), opaque, as it sticks while its lines scroll by. */
-function Header({ repo, what, ends, f, open, current, toggle }: { repo: Repo; what: "branch" | "commit"; ends: DiffEnds; f: ChangedFile; open: boolean; current: boolean; toggle: () => void }) {
+/** One file's header in the list: exactly the list's header height (DiffList HEADER_HEIGHT, 44 px), opaque, as it sticks while its lines scroll by. Also the guided review's (Guide.tsx). */
+export function Header({ repo, what, ends, f, open, current, toggle }: { repo: Repo; what: "branch" | "commit"; ends: DiffEnds; f: ChangedFile; open: boolean; current: boolean; toggle: () => void }) {
   return (
     <div
       data-file-path={f.path}
@@ -172,7 +172,8 @@ function usePane() {
   return { ref, height };
 }
 
-const list =
+/** The diff list's scroller: each file a rounded card on the page. */
+export const list =
   "relative h-full overflow-y-auto overflow-x-clip overscroll-contain px-px [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:rounded-[10px] [&_diffs-container]:shadow-[0_0_0_1px_var(--rootline)] [&_diffs-container]:[contain:layout_paint_style]";
 
 /**

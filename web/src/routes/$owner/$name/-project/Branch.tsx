@@ -7,7 +7,8 @@
 // (FilesChanged.tsx). Artifacts: the documents uploaded to the branch's page,
 // and one open with its comments (-artifacts/). Risk-based review (Risk.tsx):
 // the meter under the title, the Review box under the Merge box, and the
-// Guided review over the commits on a head a person must approve.
+// Guided review over the commits on a head a person must approve, read on its
+// own tab (Guide.tsx) beside the Merge box and Approve.
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useState } from "react";
@@ -22,7 +23,7 @@ import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
 import { fallback, rereadRuns, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
-import { type ArtifactAt, branchArtifactsLink, branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
+import { type ArtifactAt, branchArtifactsLink, branchGuideLink, branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
 import { artifactListQuery } from "../../../../api/artifacts";
 import { Ref } from "../../../../ui/Ref";
 import { Tab, TabBar } from "../../../../ui/TabBar";
@@ -34,6 +35,7 @@ import { ReviewAgents, ReviewWithAgent } from "../-agents/ReviewAgent";
 import { BranchIssues } from "../-issues/BranchIssues";
 import { CheckRows } from "./Checks";
 import { FilesChanged } from "./FilesChanged";
+import { GuideTab } from "./Guide";
 import { GuidedReview, ReviewBox, RiskMeter } from "./Risk";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
 
@@ -74,13 +76,16 @@ export function firstFiles(qc: QueryClient, key: QueryKey, done: Promise<void>):
   });
 }
 
-/** `files`: the Files changed tab waits for its first screen of files (the rest stream in); Overview fetches it alongside, for the tab's count. */
-export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean) {
+/**
+ * `files`: the Files changed tab waits for its first screen of files (the rest stream in); Overview fetches it alongside,
+ * for the tab's count. `guide`: the Guided review tab, whose diffs use the same view.
+ */
+export async function loadBranch(qc: QueryClient, m: MonorepoRef, repo: Repo, branch: string, files: boolean, guide = false) {
   const query = branchDiffQuery(m, repo.name, branch);
   const diff = files ? firstFiles(qc, query.queryKey, qc.prefetchQuery(query)) : qc.prefetchQuery(query);
 
   // Files changed: the diff view and its worker load alongside the reads (-code/coloured.ts).
-  if (files) void loadColourViews();
+  if (files || guide) void loadColourViews();
 
   await Promise.all([
     qc.ensureQueryData(branchQuery(m, repo.name, branch)),
@@ -400,7 +405,7 @@ const ArtifactsTab = lazy(() => import("../-artifacts/ArtifactsTab").then((m) =>
 export const artifactsAt = (s: { tab?: string; artifact?: string; v?: string; plain?: string }): ArtifactAt | null =>
   s.tab === "artifacts" ? { artifact: s.artifact, v: s.v, plain: s.plain } : null;
 
-export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo: Repo; branch: string; files: boolean; sessions: boolean; artifacts: ArtifactAt | null }) {
+export function BranchPage({ repo, branch, files, sessions, guide, artifacts }: { repo: Repo; branch: string; files: boolean; sessions: boolean; guide: boolean; artifacts: ArtifactAt | null }) {
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
 
@@ -443,7 +448,8 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
         <RiskMeter b={b} />
       </div>
       <TabBar label="Branch">
-        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files && !sessions && !artifacts} label="Overview" />
+        <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files && !sessions && !guide && !artifacts} label="Overview" />
+        {guide || (b.review && b.review.guide_state !== "none") ? <Tab link={branchGuideLink(monorepo.full, repo.path, branch)} current={guide} label="Guided review" /> : null}
         {on?.sessions.length ? <Tab link={branchSessionsLink(monorepo.full, repo.path, branch)} current={sessions} label="Sessions" count={on.sessions.length} /> : null}
         <Tab link={branchArtifactsLink(monorepo.full, repo.path, branch)} current={!!artifacts} label="Artifacts" count={uploaded || undefined} />
         <Tab link={branchLink(monorepo.full, repo.path, branch, true)} current={files} label="Files changed" count={changed} />
@@ -454,6 +460,8 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
         </Suspense>
       ) : files ? (
         <FilesTab repo={repo} branch={branch} />
+      ) : guide ? (
+        <GuideTab repo={repo} b={b} aside={<Aside repo={repo} b={b} live={checksLive} />} />
       ) : sessions ? (
         <BranchSessionsTab repo={repo} branch={branch} merged={b.state === "merged"} on={on} commits={commits.commits} />
       ) : (

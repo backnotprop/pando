@@ -4,16 +4,16 @@
   "status": 200,
   "body": {
     "name": "comment-on-charge",
-    "head": "ea7c8d07198074480bb6a04d66466b49ff2ca4dc",
-    "base": "4306d30ecca58c2a22eb827c84e61c3f2f3fb824",
-    "author": "risk-mv7cvr18",
+    "head": "08be8ad2b13339b03891921ec8f009095e1ffd4e",
+    "base": "935656e82279651910ce078c4118ed6cad943747",
+    "author": "risk-mv8evod6",
     "title": null,
     "description": null,
     "ahead": 1,
     "behind": 0,
     "mergeable": "clean",
     "checks": {
-      "sha": "ea7c8d07198074480bb6a04d66466b49ff2ca4dc",
+      "sha": "08be8ad2b13339b03891921ec8f009095e1ffd4e",
       "state": "success",
       "required": [],
       "missing": [],
@@ -28,14 +28,14 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "tester-mbp",
-    "created_at": "2026-10-14T00:12:49.463Z",
-    "updated_at": "2026-10-14T00:12:49.463Z",
+    "created_at": "2026-10-14T17:56:32.904Z",
+    "updated_at": "2026-10-14T17:56:32.904Z",
     "stale": false,
     "last_mergeable": null,
     "conflict_paths": null,
-    "facts_at": "2026-10-14T00:12:50.283Z",
+    "facts_at": "2026-10-14T17:56:34.244Z",
     "review": {
-      "head": "ea7c8d07198074480bb6a04d66466b49ff2ca4dc",
+      "head": "08be8ad2b13339b03891921ec8f009095e1ffd4e",
       "state": "done",
       "score": 0,
       "level": "low",
@@ -55,7 +55,7 @@
       "approved_by": null,
       "passes": true,
       "why": null,
-      "classified_at": "2026-10-14T00:12:50.610Z"
+      "classified_at": "2026-10-14T17:56:34.238Z"
     }
   }
 }

@@ -166,17 +166,24 @@ Plannotator's own pieces from `@plannotator/core` 0.25.12: `GUIDE_REVIEW_PROMPT`
 `GUIDE_SCHEMA_JSON` and `buildGuideUserMessage` for the call;
 `validateGuideOutput` (lenient) for coverage; one repair call ("fix the
 structure, never the content") if nothing survives, then no guide (recorded,
-never blocking); `buildGuideSnapshot` and `createGuideHtml` for one HTML
-file, stored as the branch artifact `guided-review.html` by Pando. Guides
+never blocking); `buildGuideSnapshot` and `createGuideHtml` for the files,
+stored as the branch artifact `guided-review.html`: one version with two
+files, Plannotator's HTML export (for download) and the snapshot it wraps,
+`guided-review.json` (GuideSnapshotV1), named by the review's
+`guide.snapshot`. Guides
 run from an outbox of their own (`guides_outbox`, the facts outbox's code
 with another table), so branch facts never wait behind one. Measured: 24
 to 75 s for one small branch, once over 120 s (the wait is now 180 s). The
-branch page's "Guided review" panel opens it in the artifacts viewer
-(Plannotator's HtmlViewer). There, page scripts do not run, so it shows the
-export's own plain version (title, intent, chapters, each file with its
-summary); downloaded, the file loads Plannotator's full viewer from
-guides.show. No npm guide viewer exists (packages/guide-viewer is
-unpublished). The guide says where the risk sits; it never rates it.
+branch page's **Guided review** tab (`?tab=review`, web
+`-project/Guide.tsx`, guide-viewer lane 2026-10-14) draws the snapshot with
+Pando's own pieces, in Pando's themes: the title and intent, the sections
+in order with their overviews (Markdown as issues show it), each file's
+summary over its diff in Files changed's own list (`-code/DiffList.tsx`,
+Pierre's CodeView, one file per card, drawn as it nears the window), cut
+from the snapshot's patch with Plannotator's parser (`ui/doc/guide.ts`).
+Sections tick as reviewed (kept in the browser by the guide's version) and
+fold; the Merge box and Risk review (Approve) sit beside it. The Overview's
+panel links to the tab. The guide says where the risk sits; it never rates it.
 
 ## On screen
 

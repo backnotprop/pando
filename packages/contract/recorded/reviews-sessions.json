@@ -5,26 +5,26 @@
   "body": {
     "reviews": [
       {
-        "id": "rv_804bf903b6b80ac3",
+        "id": "rv_f8a5d832d74a0c66",
         "branch": "charge-refuse-empty",
-        "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
+        "head": "c8f66578a958481db4f04da186a347e0bba73648",
         "verdict": "comment",
         "body": "Looks fine.",
         "comments": [],
-        "author": "risk-mv7cvr18",
-        "created_at": "2026-10-14T00:13:01.236Z",
-        "session": 4
+        "author": "risk-mv8evod6",
+        "created_at": "2026-10-14T17:56:50.256Z",
+        "session": 3
       },
       {
-        "id": "rv_1b4321e813bfc54d",
+        "id": "rv_57b695a9a8ee3683",
         "branch": "charge-refuse-empty",
-        "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
+        "head": "c8f66578a958481db4f04da186a347e0bba73648",
         "verdict": "comment",
         "body": "Looks fine.",
         "comments": [],
-        "author": "risk-mv7cvr18",
-        "created_at": "2026-10-14T00:13:01.273Z",
-        "session": 3
+        "author": "risk-mv8evod6",
+        "created_at": "2026-10-14T17:56:50.267Z",
+        "session": 4
       }
     ]
   }

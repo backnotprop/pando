@@ -9,8 +9,8 @@ import { type QueryClient, useQuery, useQueryClient, useSuspenseQuery } from "@t
 import { notFound } from "@tanstack/react-router";
 import { isMissing } from "../../../../api/client";
 import type { MonorepoRef } from "../../../../api/names";
-import { commitDiffQuery, commitQuery, repoKey } from "../../../../api/projects";
-import { useRows } from "../../../../live/rows";
+import { commitDiffQuery, commitQuery } from "../../../../api/projects";
+import { rereadRuns, useRows } from "../../../../live/rows";
 import { Avatar } from "../../../../ui/Avatar";
 import { CopyButton, Lnk, SectionHead } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
@@ -158,7 +158,8 @@ export function CommitPage({ repo, sha: ref }: { repo: Repo; sha: string }) {
   // Its checks come live: a status on it reads the page again (live/rows.ts), its CI jobs patch their runs; all read once more when the socket opens.
   const live = useRows(monorepo, [`repo:${repo.name}`], () => {
     void qc.invalidateQueries({ queryKey: query.queryKey, exact: true });
-    void qc.invalidateQueries({ queryKey: [...repoKey(monorepo, repo.name), "runs"] });
+    // Its runs too, keeping any job or build frame that lands while they are read.
+    void rereadRuns(qc, monorepo, repo.name);
   });
 
   const page = useSuspenseQuery(query).data;

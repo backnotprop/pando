@@ -8,7 +8,7 @@
 // (required checks unknown, and why); then a rename (the old name
 // redirects) and a delete with the typed confirmation. No page polls
 // while its socket is up. Real Worker, real git, real browser.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type WebSocket as PageSocket, type Response, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
 import { BASE, browserPost, ciStatus, HARD_LOAD, Machine, nextSignIn } from "./seed";
 
@@ -268,12 +268,32 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       const bk = buildkite();
 
       bk.logs.set("job-ci", "\u001b_bk;t=1759500000000\u0007$ npm test\n");
+      // The page's rows are live once its socket's first caught_up has read the check runs again (live/rows.ts
+      // rereadRuns): a read of this commit's runs answered after that frame. Webhooks sent before it would race it.
+      let caughtUp = false;
+
+      let reread = false;
+
+      const onSocket = (ws: PageSocket) => {
+        if (ws.url().includes("topics=repo%3Aprojects-web")) ws.on("framereceived", (f) => (caughtUp ||= String(f.payload).includes('"type":"caught_up"')));
+      };
+
+      const countRuns = (r: Response) => {
+        const u = new URL(r.url());
+
+        if (caughtUp && r.request().method() === "GET" && u.pathname.endsWith("/ci/builds") && u.searchParams.get("sha") === sha) reread = true;
+      };
+
+      page.on("websocket", onSocket);
+      page.on("response", countRuns);
       await page.goto(`${BASE}/${full}/projects/web/branches/feature`);
       const checks = page.getByRole("list", { name: "Checks" });
       const typecheck = checks.getByRole("listitem").filter({ hasText: "typecheck" });
 
       // The check rows' builds and jobs come as rows on the page's socket: no read of them once it is up.
-      await page.waitForTimeout(2000);
+      await expect.poll(() => reread, { timeout: 30_000 }).toBe(true);
+      page.off("websocket", onSocket);
+      page.off("response", countRuns);
       runsReads.from();
       branchReads.from();
       await bk.send("build.scheduled", "web-ci", 7, b7());

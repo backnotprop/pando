@@ -18,7 +18,7 @@ import { CheckMark } from "../../../../ui/activity";
 import { Avatar } from "../../../../ui/Avatar";
 import { button, Empty, SectionHead, useCopy } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
-import { fallback, useRows } from "../../../../live/rows";
+import { fallback, rereadRuns, useRows } from "../../../../live/rows";
 import { useArrivals } from "../../../../ui/arrival";
 import { type ArtifactAt, branchArtifactsLink, branchLink, branchSessionsLink, codeBlobLink, commitLink, ownerLink } from "../../../../ui/paths";
 import { artifactListQuery } from "../../../../api/artifacts";
@@ -396,7 +396,8 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
     void qc.invalidateQueries({ queryKey: branchQuery(monorepo, repo.name, branch).queryKey, exact: true });
     // A diff still streaming in is the head's own: it goes on rather than starting over (a large one takes a while the first time).
     void qc.invalidateQueries({ queryKey: branchDiffQuery(monorepo, repo.name, branch).queryKey, exact: true }, { cancelRefetch: false });
-    void qc.invalidateQueries({ queryKey: [...repoKey(monorepo, repo.name), "runs"] });
+    // Its runs too, keeping any job or build frame that lands while they are read.
+    void rereadRuns(qc, monorepo, repo.name);
   });
 
   const b = useSuspenseQuery({ ...branchQuery(monorepo, repo.name, branch), refetchInterval: fallback(live) }).data;

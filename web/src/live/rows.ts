@@ -73,7 +73,48 @@ function patchBuild(qc: QueryClient, m: MonorepoRef, b: CiBuild) {
   );
 
   // A branch page at this commit: the build joins its checks' runs.
-  if (b.sha) qc.setQueryData<CheckRuns>([...repoKey(m, b.repo), "runs", b.sha], (r) => r && { builds: new Map(r.builds).set(b.id, b), runs: rebuild(r.runs, b) });
+  if (b.sha) patchRuns(qc, [...repoKey(m, b.repo), "runs", b.sha], (r) => ({ builds: new Map(r.builds).set(b.id, b), runs: rebuild(r.runs, b) }));
+}
+
+/** A live frame's change to a commit's check runs. */
+type RunsPatch = (r: CheckRuns) => CheckRuns;
+
+/**
+ * Patches applied to check runs while a re-read of them is in flight, by
+ * query key: its answer was read before some of them landed, so they are
+ * applied again on top of it (rereadRuns). Frames come in order, so applying
+ * one twice ends where the frames do.
+ */
+const duringReread = new Map<string, RunsPatch[]>();
+
+function patchRuns(qc: QueryClient, key: readonly unknown[], patch: RunsPatch) {
+  qc.setQueryData<CheckRuns>(key, (r) => r && patch(r));
+  duringReread.get(JSON.stringify(key))?.push(patch);
+}
+
+/**
+ * A repo's check runs read again (a page's first caught_up, or a resync),
+ * without letting the answer undo a live frame that came while it was read:
+ * the frames applied meanwhile are applied again on top of the answer.
+ */
+export async function rereadRuns(qc: QueryClient, m: MonorepoRef, repo: RepoName): Promise<void> {
+  const prefix = [...repoKey(m, repo), "runs"];
+  const keys = qc.getQueriesData<CheckRuns>({ queryKey: prefix }).map(([key]) => JSON.stringify(key)).filter((k) => !duringReread.has(k));
+
+  for (const k of keys) duringReread.set(k, []);
+
+  try {
+    await qc.invalidateQueries({ queryKey: prefix });
+  } finally {
+    for (const [key] of qc.getQueriesData<CheckRuns>({ queryKey: prefix })) {
+      const k = JSON.stringify(key);
+      const patches = keys.includes(k) ? duringReread.get(k) : undefined;
+
+      if (patches?.length) qc.setQueryData<CheckRuns>(key, (r) => r && patches.reduce((acc, patch) => patch(acc), r));
+    }
+
+    for (const k of keys) duringReread.delete(k);
+  }
 }
 
 /** A build's own fields changed: the runs that are its jobs carry the new build. */
@@ -89,10 +130,12 @@ function patchJob(qc: QueryClient, m: MonorepoRef, repo: RepoName | null, buildI
 
   // Each branch page whose commit this build is of: the job reports its check, if it is the newest.
   for (const [key, r] of qc.getQueriesData<CheckRuns>({ queryKey: [...repoKey(m, repo), "runs"] })) {
-    const build = r?.builds.get(buildId);
+    if (!r?.builds.has(buildId)) continue;
+    patchRuns(qc, key, (runs) => {
+      const build = runs.builds.get(buildId);
 
-    if (!r || !build || !reports(job, build, r.runs.get(check))) continue;
-    qc.setQueryData<CheckRuns>(key, { builds: r.builds, runs: new Map(r.runs).set(check, { job, build }) });
+      return build && reports(job, build, runs.runs.get(check)) ? { builds: runs.builds, runs: new Map(runs.runs).set(check, { job, build }) } : runs;
+    });
   }
 }
 

@@ -8,6 +8,14 @@ review, on Cloudflare.
 
 ## The flow, per branch head
 
+0. **Comments and docs only: auto by rule, no clef call** (policy.ts
+   `commentsAndDocsOnly`). Every changed file is `.md`, `.mdx` or `.txt`,
+   or a modified file of a known language whose changed lines are all
+   comments (`//`, `#`, `/* */`, `<!-- -->` by file type) or blank. A new,
+   deleted, renamed or binary code file, a shebang, an unknown file type, and
+   a hunk that starts inside a comment it does not show are code. Sensitive
+   paths count for code only, so a comment fix in `payments/` is auto. The
+   owner: "low risk things like comments only never get flagged".
 1. **A push to a branch that is not main** writes a `review` job to the
    monorepo object's facts outbox, in the same step as the push (the path the
    branch facts already take). One job per (repo, branch, head): a new head
@@ -37,7 +45,12 @@ review, on Cloudflare.
 - `questions`: `risk` (score; levels low, medium, high with the owner's
   criteria), `review_path` (choice auto / ai / human, stored and shown, not
   the decider), `sensitive` (noul: touches auth, payments, secrets, infra,
-  data), `destructive` (noul: deletes or rewrites more than it adds).
+  data), `destructive` (noul: deletes or rewrites more than it adds),
+  `critical` (noul: changes who can do what, moves money, deletes stored
+  data, handles secrets, changes a schema or migration, or the rules for
+  merging or deploying). The risk question names those critical kinds so
+  the model weighs them wherever they are (the owner: "critical types of
+  functionality accurately get flagged").
 - One call per head. Cost: input tokens x $0.24 per million; output free.
 - clef fails, times out (20 s) or is rate limited: the row says
   `unknown`, the tier is `human`. Never `auto` on unknown. No retry: the next
@@ -105,6 +118,38 @@ The server's default for a repo with no setting is `RISK_REVIEW` ("on" or
 off). Deployed: `--var RISK_REVIEW:on` in deploy.sh. Local servers: off, so
 other lanes' suites make no clef calls and launch no sessions.
 
+## Calibration: real clef on Pando's own history (2026-10-13)
+
+`worker/test/risk-calibrate.mjs` scores real commits (some cut to the named
+files) as a push would, through `/v1/_risk/score` (RISK_TEST only). Default
+thresholds and sensitive paths. 9 clef calls, $0.0038 in all, $0.00042 a
+call (1,113 to 3,069 tokens).
+
+| Change | Commit | Files, lines | Rule or clef score | critical | Sensitive path | Tier | Expected |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Comment fix (a test's note) | 96f8ca6 | 1, 8 | rule: comments and docs |  | no | auto | auto |
+| Blank lines only (spacing) | 593d467 | 1, 2 | rule: comments and docs |  | no | auto | auto |
+| Docs page (mac/README.md) | 69e1a44 | 1, 9 | rule: comments and docs |  | no | auto | auto |
+| Copy change (landing page words) | 321a470 | 1, 2 | 0.05 | 0.01 | no | auto | auto |
+| Test only (install.mjs retry) | 1850302 | 1, 13 | 0.20 | 0.02 | no | auto | auto |
+| Web styling (artifacts tab on a phone) | 4263e95 | 1, 4 | 0.06 | 0.01 | no | auto | auto |
+| Agents' merge tool retries a 503 | 0acf094 | 1, 24 | 0.40 | 0.29 | no | ai | ai |
+| WorkOS sign-in (signin.ts as added) | b6f60e5 | 1, 40 | 0.90 | 0.97 | no | human | human |
+| Sign-out page removed (logout route) | 1209fbf | 3, 25 | 0.71 | 0.75 | no | human | human |
+| MCP OAuth server (oauth, consent, credentials) | 99e5057 | 4, 570 | 0.93 | 0.98 | no | human | human |
+| Migration 0010 (MCP OAuth tables) | 99e5057 | 1, 48 | 0.95 | 0.98 | yes | human | human |
+| Merge gate fails closed on a broken pando.toml | 86ea53e | 2, 47 | 0.71 | 0.91 | no | human | human |
+
+Every case lands in its expected tier, and no critical change scored
+under 0.70. Two critical ones sit just above it (the sign-out change and
+the merge-gate change, both 0.71), so the margin is thin. **Proposed, not
+built (the owner's call):** a functionality rule, `critical >= 0.8` makes
+a head human whatever its score. It would hold the merge-gate change
+(critical 0.91) with room, not the sign-out change (0.75), and it moves
+none of the low or medium cases (their `critical` is 0.29 or less). The
+other lever is `human_above` 0.65, which catches both but pulls more
+medium changes to a person.
+
 ## Guided review (human tier)
 
 One Workers AI call on the Worker (`@cf/zai-org/glm-5.3-flash`, the
@@ -114,7 +159,10 @@ Plannotator's own pieces from `@plannotator/core` 0.25.12: `GUIDE_REVIEW_PROMPT`
 `validateGuideOutput` (lenient) for coverage; one repair call ("fix the
 structure, never the content") if nothing survives, then no guide (recorded,
 never blocking); `buildGuideSnapshot` and `createGuideHtml` for one HTML
-file, stored as the branch artifact `guided-review.html` by Pando. The
+file, stored as the branch artifact `guided-review.html` by Pando. Guides
+run from an outbox of their own (`guides_outbox`, the facts outbox's code
+with another table), so branch facts never wait behind one. Measured: 24
+to 75 s for one small branch, once over 120 s (the wait is now 180 s). The
 branch page's "Guided review" panel opens it in the artifacts viewer
 (Plannotator's HtmlViewer). There, page scripts do not run, so it shows the
 export's own plain version (title, intent, chapters, each file with its
@@ -141,8 +189,18 @@ unpublished). The guide says where the risk sits; it never rates it.
 | Lines per hunk sent | 20 | the start of each change; the cap stays for many files |
 | Files named | 300 | past that the count and the sensitive matches only |
 | Reviewer sessions | 2 per head on ai and human | each is a container; profiles are data, more later |
-| Guide diff sent | 400,000 characters | GLM-5.3 Flash's context; larger diffs get no guide |
+| Guide diff sent | 200,000 characters (about 50,000 tokens) | inside GLM-5.3 Flash's context with room for the answer; larger diffs get no guide |
+| Guide wait | 180 s a call, up to 2 calls | measured 24 to 75 s; one call ran past 120 s |
 | clef wait | 20 s | then unknown, human |
+
+## Measured on the lane's server
+
+- clef answers in 0.2 to 0.4 s; 700 to 3,100 input tokens a push here:
+  $0.00017 to $0.00074 a classification. The e2e suite's three real calls
+  cost $0.0007.
+- The suite (agents/test/risk-review.mjs, 35 checks) runs every tier with
+  real reviewer sessions on the scripted model in containers, real clef on
+  the comment, copy, permission and payments branches, and the real guide.
 
 ## Considered, not needed for the 14th
 

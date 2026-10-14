@@ -157,10 +157,10 @@ type ListData = InfiniteData<AgentSessionList, number>;
 /**
  * A session's row came on the socket (agent.updated): it replaces the row in
  * every list that shows it, keeping the branch facts the list read (the
- * event's row has none). A new session, or a state change that moves the
- * counts, has the lists read again, with the tab's count.
+ * event's row has none). Answers whether the lists must be read again, with
+ * the tab's counts: a new session, or a state change that moves the counts.
  */
-export function applyAgentRow(qc: QueryClient, m: MonorepoRef, row: AgentSession) {
+export function applyAgentRow(qc: QueryClient, m: MonorepoRef, row: AgentSession): boolean {
   let known = false;
 
   for (const [key, data] of qc.getQueriesData<ListData>({ queryKey: listKey(m) })) {
@@ -179,5 +179,5 @@ export function applyAgentRow(qc: QueryClient, m: MonorepoRef, row: AgentSession
     qc.setQueryData<ListData>(key, { ...data, pages });
   }
 
-  if (!known) void qc.invalidateQueries({ queryKey: agentsKey(m) });
+  return !known;
 }

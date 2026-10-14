@@ -128,8 +128,10 @@ test("agents, piece 1: the Agents tab, New agent on a new and an existing branch
     // ── The bar's counts and filters ──
     const bar = page.getByRole("navigation", { name: "State" });
 
+    // #1 was stopped, and stays stopped: it counts in All, not in Waiting (only #2 waits for her).
+    await expect(row(page, 1)).toContainText("Stopped");
     await expect(bar.getByRole("link", { name: /All/ })).toContainText("2");
-    await expect(bar.getByRole("link", { name: /Waiting/ })).toContainText("2");
+    await expect(bar.getByRole("link", { name: /Waiting/ })).toContainText("1");
     await bar.getByRole("link", { name: /Working/ }).click();
     await expect(page).toHaveURL(/status=working/);
     await expect(page.getByText("No agents match.")).toBeVisible();

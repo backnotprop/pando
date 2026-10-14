@@ -79,7 +79,7 @@ this was found" is folded at the end.
   one action: ask the assistant to explain what the code does.
 - Failed: the session's reason in one sentence, what was found kept.
 - Ranges: a prompt can be long (clamp to 6 lines with "Show all"); a file
-  excerpt is at most 12 lines; a question is at most 2,000 characters
+  excerpt is at most 16 lines; a question is at most 2,000 characters
   (titles clamp at 3 lines, assumed).
 
 ## 6. Interaction and layout

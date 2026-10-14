@@ -77,7 +77,7 @@ export const MetaCard = Schema.Struct({
   machine: Schema.String,
   agent: Schema.NullOr(Schema.String),
   saved_at: Timestamp,
-  /** Up to 12 lines, from line `from`. */
+  /** Up to 16 lines, from line `from`. */
   excerpt: Schema.NullOr(Schema.Struct({ from: Count, text: Schema.String })),
 });
 

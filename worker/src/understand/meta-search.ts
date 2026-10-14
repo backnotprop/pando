@@ -11,7 +11,7 @@ export const SHARED_FILE_BYTES = 256 * 1024;
 
 export const SHARED_HITS = 20;
 
-const EXCERPT_LINES = 12;
+const EXCERPT_LINES = 16;
 
 /** A current shared file, as the meta layer object reads it. */
 export interface SharedRow extends Record<string, SqlStorageValue> {

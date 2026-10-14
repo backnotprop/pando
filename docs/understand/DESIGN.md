@@ -77,7 +77,7 @@ section (rails, labels, numbered chips, callout boxes) was withdrawn.
 | `commit` | title, short sha, date; person (avatar, login), machine, agent (Pando-Agent), model (from the session that names it, only when the sessions agree), its Pando-Session lines; branch it came from | the commit page |
 | `session` (recorded) | program mark, person, machine, model; the turn that wrote it: "Prompt 7, 14:02" with the prompt's first 400 characters, and the step (the tool call that wrote the file: `Edit api/src/limit.ts`) | the session page at that prompt |
 | `agent` (Cloudflare-run) | kind, number, who launched it, model, status; for a task, its first message is shown as "Started with", never as "what was asked" | the agent page |
-| `meta` | path, version, who saved it (person, machine, agent) and when; an excerpt of up to 12 lines around the match, with line numbers | the shared file at that version |
+| `meta` | path, version, who saved it (person, machine, agent) and when; an excerpt of up to 16 lines around the match, with line numbers | the shared file at that version |
 | `issue` | number, title, state, author, opened date, first 300 characters of its body | the issue |
 | `review` (phase 2) | verdict, reviewer (person or reviewer agent with its session), the comment on these lines | the branch page's review |
 | `artifact` (phase 2) | title, version, who added it, an inert thumbnail of its document | the artifact viewer |

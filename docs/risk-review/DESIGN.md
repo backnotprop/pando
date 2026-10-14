@@ -22,7 +22,7 @@ review, on Cloudflare.
    starts over, the same head again does nothing, nothing is cancelled.
 2. **The drain (Worker side) classifies the head with clef**
    (`@cf/cloudflare/clef` through the AI binding): one call, the state and
-   four questions below. It stores the score, level, tier, reasons, model,
+   five questions below. It stores the score, level, tier, reasons, model,
    tokens and cost on the head's row.
 3. **Policy (pure) turns the answers into a tier:** `auto`, `ai` or `human`.
 4. **The tier runs:** `ai` launches the reviewer profiles as review sessions
@@ -95,8 +95,8 @@ know which profile said what.
 - Any tier: a person's approval on this head passes it. An owner's force
   (`?force=1`, not from an agent session) passes it and is recorded as
   forced. Agents never force.
-- No row yet (classifying): 503 `risk_pending`, retried by the agents'
-  merge tool (2 s, 5 s). A row missing for 60 s counts as `unknown`
+- No row yet (classifying): 412 `risk_pending` (shaped as checks_not_green, shown as a wait), retried by the agents'
+  merge tool (2 s, 5 s, 10 s). A row missing for 60 s counts as `unknown`
   (`human`).
 
 ## State

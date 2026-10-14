@@ -13,7 +13,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { agentListQuery, agentsKey, type AgentFilters } from "../../../../api/agents";
 import { membersQuery, reposQuery } from "../../../../api/queries";
-import { fallback, useRows } from "../../../../live/rows";
+import { fallback, readAgain, useRows } from "../../../../live/rows";
 import { Avatar } from "../../../../ui/Avatar";
 import { button } from "../../../../ui/controls";
 import { Caret } from "../../../../ui/dropdown";
@@ -114,7 +114,7 @@ export function AgentsList({ search }: { search: AgentsSearch }) {
   const repos = useQuery(reposQuery(monorepo)).data ?? [];
   const paths = new Map<string, string>(repos.map((r) => [r.name, r.path]));
   const me = useMe();
-  const live = useRows(monorepo, ["agents"], () => void qc.invalidateQueries({ queryKey: agentsKey(monorepo) }));
+  const live = useRows(monorepo, ["agents"], () => readAgain(qc, { queryKey: agentsKey(monorepo) }));
   const list = useInfiniteQuery({ ...agentListQuery(monorepo, f), refetchInterval: fallback(live) });
   const rows = list.data?.pages.flatMap((p) => p.sessions) ?? [];
   const counts = list.data?.pages[0]?.counts;

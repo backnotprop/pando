@@ -6,10 +6,10 @@
 // asks for what it missed with since=<last seq>, and a resync reads again.
 // While the socket is down, the page polls as a fallback (`fallback`).
 import { type BranchEventRow, type CiBuild, type CommitPage, type CiBuildDetail, type CiJob, decodeMonorepoEventFrame, type FeedEvent, type Machine, type MonorepoEventFrame, type RepoName, Routes } from "@pando/contract";
-import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { type InvalidateQueryFilters, type QueryClient, useQueryClient } from "@tanstack/react-query";
 import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
-import { applyAgentRow } from "../api/agents";
+import { agentsKey, applyAgentRow } from "../api/agents";
 import { ciBuildQuery, ciBuildsQuery, ciKey, ciPipelineQuery, ciQuery } from "../api/ci";
 import { mirrorQuery } from "../api/mirror";
 import { releasesKey } from "../api/releases";
@@ -146,6 +146,34 @@ function refreshCommit(qc: QueryClient, m: MonorepoRef, repo: RepoName, sha: str
   }
 }
 
+/** Reads asked for again while a read of them runs: true when one more read must follow it. */
+const readingAgain = new Map<string, boolean>();
+
+/**
+ * Reads `filters` again, so the answer is from after the change that asked.
+ * A read already running started before that change (TanStack Query hands an
+ * invalidate the first read in flight rather than a new one), so one more
+ * read follows it; calls while a read runs make one more read, not one each.
+ */
+export function readAgain(qc: QueryClient, filters: InvalidateQueryFilters) {
+  const key = JSON.stringify(filters.queryKey);
+
+  if (readingAgain.has(key)) {
+    readingAgain.set(key, true);
+
+    return;
+  }
+
+  readingAgain.set(key, qc.isFetching(filters) > 0);
+  void qc.invalidateQueries(filters, { cancelRefetch: false }).finally(() => {
+    const again = readingAgain.get(key);
+
+    readingAgain.delete(key);
+
+    if (again) readAgain(qc, filters);
+  });
+}
+
 /** A row event (not caught_up, resync or error). */
 type RowEvent = Extract<MonorepoEventFrame, { type: "event" }>;
 
@@ -219,7 +247,8 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
       sessionGone(qc, m, f.row);
       break;
     case "agent.updated":
-      applyAgentRow(qc, m, f.row);
+      // A new session or a moved count: the lists and their counts are read again, after any read already running.
+      if (applyAgentRow(qc, m, f.row)) readAgain(qc, { queryKey: agentsKey(m) });
       break;
     case "artifact.added":
     case "artifact.versioned":

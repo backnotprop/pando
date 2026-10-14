@@ -279,6 +279,9 @@ export class AgentSession extends DurableObject<Env> {
       await this.#saveSandbox();
     }
 
+    // A stop that came while the run's files were being saved wins: the session stays stopped, never back to waiting.
+    if (this.ctx.storage.kv.get<StoredStatus>("status")?.status === "stopped") return;
+
     if (result.status === "done") this.#setStatus("waiting");
     else this.#setStatus("failed", result.reason ?? "the run ended without an answer");
   }

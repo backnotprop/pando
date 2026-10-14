@@ -5,7 +5,9 @@
 // is shown in the box, in words. The issues it is linked to sit under the box
 // (-issues/BranchIssues.tsx). Files changed: each file's diff, read only
 // (FilesChanged.tsx). Artifacts: the documents uploaded to the branch's page,
-// and one open with its comments (-artifacts/).
+// and one open with its comments (-artifacts/). Risk-based review (Risk.tsx):
+// the meter under the title, the Review box under the Merge box, and the
+// Guided review over the commits on a head a person must approve.
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useState } from "react";
@@ -32,6 +34,7 @@ import { ReviewAgents, ReviewWithAgent } from "../-agents/ReviewAgent";
 import { BranchIssues } from "../-issues/BranchIssues";
 import { CheckRows } from "./Checks";
 import { FilesChanged } from "./FilesChanged";
+import { GuidedReview, ReviewBox, RiskMeter } from "./Risk";
 import { mergeableOf, stateOf, unknownWhy } from "./state";
 
 /** Files enough to fill the first screen of Files changed, at the list's metrics (-code/DiffList.tsx: a 44 px header and 16 px apart, 20 px a line), counting only changed lines. */
@@ -175,6 +178,7 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
 interface Answer {
   head: string;
   code: string;
+  message: string;
   paths: readonly string[];
 }
 
@@ -190,7 +194,7 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
   const landing = useMutation({
     mutationFn: (force: boolean) => merge(monorepo, repo.name, b.name, b.head, force),
     onSuccess: async (out) => {
-      if (out.refused) setAnswer({ head: b.head, code: out.refused.error.code, paths: out.refused.error.paths ?? [] });
+      if (out.refused) setAnswer({ head: b.head, code: out.refused.error.code, message: out.refused.error.message, paths: out.refused.error.paths ?? [] });
 
       await refresh();
     },
@@ -271,7 +275,11 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
       </>
     );
   } else {
-    const force = s.tone !== "ready";
+    // Risk-based review holds the merge until its review is done (Risk.tsx): an owner can still merge anyway.
+    const held = b.review && !b.review.passes ? b.review : null;
+    const force = s.tone !== "ready" || !!held;
+    const heldWord = held?.state === "classifying" ? "Risk score pending" : held?.tier === "human" ? "Human review required" : "Waiting for review";
+    const reviewSaid = said && (said.code === "review_required" || said.code === "risk_pending") ? said.message : null;
 
     const heading = failed ? (
       <p key={line} className={`${big} text-rust ${arrives}`}>
@@ -293,6 +301,10 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
           </>
         )}
       </p>
+    ) : held ? (
+      <p key={line} className={`${big} ${held.tier === "human" ? "text-rust" : "text-bark-dim"} ${arrives}`}>
+        {heldWord}
+      </p>
     ) : (
       <p key={line} className={`${big} ${arrives}`}>
         Ready to merge
@@ -304,6 +316,7 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
         {heading}
         {/* While pando.toml cannot be read, why: after the heading, which says it when nothing else comes first. */}
         {b.checks.state === "unknown" ? <p className={`${q} mt-1.5`}>{s.text === "checks unknown" ? b.checks.checks_unknown : unknownWhy(b)}</p> : null}
+        {reviewSaid ? <p className={`${q} mt-1.5`}>{reviewSaid}</p> : held?.why && !failed && s.tone === "ready" ? <p className={`${q} mt-1.5`}>{held.why[0]?.toUpperCase() + held.why.slice(1)}</p> : null}
         {moved ? (
           <p className={`${q} mt-1.5`}>
             Moved to <code className="text-[12.5px] text-bark">{b.head.slice(0, 7)}</code>
@@ -407,6 +420,7 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
           {b.author ? ` by ${b.author}` : ""}
           {b.behind ? `, ${b.behind} behind main` : ""}.
         </p>
+        <RiskMeter b={b} />
       </div>
       <TabBar label="Branch">
         <Tab link={branchLink(monorepo.full, repo.path, branch)} current={!files && !sessions && !artifacts} label="Overview" />
@@ -433,6 +447,7 @@ function Overview({ repo, b, commits, total, reviews, live, on }: { repo: Repo; 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-16 narrow:grid-cols-[minmax(0,1fr)] narrow:gap-10">
       <section>
+        <GuidedReview repo={repo} b={b} />
         <SectionHead title="Commits" count={total} />
         {commits.length ? <Commits repo={repo} commits={commits} on={on} /> : <Empty>No commits ahead of main.</Empty>}
         <div className="mt-10">
@@ -451,6 +466,7 @@ function Aside({ repo, b, live }: { repo: Repo; b: Branch; live: boolean }) {
   return (
     <aside>
       <MergeBox repo={repo} b={b} />
+      <ReviewBox repo={repo} b={b} />
       <BranchIssues repo={repo} b={b} />
       <div className="mt-10">
         <SectionHead title="Checks" />

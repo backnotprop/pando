@@ -16,6 +16,7 @@ import { OwnHead, useMonorepo } from "./-frame/heads";
 import { LabelsSettings } from "./-issues/LabelsSettings";
 import { Mirror } from "./-settings/Mirror";
 import { ReleasesSwitch } from "./-settings/Releases";
+import { RiskReviewSettings } from "./-settings/RiskReview";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
   loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(myOrgsQuery),
@@ -202,6 +203,7 @@ function Settings() {
             <Rename />
             <Description />
             <ReleasesSwitch />
+            <RiskReviewSettings />
             <Mirror />
             <LabelsSettings />
             <Transfer />

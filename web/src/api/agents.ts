@@ -106,12 +106,16 @@ export interface ReviewAsk {
   repo: string;
   model: string;
   prompt: string;
+  /** A reviewer profile's name (correctness, security, tests, docs), or "" for a general review. */
+  profile: string;
 }
 
 export function reviewBranch(m: MonorepoRef, r: ReviewAsk): Promise<AgentSession> {
   const body = new Map<string, string>([["branch", r.branch], ["repo", r.repo], ["model", r.model]]);
 
   if (r.prompt) body.set("prompt", r.prompt);
+
+  if (r.profile) body.set("profile", r.profile);
 
   return write(Routes.reviewWithAgent(m.owner, m.name), Object.fromEntries(body));
 }

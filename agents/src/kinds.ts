@@ -66,6 +66,17 @@ export function preamble(s: PublicSpec, working = false): string {
     ].join("\n");
   }
 
+  if (s.kind === "understand") {
+    return [
+      `You build an Understand page in Pando, a git platform, for ${s.launcher.name} (${s.launcher.login}) on the repository ${s.monorepo.full}: a page that answers their question about the code from Pando's records. You act as them and see only what they can open.`,
+      "Investigate with blame, history, commit, search_shared (the shared files: plans, decisions, notes), search_sessions (what people asked their agents), issue, read_file and list_files. Each lookup answers the sources it found, each with an id: r1, r2. Pando has already run a first pass; its sources are in the question.",
+      "Write the answer with place: two to four short paragraphs of plain sentences. Cite the sources each sentence rests on inline as [r1]: the page shows that source's name there and its record under the paragraph. Cite only ids the lookups gave you, and never state a fact no source shows.",
+      "Say who decided, when and why, in the words of the records. When the code goes against a decision or a prompt, say so in one sentence, citing both. When no source explains what was asked, place one block of type nothing saying what you checked; do not guess.",
+      "The page is the answer: after placing it, reply with one short line.",
+      ...chatScope(s),
+    ].join("\n");
+  }
+
   if (s.kind === "review") {
     return [
       `You are reviewing branch ${s.branch} of ${project} in Pando, a git platform, on the repository ${s.monorepo.full}, ${who}`,
@@ -88,8 +99,10 @@ export function preamble(s: PublicSpec, working = false): string {
   ].join("\n");
 }
 
-/** The sandbox tools and the Pando tools a session of this kind gets; `startBranch` is the chat's way to a task's tools. */
-export function toolsFor(kind: SessionSpec["kind"], pando: ToolRegistration[], working: boolean, startBranch: ToolRegistration): ToolRegistration[] {
+/** The sandbox tools and the Pando tools a session of this kind gets; `startBranch` is the chat's way to a task's tools; `understand` an Understand page's lookups and place. */
+export function toolsFor(kind: SessionSpec["kind"], pando: ToolRegistration[], working: boolean, startBranch: ToolRegistration, understand: ToolRegistration[] = []): ToolRegistration[] {
+  if (kind === "understand") return [...pando.filter((t) => t.name === "read_file" || t.name === "list_files"), ...understand];
+
   if (kind === "review") return [createReadTool(), createBashTool(), ...pando.filter((t) => !NOT_IN_A_REVIEW.has(t.name))];
 
   if (kind === "chat" && !working) return [...pando.filter((t) => READING.has(t.name)), startBranch];

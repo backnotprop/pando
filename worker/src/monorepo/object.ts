@@ -37,6 +37,7 @@ import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
 import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput, type AgentView } from "../agents/store";
+import { type BlockInput, type Card, type Found, type Lines, type Scope, type Step, UNDERSTAND_SCHEMA, UnderstandStore } from "../understand/store";
 import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
@@ -408,6 +409,8 @@ export class MonorepoObject extends DurableObject<Env> {
   private artifacts: ArtifactStore;
   /** Risk-based review: each branch head's score, tier, reviewers and guide (review/store.ts). */
   private review: ReviewStore;
+  /** Understand pages (understand/store.ts). */
+  private understand: UnderstandStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -442,6 +445,7 @@ export class MonorepoObject extends DurableObject<Env> {
     this.agents = new AgentStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.releases = new ReleaseStore(this.sql, { info: () => this.info(), publish: (e) => this.publish(e) });
     this.artifacts = new ArtifactStore(this.sql, { publish: (e) => this.publish(e) });
+    this.understand = new UnderstandStore(this.sql, { publish: (e) => this.publish(e) });
     this.review = new ReviewStore(this.sql, () => this.env.RISK_REVIEW === "on");
     this.mirror = new MirrorOut(ctx, env, this.sql, () => this.info(), (t) => this.feed.armAt(t), () => this.mirrorRepos(), (e) => this.publish(e));
     this.ensureSchema();
@@ -465,6 +469,8 @@ export class MonorepoObject extends DurableObject<Env> {
     for (const stmt of statements(SESSIONS_SCHEMA)) this.sql.exec(stmt);
 
     for (const stmt of statements(AGENTS_SCHEMA)) this.sql.exec(stmt);
+
+    for (const stmt of statements(UNDERSTAND_SCHEMA)) this.sql.exec(stmt);
 
     // Added before any deploy, for local states made earlier on the branch.
     if (!this.rows<{ name: string }>("PRAGMA table_info(agent_sessions)").some((c) => c.name === "awaiting_checks")) {
@@ -1303,7 +1309,84 @@ export class MonorepoObject extends DurableObject<Env> {
     // A reviewer agent that ended changes its branch's review state.
     if (v && v.kind === "review" && v.repo && v.branch) this.publishBranchRow(v.repo, v.branch);
 
+    // An Understand page's session: the page completes or fails with it.
+    if (v && v.kind === "understand") this.understand.onSession(v.number, v.status, v.reason);
+
     return v;
+  }
+
+  // ── Understand (understand/store.ts; routes in understand/routes.ts) ───────
+
+  understandCreate(input: { question: string; scope: Scope | null; model: string }, identity: Pick<Identity, "login">) {
+    return this.guard(() => {
+      if (input.scope && !this.repoRow(input.scope.repo)) throw new HttpError(400, "bad_request", `no repo ${input.scope.repo}`);
+
+      return this.understand.create(input, identity.login);
+    });
+  }
+
+  /** The page, each record as it reads now: an issue's title and state; a deleted session is gone. */
+  understandGet(n: number) {
+    return this.guard(() =>
+      this.understand.view(n, (card: Card) => {
+        if (card.kind === "issue") {
+          const now = this.row<{ title: string; state: string }>("SELECT title, state FROM issues WHERE number = ?", card.number);
+
+          return now ? { card: { ...card, title: now.title, state: now.state }, gone: null } : { card: null, gone: `Issue #${card.number} is gone.` };
+        }
+
+        if (card.kind === "session") {
+          const s = this.row<{ deleted_by: string | null; deleted_at: string | null }>("SELECT deleted_by, deleted_at FROM sessions WHERE id = ?", card.id);
+
+          if (s?.deleted_by) return { card: null, gone: `This session was deleted by ${s.deleted_by} on ${s.deleted_at?.slice(0, 10) ?? "a day since"}.` };
+        }
+
+        return { card, gone: null };
+      }),
+    );
+  }
+
+  understandList(before: number | null, limit: number) {
+    return this.guard(() => this.understand.list(before, limit));
+  }
+
+  understandAsker(n: number) {
+    return this.guard(() => this.understand.asker(n));
+  }
+
+  understandSetSession(n: number, session: number) {
+    return this.guard(() => this.understand.setSession(n, session));
+  }
+
+  understandSetLines(n: number, lines: Lines) {
+    return this.guard(() => this.understand.setLines(n, lines));
+  }
+
+  understandFail(n: number, reason: string) {
+    return this.guard(() => this.understand.fail(n, reason));
+  }
+
+  /** Whether this credential is page n's own session's: only it may run lookups and place blocks. */
+  understandWriter(n: number, credentialId: string) {
+    return this.guard(() => {
+      const session = this.understand.sessionOf(n);
+
+      if (session === null || this.agents.numberOf(credentialId) !== session) throw new HttpError(403, "not_page_session", `only Understand page ${n}'s own session writes to it`);
+
+      return session;
+    });
+  }
+
+  understandRecord(n: number, step: Omit<Step, "refs">, found: Found[]) {
+    return this.guard(() => this.understand.record(n, step, found));
+  }
+
+  understandPlace(n: number, blocks: BlockInput[]) {
+    return this.guard(() => this.understand.place(n, blocks));
+  }
+
+  understandFollowUp(n: number, login: string) {
+    return this.guard(() => this.understand.followUp(n, login));
   }
 
   // ── Issues (issues/store.ts; routes in issues/routes.ts) ─────────────────

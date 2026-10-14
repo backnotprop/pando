@@ -38,6 +38,8 @@ export * from "./session.ts";
 
 export * from "./agent.ts";
 
+export * from "./understand.ts";
+
 export * from "./ci.ts";
 
 export * from "./release.ts";

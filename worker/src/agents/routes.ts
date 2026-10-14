@@ -132,7 +132,7 @@ export function filtersOf(c: C, chatsOf: string | null): AgentFilters {
 async function sessionOf(c: C, n: number): Promise<AgentView> {
   const s = unwrap(await c.get("stub").agentGet(n));
 
-  if (s.kind === "chat" && s.launched_by !== c.get("identity").login) throw new HttpError(404, "not_found", `no agent session ${n}`);
+  if ((s.kind === "chat" || s.kind === "understand") && s.launched_by !== c.get("identity").login) throw new HttpError(404, "not_found", `no agent session ${n}`);
 
   return s;
 }
@@ -151,7 +151,7 @@ const FIRST_MESSAGE_MAX = 200;
  * other session must say which project it works in.
  */
 function wholeRepository(kind: SessionKind): null {
-  return kind === "chat" ? null : bad("repo: which project the agent works in");
+  return kind === "chat" || kind === "understand" ? null : bad("repo: which project the agent works in");
 }
 
 export interface LaunchInput {
@@ -161,6 +161,8 @@ export interface LaunchInput {
   branch: string | null;
   model: string;
   issue: number | null;
+  /** An Understand page's number, for a session of kind understand. */
+  page?: number;
 }
 
 /** Who a session acts as and where: a request's caller, or a branch's pusher for a reviewer agent (review/run.ts). */
@@ -202,6 +204,9 @@ export async function launchAs(l: Launcher, input: LaunchInput): Promise<AgentVi
 
   await stub.agentSetCredential(session.number, cred.id);
 
+  // An Understand page knows its session before the session can run a lookup on it.
+  if (input.page !== undefined) await stub.understandSetSession(input.page, session.number);
+
   const spec: SessionSpec = {
     number: session.number,
     kind: input.kind,
@@ -214,6 +219,8 @@ export async function launchAs(l: Launcher, input: LaunchInput): Promise<AgentVi
     credential: { id: cred.id, name: cred.name, secret },
     issue: input.issue,
   };
+
+  if (input.page !== undefined) spec.page = input.page;
 
   try {
     const state = await agents.start(spec, input.prompt);

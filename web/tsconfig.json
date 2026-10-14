@@ -15,7 +15,7 @@
     "types": ["vite/client"]
   },
   "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"],
-  // Checked by tsconfig.doc.json: they import @plannotator/ui, whose sources
+  // Checked by tsconfig.doc.json: they import @plannotator/ui (or core), whose sources
   // TypeScript would check under this file's noUncheckedIndexedAccess.
-  "exclude": ["src/ui/doc/PlannotatorDoc.tsx", "src/ui/doc/PlannotatorTree.tsx", "src/ui/doc/setup.ts", "src/ui/doc/artifact"]
+  "exclude": ["src/ui/doc/PlannotatorDoc.tsx", "src/ui/doc/PlannotatorTree.tsx", "src/ui/doc/setup.ts", "src/ui/doc/artifact", "src/ui/doc/guide.ts"]
 }

@@ -18,9 +18,10 @@ Source: https://github.com/pierrecomputer/pierre (packages/diffs and
 packages/trees)
 
 This product bundles @plannotator/ui 0.50.0 and @plannotator/core 0.25.10,
-the web app's document viewer (web/src/ui/doc/PlannotatorDoc.tsx) and the
+the web app's document viewer (web/src/ui/doc/PlannotatorDoc.tsx), the
 file tree on a branch's Files changed (web/src/ui/doc/PlannotatorTree.tsx),
-copyright 2025 backnotprop, licensed under the Apache License, Version 2.0.
+and the guided review's method, format and reader (worker/src/review/guide.ts,
+web/src/ui/doc/guide.ts), copyright 2025 backnotprop, licensed under the Apache License, Version 2.0.
 Source: https://github.com/backnotprop/plannotator
 
 This product bundles Shiki 4.5.0, through @pierre/diffs, to colour code,

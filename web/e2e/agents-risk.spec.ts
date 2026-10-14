@@ -1,7 +1,9 @@
 // Risk-based review, end to end in a browser (docs/risk-review/DESIGN.md):
 // the risk meter on a branch's page and its badge in the branch list, the
-// Merge box held for a person, the Guided review panel opening Plannotator's
-// guide in the Artifacts tab, Approve, and the Settings switch. Real Worker
+// Merge box held for a person, the Guided review tab (the guide drawn with
+// Pando's own pieces: its sections, their diffs, a section ticked as
+// reviewed, in dark and light), Approve and Merge from that tab, and the
+// Settings switch. Real Worker
 // and pando-agents in one wrangler dev (the reviewer agents run in containers
 // on the scripted model, set through the Worker's test switch /v1/_risk/test;
 // playwright.config.ts --project=risk starts the server with RISK_REVIEW=on
@@ -82,21 +84,46 @@ test("risk-based review: the meter, the held merge, the guided review, Approve, 
     await expect(page.getByText("A person's approval is needed on this head", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Risk review").getByRole("button", { name: "Approve" })).toBeVisible();
 
-    // The guide, written by Workers AI from the diff, opens in the Artifacts tab.
-    const guide = page.getByLabel("Guided review");
+    // The guide, written by Workers AI from the diff, is read on the branch's own Guided review tab.
+    const panel = page.getByLabel("Guided review");
 
-    await expect(guide).toBeVisible();
+    await expect(panel).toBeVisible();
     await expect(page.getByLabel("Risk review")).toContainText("Security", { timeout: 240_000 });
-    await expect(guide.getByRole("link", { name: "Open the guided review" })).toBeVisible({ timeout: 300_000 });
+    await expect(panel.getByRole("link", { name: "Read the guided review" })).toBeVisible({ timeout: 300_000 });
     await page.screenshot({ path: "e2e/.state/risk-human.png" });
-    await guide.getByRole("link", { name: "Open the guided review" }).click();
-    await expect(page).toHaveURL(/tab=artifacts.*artifact=guided-review\.html/);
-    await expect(page.locator("iframe").first()).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(3_000);
-    await page.screenshot({ path: "e2e/.state/risk-guide.png" });
-    await page.goBack();
+    await panel.getByRole("link", { name: "Read the guided review" }).click();
+    await expect(page).toHaveURL(/tab=review/);
+    await expect(page.getByRole("navigation", { name: "Branch" }).getByRole("link", { name: "Guided review" })).toHaveAttribute("aria-current", "page");
 
-    // A person approves; the merge goes through.
+    // Its title and intent, its sections in order, each file's diff drawn by Files changed's own list (shadow DOM: Pierre's).
+    const guide = page.getByRole("article", { name: "Guided review" });
+    const sections = guide.locator("section");
+
+    await expect(guide.getByRole("heading", { level: 2 })).toBeVisible({ timeout: 30_000 });
+    expect(await sections.count()).toBeGreaterThan(0);
+    await expect(guide.locator("[data-file-path='payments/charge.ts']")).toBeVisible({ timeout: 30_000 });
+    await expect(guide.getByText("nothing to charge").last()).toBeVisible({ timeout: 30_000 });
+    const nav = page.getByRole("navigation", { name: "Sections" });
+
+    await expect(nav).toContainText(`0 of ${await sections.count()} reviewed`);
+
+    // Pando's themes: the same page in dark and in light (the films and the owner's look).
+    await page.evaluate(() => window.pandoTheme?.set({ theme: "pando", mode: "dark" }));
+    await page.waitForTimeout(1_000);
+    await page.screenshot({ path: "e2e/.state/risk-guide-dark.png", fullPage: true });
+    await page.evaluate(() => window.pandoTheme?.set({ theme: "pando", mode: "light" }));
+    await page.waitForTimeout(1_000);
+    await page.screenshot({ path: "e2e/.state/risk-guide-light.png", fullPage: true });
+
+    // A section ticked as reviewed folds and counts.
+    const first = sections.first();
+
+    await first.getByRole("checkbox", { name: /^Reviewed: / }).click();
+    await expect(first.getByRole("checkbox", { name: /^Reviewed: / })).toHaveAttribute("aria-checked", "true");
+    await expect(first.getByRole("button", { expanded: false })).toBeVisible();
+    await expect(nav).toContainText(`1 of ${await sections.count()} reviewed`);
+
+    // A person approves on the same tab; the merge goes through from there.
     await page.getByLabel("Risk review").getByRole("button", { name: "Approve" }).click();
     await expect(page.getByLabel(/^Risk: (High|Medium|Low), approved by ann-/)).toBeVisible();
     await expect(page.getByText("Ready to merge")).toBeVisible();

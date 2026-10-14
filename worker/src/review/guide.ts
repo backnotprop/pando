@@ -2,8 +2,10 @@
 // format (@plannotator/core), written by one Workers AI call on the Worker,
 // not by a container session (a guide is one read of the diff). The guide
 // is checked for coverage (every changed file placed once), repaired once if
-// nothing survives, wrapped by Plannotator's own exporter into one HTML file,
-// and kept as the branch's artifact guided-review.html. A guide that cannot
+// nothing survives, and kept as the branch's artifact guided-review.html with
+// two files: Plannotator's own HTML export (for download) and the snapshot it
+// wraps, guided-review.json, which the branch page's Guided review tab draws
+// with Pando's own components. A guide that cannot
 // be written is recorded as failed; it never holds up the review. It runs
 // from an outbox of its own (guides_outbox): a guide takes 20 to 60 s, and
 // branch facts never wait behind it.
@@ -28,8 +30,11 @@ export const GUIDE_TIMEOUT_MS = 180_000;
 
 export const GUIDE_MODEL = DEFAULT_MODEL;
 
-/** The artifact's name on the branch. */
+/** The artifact's name on the branch, and its main file: the HTML export. */
 export const GUIDE_ARTIFACT = "guided-review.html";
+
+/** The artifact's second file: the guide as data (GuideSnapshotV1 JSON). */
+export const GUIDE_SNAPSHOT = "guided-review.json";
 
 export interface GuideInput {
   /** The branch page's address: the guide's pull request. */
@@ -44,8 +49,8 @@ export interface GuideInput {
   stats: { path: string; additions: number; deletions: number }[];
 }
 
-/** A guide: the HTML file, or why there is none. */
-export type Guided = { ok: true; html: string; title: string; ms: number; calls: number } | { ok: false; why: string };
+/** A guide: the HTML file and its snapshot as JSON text, or why there is none. */
+export type Guided = { ok: true; html: string; json: string; title: string; ms: number; calls: number } | { ok: false; why: string };
 
 /** The JSON a Workers AI chat model answered with: `response` (an object, or JSON text, fenced or not), or an OpenAI-style choice. */
 function answerOf(out: Json): Json {
@@ -98,7 +103,7 @@ function userMessage(g: GuideInput, files: string[]): string {
   return [...about, buildGuideUserMessage(g.patch, "branch", undefined, { url: g.url, baseBranch: "main", inlineDiff: true }, changed)].join("\n");
 }
 
-/** The guide for this head as one HTML file, or why there is none. */
+/** The guide for this head as Plannotator's HTML export and its snapshot, or why there is none. */
 export async function writeGuide(env: Env, g: GuideInput): Promise<Guided> {
   if (!g.patch.trim()) return { ok: false, why: "the branch changes no text files" };
 
@@ -148,5 +153,5 @@ export async function writeGuide(env: Env, g: GuideInput): Promise<Guided> {
     generator: { engine: "pando", model: GUIDE_MODEL },
   });
 
-  return { ok: true, html: createGuideHtml(snapshot, { viewer: resolveGuideViewerAssets(GUIDE_VIEWER_MANIFEST) }), title: guide.title, ms: Date.now() - t0, calls };
+  return { ok: true, html: createGuideHtml(snapshot, { viewer: resolveGuideViewerAssets(GUIDE_VIEWER_MANIFEST) }), json: JSON.stringify(snapshot), title: guide.title, ms: Date.now() - t0, calls };
 }

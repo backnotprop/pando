@@ -3,17 +3,17 @@
   "route": "GET .../branches/{branch} (risk low, auto)",
   "status": 200,
   "body": {
-    "name": "docs-1",
-    "head": "01d683136bfe9369860d4ca8de9a7bf6449946b4",
-    "base": "c6f1585ec8abd22bd1b33926164606abff28ccd2",
-    "author": "risk-mv7cc9qc",
+    "name": "copy-greeting",
+    "head": "9dfe5992a12cf5b051615a81b1419b896246c112",
+    "base": null,
+    "author": "risk-mv7cvr18",
     "title": null,
     "description": null,
-    "ahead": 1,
-    "behind": 0,
-    "mergeable": "clean",
+    "ahead": null,
+    "behind": null,
+    "mergeable": "pending",
     "checks": {
-      "sha": "01d683136bfe9369860d4ca8de9a7bf6449946b4",
+      "sha": "9dfe5992a12cf5b051615a81b1419b896246c112",
       "state": "success",
       "required": [],
       "missing": [],
@@ -28,25 +28,26 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "tester-mbp",
-    "created_at": "2026-10-13T23:57:38.978Z",
-    "updated_at": "2026-10-13T23:57:38.978Z",
-    "stale": false,
+    "created_at": "2026-10-14T00:12:52.978Z",
+    "updated_at": "2026-10-14T00:12:52.978Z",
+    "stale": true,
     "last_mergeable": null,
     "conflict_paths": null,
-    "facts_at": "2026-10-13T23:57:40.364Z",
+    "facts_at": null,
     "review": {
-      "head": "01d683136bfe9369860d4ca8de9a7bf6449946b4",
+      "head": "9dfe5992a12cf5b051615a81b1419b896246c112",
       "state": "done",
-      "score": 0.0149,
+      "score": 0.082,
       "level": "low",
+      "rule": null,
       "tier": "auto",
       "reasons": [
-        "Risk 0.01: mostly low (0.98)"
+        "Risk 0.08: mostly low (0.84)"
       ],
       "sensitive_paths": [],
       "model": "@cf/cloudflare/clef",
-      "tokens": 711,
-      "cost_usd": 0.00017063999999999998,
+      "tokens": 946,
+      "cost_usd": 0.00022704,
       "error": null,
       "reviewers": [],
       "guide_state": "none",
@@ -54,7 +55,7 @@
       "approved_by": null,
       "passes": true,
       "why": null,
-      "classified_at": "2026-10-13T23:57:40.355Z"
+      "classified_at": "2026-10-14T00:12:54.429Z"
     }
   }
 }

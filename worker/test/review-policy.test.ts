@@ -2,7 +2,7 @@
 // into a score (src/review/risk.ts): real logic with edges. The flow itself
 // is tested end to end by test/risk-review.mjs against a real Worker.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, gateOf, isSensitive, levelOf, sensitiveOf, settingsPatch, tierOf } from "../src/review/policy";
+import { commentsAndDocsOnly, DEFAULT_SETTINGS, gateOf, isSensitive, levelOf, sensitiveOf, settingsPatch, tierOf } from "../src/review/policy";
 import { readAnswer, STATE_MAX_CHARS, stateOf } from "../src/review/risk";
 
 const S = { ...DEFAULT_SETTINGS };
@@ -130,5 +130,38 @@ describe("the state", () => {
     expect(s).toMatch(/and 100 more files/);
     expect(s).toMatch(/more files' changes not shown/);
     expect(s).not.toMatch(/x{201}/);
+  });
+});
+
+describe("the comments-and-docs rule", () => {
+  const f = (path: string, hunks: string[][], status = "modified", binary = false) => ({ path, status, binary, hunks });
+
+  it("docs files, line comments, block comments and blank lines are not code", () => {
+    expect(commentsAndDocsOnly([f("README.md", [["+anything at all"]], "added")])).toBe(true);
+    expect(commentsAndDocsOnly([f("src/auth/check.ts", [[" export function check() {", "-  // old note", "+  // the caller is a member", "+", "   return ok;"]])])).toBe(true);
+    expect(commentsAndDocsOnly([f("src/a.ts", [[" /**", "-  * Old.", "+  * New words.", "  */", " export const a = 1;"]])])).toBe(true);
+    expect(commentsAndDocsOnly([f("deploy/ci.yml", [[" steps:", "+  # run the tests first", "   - run: npm test"]])])).toBe(true);
+    expect(commentsAndDocsOnly([f("web/index.html", [["+<!-- the header -->", " <header>"]])])).toBe(true);
+  });
+
+  it("anything it cannot read as a comment is code", () => {
+    expect(commentsAndDocsOnly([f("src/a.ts", [["-  return a;", "+  return b;"]])])).toBe(false);
+    // A comment closed with code after it on the same line.
+    expect(commentsAndDocsOnly([f("src/a.ts", [["+/* note */ const x = 1;"]])])).toBe(false);
+    // A hunk that starts inside a block comment it does not show.
+    expect(commentsAndDocsOnly([f("src/a.ts", [["-  * Old.", "+  * New."]])])).toBe(false);
+    // A shebang changes how a script runs.
+    expect(commentsAndDocsOnly([f("bin/run.sh", [["-#!/bin/sh", "+#!/bin/bash"]])])).toBe(false);
+    // Indentation in Python is code; JSON has no comments; an unknown type is code.
+    expect(commentsAndDocsOnly([f("a.py", [["-x = 1", "+  x = 1"]])])).toBe(false);
+    expect(commentsAndDocsOnly([f("package.json", [["+  \"a\": 1,"]])])).toBe(false);
+    expect(commentsAndDocsOnly([f("Makefile", [["+# note"]])])).toBe(false);
+  });
+
+  it("a new, deleted or binary code file is code, and one code file spoils the rest", () => {
+    expect(commentsAndDocsOnly([f("src/new.ts", [["+// only a comment"]], "added")])).toBe(false);
+    expect(commentsAndDocsOnly([f("logo.png", [], "modified", true)])).toBe(false);
+    expect(commentsAndDocsOnly([f("README.md", [["+x"]]), f("src/a.ts", [["+const a = 1;"]])])).toBe(false);
+    expect(commentsAndDocsOnly([])).toBe(false);
   });
 });

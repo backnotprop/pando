@@ -7,35 +7,37 @@
       "code": "review_required",
       "message": "a person's approval is needed on this head",
       "review": {
-        "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+        "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
         "state": "done",
-        "score": 0.91115,
+        "score": 0.93395,
         "level": "high",
+        "rule": null,
         "tier": "human",
         "reasons": [
           "Touches sensitive paths: payments/charge.ts",
           "The model reads it as touching auth, payments, secrets, infrastructure or data (0.99)",
-          "Risk 0.91: mostly high (0.85)"
+          "The model reads it as changing a critical kind of behaviour: access, money, data deletion, secrets, migrations or merge rules (0.97)",
+          "Risk 0.93: mostly high (0.90)"
         ],
         "sensitive_paths": [
           "payments/charge.ts"
         ],
         "model": "@cf/cloudflare/clef",
-        "tokens": 754,
-        "cost_usd": 0.00018095999999999998,
+        "tokens": 1018,
+        "cost_usd": 0.00024432,
         "error": null,
         "reviewers": [
           {
             "profile": "correctness",
             "label": "Correctness",
-            "session": 2,
-            "state": "running",
-            "verdict": null
+            "session": 4,
+            "state": "posted",
+            "verdict": "comment"
           },
           {
             "profile": "security",
             "label": "Security",
-            "session": 1,
+            "session": 3,
             "state": "posted",
             "verdict": "comment"
           }
@@ -45,7 +47,7 @@
         "approved_by": null,
         "passes": false,
         "why": "a person's approval is needed on this head",
-        "classified_at": "2026-10-13T23:57:43.623Z"
+        "classified_at": "2026-10-14T00:13:01.069Z"
       }
     }
   }

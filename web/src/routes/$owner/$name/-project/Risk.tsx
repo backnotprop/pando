@@ -51,6 +51,17 @@ export function RiskMeter({ b }: { b: Branch }) {
 
   if (!r) return null;
 
+  // Decided by rule, with no model call: comments, docs and blank lines are never flagged.
+  if (r.rule) {
+    return (
+      <p className="mt-2 flex items-center gap-2.5 text-[13.5px]" title={reasonsOf(r)} aria-label="Risk: comments and docs only, auto" data-risk="low">
+        <Bar r={r} />
+        <span className="font-semibold text-bark-dim">Comments and docs only</span>
+        <span className="text-bark-dim">· auto, no review</span>
+      </p>
+    );
+  }
+
   return (
     <p className="mt-2 flex items-center gap-2.5 text-[13.5px]" title={reasonsOf(r)} aria-label={`Risk: ${LEVEL[r.level]}, ${pathWords(r)}`} data-risk={r.level}>
       <Bar r={r} />

@@ -23,8 +23,8 @@ export const GUIDE_PATCH_MAX = 200_000;
 /** The answer's length, in tokens. */
 const ANSWER_TOKENS = 8_192;
 
-/** One call's wait. */
-export const GUIDE_TIMEOUT_MS = 120_000;
+/** One call's wait: measured 24 to 75 s for a small branch, once over 120 s. */
+export const GUIDE_TIMEOUT_MS = 180_000;
 
 export const GUIDE_MODEL = DEFAULT_MODEL;
 

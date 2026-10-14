@@ -1,0 +1,61 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch} (comments and docs only: auto by rule)",
+  "status": 200,
+  "body": {
+    "name": "comment-on-charge",
+    "head": "ea7c8d07198074480bb6a04d66466b49ff2ca4dc",
+    "base": "4306d30ecca58c2a22eb827c84e61c3f2f3fb824",
+    "author": "risk-mv7cvr18",
+    "title": null,
+    "description": null,
+    "ahead": 1,
+    "behind": 0,
+    "mergeable": "clean",
+    "checks": {
+      "sha": "ea7c8d07198074480bb6a04d66466b49ff2ca4dc",
+      "state": "success",
+      "required": [],
+      "missing": [],
+      "statuses": [],
+      "checks_unknown": null
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "tester-mbp",
+    "created_at": "2026-10-14T00:12:49.463Z",
+    "updated_at": "2026-10-14T00:12:49.463Z",
+    "stale": false,
+    "last_mergeable": null,
+    "conflict_paths": null,
+    "facts_at": "2026-10-14T00:12:50.283Z",
+    "review": {
+      "head": "ea7c8d07198074480bb6a04d66466b49ff2ca4dc",
+      "state": "done",
+      "score": 0,
+      "level": "low",
+      "rule": "comments_and_docs",
+      "tier": "auto",
+      "reasons": [
+        "Comments and docs only: no code changed"
+      ],
+      "sensitive_paths": [],
+      "model": null,
+      "tokens": null,
+      "cost_usd": null,
+      "error": null,
+      "reviewers": [],
+      "guide_state": "none",
+      "guide": null,
+      "approved_by": null,
+      "passes": true,
+      "why": null,
+      "classified_at": "2026-10-14T00:12:50.610Z"
+    }
+  }
+}

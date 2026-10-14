@@ -107,15 +107,19 @@ export function stateOf(s: StateInput): string {
   return out.join("\n");
 }
 
+/** The risk question: what to look for, the critical kinds of change named so the model weighs them. */
+const CRITICAL_ASK =
+  "How risky is it to merge this change into main without a careful review? Weigh most a change to who can do what (permission and access checks, roles, sign-in, sessions, tokens), to money (payments, billing, charges), to deleting or overwriting stored data, to secrets and credentials, to database schemas and migrations, and to the rules that decide whether code may merge or deploy.";
+
 /** The questions, as clef takes them. */
 export const QUESTIONS: JsonObject = {
   risk: {
     type: "score",
-    instructions: "How risky is it to merge this change into main without a careful review?",
+    instructions: CRITICAL_ASK,
     criteria: [
-      "Low: documentation, tests, comments, formatting, or a small isolated change that cannot break other code.",
-      "Medium: a logic change in one area of the code, with limited reach.",
-      "High: authentication or permissions, payments, secrets, infrastructure or CI, data migrations, deleting code or files, or a large change across many areas.",
+      "Low: documentation, tests, comments, formatting, copy, styling, or a small isolated change that cannot break other code.",
+      "Medium: a logic change in one area of the code, with limited reach, that changes none of the critical kinds.",
+      "High: changes who can do what (permission or access checks, roles, sign-in, sessions, tokens), moves or charges money, deletes or overwrites stored data, handles secrets or credentials, changes a database schema or migration, changes the rules for merging or deploying, or is a large change across many areas.",
     ],
   },
   review_path: {
@@ -135,6 +139,10 @@ export const QUESTIONS: JsonObject = {
     type: "noul",
     instructions: "Does the change delete or rewrite more existing code than it adds, or remove files?",
   },
+  critical: {
+    type: "noul",
+    instructions: "Does the change alter who can do what (a permission or access check, a role, sign-in, a session or token), move or charge money, delete or overwrite stored data, handle secrets or credentials, change a database schema or migration, or change the rules for merging or deploying?",
+  },
 };
 
 /** What the head stores from clef's answers. */
@@ -146,6 +154,8 @@ export interface Classified {
   path: { choice: string; probabilities: Record<string, number> };
   sensitive: number;
   destructive: number;
+  /** The noul "critical": who can do what, money, deleting data, secrets, migrations, merge or deploy rules. */
+  critical: number;
   model: string;
   tokens: number;
   cost_usd: number;
@@ -196,6 +206,7 @@ export function readAnswer(out: Json, chars: number, ms: number): Scored {
       path: { choice: isText(choice) ? choice : "", probabilities: probs },
       sensitive: noul("sensitive"),
       destructive: noul("destructive"),
+      critical: noul("critical"),
       // It names its selector ("clef"); the model id is the one called.
       model: CLEF_MODEL,
       tokens,
@@ -235,7 +246,7 @@ export function scripted(score: number, chars: number): Classified {
 
   return {
     score, levels, path: { choice: "", probabilities: {} },
-    sensitive: 0, destructive: 0, model: "scripted", tokens: Math.ceil(chars / 4), cost_usd: 0, ms: 0,
+    sensitive: 0, destructive: 0, critical: 0, model: "scripted", tokens: Math.ceil(chars / 4), cost_usd: 0, ms: 0,
   };
 }
 
@@ -253,6 +264,8 @@ export function reasonsOf(c: Classified | null, s: { sensitive_hits: readonly st
 
   if (c) {
     if (c.sensitive >= 0.5) out.push(`The model reads it as touching auth, payments, secrets, infrastructure or data (${c.sensitive.toFixed(2)})`);
+
+    if (c.critical >= 0.5) out.push(`The model reads it as changing a critical kind of behaviour: access, money, data deletion, secrets, migrations or merge rules (${c.critical.toFixed(2)})`);
 
     if (c.destructive >= 0.5) out.push(`The model reads it as deleting or rewriting more than it adds (${c.destructive.toFixed(2)})`);
     const top = Object.entries(c.levels).sort((x, y) => y[1] - x[1])[0];

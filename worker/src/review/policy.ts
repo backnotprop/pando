@@ -144,3 +144,80 @@ export function gateOf(g: GateInput): GateAnswer {
 
   return { passes: true, why: null };
 }
+
+/** A changed file as the comments-and-docs rule reads it: its hunks' lines, each with its +, - or space. */
+export interface RuleFile {
+  path: string;
+  status: string;
+  binary: boolean;
+  hunks: readonly (readonly string[])[];
+}
+
+/** Documents: any change to them is docs. */
+const DOCS = /\.(md|mdx|txt)$/i;
+
+/** Comment syntax by file type: line markers, and a block's open and close. */
+const SYNTAX: readonly { files: RegExp; line: readonly string[]; block: readonly [string, string] | null }[] = [
+  { files: /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|scala|dart|php)$/i, line: ["//"], block: ["/*", "*/"] },
+  { files: /\.(css|scss|less)$/i, line: [], block: ["/*", "*/"] },
+  { files: /\.(py|rb|sh|bash|zsh|ya?ml|toml|tf|r|pl|ex|exs)$/i, line: ["#"], block: null },
+  { files: /\.(html?|xml|svg|vue|svelte)$/i, line: [], block: ["<!--", "-->"] },
+];
+
+/**
+ * Whether one side of a hunk (old: space and -, new: space and +) changes only
+ * comments and blank lines. Lines are read in order, so a block comment's
+ * inside is known from its opening line within the hunk; a hunk that starts
+ * inside a block it does not show is code (never guessed).
+ */
+function sideIsComments(lines: readonly string[], mark: "+" | "-", s: (typeof SYNTAX)[number]): boolean {
+  let inBlock = false;
+
+  for (const raw of lines) {
+    const kind = raw[0];
+
+    if (kind !== " " && kind !== mark) continue;
+    const t = raw.slice(1).trim();
+    let comment: boolean;
+
+    if (inBlock) {
+      const close = s.block ? t.indexOf(s.block[1]) : -1;
+      comment = close < 0 || t.slice(close + s.block![1].length).trim() === "";
+      inBlock = close < 0;
+    } else if (t === "") {
+      comment = true;
+    } else if (s.line.some((m) => t.startsWith(m)) && !t.startsWith("#!")) {
+      comment = true;
+    } else if (s.block && t.startsWith(s.block[0])) {
+      const close = t.indexOf(s.block[1], s.block[0].length);
+      comment = close < 0 || t.slice(close + s.block[1].length).trim() === "";
+      inBlock = close < 0;
+    } else {
+      comment = false;
+    }
+
+    if (kind === mark && !comment) return false;
+  }
+
+  return true;
+}
+
+/**
+ * The comments-and-docs rule: every changed file is a document (.md, .mdx,
+ * .txt), or a changed file of a known language whose changed lines are all
+ * comments or blank. Binary files, new, deleted or renamed code files, and
+ * any line that cannot be read as a comment are code. Such a head is auto
+ * with no model call: low-risk changes are never flagged.
+ */
+export function commentsAndDocsOnly(files: readonly RuleFile[]): boolean {
+  if (!files.length) return false;
+
+  return files.every((f) => {
+    if (DOCS.test(f.path)) return true;
+    const s = SYNTAX.find((x) => x.files.test(f.path));
+
+    if (!s || f.binary || f.status !== "modified" || !f.hunks.length) return false;
+
+    return f.hunks.every((h) => sideIsComments(h, "+", s) && sideIsComments(h, "-", s));
+  });
+}

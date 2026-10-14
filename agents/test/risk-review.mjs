@@ -29,7 +29,9 @@ const t = await makeRepo("risk", {
   "docs/guide.md": "# Guide\n\nHow to run the shop.\n",
   "src/app.ts": "export const app = () => 1;\n",
   "src/util.ts": "export const add = (a: number, b: number) => a + b;\n",
-  "payments/charge.ts": "export function charge(cents: number) {\n  return { cents, currency: 'usd' };\n}\n",
+  "payments/charge.ts": "// Charges a card.\nexport function charge(cents: number) {\n  return { cents, currency: 'usd' };\n}\n",
+  "src/greeting.ts": "export const greeting = 'Welcome to the shop';\n",
+  "src/access.ts": "export type Role = 'owner' | 'member' | 'guest';\n\n// Who may merge a branch into main.\nexport function canMerge(role: Role): boolean {\n  return role === 'owner';\n}\n",
   ".pando/pando.toml": '[review]\nsensitive = ["payments/", "deploy/"]\n',
 });
 
@@ -45,7 +47,9 @@ const risk = (body) => call("POST", "/v1/_risk/test", BOOT, { monorepo: t.monore
 
 /** A branch from main with one changed file, pushed by the person; its head. */
 function push(branch, path, text, message) {
-  git(["checkout", "-q", "main"], src);
+  // From main as Pando has it now (earlier branches merged into it).
+  git(["fetch", "-q", t.cloneUrl, "main"], src, t.secret);
+  git(["checkout", "-q", "-B", "main", "FETCH_HEAD"], src);
   git(["checkout", "-q", "-b", branch], src);
   writeFileSync(join(src, path), text);
   git(["commit", "-qam", message], src);
@@ -92,42 +96,61 @@ try {
   r = await call("PATCH", R, t.secret, { review: { colour: "red" } });
   check("an unknown setting: 400", r.status === 400, r.status);
 
-  // ── Docs only: real clef, low, auto ──
-  let head = push("docs-1", "docs/guide.md", "# Guide\n\nHow to run the shop.\n\nRun `npm start`, then open the shop on port 3000.\n", "docs: say how to start the shop");
-  let b = await until("docs-1");
+  // ── The story's first half: low-risk changes are never flagged ──
+  // A comment fix inside payments/: comments only, so auto by rule, with no model call, even under a sensitive path.
+  let head = push("comment-on-charge", "payments/charge.ts", "// Charges a card, in cents (never a fraction of a cent).\nexport function charge(cents: number) {\n  return { cents, currency: 'usd' };\n}\n", "payments: say charges are in cents");
+  let b = await until("comment-on-charge");
+  check("a comment fix, even inside payments/: comments and docs only, auto, no model call, no review", b?.review?.head === head && b.review.rule === "comments_and_docs" && b.review.tier === "auto" && b.review.model === null && b.review.reviewers.length === 0 && b.review.reasons[0] === "Comments and docs only: no code changed", JSON.stringify(b?.review));
+  record("branch-review-rule.json", "Branch", "GET .../branches/{branch} (comments and docs only: auto by rule)", 200, b);
+  r = await merge("comment-on-charge");
+  check("it merges with no review", r.status === 200 && r.json?.status === "merged" && r.json.forced === false, JSON.stringify(r.json));
+
+  // A copy change: real clef scores it low.
+  push("copy-greeting", "src/greeting.ts", "export const greeting = 'Welcome back to the shop';\n", "copy: welcome back");
+  b = await until("copy-greeting");
   counted(b?.review);
-  check("a docs-only change: real clef scores it low, tier auto, on its head", b?.review?.head === head && b.review.level === "low" && b.review.tier === "auto" && b.review.model === "@cf/cloudflare/clef" && b.review.tokens > 0, JSON.stringify(b?.review));
+  check("a copy change: real clef scores it low, tier auto", b?.review?.level === "low" && b.review.tier === "auto" && b.review.rule === null && b.review.model === "@cf/cloudflare/clef" && b.review.tokens > 0, JSON.stringify(b?.review));
   check("its meter's reasons say the score in words", b?.review?.reasons?.some((x) => /^Risk 0\.\d\d: mostly low/.test(x)), JSON.stringify(b?.review?.reasons));
   record("branch-review-auto.json", "Branch", "GET .../branches/{branch} (risk low, auto)", 200, b);
-  r = await merge("docs-1");
+  r = await merge("copy-greeting");
   check("auto merges on green checks as before", r.status === 200 && r.json?.status === "merged", JSON.stringify(r.json));
 
-  // ── Payments: real clef, sensitive (pando.toml's own list), human; reviewers and a guide; a person approves ──
+  // ── The story's second half: a critical kind of change is flagged high and waits for a person ──
+  // A permission check, outside any sensitive path: real clef reads what it does.
+  await risk({ model: "scripted", script: reviewer("comment", "Members can merge now; intended?") });
+  push("members-can-merge", "src/access.ts", "export type Role = 'owner' | 'member' | 'guest';\n\n// Who may merge a branch into main.\nexport function canMerge(role: Role): boolean {\n  return role !== 'guest';\n}\n", "access: members may merge too");
+  b = await until("members-can-merge");
+  counted(b?.review);
+  check("a permission check loosened: real clef scores it high, tier human, no sensitive path needed", b?.review?.level === "high" && b.review.tier === "human" && b.review.sensitive_paths.length === 0, JSON.stringify(b?.review));
+  r = await merge("members-can-merge");
+  check("its merge is refused: 412 review_required", r.status === 412 && r.json?.error?.code === "review_required", JSON.stringify(r.json?.error?.message));
+
+  // Money: a payments change, real clef, sensitive by pando.toml's own list; reviewers and a guide; a person approves.
   await risk({ model: "scripted", script: reviewer("comment", "Looks fine.") });
-  head = push("pay-1", "payments/charge.ts", "export function charge(cents: number, currency = 'usd') {\n  if (cents <= 0) throw new Error('nothing to charge');\n  return { cents, currency };\n}\n", "payments: refuse empty charges, take a currency");
-  b = await until("pay-1");
+  head = push("charge-refuse-empty", "payments/charge.ts", "export function charge(cents: number, currency = 'usd') {\n  if (cents <= 0) throw new Error('nothing to charge');\n  return { cents, currency };\n}\n", "payments: refuse empty charges, take a currency");
+  b = await until("charge-refuse-empty");
   counted(b?.review);
   check("a payments change: sensitive by pando.toml's [review] list, tier human", b?.review?.tier === "human" && b.review.sensitive_paths?.[0] === "payments/charge.ts" && b.review.reasons[0]?.startsWith("Touches sensitive paths: payments/charge.ts"), JSON.stringify(b?.review));
-  r = await merge("pay-1");
+  r = await merge("charge-refuse-empty");
   check("its merge is refused: 412 review_required, with the review state", r.status === 412 && r.json?.error?.code === "review_required" && r.json.error.review?.tier === "human" && /approval/.test(r.json.error.message), JSON.stringify(r.json));
   record("error-review-required.json", "ErrorBody", "POST .../branches/{branch}/merge (412 review_required)", r.status, r.json);
 
   // Its two reviewer agents run once, each posting a review tagged with its session.
-  b = await until("pay-1", (v) => v?.reviewers?.length === 2 && v.reviewers.every((x) => x.state !== "running"), 240_000);
+  b = await until("charge-refuse-empty", (v) => v?.reviewers?.length === 2 && v.reviewers.every((x) => x.state !== "running"), 240_000);
   check("two reviewer agents ran on it (correctness, security), each posted", b?.review?.reviewers?.map((x) => `${x.profile}:${x.state}`).join() === "correctness:posted,security:posted", JSON.stringify(b?.review?.reviewers));
-  r = await call("GET", `${R}/branches/pay-1/reviews`, t.secret);
+  r = await call("GET", `${R}/branches/charge-refuse-empty/reviews`, t.secret);
   const sessions = r.json?.reviews?.map((x) => x.session);
   check("each review names its session; AI reviews do not pass the human tier", sessions?.length === 2 && sessions.every((n) => n > 0) && b?.review?.passes === false, JSON.stringify(sessions));
   record("reviews-sessions.json", "ReviewList", "GET .../branches/{branch}/reviews (reviewer agents' reviews)", r.status, r.json);
-  r = await call("GET", `/v1/monorepos/${t.full}/agents?repo=${repo}&branch=pay-1&kind=review`, t.secret);
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?repo=${repo}&branch=charge-refuse-empty&kind=review`, t.secret);
   const first = r.json?.sessions?.length;
-  git(["push", "-q", "-f", t.cloneUrl, "pay-1"], src, t.secret); // the same head again
+  git(["push", "-q", "-f", t.cloneUrl, "charge-refuse-empty"], src, t.secret); // the same head again
   await sleep(3_000);
-  r = await call("GET", `/v1/monorepos/${t.full}/agents?repo=${repo}&branch=pay-1&kind=review`, t.secret);
+  r = await call("GET", `/v1/monorepos/${t.full}/agents?repo=${repo}&branch=charge-refuse-empty&kind=review`, t.secret);
   check("once per head: the same head pushed again launches nothing", first === 2 && r.json?.sessions?.length === 2, `${first} then ${r.json?.sessions?.length}`);
 
   // An agent's merge gets the refusal with its reason, and stops.
-  r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { branch: "pay-1", model: "scripted", prompt: tool("merge", {}) });
+  r = await call("POST", `/v1/monorepos/${t.full}/agents`, t.secret, { branch: "charge-refuse-empty", model: "scripted", prompt: tool("merge", {}) });
   const n = r.json?.number;
   let tr;
 
@@ -143,7 +166,7 @@ try {
 
   // The guided review: Plannotator's export, kept as the branch's artifact.
   const t0 = Date.now();
-  b = await until("pay-1", (v) => v?.guide_state === "ready" || v?.guide_state === "failed", 300_000);
+  b = await until("charge-refuse-empty", (v) => v?.guide_state === "ready" || v?.guide_state === "failed", 300_000);
   check("the guided review is written before anyone looks: guided-review.html on the branch", b?.review?.guide_state === "ready" && !!b.review.guide?.artifact, `${JSON.stringify({ state: b?.review?.guide_state, guide: b?.review?.guide })} after ${Math.round((Date.now() - t0) / 1000)} s`);
   record("branch-review-human.json", "Branch", "GET .../branches/{branch} (risk high or sensitive: human, reviewers posted, guide ready)", 200, b);
 
@@ -152,10 +175,10 @@ try {
     check("the artifact is Plannotator's guided review export, covering the changed file", r.status === 200 && /<meta name="plannotator-guided-review" content="v1">/.test(r.text) && r.text.includes("payments/charge.ts"), `${r.status} ${r.text.slice(0, 120)}`);
   }
 
-  r = await call("POST", `${R}/branches/pay-1/reviews`, t.secret, { verdict: "approve", body: "Read it with the guide." });
-  b = await until("pay-1", (v) => v?.passes === true, 10_000);
+  r = await call("POST", `${R}/branches/charge-refuse-empty/reviews`, t.secret, { verdict: "approve", body: "Read it with the guide." });
+  b = await until("charge-refuse-empty", (v) => v?.passes === true, 10_000);
   check("a person's approval on the head passes it", b?.review?.approved_by === t.login && b.review.why === null, JSON.stringify(b?.review));
-  r = await merge("pay-1");
+  r = await merge("charge-refuse-empty");
   check("then it merges", r.status === 200 && r.json?.status === "merged", JSON.stringify(r.json));
 
   // ── Medium (scripted score): reviewer agents; one asks for changes ──

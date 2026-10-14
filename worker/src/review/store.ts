@@ -12,7 +12,7 @@ import { profileOf } from "./profiles";
 export const REVIEW_SCHEMA = `
 CREATE TABLE IF NOT EXISTS branch_reviews (
   repo TEXT NOT NULL, branch TEXT NOT NULL, head TEXT NOT NULL, state TEXT NOT NULL,
-  score REAL, tier TEXT, reasons TEXT NOT NULL DEFAULT '[]', sensitive TEXT NOT NULL DEFAULT '[]', answers TEXT,
+  rule TEXT, score REAL, tier TEXT, reasons TEXT NOT NULL DEFAULT '[]', sensitive TEXT NOT NULL DEFAULT '[]', answers TEXT,
   model TEXT, tokens INTEGER, cost_usd REAL, error TEXT, reviewers TEXT NOT NULL DEFAULT '[]',
   guide_state TEXT NOT NULL DEFAULT 'none', guide TEXT, guide_error TEXT,
   created_at TEXT NOT NULL, classified_at TEXT, PRIMARY KEY (repo, branch, head));
@@ -34,6 +34,7 @@ interface HeadRow extends Row {
   branch: string;
   head: string;
   state: string;
+  rule: string | null;
   score: number | null;
   tier: string | null;
   reasons: string;
@@ -59,6 +60,8 @@ export interface Launched {
 export interface ClassifiedRow {
   /** The project's sensitive paths as read for this head. */
   patterns: string[];
+  /** A rule that decided it with no model call (policy.ts commentsAndDocsOnly). */
+  rule: "comments_and_docs" | null;
   score: number | null;
   tier: Contract.ReviewTier;
   reasons: string[];
@@ -101,6 +104,9 @@ export class ReviewStore {
 
   ensureSchema(): void {
     for (const s of REVIEW_SCHEMA.split(";").map((x) => x.trim()).filter(Boolean)) this.sql.exec(s);
+
+    // Rows from before the comments-and-docs rule.
+    if (!this.sql.exec<{ name: string }>("PRAGMA table_info(branch_reviews)").toArray().some((c) => c.name === "rule")) this.sql.exec("ALTER TABLE branch_reviews ADD COLUMN rule TEXT");
   }
 
   private one<T extends Row>(q: string, ...args: SqlStorageValue[]): T | null {
@@ -144,9 +150,9 @@ export class ReviewStore {
   /** clef's answer (or why there is none), once per head: false when it was already written. */
   classified(repo: string, branch: string, head: string, c: ClassifiedRow): boolean {
     return this.sql.exec(
-      `UPDATE branch_reviews SET state = 'done', score = ?, tier = ?, reasons = ?, sensitive = ?, answers = ?, model = ?, tokens = ?, cost_usd = ?, error = ?, classified_at = ?
+      `UPDATE branch_reviews SET state = 'done', rule = ?, score = ?, tier = ?, reasons = ?, sensitive = ?, answers = ?, model = ?, tokens = ?, cost_usd = ?, error = ?, classified_at = ?
        WHERE repo = ? AND branch = ? AND head = ? AND state = 'classifying'`,
-      c.score, c.tier, JSON.stringify(c.reasons), JSON.stringify(c.sensitive), c.answers === undefined ? null : JSON.stringify(c.answers),
+      c.rule, c.score, c.tier, JSON.stringify(c.reasons), JSON.stringify(c.sensitive), c.answers === undefined ? null : JSON.stringify(c.answers),
       c.model, c.tokens, c.cost_usd, c.error, now(), repo, branch, head,
     ).rowsWritten > 0;
   }
@@ -189,7 +195,8 @@ export class ReviewStore {
     const sensitive = textList(r.sensitive);
     // The tier from the stored score under the settings as they are now: a threshold changed in Settings counts at once.
     // Reviewers and the guide start only when a head is scored.
-    const tier = late ? "human" : r.state === "classifying" ? null : tierOf(r.score, sensitive.length, s);
+    const rule = r.rule === "comments_and_docs" ? r.rule : null;
+    const tier = late ? "human" : r.state === "classifying" ? null : rule ? "auto" : tierOf(r.score, sensitive.length, s);
     const launched = parseJson(r.reviewers);
 
     const reviewers: (typeof Contract.Reviewer.Encoded & ReviewerState)[] = (Array.isArray(launched) ? launched : []).flatMap((x) => {
@@ -212,7 +219,8 @@ export class ReviewStore {
       head: r.head,
       state: r.state === "classifying" && !late ? "classifying" : "done",
       score: r.score,
-      level: late ? "unknown" : r.state === "classifying" ? "unknown" : levelOf(r.score, s),
+      level: late || r.state === "classifying" ? "unknown" : rule ? "low" : levelOf(r.score, s),
+      rule,
       tier,
       reasons: late ? ["The risk score did not arrive within a minute"] : textList(r.reasons),
       sensitive_paths: sensitive,

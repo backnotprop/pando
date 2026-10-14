@@ -5,12 +5,13 @@
   "body": {
     "error": {
       "code": "risk_pending",
-      "message": "the risk score for 17f1f680b245 is still being worked out; try again in a few seconds",
+      "message": "the risk score for 6fc64651a8a4 is still being worked out; try again in a few seconds",
       "review": {
-        "head": "17f1f680b24561768b2d07479c6832e7d8524ce2",
+        "head": "6fc64651a8a41ca9917d483f4293c268bb24f283",
         "state": "classifying",
         "score": null,
         "level": "unknown",
+        "rule": null,
         "tier": null,
         "reasons": [],
         "sensitive_paths": [],

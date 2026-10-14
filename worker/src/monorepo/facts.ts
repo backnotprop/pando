@@ -156,8 +156,8 @@ export class FactsDrain extends WorkerEntrypoint<Env> {
     };
 
     const idx = jobs.map((_, i) => i);
-    // One-branch jobs and review jobs (each its own head: a clef call under a second) side by side; the rest in order.
-    const side = (t: string) => t === "branch" || t === "review";
+    // One-branch jobs, review jobs (a clef call under a second) and guides (their own outbox) side by side; the rest in order.
+    const side = (t: string) => t === "branch" || t === "review" || t === "review_guide";
     await pool(idx.filter((i) => side(jobs[i].type)), SWEEP_PARALLEL, one);
 
     for (const i of idx.filter((i) => !side(jobs[i].type))) await one(i);

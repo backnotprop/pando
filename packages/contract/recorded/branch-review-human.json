@@ -3,17 +3,17 @@
   "route": "GET .../branches/{branch} (risk high or sensitive: human, reviewers posted, guide ready)",
   "status": 200,
   "body": {
-    "name": "pay-1",
-    "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
-    "base": "c6f1585ec8abd22bd1b33926164606abff28ccd2",
-    "author": "risk-mv7cc9qc",
+    "name": "charge-refuse-empty",
+    "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
+    "base": "85c4016ed2c27378079b558fcdad0047b2d1b191",
+    "author": "risk-mv7cvr18",
     "title": null,
     "description": null,
     "ahead": 1,
-    "behind": 2,
+    "behind": 0,
     "mergeable": "clean",
     "checks": {
-      "sha": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+      "sha": "a80307c718b33dfb8b10372e2c6f3553930ae548",
       "state": "success",
       "required": [],
       "missing": [],
@@ -28,56 +28,58 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "tester-mbp",
-    "created_at": "2026-10-13T23:57:42.419Z",
-    "updated_at": "2026-10-13T23:57:42.419Z",
+    "created_at": "2026-10-14T00:12:59.514Z",
+    "updated_at": "2026-10-14T00:12:59.514Z",
     "stale": false,
     "last_mergeable": null,
     "conflict_paths": null,
-    "facts_at": "2026-10-13T23:57:44.344Z",
+    "facts_at": "2026-10-14T00:13:00.786Z",
     "review": {
-      "head": "b1b7dd2f82ac99628d71cf53d5075c055c45fa8d",
+      "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
       "state": "done",
-      "score": 0.91115,
+      "score": 0.93395,
       "level": "high",
+      "rule": null,
       "tier": "human",
       "reasons": [
         "Touches sensitive paths: payments/charge.ts",
         "The model reads it as touching auth, payments, secrets, infrastructure or data (0.99)",
-        "Risk 0.91: mostly high (0.85)"
+        "The model reads it as changing a critical kind of behaviour: access, money, data deletion, secrets, migrations or merge rules (0.97)",
+        "Risk 0.93: mostly high (0.90)"
       ],
       "sensitive_paths": [
         "payments/charge.ts"
       ],
       "model": "@cf/cloudflare/clef",
-      "tokens": 754,
-      "cost_usd": 0.00018095999999999998,
+      "tokens": 1018,
+      "cost_usd": 0.00024432,
       "error": null,
       "reviewers": [
         {
           "profile": "correctness",
           "label": "Correctness",
-          "session": 2,
+          "session": 4,
           "state": "posted",
           "verdict": "comment"
         },
         {
           "profile": "security",
           "label": "Security",
-          "session": 1,
+          "session": 3,
           "state": "posted",
           "verdict": "comment"
         }
       ],
       "guide_state": "ready",
       "guide": {
-        "artifact": "art_f3445fa529de8f29",
+        "artifact": "art_84706fd46f02cdaa",
         "version": 1,
-        "title": "Charges take a currency and refuse empty amounts"
+        "title": "Charges refuse empty amounts and take a currency"
       },
       "approved_by": null,
       "passes": false,
       "why": "a person's approval is needed on this head",
-      "classified_at": "2026-10-13T23:57:43.623Z"
+      "classified_at": "2026-10-14T00:13:01.069Z"
     }
   }
 }

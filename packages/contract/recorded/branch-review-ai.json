@@ -4,16 +4,16 @@
   "status": 200,
   "body": {
     "name": "mid-1",
-    "head": "e8a7f8fd9a5fe048bc7349eb88cf22bf5ed3ad75",
+    "head": "e65cf9ae8c48f67bb4b7bfe145cf1a3fdcfbb070",
     "base": null,
-    "author": "risk-mv7cc9qc",
+    "author": "risk-mv7cvr18",
     "title": null,
     "description": null,
     "ahead": null,
     "behind": null,
     "mergeable": "pending",
     "checks": {
-      "sha": "e8a7f8fd9a5fe048bc7349eb88cf22bf5ed3ad75",
+      "sha": "e65cf9ae8c48f67bb4b7bfe145cf1a3fdcfbb070",
       "state": "success",
       "required": [],
       "missing": [],
@@ -28,17 +28,18 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "tester-mbp",
-    "created_at": "2026-10-13T23:58:45.930Z",
-    "updated_at": "2026-10-13T23:58:45.930Z",
+    "created_at": "2026-10-14T00:14:53.618Z",
+    "updated_at": "2026-10-14T00:14:53.618Z",
     "stale": true,
     "last_mergeable": null,
     "conflict_paths": null,
     "facts_at": null,
     "review": {
-      "head": "e8a7f8fd9a5fe048bc7349eb88cf22bf5ed3ad75",
+      "head": "e65cf9ae8c48f67bb4b7bfe145cf1a3fdcfbb070",
       "state": "done",
       "score": 0.5,
       "level": "medium",
+      "rule": null,
       "tier": "ai",
       "reasons": [
         "Risk 0.50: mostly medium (1.00)"
@@ -52,14 +53,14 @@
         {
           "profile": "correctness",
           "label": "Correctness",
-          "session": 5,
+          "session": 7,
           "state": "posted",
           "verdict": "comment"
         },
         {
           "profile": "security",
           "label": "Security",
-          "session": 4,
+          "session": 6,
           "state": "posted",
           "verdict": "comment"
         }
@@ -69,7 +70,7 @@
       "approved_by": null,
       "passes": true,
       "why": null,
-      "classified_at": "2026-10-13T23:58:47.125Z"
+      "classified_at": "2026-10-14T00:14:55.840Z"
     }
   }
 }

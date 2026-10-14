@@ -57,6 +57,8 @@ export const BranchReview = Schema.Struct({
   /** 0 (low) to 1 (high): clef's probability-weighted level; null when unknown. */
   score: Schema.NullOr(Schema.Number),
   level: RiskLevel,
+  /** comments_and_docs: only comments, docs and blank lines changed, so it is auto by rule, with no model call (never flagged). */
+  rule: Schema.NullOr(Schema.Literals(["comments_and_docs"])),
   tier: Schema.NullOr(ReviewTier),
   /** Plain words, most telling first: sensitive paths, deletions, size, the model's answers. */
   reasons: Schema.Array(Schema.String),

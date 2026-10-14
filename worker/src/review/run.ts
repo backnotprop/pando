@@ -16,7 +16,7 @@ import type { MonorepoObject } from "../monorepo/object";
 import type { Identity, ObjectInfo, Outcome, RepoRecord } from "../monorepo/types";
 import { DEFAULT_MODEL } from "../../../agents/src/protocol";
 import { GUIDE_ARTIFACT, writeGuide } from "./guide";
-import { DEFAULT_SENSITIVE, SENSITIVE_SHOWN, sensitiveOf, tierOf } from "./policy";
+import { commentsAndDocsOnly, DEFAULT_SENSITIVE, SENSITIVE_SHOWN, sensitiveOf, tierOf } from "./policy";
 import { AUTO_PROFILES, profileOf } from "./profiles";
 import { classify, reasonsOf, scripted, stateOf, type ChangedFile, type Scored } from "./risk";
 import type { BranchReviewOut, Launched } from "./store";
@@ -112,8 +112,14 @@ export async function runReview(env: Env, stub: Stub, r: RepoRecord, info: Objec
   let scored: Scored = read.ok ? { ok: false, why: "not scored" } : read;
   let hits: string[] = [];
   let reasons: string[] = [];
+  let rule: "comments_and_docs" | null = null;
 
-  if (read.ok) {
+  if (read.ok && !read.change.diff.too_many_files && commentsAndDocsOnly(changedOf(read.change.diff))) {
+    // Comments, docs and blank lines only: auto by rule, with no model call (policy.ts). Sensitive paths count for code only.
+    rule = "comments_and_docs";
+    scored = { ok: true, c: { score: 0, levels: { low: 1, medium: 0, high: 0 }, path: { choice: "auto", probabilities: {} }, sensitive: 0, destructive: 0, critical: 0, model: "", tokens: 0, cost_usd: 0, ms: 0 } };
+    reasons = ["Comments and docs only: no code changed"];
+  } else if (read.ok) {
     const { diff, commits } = read.change;
     const files = changedOf(diff);
     hits = sensitiveOf(files.map((f) => f.path), patterns);
@@ -133,18 +139,18 @@ export async function runReview(env: Env, stub: Stub, r: RepoRecord, info: Objec
     reasons = reasonsOf(scored.ok ? scored.c : null, facts);
   }
 
-  const c = scored.ok ? scored.c : null;
+  const c = scored.ok && !rule ? scored.c : null;
   const error = scored.ok ? null : scored.why;
-  const tier = tierOf(c?.score ?? null, hits.length, job.settings);
+  const tier = rule ? "auto" : tierOf(c?.score ?? null, hits.length, job.settings);
 
   if (error) reasons = [`Risk unknown: ${error}`, ...reasons].slice(0, 6);
-  console.log(JSON.stringify({ msg: "pando.risk", repo: m.repo, branch: m.branch, head: m.head, tier, score: c?.score ?? null, tokens: c?.tokens ?? null, cost_usd: c?.cost_usd ?? null, ms: c?.ms ?? null, error }));
+  console.log(JSON.stringify({ msg: "pando.risk", repo: m.repo, branch: m.branch, head: m.head, tier, rule, score: rule ? 0 : (c?.score ?? null), tokens: c?.tokens ?? null, cost_usd: c?.cost_usd ?? null, ms: c?.ms ?? null, error }));
 
   const first = await stub.reviewClassified(m.repo, m.branch, m.head, {
-    patterns,
-    score: c?.score ?? null, tier, reasons, sensitive: hits.slice(0, SENSITIVE_SHOWN),
-    answers: c ? { levels: c.levels, path: c.path, sensitive: c.sensitive, destructive: c.destructive, ms: c.ms } : null,
-    model: c?.model ?? null, tokens: c?.tokens ?? null, cost_usd: c?.cost_usd ?? null, error,
+    patterns, rule,
+    score: rule ? 0 : (c?.score ?? null), tier, reasons, sensitive: hits.slice(0, SENSITIVE_SHOWN),
+    answers: c ? { levels: c.levels, path: c.path, sensitive: c.sensitive, destructive: c.destructive, critical: c.critical, ms: c.ms } : null,
+    model: c?.model ?? null, tokens: c?.tokens ?? null, cost_usd: c?.cost_usd ?? null, error: rule ? null : error,
   });
 
   if (!first || tier === "auto") return;

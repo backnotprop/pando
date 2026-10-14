@@ -8,7 +8,7 @@
 // (required checks unknown, and why); then a rename (the old name
 // redirects) and a delete with the typed confirmation. No page polls
 // while its socket is up. Real Worker, real git, real browser.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type WebSocket as PageSocket, test } from "@playwright/test";
 import { Buildkite } from "./buildkite";
 import { BASE, browserPost, ciStatus, HARD_LOAD, Machine, nextSignIn } from "./seed";
 
@@ -273,7 +273,8 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       const typecheck = checks.getByRole("listitem").filter({ hasText: "typecheck" });
 
       // The check rows' builds and jobs come as rows on the page's socket: no read of them once it is up.
-      await page.waitForTimeout(2000);
+      // The checks say they are busy until the page's socket is up and their runs were read again after it opened.
+      await expect(page.getByTestId("checks")).toHaveAttribute("aria-busy", "false", { timeout: 30_000 });
       runsReads.from();
       branchReads.from();
       await bk.send("build.scheduled", "web-ci", 7, b7());
@@ -385,6 +386,61 @@ test("slice 3: machines, your machines, members, CI with Buildkite, rename and d
       await expect(rebuilt.getByText("canceled", { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(rebuilt).toHaveClass(/arrived/);
       expect(ciReads.seen()).toEqual([]);
+    });
+
+    await test.step("a job's frame that lands while the page's first re-read is in flight stays, never undone by that read's older answer", async () => {
+      const bk = buildkite();
+      // The commit's oldest build, so the page's re-read reads it last.
+      const b8 = { commit: sha, branch: "feature", message: "Start a feature", created_at: at(-90_000) };
+      const run8 = { ...b8, state: "running", started_at: at(-89_000) };
+
+      await bk.send("build.scheduled", "web-ci", 8, b8);
+      await bk.send("job.scheduled", "web-ci", 8, run8, { id: "job-smoke", key: "smoke", state: "scheduled", created_at: at(-89_500) });
+      // The page's read of build 8 (smoke queued), which its socket's first caught_up waits for, is held until the
+      // job's running frame has landed on the page, then handed over: an answer older than what the page was told.
+      let runningFrame = false;
+
+      let release = () => {};
+
+      const released = new Promise<void>((r) => (release = r));
+
+      let held = false;
+
+      let handedOver = false;
+
+      const onSocket = (ws: PageSocket) => {
+        if (!ws.url().includes("topics=repo%3Aprojects-web")) return;
+        ws.on("framereceived", (f) => {
+          const text = String(f.payload);
+
+          runningFrame ||= text.includes('"kind":"ci.job"') && text.includes('"job-smoke"') && text.includes('"state":"running"');
+        });
+      };
+
+      page.on("websocket", onSocket);
+      await page.route(/\/ci\/builds\/cib_[^/?]+$/, async (route) => {
+        const answer = await route.fetch();
+
+        if (!(await answer.text()).includes('"job-smoke"')) return route.fulfill({ response: answer });
+        held = true;
+        await released;
+        await route.fulfill({ response: answer });
+        handedOver = true;
+      });
+      await page.goto(`${BASE}/${full}/projects/web/branches/feature`);
+      const smoke = page.getByRole("list", { name: "Checks" }).getByRole("listitem").filter({ hasText: "smoke" });
+
+      await expect.poll(() => held, { timeout: 30_000 }).toBe(true);
+      await bk.send("job.started", "web-ci", 8, run8, { id: "job-smoke", key: "smoke", state: "running", created_at: at(-89_500), started_at: at(-20_000) });
+      await expect.poll(() => runningFrame, { timeout: 30_000 }).toBe(true);
+      release();
+      // Build 8 is the read's last: once its older answer is in and the page has drawn twice, smoke must still say running.
+      await expect.poll(() => handedOver, { timeout: 30_000 }).toBe(true);
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await expect(smoke.getByText("running", { exact: true })).toBeVisible();
+      await expect(smoke.getByText("queued", { exact: true })).toHaveCount(0);
+      await page.unroute(/\/ci\/builds\/cib_[^/?]+$/);
+      page.off("websocket", onSocket);
     });
 
     await test.step("a check on a commit no branch is at names the commit: lint passed on <sha>", async () => {

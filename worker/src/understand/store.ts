@@ -256,9 +256,20 @@ export class UnderstandStore {
     const placed: string[] = [];
     const refused: { id: string; reason: string }[] = [];
 
+    // Every block names itself: a missing, malformed or repeated id is the whole request's refusal, never renamed (a
+    // renamed block could take another's id and replace it).
+    const seen = new Set<string>();
+
     for (const [i, b] of input.entries()) {
-      const id = b.id !== null && BLOCK_ID.test(b.id) ? b.id : `p${blocks.length + 1}`;
-      const no = (reason: string) => refused.push({ id: b.id ?? `block ${i + 1}`, reason });
+      if (b.id === null || !BLOCK_ID.test(b.id)) throw new HttpError(400, "bad_request", `blocks[${i}].id: ${b.id === null ? "missing" : `"${b.id.slice(0, 60)}" is not one`}; give each block an id of letters, digits, _ and -, at most 40 characters (such as p1)`);
+
+      if (seen.has(b.id)) throw new HttpError(400, "bad_request", `blocks[${i}].id: "${b.id}" is given twice in this request`);
+      seen.add(b.id);
+    }
+
+    for (const [i, b] of input.entries()) {
+      const id = b.id ?? `block ${i + 1}`;
+      const no = (reason: string) => refused.push({ id, reason });
 
       if (b.type !== "paragraph" && b.type !== "nothing") {
         no('type: "paragraph" (a part of the answer) or "nothing" (no record explains what was asked)');

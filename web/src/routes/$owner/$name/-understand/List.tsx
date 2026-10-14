@@ -29,20 +29,26 @@ function Ask() {
   const navigate = useNavigate();
   const [text, setText] = useState("");
   const [error, setError] = useState<Error | null>(null);
+  const [sending, setSending] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
 
-    if (!text.trim()) return;
+    // One question at a time: a second press while the first is asked does nothing.
+    if (!text.trim() || sending) return;
+    setSending(true);
     setError(null);
 
     try {
       const page = await askUnderstand(monorepo, text.trim(), null, null);
 
+      setText("");
       qc.setQueryData(understandQuery(monorepo, page.number).queryKey, page);
       await navigate(understandLink(monorepo.full, page.number));
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setSending(false);
     }
   };
 

@@ -173,6 +173,11 @@ try {
       { id: "made-up", type: "paragraph", text: "A record nobody found: [r9]." },
       { id: "uncited", type: "paragraph", text: "A sentence that rests on nothing." },
     ]),
+    place([{ id: "bad id!", type: "paragraph", text: "A block with no usable id [r1]." }]),
+    place([
+      { id: "p1", type: "paragraph", text: "A second p1 [r1]." },
+      { id: "p1", type: "paragraph", text: "And a third [r2]." },
+    ]),
   ].join("\n");
 
   r = await call("POST", `/v1/monorepos/${m.full}/understand`, m.secret, { question, scope: { kind: "lines", repo, path: "src/limit.ts", ref: "main", start: 1, end: 7 }, model: "scripted" });
@@ -195,8 +200,11 @@ try {
   check("three paragraphs placed, in order, each citing its records", page?.blocks?.map((b) => `${b.id}:${b.cites.join("+")}`).join() === "p1:r5+r4,p2:r3+r1,p3:r2", JSON.stringify(page?.blocks));
   check("a made-up source and an uncited sentence are not on the page", !page?.blocks?.some((b) => b.id === "made-up" || b.id === "uncited"));
   r = await call("GET", `/v1/monorepos/${m.full}/agents/${page?.session}/transcript`, m.secret);
-  const placed = r.json?.messages?.filter((x) => x.role === "tool").map((x) => x.parts[0]).find((p) => p.name === "place");
+  const places = r.json?.messages?.filter((x) => x.role === "tool").map((x) => x.parts[0]).filter((p) => p.name === "place") ?? [];
+  const placed = places[0];
   check("the model is told why: r9 is not a source; a paragraph must cite", /Refused made-up: r9: not a source this page's lookups found/.test(placed?.text ?? "") && /Refused uncited: a paragraph must cite/.test(placed?.text ?? ""), placed?.text);
+  check("a block id that is not one is refused whole (400), never renamed", places[1]?.error === true && /Pando refused \(400\) bad_request: blocks\[0\]\.id: "bad id!" is not one/.test(places[1]?.text ?? ""), places[1]?.text);
+  check("an id given twice in one request is refused whole (400): nothing replaced", places[2]?.error === true && /blocks\[1\]\.id: "p1" is given twice/.test(places[2]?.text ?? "") && page?.blocks?.[0]?.text.startsWith("The limit is 100"), places[2]?.text);
 
   // ── The page's writers: its own session only ──
   r = await call("POST", `/v1/monorepos/${m.full}/understand/1/blocks`, m.secret, { blocks: [{ id: "p9", type: "paragraph", text: "Mine [r1]." }] });
@@ -254,6 +262,43 @@ try {
   const frames = r.json?.events?.filter((e) => e.kind === "understand.updated") ?? [];
   check("its row events, on topic understand:1", frames.length > 3 && frames.every((f) => f.number === 1), r.status);
   record("understand-event-frames.json", "MonorepoEventFrame[]", "GET .../events?topics=understand:1 (understand.updated)", 200, frames.slice(-2).map((f) => ({ type: "event", ...f })));
+
+  // ── A member's chat is theirs alone: its agent and its sandbox's sessions never reach a page, nor a search ──
+  r = await call("POST", `/v1/monorepos/${m.full}/assistant`, bo, { model: "scripted", prompt: "Where is the rate limit window kept?" });
+  const chatN = r.json?.number;
+
+  check("Bo's chat with the assistant", r.status === 201 && r.json?.kind === "chat", JSON.stringify(r.json));
+  // A machine named as that chat's sandbox (cloud-<n>), recording a session that names the window.
+  r = await call("POST", "/v1/user/credentials", bo, { name: `cloud-${chatN}`, kind: "sandbox" });
+  const chatAgentId = `0199-chat-${id}`;
+  const chatSid = sessionId("pi", chatAgentId);
+
+  const chatLines = [
+    { type: "session", version: 3, id: chatAgentId, timestamp: t(0), cwd: "/workspace/repo" },
+    { type: "message", id: "u1", parentId: null, timestamp: t(1), message: { role: "user", content: [{ type: "text", text: "Keep the window private: sixty seconds a machine, not per person." }], timestamp: Date.parse(t(1)) } },
+  ].map((x) => JSON.stringify(x)).join("\n") + "\n";
+
+  const chatPiece = await fetch(`${BASE}/v1/monorepos/${m.full}/sessions/${chatSid}/pieces?at=0&next=${Buffer.byteLength(chatLines)}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${r.json?.secret}`, "pando-session": JSON.stringify({ program: "pi", agent_id: chatAgentId, repo, branch: "chat-note", parent: null }), "content-type": "application/x-ndjson" },
+    body: chatLines,
+  });
+
+  check("a session recorded from the chat's machine", chatPiece.status === 200 || chatPiece.status === 201, chatPiece.status);
+  // A commit made from that machine, naming that session.
+  git(["checkout", "-qb", "chat-note"], src);
+  put("README.md", "# API\n\nThe rate limit window is sixty seconds.\n");
+  git(["commit", "-qam", `Note the window\n\nPando-Session: ${chatSid}\nPando-Machine: cloud-${chatN}`], src);
+  check("its commit pushed on chat-note", git(["push", "-q", cloneUrl, "chat-note"], src, m.secret).ok);
+  r = await call("POST", `/v1/monorepos/${m.full}/understand`, m.secret, {
+    question: ["Why is line 3 of README.md the way it is?", tool("search_sessions", { words: ["window private"] })].join("\n"),
+    scope: { kind: "lines", repo, path: "README.md", ref: "chat-note", start: 3, end: 3 },
+    model: "scripted",
+  });
+  page = await until(m, r.json?.number ?? 5, complete);
+  check("the chat's commit is on the page, as git has it", page?.refs?.[0]?.card?.kind === "commit" && page.refs[0].card.machine === `cloud-${chatN}`, JSON.stringify(page?.refs?.[0]));
+  check("but not the chat (no agent card) nor the session from its sandbox", !page?.refs?.some((x) => x.card?.kind === "agent" || (x.card?.kind === "session" && x.card.id === chatSid)), JSON.stringify(page?.refs?.map((x) => `${x.id}:${x.card?.kind}`)));
+  check("and search_sessions does not find it", page?.steps?.find((x) => x.tool === "search_sessions")?.found.startsWith("nothing"), JSON.stringify(page?.steps?.find((x) => x.tool === "search_sessions")));
 
   // ── Refusals ──
   r = await call("POST", `/v1/monorepos/${m.full}/understand`, m.secret, { question: " " });

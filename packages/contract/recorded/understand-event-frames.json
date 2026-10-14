@@ -5,8 +5,8 @@
   "body": [
     {
       "type": "event",
-      "seq": 27,
-      "at": "2026-10-14T19:16:27.819Z",
+      "seq": 28,
+      "at": "2026-10-14T22:08:06.105Z",
       "kind": "understand.updated",
       "collection": "understand",
       "key": "1",
@@ -18,33 +18,33 @@
       "number": 1,
       "row": {
         "number": 1,
-        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}",
+        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> blame {\"path\":\"src/limit.ts\",\"start\":2,\"end\":2}\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}\n> place {\"blocks\":[{\"id\":\"bad id!\",\"type\":\"paragraph\",\"text\":\"A block with no usable id [r1].\"}]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"A second p1 [r1].\"},{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"And a third [r2].\"}]}",
         "scope": {
           "kind": "lines",
           "repo": "projects-api",
           "path": "src/limit.ts",
-          "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+          "commit": "0f833ffd01278eaeb5d51b38a698e4403fe0e01d",
           "start": 1,
           "end": 7
         },
         "from": null,
         "status": "building",
         "reason": null,
-        "asked_by": "und-mv8hq8wy",
+        "asked_by": "und-mv8nuxym",
         "session": 1,
         "model": "scripted",
         "revision": 2,
         "sources": 5,
         "cited": 5,
-        "created_at": "2026-10-14T19:16:21.863Z",
-        "updated_at": "2026-10-14T19:16:27.819Z",
+        "created_at": "2026-10-14T22:08:00.101Z",
+        "updated_at": "2026-10-14T22:08:06.105Z",
         "completed_at": null
       }
     },
     {
       "type": "event",
-      "seq": 29,
-      "at": "2026-10-14T19:16:27.824Z",
+      "seq": 30,
+      "at": "2026-10-14T22:08:06.112Z",
       "kind": "understand.updated",
       "collection": "understand",
       "key": "1",
@@ -56,27 +56,27 @@
       "number": 1,
       "row": {
         "number": 1,
-        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}",
+        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> blame {\"path\":\"src/limit.ts\",\"start\":2,\"end\":2}\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}\n> place {\"blocks\":[{\"id\":\"bad id!\",\"type\":\"paragraph\",\"text\":\"A block with no usable id [r1].\"}]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"A second p1 [r1].\"},{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"And a third [r2].\"}]}",
         "scope": {
           "kind": "lines",
           "repo": "projects-api",
           "path": "src/limit.ts",
-          "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+          "commit": "0f833ffd01278eaeb5d51b38a698e4403fe0e01d",
           "start": 1,
           "end": 7
         },
         "from": null,
         "status": "complete",
         "reason": null,
-        "asked_by": "und-mv8hq8wy",
+        "asked_by": "und-mv8nuxym",
         "session": 1,
         "model": "scripted",
         "revision": 2,
         "sources": 5,
         "cited": 5,
-        "created_at": "2026-10-14T19:16:21.863Z",
-        "updated_at": "2026-10-14T19:16:27.823Z",
-        "completed_at": "2026-10-14T19:16:27.823Z"
+        "created_at": "2026-10-14T22:08:00.101Z",
+        "updated_at": "2026-10-14T22:08:06.112Z",
+        "completed_at": "2026-10-14T22:08:06.112Z"
       }
     }
   ]

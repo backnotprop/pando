@@ -163,6 +163,7 @@ try {
 
   const question = [
     "Why are lines 1 to 7 of src/limit.ts the way they are?",
+    tool("blame", { path: "src/limit.ts", start: 2, end: 2 }),
     tool("search_shared", { words: ["rate limit"] }),
     tool("search_sessions", { words: ["per machine"] }),
     place([
@@ -188,8 +189,9 @@ try {
   check("r3: the session, its turn that wrote the file: the prompt and the edit", ref("r3")?.card?.kind === "session" && ref("r3").card.id === sid && ref("r3").card.prompt?.why === "wrote" && ref("r3").card.prompt.text.startsWith("Apply decisions/0010") && ref("r3").card.step?.tool === "edit" && ref("r3").card.step.input === "src/limit.ts", JSON.stringify(ref("r3")));
   check("r4: issue #1, named in the prompt", ref("r4")?.card?.kind === "issue" && ref("r4").card.number === 1 && ref("r4").how === "named", JSON.stringify(ref("r4")));
   check("r5: the decision, named, with its words and who saved it", ref("r5")?.card?.kind === "meta" && ref("r5").card.path === "decisions/0010-rate-limit.md" && /100 requests a minute per machine/.test(ref("r5").card.excerpt?.text ?? "") && ref("r5").card.machine === "ramos-mbp", JSON.stringify(ref("r5")));
-  check("the first pass's steps, then the assistant's searches", page?.steps?.map((s) => `${s.by}:${s.tool}`).join() === "first_pass:blame,first_pass:behind,assistant:search_shared,assistant:search_sessions", page?.steps?.map((s) => `${s.by}:${s.tool}:${s.found}`).join(" | "));
-  check("its search found the decision again: the same id, no second record", page?.steps?.[2]?.refs?.includes("r5") && page.refs.filter((x) => x.card?.kind === "meta").length === 1, JSON.stringify(page?.steps?.[2]));
+  check("the first pass's steps, then the assistant's searches", page?.steps?.map((s) => `${s.by}:${s.tool}`).join() === "first_pass:blame,first_pass:behind,assistant:blame,assistant:search_shared,assistant:search_sessions", page?.steps?.map((s) => `${s.by}:${s.tool}:${s.found}`).join(" | "));
+  check("the assistant's own blame (line 2) leaves the page's lines as asked, and finds the same commit, r1", page?.lines?.lines?.length === 7 && page.steps[2].refs.join() === "r1", JSON.stringify(page?.steps?.[2]));
+  check("its search found the decision again: the same id, no second record", page?.steps?.[3]?.refs?.includes("r5") && page.refs.filter((x) => x.card?.kind === "meta").length === 1, JSON.stringify(page?.steps?.[3]));
   check("three paragraphs placed, in order, each citing its records", page?.blocks?.map((b) => `${b.id}:${b.cites.join("+")}`).join() === "p1:r5+r4,p2:r3+r1,p3:r2", JSON.stringify(page?.blocks));
   check("a made-up source and an uncited sentence are not on the page", !page?.blocks?.some((b) => b.id === "made-up" || b.id === "uncited"));
   r = await call("GET", `/v1/monorepos/${m.full}/agents/${page?.session}/transcript`, m.secret);

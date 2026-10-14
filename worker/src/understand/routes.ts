@@ -124,7 +124,8 @@ async function ctxOf(c: C, scope: Scope | null, known: string[] = []): Promise<L
 async function keep(c: C, n: number, result: LookupResult): Promise<{ text: string; refs: string[] }> {
   const stub = c.get("stub");
 
-  if (result.lines) unwrap(await stub.understandSetLines(n, result.lines));
+  // The lines asked about are the first pass's blame of the scope; the assistant's own blames are steps, not the page's lines.
+  if (result.lines && result.step.by === "first_pass") unwrap(await stub.understandSetLines(n, result.lines));
   const ids = unwrap(await stub.understandRecord(n, result.step, result.found));
 
   return { text: lookupText(result, ids), refs: ids.filter((x): x is string => x !== null) };

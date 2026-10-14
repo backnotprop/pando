@@ -18,7 +18,12 @@ const id = Date.now().toString(36);
 
 const ann = { id: `user_ann_${id}`, email: `ann-${id}@pando.invalid`, email_verified: true, first_name: "Ann", last_name: "Lane" };
 
-const SHOTS = new URL("../../../../../../research/design/pando-understand-2026-10-14/shots/", import.meta.url).pathname;
+/** PANDO_E2E_SHOTS=<folder>: the spec also saves its screenshots there (the design folder's shots); unset, it saves none. */
+const SHOTS = process.env.PANDO_E2E_SHOTS ?? null;
+
+async function shot(page: Page, name: string) {
+  if (SHOTS) await page.screenshot({ path: `${SHOTS.replace(/\/$/, "")}/${name}`, fullPage: true });
+}
 
 /** A line the scripted model reads as one tool call (agents/src/models.ts). */
 const tool = (name: string, args: JsonBody) => `> ${name} ${JSON.stringify(args)}`;
@@ -134,7 +139,7 @@ test("understand: the page as an essay with exhibits, nothing found, and its way
 
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Why are lines 1 to 7 of src/limit.ts the way they are?");
   await expect(article).toContainText(/ann-\w+ asked, .*\. Scripted \(tests\) answered from Pando's records\./);
-  await page.screenshot({ path: `${SHOTS}e2e-complete-dark-first.png`, fullPage: true });
+  await shot(page, "e2e-complete-dark-first.png");
   // The lines, each run with the commit that last changed it.
   const lines = page.getByLabel("The lines asked about, with the commit that last changed each");
 
@@ -165,9 +170,9 @@ test("understand: the page as an essay with exhibits, nothing found, and its way
   await expect(page.getByText(/Blamed lines 1 to 7 of src\/limit\.ts: 2 commits/)).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask a follow-up" })).toBeVisible();
   await page.getByText("How this was found").click();
-  await page.screenshot({ path: `${SHOTS}e2e-complete-dark.png`, fullPage: true });
+  await shot(page, "e2e-complete-dark.png");
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "pando-light"));
-  await page.screenshot({ path: `${SHOTS}e2e-complete-light.png`, fullPage: true });
+  await shot(page, "e2e-complete-light.png");
   await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));
 
   // A follow-up from the box: it is sent, and the page builds again and settles.
@@ -196,7 +201,7 @@ test("understand: the page as an essay with exhibits, nothing found, and its way
   await expect(page.locator("[data-block=n1]")).toContainText("No record explains these lines. They came with the project's first commit,");
   await expect(page.getByRole("button", { name: "Ask the assistant what this code does" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask a follow-up" })).toHaveCount(0);
-  await page.screenshot({ path: `${SHOTS}e2e-nothing-dark.png`, fullPage: true });
+  await shot(page, "e2e-nothing-dark.png");
 
   // ── The ways in: Why? on a commit ──
   const read = await (await page.request.get(`${BASE}/v1/monorepos/${full}/understand/${asked.number}`)).json();

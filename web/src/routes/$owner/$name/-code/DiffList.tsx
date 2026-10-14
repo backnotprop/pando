@@ -18,7 +18,8 @@ const pool = codePool();
 
 // Line and number tints alike, a little quieter than Pierre's (15% of the
 // token's colour in the dark, 10% in the light); the unchanged lines between
-// hunks on a Loam strip, their count lined up with the code.
+// hunks on a Loam strip, their count lined up with the code. Lines chosen for
+// Why? (a line number, shift and another) take the Link colour's tint.
 const DIFF = `
 :host {
   --diffs-light-bg: var(--soil);
@@ -29,6 +30,8 @@ const DIFF = `
 }
 [data-line], [data-no-newline], [data-gutter-buffer], [data-column-number] { --mix-dark: 85%; --mix-light: 90%; }
 [data-separator-content] { padding-inline: max(52px, calc(var(--diffs-min-number-column-width-default, 4ch) + 21px)) 0; }
+[data-line][data-selected-line], [data-column-number][data-selected-line], [data-gutter-buffer][data-selected-line] { background-color: color-mix(in srgb, var(--link) 16%, var(--soil)) !important; }
+[data-column-number][data-selected-line] { color: var(--bark) !important; }
 `;
 
 /** The header the page draws for each file: its height, which the list's layout counts on. */

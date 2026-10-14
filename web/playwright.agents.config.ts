@@ -14,6 +14,8 @@ export default defineConfig({
   testDir: "e2e",
   // PANDO_AGENTS_SHOTS=1: the shots for the owner's look (e2e/shots-agents.spec.ts) instead of the tests.
   testMatch: process.env.PANDO_AGENTS_SHOTS === "1" ? /\/e2e\/shots-agents\.spec\.ts$/ : /\/e2e\/agents[^/]*\.spec\.ts$/,
+  // Risk-based review needs its server's own vars: playwright.config.ts --project=risk runs it.
+  testIgnore: /\/e2e\/agents-risk\.spec\.ts$/,
   timeout: 300_000,
   expect: { timeout: 30_000 },
   workers: 1,

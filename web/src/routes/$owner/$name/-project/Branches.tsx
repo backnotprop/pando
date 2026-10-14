@@ -17,6 +17,7 @@ import { since, useNow } from "../../../../ui/time";
 import { Older } from "../../../../ui/Older";
 import { useArrivals } from "../../../../ui/arrival";
 import { RepoHead, useMonorepo } from "../-frame/heads";
+import { RiskBadge } from "./Risk";
 import { stateOf, toneClass, unknownWhy } from "./state";
 
 /** A plain repo's one repo (path `.`), for its pages at /{owner}/{name}. */
@@ -91,7 +92,10 @@ function Open({ repo }: { repo: Repo }) {
               <span className="min-w-0 narrow:hidden phone:block">
                 <Who person={b.author} machine={b.pushed_machine} />
               </span>
-              <StateWord b={b} mark={false} className="phone:hidden" />
+              <span className="flex items-center phone:hidden">
+                <StateWord b={b} mark={false} />
+                <RiskBadge b={b} />
+              </span>
               <span className="text-right text-[12.5px] whitespace-nowrap text-ash">{b.updated_at ? since(b.updated_at, clock) : ""}</span>
             </Link>
           </li>

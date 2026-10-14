@@ -3,12 +3,12 @@
   "route": "PUT /v1/orgs/{org}/members/{login}",
   "status": 200,
   "body": {
-    "login": "bo-mv7am39t",
+    "login": "bo-mv7h4exl",
     "name": "Bo Diaz",
     "picture_url": null,
     "role": "member",
-    "added_at": "2026-10-13T23:10:06.835Z",
-    "added_by": "rec-mv7am39t",
+    "added_at": "2026-10-14T02:12:14.040Z",
+    "added_by": "rec-mv7h4exl",
     "last_active_at": null
   }
 }

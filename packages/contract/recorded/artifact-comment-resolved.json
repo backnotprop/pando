@@ -3,10 +3,10 @@
   "route": "PATCH .../artifact-comments/{id} {state: resolved}",
   "status": 200,
   "body": {
-    "id": "ac_9b92c91dda744223",
-    "artifact": "art_9bfe688f25153d21",
+    "id": "ac_40775383924f59a6",
+    "artifact": "art_1fb02cc616358da4",
     "version": 2,
-    "thread": "ac_9b92c91dda744223",
+    "thread": "ac_40775383924f59a6",
     "in_reply_to": null,
     "anchor": {
       "type": "COMMENT",
@@ -31,13 +31,13 @@
     },
     "body": "Wednesday clashes with the freeze.",
     "body_version": 2,
-    "author": "art-b-mv55o0nn",
+    "author": "art-b-mv7dbfop",
     "machine": "bootstrap",
     "mentions": [],
     "state": "resolved",
-    "resolved_by": "art-mv55o0nn",
-    "resolved_at": "2026-10-12T11:15:19.117Z",
-    "created_at": "2026-10-12T11:15:19.097Z",
-    "updated_at": "2026-10-12T11:15:19.117Z"
+    "resolved_by": "art-mv7dbfop",
+    "resolved_at": "2026-10-14T00:25:03.126Z",
+    "created_at": "2026-10-14T00:25:03.103Z",
+    "updated_at": "2026-10-14T00:25:03.126Z"
   }
 }

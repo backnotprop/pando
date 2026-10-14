@@ -1,0 +1,54 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/merge (412 review_required)",
+  "status": 412,
+  "body": {
+    "error": {
+      "code": "review_required",
+      "message": "a person's approval is needed on this head",
+      "review": {
+        "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
+        "state": "done",
+        "score": 0.93395,
+        "level": "high",
+        "rule": null,
+        "tier": "human",
+        "reasons": [
+          "Touches sensitive paths: payments/charge.ts",
+          "The model reads it as touching auth, payments, secrets, infrastructure or data (0.99)",
+          "The model reads it as changing a critical kind of behaviour: access, money, data deletion, secrets, migrations or merge rules (0.97)",
+          "Risk 0.93: mostly high (0.90)"
+        ],
+        "sensitive_paths": [
+          "payments/charge.ts"
+        ],
+        "model": "@cf/cloudflare/clef",
+        "tokens": 1018,
+        "cost_usd": 0.00024432,
+        "error": null,
+        "reviewers": [
+          {
+            "profile": "correctness",
+            "label": "Correctness",
+            "session": 4,
+            "state": "posted",
+            "verdict": "comment"
+          },
+          {
+            "profile": "security",
+            "label": "Security",
+            "session": 3,
+            "state": "posted",
+            "verdict": "comment"
+          }
+        ],
+        "guide_state": "writing",
+        "guide": null,
+        "approved_by": null,
+        "passes": false,
+        "why": "a person's approval is needed on this head",
+        "classified_at": "2026-10-14T00:13:01.069Z"
+      }
+    }
+  }
+}

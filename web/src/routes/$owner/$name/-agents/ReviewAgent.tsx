@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { agentListQuery, agentsKey, reviewBranch } from "../../../../api/agents";
 import { reviewsQuery } from "../../../../api/projects";
 import { fallback, useRows } from "../../../../live/rows";
-import { button } from "../../../../ui/controls";
+import { button, field } from "../../../../ui/controls";
 import { Leaf } from "../../../../ui/Leaf";
 import { ago, useNow } from "../../../../ui/time";
 import { useMonorepo } from "../-frame/heads";
@@ -20,15 +20,19 @@ import { useMe } from "../-issues/parts";
 import { AgentDialog, fieldLabel, ModelField, useModel } from "./Dialog";
 import { leafOf, StateWords } from "./parts";
 
+/** The reviewer profiles (worker/src/review/profiles.ts), as the dialog offers them; the risk tiers launch correctness and security. */
+const FOCUS = [["", "The whole change"], ["correctness", "Correctness"], ["security", "Security"], ["tests", "Tests"], ["docs", "Docs"]] as const;
+
 export function ReviewWithAgent({ repo, branch }: { repo: Repo; branch: string }) {
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const pick = useModel(open);
   const [prompt, setPrompt] = useState("");
+  const [profile, setProfile] = useState("");
 
   const start = useMutation({
-    mutationFn: () => reviewBranch(monorepo, { branch, repo: repo.name, model: pick.model ?? "", prompt: prompt.trim() }),
+    mutationFn: () => reviewBranch(monorepo, { branch, repo: repo.name, model: pick.model ?? "", prompt: prompt.trim(), profile }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: agentsKey(monorepo) });
       setPrompt("");
@@ -66,6 +70,18 @@ export function ReviewWithAgent({ repo, branch }: { repo: Repo; branch: string }
             rows={3}
             className="resize-y rounded-lg border border-rootline bg-air px-3 py-2.5 text-[14px] leading-[21px] text-bark placeholder:text-ash focus:border-ash focus:outline-none"
           />
+        </label>
+        <label className={fieldLabel}>
+          <span className="font-semibold text-bark">
+            Focus <i className="font-normal text-ash">optional</i>
+          </span>
+          <select value={profile} onChange={(e) => setProfile(e.target.value)} className={field}>
+            {FOCUS.map(([name, label]) => (
+              <option key={name} value={name}>
+                {label}
+              </option>
+            ))}
+          </select>
         </label>
         <ModelField pick={pick} />
       </AgentDialog>

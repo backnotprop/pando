@@ -35,6 +35,21 @@ const log = "../web/e2e/.state/worker.log";
 
 const fanout = Number(process.env.PANDO_E2E_FEED_FANOUT_MAX ?? 1);
 
+// `--project=risk` (e2e/agents-risk.spec.ts, risk-based review): Pando's Worker and pando-agents in one wrangler dev, as
+// playwright.agents.config.ts runs them (the reviewer agents run in containers: DOCKER_HOST must point at a Docker engine
+// in a VM, the Colima profile cloud-agents), with risk-based review on and its test switch (RISK_REVIEW, RISK_TEST), the
+// scripted model from agents/.dev.vars, and state of its own.
+const risk = process.argv.some((a, i, all) => a === "--project=risk" || (a === "--project" && all[i + 1] === "risk"));
+
+const server = risk
+  ? [
+      "npm run build",
+      "(grep -qs '^SCRIPTED_MODEL=1$' ../agents/.dev.vars || echo SCRIPTED_MODEL=1 >> ../agents/.dev.vars)",
+      "cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ../web/e2e/.state/wrangler-risk",
+      `npx wrangler dev -c wrangler.jsonc -c ../agents/wrangler.jsonc --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ../web/e2e/.state/wrangler-risk --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site --var WORKOS_API_BASE:http://127.0.0.1:${STANDIN_PORT} --var RISK_REVIEW:on --var RISK_TEST:1 > ../web/e2e/.state/worker-risk.log 2>&1`,
+    ].join(" && ")
+  : null;
+
 // One key per run: the test processes inherit it from this one.
 if (GITHUB_PORT) process.env.PANDO_E2E_GITHUB_KEY ??= generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 
@@ -71,6 +86,8 @@ export default defineConfig({
     { name: "shots", testMatch: /fidelity\.spec\.ts/ },
     { name: "org-shots", testMatch: /orgs-shots\.spec\.ts/ },
     { name: "mirror", testMatch: /mirror\.spec\.ts/ },
+    // Risk-based review, the film story: a comment fix merges with no review; a money change waits for a person (see `risk` above).
+    { name: "risk", testMatch: /agents-risk\.spec\.ts/ },
     { name: "profile-shots", testMatch: /profile-shots\.spec\.ts/ },
     // Recorded agent sessions (the sessions lane): the checks, and the built pages' shots for the owner's look.
     { name: "sessions", testMatch: /sessions\.spec\.ts/, grepInvert: /shots of the built pages/ },
@@ -79,10 +96,10 @@ export default defineConfig({
   webServer: [
     { command: "node e2e/workos.ts", url: `http://127.0.0.1:${STANDIN_PORT}/healthz`, reuseExistingServer: false },
     {
-      command: `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site --var FEED_FANOUT_MAX:${fanout}${github} > ${log}`,
+      command: server ?? `npm run build && cd ../worker && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to ${state} && npx wrangler dev --port ${WORKER_PORT} --inspector-port ${INSPECTOR_PORT} --persist-to ${state} --var DOCS_URL:http://127.0.0.1:${STANDIN_PORT}/docs-site --var FEED_FANOUT_MAX:${fanout}${github} > ${log}`,
       url: `http://localhost:${WORKER_PORT}/healthz`,
       reuseExistingServer: false,
-      timeout: 180_000,
+      timeout: risk ? 600_000 : 180_000,
     },
   ],
 });

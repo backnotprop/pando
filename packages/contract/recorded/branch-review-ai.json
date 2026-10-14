@@ -1,0 +1,76 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch} (risk medium: reviewer agents)",
+  "status": 200,
+  "body": {
+    "name": "mid-1",
+    "head": "e65cf9ae8c48f67bb4b7bfe145cf1a3fdcfbb070",
+    "base": null,
+    "author": "risk-mv7cvr18",
+    "title": null,
+    "description": null,
+    "ahead": null,
+    "behind": null,
+    "mergeable": "pending",
+    "checks": {
+      "sha": "e65cf9ae8c48f67bb4b7bfe145cf1a3fdcfbb070",
+      "state": "success",
+      "required": [],
+      "missing": [],
+      "statuses": [],
+      "checks_unknown": null
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "tester-mbp",
+    "created_at": "2026-10-14T00:14:53.618Z",
+    "updated_at": "2026-10-14T00:14:53.618Z",
+    "stale": true,
+    "last_mergeable": null,
+    "conflict_paths": null,
+    "facts_at": null,
+    "review": {
+      "head": "e65cf9ae8c48f67bb4b7bfe145cf1a3fdcfbb070",
+      "state": "done",
+      "score": 0.5,
+      "level": "medium",
+      "rule": null,
+      "tier": "ai",
+      "reasons": [
+        "Risk 0.50: mostly medium (1.00)"
+      ],
+      "sensitive_paths": [],
+      "model": "scripted",
+      "tokens": 132,
+      "cost_usd": 0,
+      "error": null,
+      "reviewers": [
+        {
+          "profile": "correctness",
+          "label": "Correctness",
+          "session": 7,
+          "state": "posted",
+          "verdict": "comment"
+        },
+        {
+          "profile": "security",
+          "label": "Security",
+          "session": 6,
+          "state": "posted",
+          "verdict": "comment"
+        }
+      ],
+      "guide_state": "none",
+      "guide": null,
+      "approved_by": null,
+      "passes": true,
+      "why": null,
+      "classified_at": "2026-10-14T00:14:55.840Z"
+    }
+  }
+}

@@ -4,7 +4,7 @@
 // `/` is sent as %2F.
 import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
 import { Artifact, ArtifactComment, ArtifactDetail, ArtifactList, ArtifactThreads, type ArtifactCommentState } from "./artifact.ts";
-import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, ReviewList, Branch } from "./branch.ts";
+import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, Review, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
 import { CommitDiffLine, CommitPage } from "./commit.ts";
 import { CiAnnotationList, CiArtifactList, CiBuildAnswer, CiBuildDetail, CiBuildList, CiConnected, CiJobAnswer, CiJobLog, CiOverview, CiPipelinePage, Hook } from "./ci.ts";
@@ -168,6 +168,9 @@ export const setReleasesPublic = (owner: Login, name: MonorepoName, repo: RepoNa
 /** PATCH .../repos/{repo} {ci_policy} (owners): when the project's CI builds run (every_push, on_merge, main_only). */
 export const setCiPolicy = (owner: Login, name: MonorepoName, repo: RepoName) => ({ method: "PATCH", path: repoBase(owner, name, repo), response: Repo }) as const;
 
+/** PATCH .../repos/{repo} {review: {enabled?, auto_below?, human_above?, human_for_sensitive?}} (owners): risk-based review's switch and thresholds. */
+export const setRepoReview = (owner: Login, name: MonorepoName, repo: RepoName) => ({ method: "PATCH", path: repoBase(owner, name, repo), response: Repo }) as const;
+
 // ── Builds of main and releases (research/plans/releases-2026-10-04). Made, published and deleted with the CLI or the API; the web shows them.
 
 /** GET .../repos/{repo}/summary: main's commit and its state (or not built), the newest build on main, the latest release. */
@@ -243,6 +246,10 @@ export const listReviews = (owner: Login, name: MonorepoName, repo: RepoName, br
  * 412 checks_not_green (ErrorBody with `checks`), 409 head_moved or conflicts
  * (with `paths`). `force` merges past red or missing checks.
  */
+/** POST .../branches/{branch}/reviews {verdict, body?, comments?, head?} (201): a review on the head; an approval by a person passes risk-based review's gate. */
+export const postReview = (owner: Login, name: MonorepoName, repo: RepoName, branch: string) =>
+  ({ method: "POST", path: `${branchBase(owner, name, repo, branch)}/reviews`, response: Review }) as const;
+
 export const mergeBranch = (owner: Login, name: MonorepoName, repo: RepoName, branch: string, force: boolean) =>
   ({ method: "POST", path: `${branchBase(owner, name, repo, branch)}/merge?force=${force ? "1" : "0"}`, response: MergeResult }) as const;
 
@@ -677,7 +684,7 @@ export const launchAgent = (owner: Login, name: MonorepoName) => ({ method: "POS
  */
 export const addressIssueWithAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${monorepoBase(owner, name)}/issues/${n}/agent`, response: AgentSession }) as const;
 
-/** POST .../agents/review {branch, repo?, prompt?, model?} (201): "Review with agent" on a branch. */
+/** POST .../agents/review {branch, repo?, prompt?, model?, profile?} (201): "Review with agent" on a branch; a profile (correctness, security, tests, docs) gives it one focus. */
 export const reviewWithAgent = (owner: Login, name: MonorepoName) => ({ method: "POST", path: `${agentsBase(owner, name)}/review`, response: AgentSession }) as const;
 
 /** GET .../assistant: the caller's own chats with the repository assistant, newest first. */

@@ -11,19 +11,19 @@
     "project_path": null,
     "labels": [],
     "assignees": [],
-    "author": "rec-mv7am39t",
+    "author": "rec-mv7h4exl",
     "comments": 0,
     "tasks": null,
     "linked_branches": 1,
-    "created_at": "2026-10-13T23:10:01.042Z",
-    "updated_at": "2026-10-13T23:10:06.505Z",
-    "closed_at": "2026-10-13T23:10:06.505Z",
-    "closed_by": "rec-mv7am39t",
+    "created_at": "2026-10-14T02:12:08.822Z",
+    "updated_at": "2026-10-14T02:12:13.776Z",
+    "closed_at": "2026-10-14T02:12:13.776Z",
+    "closed_by": "rec-mv7h4exl",
     "closed_by_merge": {
       "repo": "projects-web",
       "repo_path": "projects/web",
       "branch": "fix/login",
-      "merge_commit": "9a2a36a79ac185170494edeecc644ec90056653e"
+      "merge_commit": "4d8839f2a16b8ddd8df2b9825af92f6e3fe1d08a"
     },
     "body": "",
     "body_version": 1,
@@ -36,15 +36,15 @@
         "sources": [
           "commit"
         ],
-        "sha": "acfa505a12f484d61cd78534deb76c93655b7162",
+        "sha": "e55ef2a9287ed540c509577d42cab92ceb3abb6d",
         "linked_by": null,
         "branch_state": "merged",
-        "merged_at": "2026-10-13T23:10:05.501Z",
+        "merged_at": "2026-10-14T02:12:12.772Z",
         "closed_issue": true
       }
     ],
     "participants": [
-      "rec-mv7am39t"
+      "rec-mv7h4exl"
     ],
     "reactions": []
   }

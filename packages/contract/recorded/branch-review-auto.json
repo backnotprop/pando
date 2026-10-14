@@ -1,0 +1,61 @@
+{
+  "schema": "Branch",
+  "route": "GET .../branches/{branch} (risk low, auto)",
+  "status": 200,
+  "body": {
+    "name": "copy-greeting",
+    "head": "9dfe5992a12cf5b051615a81b1419b896246c112",
+    "base": null,
+    "author": "risk-mv7cvr18",
+    "title": null,
+    "description": null,
+    "ahead": null,
+    "behind": null,
+    "mergeable": "pending",
+    "checks": {
+      "sha": "9dfe5992a12cf5b051615a81b1419b896246c112",
+      "state": "success",
+      "required": [],
+      "missing": [],
+      "statuses": [],
+      "checks_unknown": null
+    },
+    "state": "open",
+    "merge_commit": null,
+    "merged_by": null,
+    "merged_at": null,
+    "merged_machine": null,
+    "merged_agent": null,
+    "forced": null,
+    "pushed_machine": "tester-mbp",
+    "created_at": "2026-10-14T00:12:52.978Z",
+    "updated_at": "2026-10-14T00:12:52.978Z",
+    "stale": true,
+    "last_mergeable": null,
+    "conflict_paths": null,
+    "facts_at": null,
+    "review": {
+      "head": "9dfe5992a12cf5b051615a81b1419b896246c112",
+      "state": "done",
+      "score": 0.082,
+      "level": "low",
+      "rule": null,
+      "tier": "auto",
+      "reasons": [
+        "Risk 0.08: mostly low (0.84)"
+      ],
+      "sensitive_paths": [],
+      "model": "@cf/cloudflare/clef",
+      "tokens": 946,
+      "cost_usd": 0.00022704,
+      "error": null,
+      "reviewers": [],
+      "guide_state": "none",
+      "guide": null,
+      "approved_by": null,
+      "passes": true,
+      "why": null,
+      "classified_at": "2026-10-14T00:12:54.429Z"
+    }
+  }
+}

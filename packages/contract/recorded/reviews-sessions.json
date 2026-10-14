@@ -1,0 +1,31 @@
+{
+  "schema": "ReviewList",
+  "route": "GET .../branches/{branch}/reviews (reviewer agents' reviews)",
+  "status": 200,
+  "body": {
+    "reviews": [
+      {
+        "id": "rv_804bf903b6b80ac3",
+        "branch": "charge-refuse-empty",
+        "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
+        "verdict": "comment",
+        "body": "Looks fine.",
+        "comments": [],
+        "author": "risk-mv7cvr18",
+        "created_at": "2026-10-14T00:13:01.236Z",
+        "session": 4
+      },
+      {
+        "id": "rv_1b4321e813bfc54d",
+        "branch": "charge-refuse-empty",
+        "head": "a80307c718b33dfb8b10372e2c6f3553930ae548",
+        "verdict": "comment",
+        "body": "Looks fine.",
+        "comments": [],
+        "author": "risk-mv7cvr18",
+        "created_at": "2026-10-14T00:13:01.273Z",
+        "session": 3
+      }
+    ]
+  }
+}

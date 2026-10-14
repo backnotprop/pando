@@ -17,6 +17,7 @@ import { LabelsSettings } from "./-issues/LabelsSettings";
 import { Mirror } from "./-settings/Mirror";
 import { CiPolicySwitch } from "./-settings/CiPolicy";
 import { ReleasesSwitch } from "./-settings/Releases";
+import { RiskReviewSettings } from "./-settings/RiskReview";
 
 export const Route = createFileRoute("/$owner/$name/settings")({
   loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(myOrgsQuery),
@@ -204,6 +205,7 @@ function Settings() {
             <Description />
             <ReleasesSwitch />
             <CiPolicySwitch />
+            <RiskReviewSettings />
             <Mirror />
             <LabelsSettings />
             <Transfer />

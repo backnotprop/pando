@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { byActivityKind } from "./feed.ts";
 import { Count, FullName, Login, RepoName, Timestamp } from "./ids.ts";
 import { MemberRole, MonorepoEntry, ReplacedAlias } from "./monorepo.ts";
+import { ReviewSettings } from "./review.ts";
 import { CredentialKind } from "./user.ts";
 
 /**
@@ -36,6 +37,8 @@ export const Repo = Schema.Struct({
   releases_public: Schema.optionalKey(Schema.Boolean),
   /** When its CI builds run (owners set it): in the list and getRepo. */
   ci_policy: Schema.optionalKey(CiPolicy),
+  /** Risk-based review: on or off, its thresholds and sensitive paths. Only when the repo is fetched alone (getRepo). */
+  review: Schema.optionalKey(ReviewSettings),
   created_at: Timestamp,
   created_by: Schema.NullOr(Login),
 });

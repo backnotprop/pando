@@ -84,7 +84,7 @@ export function preamble(s: PublicSpec, working = false): string {
     sandbox,
     ...shared(s),
     "Pando's own tools reach the repository on the server: read_file, list_files, issue, branch_diff, comment_issue, post_review, merge.",
-    `When your work is done and pushed, merge ${s.branch} with the merge tool. Pando merges only when the required checks are green; if it refuses, say why and stop.`,
+    `When your work is done and pushed, merge ${s.branch} with the merge tool. Pando merges only when the required checks are green and the review its risk calls for is done; if it refuses, say why and stop.`,
   ].join("\n");
 }
 

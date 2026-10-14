@@ -151,3 +151,18 @@ export async function checksTestRoute(request: Request, env: Env): Promise<Respo
 
   return Response.json(await env.MONOREPO.getByName(b.monorepo).testChecks(b.fail));
 }
+
+/**
+ * Risk-based review's sensitive paths: `[review] sensitive = [...]` in the
+ * same pando.toml, paths from each project's root; the defaults when the file
+ * names none. When the file cannot be read or does not parse, the defaults
+ * too (a sensitive change still reaches a person).
+ */
+export async function sensitivePatterns(env: Env, monorepo: { id: string; kind: Kind }, repo: RepoRecord, defaults: readonly string[]): Promise<string[]> {
+  const source = monorepo.kind === "repo" ? repo.artifacts_name : metaArtifactsName(monorepo.id);
+  const toml = await readConfig(env, source).catch(() => null);
+  const review = toml?.review;
+  const list = isTomlTable(review) ? review.sensitive : undefined;
+
+  return Array.isArray(list) ? list.filter(isText) : [...defaults];
+}

@@ -1,0 +1,67 @@
+---
+title: Risk-based review
+description: Every branch head gets a risk score. Low risk merges on green checks, medium gets reviewer agents, high waits for a person, with a guided review ready.
+sidebar:
+  order: 10
+---
+
+Most of what agents push is safe to merge on green checks. Some of it is not. Pando scores every branch head for risk and asks for the review that risk calls for, so people read only what needs a person.
+
+## What happens on a push
+
+Each push to a branch other than main is scored once for its head. A new head is scored again; the same head pushed again does nothing.
+
+1. **Comments and docs only: merged on green checks, never flagged.** When a head changes only Markdown or text files, comments, or blank lines, it is **auto** by rule, with no model call, even under a sensitive path. A line Pando cannot read as a comment counts as code.
+2. **Everything else is scored by Workers AI.** Pando gives Cloudflare's [clef](https://developers.cloudflare.com/workers-ai/models/clef/) model the branch's title, description and commit messages, who pushed it (a person or an agent), every changed file with its added and removed lines, the start of each change, and the project's sensitive paths. It answers with a score from 0 (low) to 1 (high).
+3. **The score picks a tier:**
+
+| Tier | When | What Pando does | What the merge needs |
+| --- | --- | --- | --- |
+| **Auto** | below 0.35, or comments and docs only | nothing more | green checks, as always |
+| **AI review** | 0.35 to 0.70 | starts two reviewer agents, Correctness and Security, each a "Review with agent" session | every reviewer posted, and none asked for changes |
+| **Human review** | 0.70 or above, a sensitive path, or risk unknown | the same two reviewer agents, and a **guided review** written before anyone looks | a person's approval on this head |
+
+A person's approval on the head passes any tier. An owner can still **Merge anyway** (recorded as forced); an agent never can.
+
+The review comes before the checks. A merge is refused for risk first (`risk_pending`, then `review_required`), and only then for checks (`checks_not_green`). So in a project whose checks run on merge, a branch waiting for a person or for its reviewer agents starts no build; its build starts on the first merge after the review passes. The reviewer agents run the tests in their own sandboxes and do not wait for CI.
+
+## On the branch page
+
+- **The risk meter** under the title: the level, the tier and the score, such as **High · human review required 0.94**. Hover it for the reasons: sensitive paths touched, files deleted, the size, and what the model read.
+- **The Merge box** says why a merge waits: **Human review required**, **Waiting for review**, or **Risk score pending** for the second or so a new head is scored.
+- **Risk review**, under the Merge box: each reviewer agent and what it said, and **Approve**.
+- **Guided review**, over the commits on a head a person must approve: Plannotator's guide to the change, the parts to read first at the top, kept on the branch as the artifact `guided-review.html`. It opens in the Artifacts tab; its download carries Plannotator's full viewer with the diffs.
+- The branch list shows the level beside each open branch.
+
+## Sensitive paths
+
+A change to code under a sensitive path always asks a person (Settings can turn that off). The defaults are `auth/`, `payments/`, `billing/`, `infra/`, `.github/`, `migrations/`, `.pando/`, `.env` and `secrets`. Name your own in `.pando/pando.toml` on main:
+
+```toml
+[review]
+sensitive = ["payments/", "src/auth/", "deploy/", ".env"]
+```
+
+A pattern ending in `/` is a folder anywhere in the path; any other is a file name or the start of one.
+
+The model also looks for the kinds of change that matter wherever they are: who can do what (permission checks, roles, sign-in, tokens), money, deleting stored data, secrets, database migrations, and the rules for merging or deploying.
+
+## Settings
+
+Owners turn risk-based review on or off per project in **Settings, Risk-based review**, and set the two thresholds and the sensitive-path rule. A change counts at once for every open branch. By API:
+
+```sh
+curl -X PATCH https://app.gitpando.com/v1/monorepos/<owner>/<name>/repos/<repo> \
+  -H "Authorization: Bearer $PANDO_TOKEN" \
+  -d '{"review": {"auto_below": 0.3, "human_above": 0.6}}'
+```
+
+## Agents
+
+An agent's merge on a branch that waits for review is refused with `412 review_required` and the reason; Pando's own agents stop and tell their person. While a new head is being scored, the merge answers `412 risk_pending`, and agents try again a few seconds later.
+
+**Review with agent** takes a focus: Correctness, Security, Tests or Docs.
+
+## What it costs
+
+clef costs $0.24 per million input tokens and nothing for its answer. A typical push is 700 to 3,000 tokens: about $0.0002 to $0.0007. The largest the state can be (24,000 tokens) is $0.0058. Comments-and-docs pushes cost nothing. See [Limits](/limits/#risk-based-review).

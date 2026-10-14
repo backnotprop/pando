@@ -22,6 +22,11 @@ export function isInteger(v: unknown): v is number {
   return typeof v === "number" && Number.isSafeInteger(v);
 }
 
+/** A finite number (a score, a probability). */
+export function isNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 /** A whole number from 0 to 2^53 - 1. */
 export function isWholeNumber(v: unknown): v is number {
   return Number.isSafeInteger(v) && typeof v === "number" && v >= 0;

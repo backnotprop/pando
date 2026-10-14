@@ -360,6 +360,12 @@ func Merge(e *Env, args []string) error {
 					}
 				}
 				return errors.New("not merged; wait for green, or merge past them with --force")
+			case "risk_pending":
+				// Risk-based review is scoring the head (about a second): a wait, not a failure.
+				return fmt.Errorf("not merged yet: the risk score for %s is still being worked out; merge again in a few seconds", branch)
+			case "review_required":
+				e.printf("Review required on %s: %s\n", branch, ae.Message)
+				return errors.New("not merged; a person approves it on its page, or an owner merges past it with --force")
 			case "conflict":
 				for _, p := range ae.Paths {
 					e.printf("  conflict: %s\n", p)

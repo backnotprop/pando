@@ -114,6 +114,16 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **A name:** letters, digits, `.`, `_`, `+` and `-`, starting with a letter or digit; at most 200 characters, as release files. An image's path is such names joined by `/`.
 - **Deleting an artifact has no undo:** every version, its bytes and its comments go at once. Any member may delete one, as anyone may merge.
 
+## Risk-based review
+
+- **One clef call per branch head,** about $0.0002 to $0.0007 for a typical push ($0.24 per million input tokens, nothing for the answer). A comments-and-docs head makes none. A head is never scored twice and nothing is retried: the next push scores again.
+- **What clef reads is at most about 24,000 tokens** (96,000 characters): a third of its 65,536-token window, so a call costs $0.0058 at most. Within that: the first 20 lines of each hunk, at most 300 files named, the newest 50 commit messages of up to 500 characters, a description of up to 4,000 characters. The start of each change is cut first, then the file list.
+- **clef has 20 seconds.** Past that, or when it fails or is busy, the risk is unknown and a person reviews it. Unknown is never auto.
+- **A head still unscored after a minute counts as unknown.** Its merge answers `risk_pending` until then.
+- **Two reviewer agents per head** on the AI and human tiers (Correctness and Security). Each is a cloud agent session in its own container.
+- **A guided review reads a diff of at most 200,000 characters** (about 50,000 tokens), with up to two Workers AI calls of up to 3 minutes each; it took 24 to 75 seconds when measured. A larger change, or one the model cannot place file by file, gets none and says so; the merge still needs a person.
+- **The comments-and-docs rule** reads `//`, `#`, `/* */` and `<!-- -->` comments by file type, and `.md`, `.mdx` and `.txt` files. A new, deleted or renamed code file, a binary file, a shebang, a file type it does not know, and a hunk that starts inside a comment it cannot see are code. A line inside a multi-line string that looks like a comment is read as one.
+
 ## Hooks
 
 - **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.

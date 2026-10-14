@@ -15,6 +15,7 @@ import { agentRoutes } from "../agents/routes";
 import { deploymentRoutes, publicFileRoutes, releaseRoutes, tagRoutes } from "../releases/routes";
 import { issueAgentRoutes } from "../agents/issue";
 import { reviewAgentRoutes } from "../agents/review";
+import { settingsPatch } from "../review/policy";
 import { assistantRoutes } from "../agents/assistant";
 import { finishTiming, note, runTimed, startTiming, timed, timedArtifacts } from "../timing";
 import { artifactsCode, artifactsError, branchesOf, listRefs, withRepo } from "./artifacts";
@@ -730,28 +731,30 @@ api.get("/v1/monorepos/:o/:m/repos", async (c) => {
   return c.json({ repos: (await c.get("stub").listRepos()).map((r) => repoView(homeOf(c), r)) } satisfies typeof Contract.RepoList.Encoded);
 });
 
-/** The repo alone: its required checks and its two settings, read fresh. */
+/** The repo alone: its required checks and its settings, read fresh. */
 async function oneRepo(c: C, r: RepoRecord) {
   const stub = c.get("stub");
-  const [releasesPublic, ciPolicy, required] = await Promise.all([stub.releasesPublic(r.name), stub.ciPolicy(r.name), requiredKept(c.env, c.get("info"), r)]);
+  const [releasesPublic, ciPolicy, review, required] = await Promise.all([stub.releasesPublic(r.name), stub.ciPolicy(r.name), stub.reviewSettings(r.name), requiredKept(c.env, c.get("info"), r)]);
 
-  return { ...repoView(homeOf(c), r, required), releases_public: releasesPublic, ci_policy: ciPolicy } satisfies typeof Contract.Repo.Encoded;
+  return { ...repoView(homeOf(c), r, required), releases_public: releasesPublic, ci_policy: ciPolicy, review } satisfies typeof Contract.Repo.Encoded;
 }
 
 const CI_POLICIES: readonly CiPolicy[] = ["every_push", "on_merge", "main_only"];
 
 api.get("/v1/monorepos/:o/:m/repos/:r", async (c) => c.json(await oneRepo(c, await repoOf(c))));
 
-// A project's settings (owners), either or both: releases_public, the switch "Anyone can download releases"
-// (release files only, never code); ci_policy, when its CI builds run (every_push, on_merge or main_only).
+// A project's settings (owners), any of them: releases_public, the switch "Anyone can download releases"
+// (release files only, never code); ci_policy, when its CI builds run (every_push, on_merge or main_only);
+// review, risk-based review's switch and thresholds (review/policy.ts settingsPatch).
 api.patch("/v1/monorepos/:o/:m/repos/:r", async (c) => {
   owner(c, "change a project's settings");
   const r = await repoOf(c);
   const b = await body(c.req);
+  const stub = c.get("stub");
   const on = b.releases_public;
   const policy = b.ci_policy;
 
-  if (on === undefined && policy === undefined) bad("send releases_public, ci_policy, or both");
+  if (on === undefined && policy === undefined && b.review === undefined) bad("send releases_public, ci_policy, review ({enabled, auto_below, human_above, human_for_sensitive}), or more than one");
 
   if (on !== undefined && on !== true && on !== false) bad("releases_public is true (anyone can download release files) or false (members only)");
 
@@ -759,9 +762,15 @@ api.patch("/v1/monorepos/:o/:m/repos/:r", async (c) => {
     bad("ci_policy is every_push (each push builds), on_merge (a build starts when a merge asks for it) or main_only (only main builds)");
   }
 
-  if (on !== undefined) await c.get("stub").setReleasesPublic(r.name, on);
+  const next = b.review === undefined ? null : settingsPatch(b.review, await stub.reviewSettingsRaw(r.name));
 
-  if (policy !== undefined) await c.get("stub").setCiPolicy(r.name, policy);
+  if (next && !next.ok) bad(next.why);
+
+  if (on !== undefined) await stub.setReleasesPublic(r.name, on);
+
+  if (policy !== undefined) await stub.setCiPolicy(r.name, policy);
+
+  if (next?.ok) await stub.setReviewSettings(r.name, next.settings);
 
   return c.json(await oneRepo(c, r));
 });

@@ -1,0 +1,32 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/merge (412 risk_pending)",
+  "status": 412,
+  "body": {
+    "error": {
+      "code": "risk_pending",
+      "message": "the risk score for 6fc64651a8a4 is still being worked out; try again in a few seconds",
+      "review": {
+        "head": "6fc64651a8a41ca9917d483f4293c268bb24f283",
+        "state": "classifying",
+        "score": null,
+        "level": "unknown",
+        "rule": null,
+        "tier": null,
+        "reasons": [],
+        "sensitive_paths": [],
+        "model": null,
+        "tokens": null,
+        "cost_usd": null,
+        "error": null,
+        "reviewers": [],
+        "guide_state": "none",
+        "guide": null,
+        "approved_by": null,
+        "passes": false,
+        "why": "the risk score is still being worked out",
+        "classified_at": null
+      }
+    }
+  }
+}

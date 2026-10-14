@@ -3,19 +3,36 @@
   "route": "PATCH .../repos/{repo} {ci_policy: on_merge}",
   "status": 200,
   "body": {
-    "monorepo": "cost-mv7al4yu/cost-mv7al4yu",
-    "name": "cost-mv7al4yu",
+    "monorepo": "cost-mv7h62lv/cost-mv7h62lv",
+    "name": "cost-mv7h62lv",
     "path": ".",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8917/cost-mv7al4yu/cost-mv7al4yu.git",
+    "clone_url": "http://127.0.0.1:8919/cost-mv7h62lv/cost-mv7h62lv.git",
     "required_checks": [
       "ci"
     ],
     "checks_unknown": null,
     "ci_policy": "on_merge",
-    "created_at": "2026-10-13T23:08:32.097Z",
-    "created_by": "cost-mv7al4yu",
-    "releases_public": false
+    "created_at": "2026-10-14T02:12:45.538Z",
+    "created_by": "cost-mv7h62lv",
+    "releases_public": false,
+    "review": {
+      "enabled": false,
+      "auto_below": 0.35,
+      "human_above": 0.7,
+      "human_for_sensitive": true,
+      "sensitive": [
+        "auth/",
+        "payments/",
+        "billing/",
+        "infra/",
+        ".github/",
+        "migrations/",
+        ".pando/",
+        ".env",
+        "secrets"
+      ]
+    }
   }
 }

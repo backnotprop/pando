@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { Checks } from "./checks.ts";
 import { ReviewVerdict } from "./feed.ts";
 import { Count, Login, Sha, Timestamp } from "./ids.ts";
+import { BranchReview } from "./review.ts";
 
 /** From the merge engine's dry run; `pending` while not computed for the current main and head. */
 export const Mergeable = Schema.Literals(["clean", "conflicts", "up_to_date", "unknown", "pending"]);
@@ -42,10 +43,12 @@ export const Branch = Schema.Struct({
   merged_agent: Schema.NullOr(Schema.String),
   /** The credential (machine) that last pushed the branch. */
   pushed_machine: Schema.NullOr(Schema.String),
-  /** True when the merge went past red or missing checks with force=1. */
+  /** True when the merge went past red or missing checks, or a required review, with force=1. */
   forced: Schema.NullOr(Schema.Boolean),
   created_at: Schema.NullOr(Timestamp),
   updated_at: Schema.NullOr(Timestamp),
+  /** Risk-based review of the head (review.ts); null when the project has it off. Absent from rows written before it existed. */
+  review: Schema.optionalKey(Schema.NullOr(BranchReview)),
 });
 
 export interface Branch extends Schema.Schema.Type<typeof Branch> {}
@@ -216,6 +219,8 @@ export const Review = Schema.Struct({
   comments: Schema.Array(ReviewComment),
   author: Schema.String,
   created_at: Timestamp,
+  /** The agent session that posted it (a reviewer agent, "Review with agent"); null for a person's. */
+  session: Schema.optionalKey(Schema.NullOr(Count)),
 });
 
 export interface Review extends Schema.Schema.Type<typeof Review> {}
@@ -236,6 +241,7 @@ export const MergeResult = Schema.Struct({
   /** The default branch head before the merge. */
   base_before: Schema.optionalKey(Sha),
   merge_base: Schema.optionalKey(Sha),
+  /** True when it went past red or missing checks, or a required review (owners only), with force=1. */
   forced: Schema.optionalKey(Schema.Boolean),
   merged_by: Schema.optionalKey(Login),
   /**

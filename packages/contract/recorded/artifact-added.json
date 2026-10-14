@@ -3,8 +3,8 @@
   "route": "POST .../branches/{branch}/artifacts (a new name)",
   "status": 201,
   "body": {
-    "id": "art_9bfe688f25153d21",
-    "repo": "art-mv55o0nn",
+    "id": "art_1fb02cc616358da4",
+    "repo": "art-mv7dbfop",
     "branch": "feat/refresh-margin",
     "name": "refresh-plan.md",
     "kind": "markdown",
@@ -27,18 +27,18 @@
           "type": "image/png"
         }
       ],
-      "uploaded_by": "art-mv55o0nn",
+      "uploaded_by": "art-mv7dbfop",
       "machine": "bootstrap",
       "via": "cli",
-      "created_at": "2026-10-12T11:15:18.171Z"
+      "created_at": "2026-10-14T00:25:02.128Z"
     },
     "versions": 1,
     "comments": {
       "open": 0,
       "resolved": 0
     },
-    "created_by": "art-mv55o0nn",
-    "created_at": "2026-10-12T11:15:18.171Z",
-    "updated_at": "2026-10-12T11:15:18.171Z"
+    "created_by": "art-mv7dbfop",
+    "created_at": "2026-10-14T00:25:02.128Z",
+    "updated_at": "2026-10-14T00:25:02.128Z"
   }
 }

@@ -6,11 +6,13 @@ import * as Schema from "effect/Schema";
 import { Checks } from "./checks.ts";
 import { ArtifactComment } from "./artifact.ts";
 import { Issue, IssueComment } from "./issue.ts";
+import { BranchReview } from "./review.ts";
 
 /**
  * The wire body of every error response. A refused merge carries `checks` (412 checks_not_green, with
- * `checks_started` when the refusal started them: the repo's CI policy is on_merge) or `paths`
- * (409 conflicts); a stale body edit (409 edited) carries `current`, the issue or comment (or artifact comment) as it is now.
+ * `checks_started` when the refusal started them: the repo's CI policy is on_merge), `review` (412 review_required,
+ * 412 risk_pending: the head's risk-based review) or `paths` (409 conflicts); a stale body edit (409 edited) carries
+ * `current`, the issue or comment (or artifact comment) as it is now.
  */
 export const ErrorBody = Schema.Struct({
   error: Schema.Struct({
@@ -19,6 +21,7 @@ export const ErrorBody = Schema.Struct({
     paths: Schema.optionalKey(Schema.Array(Schema.String)),
     checks: Schema.optionalKey(Checks),
     checks_started: Schema.optionalKey(Schema.Boolean),
+    review: Schema.optionalKey(BranchReview),
     current: Schema.optionalKey(Schema.Union([Issue, IssueComment, ArtifactComment])),
     /** 409 not_at_end on a session's piece: where the session ends; resume from there. */
     end: Schema.optionalKey(Schema.Int),

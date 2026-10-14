@@ -271,6 +271,8 @@ export interface RefusalExtra {
   paths?: string[];
   /** A merge refused because checks are not green, which started them (the repo's CI policy is on_merge). */
   checks_started?: boolean;
+  /** A merge refused by risk-based review (review_required, risk_pending): the head's review state. */
+  review?: typeof import("@pando/contract").BranchReview.Encoded;
   /** A CI service's rate limit: when to try again. */
   retry_after_ms?: number;
   /** 409 not_at_end: where the session ends, the cursor the sender resumes from (sessions/). */

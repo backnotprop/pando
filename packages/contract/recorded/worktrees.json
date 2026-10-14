@@ -5,16 +5,16 @@
   "body": {
     "worktrees": [
       {
-        "id": "wt-mv7am39t",
+        "id": "wt-mv7h4exl",
         "repo": "projects/web",
         "branch": "feat/ready",
         "path": "/Users/ana/pando/projects/web/worktrees/feat-ready",
         "machine": "ana-mbp",
         "agent": null,
         "kind": "sparse",
-        "reported_by": "rec-mv7am39t",
-        "created_at": "2026-10-13T23:09:31.436Z",
-        "last_seen_at": "2026-10-13T23:09:31.436Z"
+        "reported_by": "rec-mv7h4exl",
+        "created_at": "2026-10-14T02:11:43.708Z",
+        "last_seen_at": "2026-10-14T02:11:43.708Z"
       }
     ]
   }

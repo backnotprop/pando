@@ -5,15 +5,15 @@
   "body": {
     "repos": [
       {
-        "monorepo": "cost-mv7al4yu/cost-mv7al4yu",
-        "name": "cost-mv7al4yu",
+        "monorepo": "cost-mv7h62lv/cost-mv7h62lv",
+        "name": "cost-mv7h62lv",
         "path": ".",
         "description": null,
         "default_branch": "main",
-        "clone_url": "http://localhost:8917/cost-mv7al4yu/cost-mv7al4yu.git",
+        "clone_url": "http://127.0.0.1:8919/cost-mv7h62lv/cost-mv7h62lv.git",
         "ci_policy": "on_merge",
-        "created_at": "2026-10-13T23:08:32.097Z",
-        "created_by": "cost-mv7al4yu"
+        "created_at": "2026-10-14T02:12:45.538Z",
+        "created_by": "cost-mv7h62lv"
       }
     ]
   }

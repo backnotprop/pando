@@ -3,12 +3,13 @@
 // Merge box held for a person, the Guided review panel opening Plannotator's
 // guide in the Artifacts tab, Approve, and the Settings switch. Real Worker
 // and pando-agents in one wrangler dev (the reviewer agents run in containers
-// on the scripted model, set through the Worker's test switch /v1/_risk/test,
-// RISK_TEST=1 with RISK_REVIEW=on in worker/.dev.vars), real Workers AI: clef
+// on the scripted model, set through the Worker's test switch /v1/_risk/test;
+// playwright.config.ts --project=risk starts the server with RISK_REVIEW=on
+// and RISK_TEST=1), real Workers AI: clef
 // scores the money change and GLM-5.3 Flash writes the guide. The story the
 // films capture: a comment fix merges with no review; a money change waits
 // for a person, with the guide attached.
-//   PANDO_E2E_WORKER_PORT=8919 PANDO_E2E_STANDIN_PORT=8920 PANDO_E2E_INSPECTOR_PORT=9419 npx playwright test -c playwright.agents.config.ts agents-risk
+//   DOCKER_HOST=unix://$HOME/.colima/cloud-agents/docker.sock PANDO_E2E_PORT=8919 PANDO_E2E_INSPECTOR_PORT=9419 npx playwright test --project=risk
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 import { BASE, browserPost, Machine, nextSignIn } from "./seed";
@@ -34,6 +35,8 @@ async function signIn(page: Page) {
 }
 
 test("risk-based review: the meter, the held merge, the guided review, Approve, Settings", async ({ page }) => {
+  // Two reviewer agents in containers and a guide written by Workers AI (24 to 75 s measured).
+  test.setTimeout(600_000);
   const errors: string[] = [];
 
   page.on("pageerror", (e) => errors.push(e.message));

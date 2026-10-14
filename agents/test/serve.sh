@@ -7,7 +7,11 @@
 # Environment: AGENTS_PORT (8863), AGENTS_INSPECTOR (9363), AGENTS_STATE
 # (agents/.state), DOCKER_HOST (a Docker engine in a VM, for the containers
 # and FUSE; this lane uses its own Colima profile, see BUILD-NOTES.md). The
-# scripted model is on (SCRIPTED_MODEL=1, agents/.dev.vars). The log is
+# scripted model is on (SCRIPTED_MODEL=1, agents/.dev.vars). AGENTS_PANDO_VARS
+# adds vars to Pando's Worker for one run (the gate's risk suite:
+# "RISK_REVIEW=on RISK_TEST=1"): wrangler's --var reaches only the first
+# config of a multi-config dev (the driver), so they go into
+# worker/.dev.vars, kept as it was and put back on stop. The log is
 # $AGENTS_STATE/wrangler.log. stop ends only this folder's processes.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,11 +19,15 @@ port="${AGENTS_PORT:-8863}"
 inspector="${AGENTS_INSPECTOR:-9363}"
 state="${AGENTS_STATE:-$here/.state}"
 log="$state/wrangler.log"
+vars="$here/../worker/.dev.vars"
+kept="$state/worker.dev.vars.kept"
 
 stop() {
   pkill -f "$here/node_modules" 2>/dev/null || true
-  for _ in $(seq 1 20); do pgrep -f "$here/node_modules" >/dev/null || return 0; sleep 0.5; done
+  for _ in $(seq 1 20); do pgrep -f "$here/node_modules" >/dev/null || break; sleep 0.5; done
   pkill -9 -f "$here/node_modules" 2>/dev/null || true
+  # Pando's Worker's vars as they were before AGENTS_PANDO_VARS.
+  if [ -f "$kept" ]; then cp -p "$kept" "$vars" && rm -f "$kept"; fi
 }
 
 # start: the three together. start-alone: Pando's Worker by itself, without
@@ -29,6 +37,10 @@ start() {
 
   [ "${1:-}" = alone ] && configs=(-c ../worker/wrangler.jsonc)
   mkdir -p "$state"
+  if [ -n "${AGENTS_PANDO_VARS:-}" ]; then
+    [ -f "$kept" ] || cp -p "$vars" "$kept"
+    for kv in $AGENTS_PANDO_VARS; do printf '%s\n' "$kv" >> "$vars"; done
+  fi
   # The scripted model, for deterministic tests. Local only: .dev.vars is never deployed.
   grep -qs '^SCRIPTED_MODEL=1$' "$here/.dev.vars" || echo "SCRIPTED_MODEL=1" >> "$here/.dev.vars"
   (cd "$here/../worker" && npx wrangler d1 migrations apply pando-accounts-dev --local --persist-to "$state" >/dev/null)

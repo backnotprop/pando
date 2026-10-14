@@ -76,7 +76,8 @@ test("risk-based review: the meter, the held merge, the guided review, Approve, 
     await row.click();
     await expect(page.getByLabel(/^Risk: (High|Medium|Low), human review required$/)).toBeVisible();
     await expect(page.getByText("Human review required", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Risk review")).toContainText("A person's approval is needed on this head.");
+    await expect(page.getByText("A person's approval is needed on this head", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Risk review").getByRole("button", { name: "Approve" })).toBeVisible();
 
     // The guide, written by Workers AI from the diff, opens in the Artifacts tab.
     const guide = page.getByLabel("Guided review");

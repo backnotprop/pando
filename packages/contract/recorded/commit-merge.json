@@ -4,22 +4,22 @@
   "status": 200,
   "body": {
     "commit": {
-      "sha": "3d5e764623c3f1bc714fb5a4737c9897cff915ed",
+      "sha": "aa399b220701a19d175a2d0ef4e502a8d9da7364",
       "parents": [
-        "9f2c8dd9309b611b7e9466ffee802004499f2215",
-        "50fc2cdcccd0d33bffd41144c68424a0284071ea"
+        "59b1bc77b1293cbc69aa9839f01e7d6c96316533",
+        "7a6a960366d8899c2cd8e1e69422d9a442f82a66"
       ],
       "title": "Merge branch 'feat/ready'",
       "message": "Merge branch 'feat/ready'",
       "author": {
         "name": "Ana Lima",
         "email": "ana@pando.invalid",
-        "date": "2026-10-13T23:09:41.000Z"
+        "date": "2026-10-14T02:11:52.000Z"
       },
       "committer": {
         "name": "Pando",
         "email": "pando@pando.invalid",
-        "date": "2026-10-13T23:09:41.000Z"
+        "date": "2026-10-14T02:11:52.000Z"
       },
       "trailers": {
         "agent": null,
@@ -29,7 +29,7 @@
       "co_authors": []
     },
     "author_person": {
-      "login": "rec-mv7am39t",
+      "login": "rec-mv7h4exl",
       "picture_url": null
     },
     "branch": null,
@@ -37,10 +37,10 @@
       "name": "feat/ready",
       "title": null,
       "state": "merged",
-      "merge_commit": "3d5e764623c3f1bc714fb5a4737c9897cff915ed"
+      "merge_commit": "aa399b220701a19d175a2d0ef4e502a8d9da7364"
     },
     "checks": {
-      "sha": "3d5e764623c3f1bc714fb5a4737c9897cff915ed",
+      "sha": "aa399b220701a19d175a2d0ef4e502a8d9da7364",
       "state": "missing",
       "required": [
         "ci/test"

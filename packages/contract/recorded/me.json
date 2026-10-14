@@ -3,16 +3,16 @@
   "route": "GET /v1/user",
   "status": 200,
   "body": {
-    "login": "rec-mv7am39t",
+    "login": "rec-mv7h4exl",
     "name": "Ana Lima",
     "email": "ana@pando.invalid",
     "picture_url": null,
-    "created_at": "2026-10-13T23:09:12.603Z",
+    "created_at": "2026-10-14T02:11:25.222Z",
     "credential": {
-      "id": "cred_ea06961329e1ea4b",
+      "id": "cred_6d5bb8f9750121ee",
       "name": "ana-mbp",
       "kind": "bootstrap",
-      "created_at": "2026-10-13T23:09:12.604Z",
+      "created_at": "2026-10-14T02:11:25.234Z",
       "last_used_at": null,
       "expires_at": null
     }

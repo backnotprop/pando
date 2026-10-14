@@ -4,7 +4,7 @@
   "status": 200,
   "body": {
     "type": "user",
-    "login": "rec-mv7am39t",
+    "login": "rec-mv7h4exl",
     "name": "Ana Lima",
     "bio": "Plans and code.",
     "location": "Lisbon",
@@ -12,7 +12,7 @@
       "https://example.com/ana"
     ],
     "picture_url": null,
-    "created_at": "2026-10-13T23:09:12.603Z",
+    "created_at": "2026-10-14T02:11:25.222Z",
     "orgs": []
   }
 }

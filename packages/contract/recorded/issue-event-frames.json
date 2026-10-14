@@ -5,18 +5,18 @@
   "body": [
     {
       "type": "caught_up",
-      "seq": 55
+      "seq": 56
     },
     {
       "type": "event",
-      "seq": 56,
-      "at": "2026-10-13T23:10:01.019Z",
+      "seq": 57,
+      "at": "2026-10-14T02:12:08.810Z",
       "kind": "label.updated",
       "collection": "labels",
       "key": "area/web",
       "op": "upsert",
       "repo": null,
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -27,14 +27,14 @@
     },
     {
       "type": "event",
-      "seq": 57,
-      "at": "2026-10-13T23:10:01.029Z",
+      "seq": 58,
+      "at": "2026-10-14T02:12:08.814Z",
       "kind": "issue.opened",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -57,17 +57,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 0,
         "tasks": {
           "done": 1,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.027Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.814Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -78,14 +78,14 @@
     },
     {
       "type": "event",
-      "seq": 59,
-      "at": "2026-10-13T23:10:01.052Z",
+      "seq": 60,
+      "at": "2026-10-14T02:12:08.827Z",
       "kind": "issue.commented",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -108,17 +108,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 1,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.051Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.826Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -128,18 +128,18 @@
       "items": [
         {
           "id": 1,
-          "at": "2026-10-13T23:10:01.051Z",
-          "actor": "rec-mv7am39t",
+          "at": "2026-10-14T02:12:08.826Z",
+          "actor": "rec-mv7h4exl",
           "machine": "ana-mbp",
           "kind": "comment",
           "comment": {
-            "id": "ic_510a42f8cc64d563",
+            "id": "ic_7559b7fbed173bc8",
             "body": "Seen on staging too.",
             "body_version": 1,
-            "author": "rec-mv7am39t",
+            "author": "rec-mv7h4exl",
             "machine": "ana-mbp",
-            "created_at": "2026-10-13T23:10:01.051Z",
-            "updated_at": "2026-10-13T23:10:01.051Z",
+            "created_at": "2026-10-14T02:12:08.826Z",
+            "updated_at": "2026-10-14T02:12:08.826Z",
             "reactions": []
           }
         }
@@ -147,14 +147,14 @@
     },
     {
       "type": "event",
-      "seq": 60,
-      "at": "2026-10-13T23:10:01.060Z",
+      "seq": 61,
+      "at": "2026-10-14T02:12:08.831Z",
       "kind": "issue.updated",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -177,17 +177,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 1,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.051Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.826Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -200,21 +200,21 @@
           "content": "+1",
           "count": 1,
           "by": [
-            "rec-mv7am39t"
+            "rec-mv7h4exl"
           ]
         }
       ]
     },
     {
       "type": "event",
-      "seq": 61,
-      "at": "2026-10-13T23:10:01.069Z",
+      "seq": 62,
+      "at": "2026-10-14T02:12:08.834Z",
       "kind": "issue.updated",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -237,17 +237,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 1,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.051Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.826Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -256,19 +256,19 @@
       "body_version": 1,
       "items": [],
       "comment": {
-        "id": "ic_510a42f8cc64d563",
+        "id": "ic_7559b7fbed173bc8",
         "body": "Seen on staging too.",
         "body_version": 1,
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "machine": "ana-mbp",
-        "created_at": "2026-10-13T23:10:01.051Z",
-        "updated_at": "2026-10-13T23:10:01.051Z",
+        "created_at": "2026-10-14T02:12:08.826Z",
+        "updated_at": "2026-10-14T02:12:08.826Z",
         "reactions": [
           {
             "content": "heart",
             "count": 1,
             "by": [
-              "rec-mv7am39t"
+              "rec-mv7h4exl"
             ]
           }
         ]
@@ -276,14 +276,14 @@
     },
     {
       "type": "event",
-      "seq": 62,
-      "at": "2026-10-13T23:10:01.076Z",
+      "seq": 63,
+      "at": "2026-10-14T02:12:08.836Z",
       "kind": "issue.updated",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -306,17 +306,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 2,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.075Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.836Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -327,14 +327,14 @@
     },
     {
       "type": "event",
-      "seq": 63,
-      "at": "2026-10-13T23:10:01.091Z",
+      "seq": 64,
+      "at": "2026-10-14T02:12:08.841Z",
       "kind": "issue.updated",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -352,17 +352,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 2,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.091Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.841Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -372,8 +372,8 @@
       "items": [
         {
           "id": 2,
-          "at": "2026-10-13T23:10:01.090Z",
-          "actor": "rec-mv7am39t",
+          "at": "2026-10-14T02:12:08.841Z",
+          "actor": "rec-mv7h4exl",
           "machine": "ana-mbp",
           "kind": "renamed",
           "from": "Login fails after token refresh",
@@ -381,8 +381,8 @@
         },
         {
           "id": 3,
-          "at": "2026-10-13T23:10:01.090Z",
-          "actor": "rec-mv7am39t",
+          "at": "2026-10-14T02:12:08.841Z",
+          "actor": "rec-mv7h4exl",
           "machine": "ana-mbp",
           "kind": "unlabeled",
           "label": {
@@ -395,14 +395,14 @@
     },
     {
       "type": "event",
-      "seq": 64,
-      "at": "2026-10-13T23:10:01.098Z",
+      "seq": 65,
+      "at": "2026-10-14T02:12:08.844Z",
       "kind": "issue.closed",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -420,19 +420,19 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 2,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.097Z",
-        "closed_at": "2026-10-13T23:10:01.097Z",
-        "closed_by": "rec-mv7am39t",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.843Z",
+        "closed_at": "2026-10-14T02:12:08.843Z",
+        "closed_by": "rec-mv7h4exl",
         "closed_by_merge": null
       },
       "number": 1,
@@ -440,8 +440,8 @@
       "items": [
         {
           "id": 4,
-          "at": "2026-10-13T23:10:01.097Z",
-          "actor": "rec-mv7am39t",
+          "at": "2026-10-14T02:12:08.843Z",
+          "actor": "rec-mv7h4exl",
           "machine": "ana-mbp",
           "kind": "closed",
           "reason": "not_planned",
@@ -451,14 +451,14 @@
     },
     {
       "type": "event",
-      "seq": 65,
-      "at": "2026-10-13T23:10:01.109Z",
+      "seq": 66,
+      "at": "2026-10-14T02:12:08.847Z",
       "kind": "issue.reopened",
       "collection": "issues",
       "key": "1",
       "op": "upsert",
       "repo": "projects-web",
-      "actor": "rec-mv7am39t",
+      "actor": "rec-mv7h4exl",
       "machine": "ana-mbp",
       "agent": null,
       "row": {
@@ -476,17 +476,17 @@
           }
         ],
         "assignees": [
-          "rec-mv7am39t"
+          "rec-mv7h4exl"
         ],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 1,
         "tasks": {
           "done": 2,
           "total": 2
         },
         "linked_branches": 0,
-        "created_at": "2026-10-13T23:10:01.027Z",
-        "updated_at": "2026-10-13T23:10:01.108Z",
+        "created_at": "2026-10-14T02:12:08.814Z",
+        "updated_at": "2026-10-14T02:12:08.847Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -496,8 +496,8 @@
       "items": [
         {
           "id": 5,
-          "at": "2026-10-13T23:10:01.108Z",
-          "actor": "rec-mv7am39t",
+          "at": "2026-10-14T02:12:08.847Z",
+          "actor": "rec-mv7h4exl",
           "machine": "ana-mbp",
           "kind": "reopened"
         }
@@ -505,8 +505,8 @@
     },
     {
       "type": "event",
-      "seq": 67,
-      "at": "2026-10-13T23:10:05.491Z",
+      "seq": 68,
+      "at": "2026-10-14T02:12:12.772Z",
       "kind": "issue.updated",
       "collection": "issues",
       "key": "2",
@@ -524,12 +524,12 @@
         "project_path": null,
         "labels": [],
         "assignees": [],
-        "author": "rec-mv7am39t",
+        "author": "rec-mv7h4exl",
         "comments": 0,
         "tasks": null,
         "linked_branches": 1,
-        "created_at": "2026-10-13T23:10:01.042Z",
-        "updated_at": "2026-10-13T23:10:05.491Z",
+        "created_at": "2026-10-14T02:12:08.822Z",
+        "updated_at": "2026-10-14T02:12:12.772Z",
         "closed_at": null,
         "closed_by": null,
         "closed_by_merge": null
@@ -539,14 +539,14 @@
       "items": [
         {
           "id": 6,
-          "at": "2026-10-13T23:10:05.491Z",
+          "at": "2026-10-14T02:12:12.772Z",
           "actor": null,
           "machine": null,
           "kind": "linked",
           "repo": "projects-web",
           "branch": "fix/login",
           "source": "commit",
-          "sha": "acfa505a12f484d61cd78534deb76c93655b7162",
+          "sha": "e55ef2a9287ed540c509577d42cab92ceb3abb6d",
           "repo_path": "projects/web"
         }
       ]

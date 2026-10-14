@@ -5,14 +5,14 @@
   "body": {
     "branches": [
       {
-        "monorepo": "rec-mv7am39t/rec-mv7am39t",
-        "monorepo_id": "m_ad86bce2ea2fd58b",
+        "monorepo": "rec-mv7h4exl/rec-mv7h4exl",
+        "monorepo_id": "m_a8596bfa02181ddc",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/clash",
         "title": null,
-        "head": "560f880857af8a4df38365737e3ac32f80e4a469",
-        "author": "rec-mv7am39t",
+        "head": "83cd283263758a63698ef89c9ec5dc6ab61edeae",
+        "author": "rec-mv7h4exl",
         "pushed_machine": "ana-mbp",
         "state": "conflicts",
         "checks": {
@@ -20,17 +20,17 @@
           "failing": [],
           "failing_apps": {}
         },
-        "updated_at": "2026-10-13T23:09:27.800Z"
+        "updated_at": "2026-10-14T02:11:40.048Z"
       },
       {
-        "monorepo": "rec-mv7am39t/rec-mv7am39t",
-        "monorepo_id": "m_ad86bce2ea2fd58b",
+        "monorepo": "rec-mv7h4exl/rec-mv7h4exl",
+        "monorepo_id": "m_a8596bfa02181ddc",
         "repo": "projects-web",
         "repo_path": "projects/web",
         "branch": "feat/failing",
         "title": null,
-        "head": "130462630730124883e8c104373783199830174c",
-        "author": "rec-mv7am39t",
+        "head": "80a004003eace4e3cec2bb057f4f9dae47a30e51",
+        "author": "rec-mv7h4exl",
         "pushed_machine": "ana-mbp",
         "state": "failing",
         "checks": {
@@ -42,18 +42,18 @@
             "ci/test": null
           }
         },
-        "updated_at": "2026-10-13T23:09:26.389Z"
+        "updated_at": "2026-10-14T02:11:38.298Z"
       }
     ],
     "issues": [
       {
-        "monorepo": "rec-mv7am39t/rec-mv7am39t",
-        "monorepo_id": "m_ad86bce2ea2fd58b",
+        "monorepo": "rec-mv7h4exl/rec-mv7h4exl",
+        "monorepo_id": "m_a8596bfa02181ddc",
         "count": 1,
         "newest": {
           "number": 1,
           "title": "Login fails an hour after sign-in",
-          "updated_at": "2026-10-13T23:10:01.108Z"
+          "updated_at": "2026-10-14T02:12:08.847Z"
         }
       }
     ],

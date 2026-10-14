@@ -22,17 +22,17 @@
       }
     ],
     "assignees": [
-      "rec-mv7am39t"
+      "rec-mv7h4exl"
     ],
-    "author": "rec-mv7am39t",
+    "author": "rec-mv7h4exl",
     "comments": 0,
     "tasks": {
       "done": 1,
       "total": 2
     },
     "linked_branches": 0,
-    "created_at": "2026-10-13T23:10:01.027Z",
-    "updated_at": "2026-10-13T23:10:01.027Z",
+    "created_at": "2026-10-14T02:12:08.814Z",
+    "updated_at": "2026-10-14T02:12:08.814Z",
     "closed_at": null,
     "closed_by": null,
     "closed_by_merge": null,
@@ -41,7 +41,7 @@
     "machine": "ana-mbp",
     "links": [],
     "participants": [
-      "rec-mv7am39t"
+      "rec-mv7h4exl"
     ],
     "reactions": []
   }

@@ -15,7 +15,7 @@ import { commitReader, compareWith } from "../monorepo/graph";
 import type { MonorepoObject } from "../monorepo/object";
 import type { Identity, ObjectInfo, Outcome, RepoRecord } from "../monorepo/types";
 import { DEFAULT_MODEL } from "../../../agents/src/protocol";
-import { GUIDE_ARTIFACT, writeGuide } from "./guide";
+import { GUIDE_ARTIFACT, GUIDE_SNAPSHOT, writeGuide } from "./guide";
 import { commentsAndDocsOnly, DEFAULT_SENSITIVE, SENSITIVE_SHOWN, sensitiveOf, tierOf } from "./policy";
 import { AUTO_PROFILES, profileOf } from "./profiles";
 import { classify, reasonsOf, scripted, stateOf, type ChangedFile, type Scored } from "./risk";
@@ -196,7 +196,16 @@ const PANDO: Identity = { login: "pando", name: "Pando", email: null, credential
 
 const pagePath = (full: string, r: RepoRecord, branch: string) => `/${full}${r.path === "." ? "" : `/projects/${r.path.replace(/^projects\//, "")}`}/branches/${branch}`;
 
-/** The guided review of a human-tier head, kept as the branch's artifact guided-review.html. */
+/** One file of the guide's version, put in the bucket under the version's prefix. */
+async function putText(env: Env, prefix: string, path: string, text: string, type: string) {
+  const bytes = new TextEncoder().encode(text);
+  // SAFETY: TextEncoder's output is backed by a plain ArrayBuffer of exactly its bytes.
+  const sha256 = await putBytes(env.BLOBS, prefix + path, bytes.buffer as ArrayBuffer, type);
+
+  return { path, size: bytes.byteLength, sha256, type };
+}
+
+/** The guided review of a human-tier head, kept as the branch's artifact guided-review.html: the HTML export, then its snapshot (guided-review.json). */
 export async function runGuide(env: Env, stub: Stub, r: RepoRecord, info: ObjectInfo, m: { repo: string; branch: string; head: string }): Promise<void> {
   if ((await stub.reviewGuideState(m.repo, m.branch, m.head)) !== "writing") return;
   const set = (state: BranchReviewOut["guide_state"], guide: BranchReviewOut["guide"], error: string | null) => stub.reviewSetGuide(m.repo, m.branch, m.head, state, guide, error);
@@ -228,16 +237,13 @@ export async function runGuide(env: Env, stub: Stub, r: RepoRecord, info: Object
   try {
     const slot = unwrap(await stub.artifactSlot(r.name, m.branch, GUIDE_ARTIFACT));
     const prefix = `artifacts/${info.id}/${r.name}/${slot.id}/guide_${m.head.slice(0, 12)}/`;
-    const bytes = new TextEncoder().encode(out.html);
-    // SAFETY: TextEncoder's output is backed by a plain ArrayBuffer of exactly its bytes.
-    const sha256 = await putBytes(env.BLOBS, prefix + GUIDE_ARTIFACT, bytes.buffer as ArrayBuffer, "text/html");
+    const files = await Promise.all([putText(env, prefix, GUIDE_ARTIFACT, out.html, "text/html"), putText(env, prefix, GUIDE_SNAPSHOT, out.json, "application/json")]);
 
     const added = unwrap(await stub.artifactAddVersion(r.name, m.branch, {
-      id: slot.id, branch_created_at: slot.branch_created_at, name: GUIDE_ARTIFACT, kind: "html", title: out.title,
-      files: [{ path: GUIDE_ARTIFACT, size: bytes.byteLength, sha256, type: "text/html" }], prefix, machine: null, via: "cli",
+      id: slot.id, branch_created_at: slot.branch_created_at, name: GUIDE_ARTIFACT, kind: "html", title: out.title, files, prefix, machine: null, via: "cli",
     }, PANDO));
 
-    await set("ready", { artifact: added.artifact.id, version: added.artifact.latest.n, title: out.title }, null);
+    await set("ready", { artifact: added.artifact.id, version: added.artifact.latest.n, title: out.title, snapshot: GUIDE_SNAPSHOT }, null);
   } catch (err) {
     await set("failed", null, `the guide could not be kept: ${err instanceof Error ? err.message : String(err)}`);
   }

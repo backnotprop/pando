@@ -30,8 +30,14 @@ The review comes before the checks. A merge is refused for risk first (`risk_pen
 - **The risk meter** under the title: the level, the tier and the score, such as **High · human review required 0.94**. Hover it for the reasons: sensitive paths touched, files deleted, the size, and what the model read.
 - **The Merge box** says why a merge waits: **Human review required**, **Waiting for review**, or **Risk score pending** for the second or so a new head is scored.
 - **Risk review**, under the Merge box: each reviewer agent and what it said, and **Approve**.
-- **Guided review**, over the commits on a head a person must approve: Plannotator's guide to the change, the parts to read first at the top, kept on the branch as the artifact `guided-review.html`. It opens in the Artifacts tab; its download carries Plannotator's full viewer with the diffs.
+- **Guided review**, over the commits on a head a person must approve: a short note with a link to the branch's **Guided review** tab.
 - The branch list shows the level beside each open branch.
+
+## The guided review
+
+Before anyone looks, Pando has Workers AI read the change and write a guide to it, with [Plannotator](https://github.com/backnotprop/plannotator)'s method: a title, one or two sentences on why the change exists, then the change cut into sections in the order to read them, the core first and the glue last. Each section has an overview and its files, each file with a sentence on what changed in it. The guide says where the risk sits; it never rates it.
+
+The branch's **Guided review** tab shows it in Pando's own page, in your theme: each section's overview, then each of its files' diffs, drawn as on Files changed, with their syntax colours. Tick **Reviewed** on a section as you finish it; it folds, and the count on the right goes up (the ticks stay in your browser). The Merge box and **Approve** sit beside the guide, so you read, approve and merge in one place. A file the guide did not place is under **Everything else** at the end. **Download** saves the guide as one HTML file that opens anywhere; it is also on the branch's Artifacts tab as `guided-review.html`, with the guide as data beside it (`guided-review.json`).
 
 ## Sensitive paths
 

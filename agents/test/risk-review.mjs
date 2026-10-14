@@ -171,8 +171,17 @@ try {
   record("branch-review-human.json", "Branch", "GET .../branches/{branch} (risk high or sensitive: human, reviewers posted, guide ready)", 200, b);
 
   if (b?.review?.guide) {
-    r = await call("GET", `/v1/monorepos/${t.full}/artifacts/${b.review.guide.artifact}/versions/1/document`, t.secret);
+    const g = b.review.guide;
+    r = await call("GET", `/v1/monorepos/${t.full}/artifacts/${g.artifact}/versions/${g.version}/document`, t.secret);
     check("the artifact is Plannotator's guided review export, covering the changed file", r.status === 200 && /<meta name="plannotator-guided-review" content="v1">/.test(r.text) && r.text.includes("payments/charge.ts"), `${r.status} ${r.text.slice(0, 120)}`);
+    // Beside it, the guide as data: the snapshot the branch page's Guided review tab draws.
+    r = await call("GET", `/v1/monorepos/${t.full}/artifacts/${g.artifact}/versions/${g.version}/files/${g.snapshot}`, t.secret);
+    const s = r.json;
+    check(
+      "the version keeps the snapshot too: guided-review.json, Plannotator's GuideSnapshotV1 with sections and the patch",
+      g.snapshot === "guided-review.json" && r.status === 200 && s?.kind === "plannotator-guided-review" && s.version === 1 && s.guide?.sections?.length > 0 && s.review?.rawPatch?.includes("payments/charge.ts") && s.source?.headSha === b.head,
+      `${g.snapshot} ${r.status} ${JSON.stringify(s)?.slice(0, 200)}`,
+    );
   }
 
   r = await call("POST", `${R}/branches/charge-refuse-empty/reviews`, t.secret, { verdict: "approve", body: "Read it with the guide." });

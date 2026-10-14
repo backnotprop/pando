@@ -4,16 +4,16 @@
   "status": 200,
   "body": {
     "name": "copy-greeting",
-    "head": "9dfe5992a12cf5b051615a81b1419b896246c112",
-    "base": null,
-    "author": "risk-mv7cvr18",
+    "head": "f0e2ed2cd6e7ec752bba6f529d0da7614a9697c3",
+    "base": "f0aba64a01d357e0c9e38fa0bd18f4883c043fd1",
+    "author": "risk-mv8evod6",
     "title": null,
     "description": null,
-    "ahead": null,
-    "behind": null,
-    "mergeable": "pending",
+    "ahead": 1,
+    "behind": 0,
+    "mergeable": "clean",
     "checks": {
-      "sha": "9dfe5992a12cf5b051615a81b1419b896246c112",
+      "sha": "f0e2ed2cd6e7ec752bba6f529d0da7614a9697c3",
       "state": "success",
       "required": [],
       "missing": [],
@@ -28,26 +28,26 @@
     "merged_agent": null,
     "forced": null,
     "pushed_machine": "tester-mbp",
-    "created_at": "2026-10-14T00:12:52.978Z",
-    "updated_at": "2026-10-14T00:12:52.978Z",
-    "stale": true,
+    "created_at": "2026-10-14T17:56:38.217Z",
+    "updated_at": "2026-10-14T17:56:38.217Z",
+    "stale": false,
     "last_mergeable": null,
     "conflict_paths": null,
-    "facts_at": null,
+    "facts_at": "2026-10-14T17:56:40.208Z",
     "review": {
-      "head": "9dfe5992a12cf5b051615a81b1419b896246c112",
+      "head": "f0e2ed2cd6e7ec752bba6f529d0da7614a9697c3",
       "state": "done",
-      "score": 0.082,
+      "score": 0.08625,
       "level": "low",
       "rule": null,
       "tier": "auto",
       "reasons": [
-        "Risk 0.08: mostly low (0.84)"
+        "Risk 0.09: mostly low (0.84)"
       ],
       "sensitive_paths": [],
       "model": "@cf/cloudflare/clef",
-      "tokens": 946,
-      "cost_usd": 0.00022704,
+      "tokens": 944,
+      "cost_usd": 0.00022656,
       "error": null,
       "reviewers": [],
       "guide_state": "none",
@@ -55,7 +55,7 @@
       "approved_by": null,
       "passes": true,
       "why": null,
-      "classified_at": "2026-10-14T00:12:54.429Z"
+      "classified_at": "2026-10-14T17:56:40.315Z"
     }
   }
 }

@@ -1,15 +1,15 @@
 // Risk-based review on a branch (docs/risk-review/DESIGN.md): the meter under
 // the title ("High · human review required"), its badge in the branch list,
 // the Review box beside the Merge box (the reviewer agents, why the merge
-// waits, Approve) and the Guided review panel, which opens Plannotator's
-// guide in the Artifacts tab. Workers AI's clef scores each head.
+// waits, Approve) and the Guided review panel, which opens the guide on the
+// branch's Guided review tab (Guide.tsx). Workers AI's clef scores each head.
 import type { Branch, BranchReview, Repo } from "@pando/contract";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { approve } from "../../../../api/review";
 import { repoKey, reviewsQuery } from "../../../../api/projects";
 import { button, Refusal, SectionHead } from "../../../../ui/controls";
-import { agentLink, branchArtifactsLink } from "../../../../ui/paths";
+import { agentLink, branchGuideLink } from "../../../../ui/paths";
 import { useMonorepo } from "../-frame/heads";
 
 const LEVEL = { low: "Low", medium: "Medium", high: "High", unknown: "Risk unknown" } as const;
@@ -138,7 +138,7 @@ export function ReviewBox({ repo, b }: { repo: Repo; b: Branch }) {
   );
 }
 
-/** Over the commits, on the human tier: Plannotator's guided review, read first. */
+/** Over the commits, on the human tier: the guided review, read first. */
 export function GuidedReview({ repo, b }: { repo: Repo; b: Branch }) {
   const { monorepo } = useMonorepo();
   const r = b.review;
@@ -152,8 +152,8 @@ export function GuidedReview({ repo, b }: { repo: Repo; b: Branch }) {
         <>
           <p className="text-[14px] text-bark">{r.guide.title ?? "Guided review"}</p>
           <p className="mt-1 text-[13px] text-bark-dim">Written by Pando when this head was scored, for whoever approves it: the changes in the order to read them, the risky parts first.</p>
-          <Link {...branchArtifactsLink(monorepo.full, repo.path, b.name, { artifact: "guided-review.html" })} className="mt-3 inline-block text-[13.5px] text-link hover:underline">
-            Open the guided review
+          <Link {...branchGuideLink(monorepo.full, repo.path, b.name)} className="mt-3 inline-block text-[13.5px] text-link hover:underline">
+            Read the guided review
           </Link>
         </>
       ) : (

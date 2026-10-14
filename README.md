@@ -80,6 +80,7 @@ PANDO_URL=http://localhost:8797 node test/e2e.mjs
 | browser | none | Listens on 127.0.0.1:8799 itself; keep that port free. |
 | feed-load | `--var FEED_TEST:1` | A measurement (`N=10` monorepos): it prints timings, not checks. |
 | machines-load | none | A measurement, like feed-load. |
+| bench-push | none | A measurement: concurrent pushes and merges. Also runs against a deployed Worker. See below. |
 
 Each suite prints PASS or FAIL per check and exits non-zero on a failure.
 These need a deployed Worker and the credential of a signed-in machine
@@ -112,6 +113,37 @@ mount is tested only inside a privileged Linux container
 `worker/test/clone.mjs` checks the clone end to end against `wrangler dev`
 (every file on disk, few requests) and prints its times; `--from <repo>`
 measures a real repo.
+
+#### Push benchmark
+
+`worker/test/bench-push.mjs` measures how many pushes a second one
+repository takes and how long each waits. N pushers each loop for a fixed
+time: change one file, commit, `git push` to its own branch. Per push it
+times git push to exit (accepted), to `GET .../branches/<name>` answering
+the new head (visible), and to the monorepo's event socket carrying it. It
+runs a ladder of N (one monorepo per level), N spread over 5 monorepos and
+over 5 projects of one monorepo, and merge levels (push a branch, merge it
+through the merge route, repeat). It prints a line per level and writes
+JSON with `--out`. It deletes every monorepo it made.
+
+```sh
+PANDO_URL=http://localhost:8797 node test/bench-push.mjs --server-log /tmp/pando-a.log --out local.json
+PANDO_URL=https://app.gitpando.com node test/bench-push.mjs --cred home --cred-host pando-dev.plannotator.workers.dev --out prod.json
+```
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--levels` | `1,5,10,25,50` | Pushers per ladder level. It stops raising N after a level with a 429 or 5xx, or over 20% failed. |
+| `--seconds` | `30` | Length of each level. |
+| `--spread`, `--spread-n` | `5`, `25` | Spread levels: `--spread-n` pushers over `--spread` monorepos, then over `--spread` projects of one. |
+| `--merge-n` | `1,10` | Merge levels (pushers that push and merge). |
+| `--only` | `ladder,spread,merge` | The parts to run. |
+| `--cred` | `bootstrap` | `bootstrap` makes a user with `PANDO_BOOTSTRAP`; `home` reads `~/.pando/credentials/<--cred-host>`. |
+| `--server-log` | none | The `wrangler dev` output: adds the door's own timing per level (write gate, Artifacts). |
+| `--prefix` | `bench-<date>` | Start of the monorepo names. |
+
+Against anything but localhost it refuses over 50 pushers or 60 s a level.
+Risk review is switched off on its projects, so no model runs.
 
 ### Docs site
 

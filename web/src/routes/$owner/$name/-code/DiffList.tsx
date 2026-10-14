@@ -59,9 +59,8 @@ function headerOnly(f: ChangedFile): string {
   return `diff --git a/${from} b/${f.path}\n${kind}${rename}`;
 }
 
-/** A file's parsed diff: its patch, or its header alone. */
-function diffOf(f: ChangedFile): FileDiffMetadata {
-  const key = itemId(f);
+/** A file's parsed diff: its patch, or its header alone. `key` is its item's id. */
+function diffOf(f: ChangedFile, key: string): FileDiffMetadata {
   const d = (f.patch !== null ? processFile(f.patch, { cacheKey: key, isGitDiff: true }) : undefined) ?? processFile(headerOnly(f), { cacheKey: `${key}:header`, isGitDiff: true });
 
   if (!d) throw new Error(`no diff for ${f.path}`);
@@ -90,12 +89,14 @@ export interface DiffListProps {
   /** Lines chosen, or none (Why? on lines, Understand). */
   onChoose?: (chosen: ChosenLines | null) => void;
   className?: string;
+  /** Each file's item id, when its blobs are not known (a guided review's patch): unique to the change it belongs to. */
+  idOf?: (f: ChangedFile) => string;
 }
 
-export default function DiffList({ files, closed, header, target, onTop, onChoose, className }: DiffListProps) {
+export default function DiffList({ files, closed, header, target, onTop, onChoose, className, idOf = itemId }: DiffListProps) {
   const handle = useRef<CodeViewHandle<undefined>>(null);
   const items = useRef(new Map<string, CodeViewDiffItem>());
-  const byId = useMemo(() => new Map(files.map((f) => [itemId(f), f])), [files]);
+  const byId = useMemo(() => new Map(files.map((f) => [idOf(f), f])), [files, idOf]);
   const choose = useRef(onChoose);
   const choosing = onChoose !== undefined;
 
@@ -124,14 +125,14 @@ export default function DiffList({ files, closed, header, target, onTop, onChoos
     const next = new Map<string, CodeViewDiffItem>();
 
     const out = files.map((f) => {
-      const id = itemId(f);
+      const id = idOf(f);
       const collapsed = closed.has(f.path);
       const was = items.current.get(id);
 
       const item: CodeViewDiffItem =
         was && (was.collapsed ?? false) === collapsed
           ? was
-          : { id, type: "diff", fileDiff: was?.fileDiff ?? diffOf(f), collapsed, version: (was?.version ?? 0) + 1 };
+          : { id, type: "diff", fileDiff: was?.fileDiff ?? diffOf(f, id), collapsed, version: (was?.version ?? 0) + 1 };
 
       next.set(id, item);
 
@@ -141,13 +142,13 @@ export default function DiffList({ files, closed, header, target, onTop, onChoos
     items.current = next;
 
     return out;
-  }, [files, closed]);
+  }, [files, closed, idOf]);
 
   useEffect(() => {
     const id = target && files.find((f) => f.path === target.path);
 
-    if (id) handle.current?.scrollTo({ type: "item", id: itemId(id), align: "start" });
-  }, [target, files]);
+    if (id) handle.current?.scrollTo({ type: "item", id: idOf(id), align: "start" });
+  }, [target, files, idOf]);
 
   // The file at the top: the last drawn file whose top is at or above the scroll position, once a frame at most.
   const frame = useRef(0);

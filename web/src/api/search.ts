@@ -24,9 +24,9 @@ export const refSearch = Schema.toStandardSchemaV1(Schema.Struct({ ref: Schema.o
 export const branchesSearch = Schema.toStandardSchemaV1(Schema.Struct({ tab: Schema.optionalKey(Schema.String) }));
 
 /**
- * A branch's page: `?tab=files` for Files changed, `?tab=artifacts` for its
- * Artifacts; `&artifact=<name>` opens one, `&v=` at an older version,
- * `&plain=1` on its code.
+ * A branch's page: `?tab=files` for Files changed, `?tab=review` for its
+ * Guided review, `?tab=artifacts` for its Artifacts; `&artifact=<name>` opens
+ * one, `&v=` at an older version, `&plain=1` on its code.
  */
 export const branchSearch = Schema.toStandardSchemaV1(
   Schema.Struct({

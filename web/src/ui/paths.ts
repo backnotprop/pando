@@ -153,6 +153,12 @@ export const branchSessionsLink = (full: string, repoPath: string, branch: strin
     ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: { tab: "sessions" } })
     : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch }, search: { tab: "sessions" } });
 
+/** A branch's Guided review tab (-project/Guide.tsx). */
+export const branchGuideLink = (full: string, repoPath: string, branch: string) =>
+  repoPath === "."
+    ? linkOptions({ to: "/$owner/$name/branches/$", params: { ...split(full), _splat: branch }, search: { tab: "review" } })
+    : linkOptions({ to: "/$owner/$name/projects/$project/branches/$", params: { ...split(full), project: project(repoPath), _splat: branch }, search: { tab: "review" } });
+
 /** Where on a branch's Artifacts tab: one artifact (by its name), at a version, on its code. */
 export interface ArtifactAt {
   artifact?: string;
@@ -218,6 +224,7 @@ export type AppLink =
   | ReturnType<typeof releaseLink>
   | ReturnType<typeof branchLink>
   | ReturnType<typeof branchSessionsLink>
+  | ReturnType<typeof branchGuideLink>
   | ReturnType<typeof branchArtifactsLink>
   | ReturnType<typeof commitLink>
   | ReturnType<typeof sessionsLink>

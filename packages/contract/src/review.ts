@@ -72,8 +72,12 @@ export const BranchReview = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   reviewers: Schema.Array(Reviewer),
   guide_state: GuideState,
-  /** The guided review's artifact (open it at its id); null until written. */
-  guide: Schema.NullOr(Schema.Struct({ artifact: Schema.String, version: Count, title: Schema.NullOr(Schema.String) })),
+  /**
+   * The guided review's artifact (open it at its id); null until written. Its version holds the HTML export
+   * (guided-review.html, for download) and `snapshot`, the file with the guide as data (Plannotator's
+   * GuideSnapshotV1 JSON) that the branch page's Guided review tab draws; null for a guide written before it was kept.
+   */
+  guide: Schema.NullOr(Schema.Struct({ artifact: Schema.String, version: Count, title: Schema.NullOr(Schema.String), snapshot: Schema.NullOr(Schema.String) })),
   /** The person whose approval on this head lets it merge; null until one approves. */
   approved_by: Schema.NullOr(Login),
   /** Whether the merge gate's review part passes now (checks are separate). */

@@ -18,7 +18,8 @@ const pool = codePool();
 
 // Line and number tints alike, a little quieter than Pierre's (15% of the
 // token's colour in the dark, 10% in the light); the unchanged lines between
-// hunks on a Loam strip, their count lined up with the code.
+// hunks on a Loam strip, their count lined up with the code. Lines chosen for
+// Why? (a line number, shift and another) take the Link colour's tint.
 const DIFF = `
 :host {
   --diffs-light-bg: var(--soil);
@@ -29,6 +30,8 @@ const DIFF = `
 }
 [data-line], [data-no-newline], [data-gutter-buffer], [data-column-number] { --mix-dark: 85%; --mix-light: 90%; }
 [data-separator-content] { padding-inline: max(52px, calc(var(--diffs-min-number-column-width-default, 4ch) + 21px)) 0; }
+[data-line][data-selected-line], [data-column-number][data-selected-line], [data-gutter-buffer][data-selected-line] { background-color: color-mix(in srgb, var(--link) 16%, var(--soil)) !important; }
+[data-column-number][data-selected-line] { color: var(--bark) !important; }
 `;
 
 /** The header the page draws for each file: its height, which the list's layout counts on. */
@@ -68,6 +71,14 @@ function diffOf(f: ChangedFile, key: string): FileDiffMetadata {
   return d;
 }
 
+/** Lines chosen in one file (a click on a line number, shift-click for more): the side's lines, first to last. */
+export interface ChosenLines {
+  file: ChangedFile;
+  side: "old" | "new";
+  start: number;
+  end: number;
+}
+
 export interface DiffListProps {
   files: readonly ChangedFile[];
   /** Paths the person closed. */
@@ -78,15 +89,37 @@ export interface DiffListProps {
   target: { path: string; token: number } | null;
   /** The file at the top of the list, as it scrolls. */
   onTop: (path: string) => void;
+  /** Lines chosen, or none (Why? on lines, Understand). */
+  onChoose?: (chosen: ChosenLines | null) => void;
   className?: string;
   /** Each file's item id, when its blobs are not known (a guided review's patch): unique to the change it belongs to. */
   idOf?: (f: ChangedFile) => string;
 }
 
-export default function DiffList({ files, closed, header, target, onTop, className, idOf = itemId }: DiffListProps) {
+export default function DiffList({ files, closed, header, target, onTop, onChoose, className, idOf = itemId }: DiffListProps) {
   const handle = useRef<CodeViewHandle<undefined>>(null);
   const items = useRef(new Map<string, CodeViewDiffItem>());
   const byId = useMemo(() => new Map(files.map((f) => [idOf(f), f])), [files, idOf]);
+  const choose = useRef(onChoose);
+  const choosing = onChoose !== undefined;
+
+  choose.current = onChoose;
+  // Line selection, when the page asks for it: the chosen lines go to the page with their file and side.
+  const viewOptions = useMemo<CodeViewOptions<undefined>>(() => (choosing ? { ...options, enableLineSelection: true } : options), [choosing]);
+
+  const selected = (sel: { id: string; range: { start: number; end: number; side?: string; endSide?: string } } | null) => {
+    const file = sel ? byId.get(sel.id) : undefined;
+
+    if (!sel || !file) {
+      choose.current?.(null);
+
+      return;
+    }
+
+    const [start, end] = sel.range.start <= sel.range.end ? [sel.range.start, sel.range.end] : [sel.range.end, sel.range.start];
+
+    choose.current?.({ file, side: (sel.range.endSide ?? sel.range.side) === "deletions" ? "old" : "new", start, end });
+  };
 
   // One item per id, kept while its file is listed (a new answer for the same head, or a push that left the
   // file alone, reads it again as a new object): the same item, and the same parsed diff when only its closed
@@ -151,7 +184,8 @@ export default function DiffList({ files, closed, header, target, onTop, classNa
       <CodeView
         ref={handle}
         items={list}
-        options={options}
+        options={viewOptions}
+        onSelectedLinesChange={choosing ? selected : undefined}
         onScroll={scrolled}
         className={className}
         renderCustomHeader={(item) => {

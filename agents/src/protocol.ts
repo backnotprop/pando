@@ -10,8 +10,8 @@ export const DEFAULT_MODEL = "@cf/zai-org/glm-5.3-flash";
 /** The Workers AI models a session may name, with the names people see (Pando lists them even when pando-agents cannot be reached). */
 export const WORKERS_AI_MODELS: readonly ModelInfo[] = [{ id: DEFAULT_MODEL, name: "GLM-5.3 Flash" }];
 
-/** What started the session: a person's prompt, an issue, a branch to review, or the assistant's chat. */
-export type SessionKind = "task" | "issue" | "review" | "chat";
+/** What started the session: a person's prompt, an issue, a branch to review, the assistant's chat, or an Understand page. */
+export type SessionKind = "task" | "issue" | "review" | "chat" | "understand";
 
 /** What can be known exactly about a session at a moment. */
 export type Status = "working" | "waiting" | "failed" | "stopped";
@@ -40,6 +40,8 @@ export interface SessionSpec {
   credential: { id: string; name: string; secret: string };
   /** The issue it addresses, when it was started from one. */
   issue: number | null;
+  /** The Understand page it builds (kind understand). */
+  page?: number;
 }
 
 export interface Project {

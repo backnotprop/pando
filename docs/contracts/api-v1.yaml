@@ -1874,6 +1874,95 @@ paths:
                 model: { type: string }
       responses:
         "201": { description: Started, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSession" } } } }
+  /v1/monorepos/{owner}/{monorepo}/understand:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+    get:
+      operationId: listUnderstand
+      summary: The repository's Understand pages, newest first (docs/understand/DESIGN.md)
+      tags: [understand]
+      parameters:
+        - { name: before, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UnderstandList" } } } }
+    post:
+      operationId: askUnderstand
+      summary: Ask a question about the code; the page is built from Pando's records
+      description: |
+        Records the page, runs the first pass with no model (blame on the
+        lines asked about through Pando's own objects, the sessions, agents,
+        issues and shared files their commits name; for a question with no
+        scope, a search of the shared files and the sessions' prompts), then
+        launches an agent session of kind understand (no sandbox) and answers
+        the page as it stands. The session's lookups register each record they
+        find as a ref (r1, r2) with its card filled by the server; its place
+        tool writes paragraphs that may cite only those refs. Every member can
+        read a page; only its asker sends follow-ups. `scope` is
+        `{kind: lines, repo, path, ref, start, end}` (at most 400 lines; `ref`
+        a branch or a full sha) or `{kind: commit, repo, sha}`; `from` says
+        where it was asked (files_changed with its branch, commit, assistant).
+      tags: [understand]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, maxLength: 2000 }
+                scope: { type: object }
+                from: { type: object }
+                model: { type: string }
+      responses:
+        "201": { description: Asked, content: { application/json: { schema: { $ref: "#/components/schemas/UnderstandPage" } } } }
+  /v1/monorepos/{owner}/{monorepo}/understand/{n}:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: getUnderstand
+      summary: One page, every record as it reads now (an issue's title and state; a deleted session is gone)
+      tags: [understand]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UnderstandPage" } } } }
+  /v1/monorepos/{owner}/{monorepo}/understand/{n}/follow-ups:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: followUpUnderstand
+      summary: A follow-up from the page's asker (403 not_asker for anyone else); the page's next revision
+      tags: [understand]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [question], properties: { question: { type: string, maxLength: 2000 } } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UnderstandPage" } } } }
+  /v1/monorepos/{owner}/{monorepo}/understand/{n}/lookups:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: lookUpUnderstand
+      summary: "The page's own session only (403 not_page_session): one lookup, {tool: blame | history | commit | search_shared | search_sessions | issue, args}"
+      tags: [understand]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UnderstandLookup" } } } }
+  /v1/monorepos/{owner}/{monorepo}/understand/{n}/blocks:
+    parameters:
+      - $ref: "#/components/parameters/owner"
+      - $ref: "#/components/parameters/monorepo"
+      - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: placeUnderstand
+      summary: "The page's own session only: place paragraphs {blocks: [{id, type: paragraph | nothing, text}]}; each refusal says why"
+      tags: [understand]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UnderstandPlaced" } } } }
   /v1/monorepos/{owner}/{monorepo}/agents/review:
     parameters:
       - $ref: "#/components/parameters/owner"
@@ -5932,6 +6021,36 @@ components:
           description: In a list only. Its branch now (state, ahead, merged_at, checks); null while the branch is not made yet.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    UnderstandPage:
+      description: |
+        An Understand page (packages/contract/src/understand.ts is exact):
+        number, question, scope, from, status (building, complete, failed),
+        reason, asked_by, session, model, revision, sources, cited, times;
+        lines (the lines asked about, each with the commit that last changed
+        it); blocks (paragraph or nothing, text citing refs as [r1], cites,
+        revision); refs (id, how: direct | named | search, found_by, step,
+        card: commit | session | agent | meta | issue, filled by the server;
+        null with `gone` once the record is gone); steps (each lookup: tool,
+        asked, found, refs, ms, by: first_pass | assistant, error).
+      type: object
+    UnderstandList:
+      type: object
+      required: [pages, next_before]
+      properties:
+        pages: { type: array, items: { type: object, description: "UnderstandPage without lines, blocks, refs and steps" } }
+        next_before: { type: [integer, "null"] }
+    UnderstandLookup:
+      type: object
+      required: [text, refs]
+      properties:
+        text: { type: string, description: "What the lookup found, each record with its id, for the model" }
+        refs: { type: array, items: { type: string } }
+    UnderstandPlaced:
+      type: object
+      required: [placed, refused]
+      properties:
+        placed: { type: array, items: { type: string } }
+        refused: { type: array, items: { type: object, properties: { id: { type: string }, reason: { type: string } } } }
     AgentSessionList:
       type: object
       required: [sessions, next_before, counts]

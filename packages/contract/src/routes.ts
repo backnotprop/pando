@@ -3,6 +3,7 @@
 // Path segments are encoded here, so callers pass plain values; a branch's
 // `/` is sent as %2F.
 import { AgentModels, AgentSession, AgentSessionList, AgentTranscript } from "./agent.ts";
+import { UnderstandList, UnderstandPage } from "./understand.ts";
 import { Artifact, ArtifactComment, ArtifactDetail, ArtifactList, ArtifactThreads, type ArtifactCommentState } from "./artifact.ts";
 import { BranchCommits, BranchDiff, BranchDiffLine, BranchList, MergeResult, Review, ReviewList, Branch } from "./branch.ts";
 import { Checks } from "./checks.ts";
@@ -710,6 +711,25 @@ export const sendAgent = (owner: Login, name: MonorepoName, n: number) => ({ met
 
 /** POST .../agents/{n}/stop: its launcher or an owner. */
 export const stopAgent = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${agentsBase(owner, name)}/${n}/stop`, response: AgentSession }) as const;
+
+// ── Understand (docs/understand/DESIGN.md) ──
+
+const understandBase = (owner: Login, name: MonorepoName): string => `${monorepoBase(owner, name)}/understand`;
+
+/** GET .../understand: the repository's pages, newest first. */
+export const listUnderstand = (owner: Login, name: MonorepoName, before: number | null = null) => ({
+  path: `${understandBase(owner, name)}${before === null ? "" : `?before=${before}`}`,
+  response: UnderstandList,
+});
+
+/** POST .../understand {question, scope?, model?} (201): a new page; it builds in the background. */
+export const askUnderstand = (owner: Login, name: MonorepoName) => ({ method: "POST", path: understandBase(owner, name), response: UnderstandPage }) as const;
+
+/** GET .../understand/{n}: the page with its records. */
+export const getUnderstand = (owner: Login, name: MonorepoName, n: number) => ({ path: `${understandBase(owner, name)}/${n}`, response: UnderstandPage });
+
+/** POST .../understand/{n}/follow-ups {question}: its asker only. */
+export const followUpUnderstand = (owner: Login, name: MonorepoName, n: number) => ({ method: "POST", path: `${understandBase(owner, name)}/${n}/follow-ups`, response: UnderstandPage }) as const;
 
 // ── Recorded agent sessions (worker/src/sessions) ──
 

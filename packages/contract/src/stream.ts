@@ -12,6 +12,7 @@ import { Machine } from "./repo.ts";
 import { IssueComment, IssueRow, Label, Reactions, TimelineItem } from "./issue.ts";
 import { Session, SessionDeleted } from "./session.ts";
 import { AgentSession } from "./agent.ts";
+import { UnderstandRow } from "./understand.ts";
 import { Release, Tag } from "./release.ts";
 import { Artifact, ArtifactComment } from "./artifact.ts";
 
@@ -194,6 +195,19 @@ export const AgentEvent = Schema.Struct({
   row: AgentSession,
 });
 
+/**
+ * An Understand page changed: asked, a lookup found something, the assistant placed a paragraph, it completed or
+ * failed (topics `understand` and `understand:<n>`). The row is the list's; a page that is open reads GET .../understand/{n} again.
+ */
+export const UnderstandEvent = Schema.Struct({
+  ...envelope,
+  kind: Schema.Literal("understand.updated"),
+  collection: Schema.Literal("understand"),
+  op: Schema.Literal("upsert"),
+  number: Count,
+  row: UnderstandRow,
+});
+
 /** A tag recorded (pushed, moved, or made by publishing a release) or deleted: on topic `kind:tag.created` or `kind:tag.deleted`. */
 export const TagEvent = Schema.Union([
   Schema.Struct({ ...envelope, kind: Schema.Literal("tag.created"), collection: Schema.Literal("tags"), op: Schema.Literal("upsert"), row: Tag.pipe(Schema.fieldsAssign({ repo: RepoName })) }),
@@ -264,6 +278,7 @@ export const MonorepoEventFrame = Schema.Union([
   MirrorEvent,
   SessionEvent,
   AgentEvent,
+  UnderstandEvent,
   TagEvent,
   ReleaseEvent,
   ArtifactEvent,

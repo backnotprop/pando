@@ -6,15 +6,17 @@
 // view (FilesChanged.tsx). The address takes a full sha or the start of one.
 import type { CommitPage as CommitAnswer, Repo } from "@pando/contract";
 import { type QueryClient, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { notFound } from "@tanstack/react-router";
+import { notFound, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { isMissing } from "../../../../api/client";
 import type { MonorepoRef } from "../../../../api/names";
 import { commitDiffQuery, commitQuery } from "../../../../api/projects";
 import { rereadRuns, useRows } from "../../../../live/rows";
 import { Avatar } from "../../../../ui/Avatar";
-import { CopyButton, Lnk, SectionHead } from "../../../../ui/controls";
+import { askUnderstand } from "../../../../api/understand";
+import { button, CopyButton, Lnk, Refusal, SectionHead } from "../../../../ui/controls";
 import { Title } from "../../../../ui/pages";
-import { branchLink, commitLink, ownerLink, repoLink } from "../../../../ui/paths";
+import { branchLink, commitLink, ownerLink, repoLink, understandLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { ago, dayAndTime, useNow } from "../../../../ui/time";
 import { loadColourViews } from "../-code/coloured";
@@ -110,6 +112,38 @@ function Origin({ repo, page }: { repo: Repo; page: CommitAnswer }) {
   );
 }
 
+/** Why? on a commit: an Understand page about why it was made, which opens. */
+function Why({ repo, sha }: { repo: Repo; sha: string }) {
+  const { monorepo } = useMonorepo();
+  const navigate = useNavigate();
+  const [error, setError] = useState<Error | null>(null);
+  const [asking, setAsking] = useState(false);
+
+  const ask = async () => {
+    if (asking) return;
+    setAsking(true);
+    setError(null);
+
+    try {
+      const page = await askUnderstand(monorepo, `Why was commit ${short(sha)} made?`, { kind: "commit", repo: repo.name, sha }, { kind: "commit" });
+
+      await navigate(understandLink(monorepo.full, page.number));
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+      setAsking(false);
+    }
+  };
+
+  return (
+    <span>
+      <button type="button" className={button("quiet", 28)} onClick={() => void ask()}>
+        Why?
+      </button>
+      <Refusal error={error} />
+    </span>
+  );
+}
+
 /** The full sha with Copy sha, and its parents, each opening its own page. */
 function Ids({ repo, page }: { repo: Repo; page: CommitAnswer }) {
   const { monorepo } = useMonorepo();
@@ -132,6 +166,7 @@ function Ids({ repo, page }: { repo: Repo; page: CommitAnswer }) {
           </span>
         ))}
       </span>
+      <Why repo={repo} sha={sha} />
     </div>
   );
 }

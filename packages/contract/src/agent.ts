@@ -7,8 +7,8 @@ import * as Schema from "effect/Schema";
 
 import { Count, Login, RepoName, Timestamp } from "./ids.ts";
 
-/** What started it: a person's prompt, an issue ("Address with agent"), a branch to review, or the assistant's chat. */
-export const AgentKind = Schema.Literals(["task", "issue", "review", "chat"]);
+/** What started it: a person's prompt, an issue ("Address with agent"), a branch to review, the assistant's chat, or an Understand page. */
+export const AgentKind = Schema.Literals(["task", "issue", "review", "chat", "understand"]);
 
 export type AgentKind = typeof AgentKind.Type;
 

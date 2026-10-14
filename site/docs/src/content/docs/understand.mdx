@@ -1,0 +1,34 @@
+---
+title: Understand
+description: Ask the code why it is the way it is. The answer is a page built from Pando's records, every record shown as it is.
+sidebar:
+  order: 11
+---
+
+Understand answers a question about your code, such as "why is the rate limit 100 a minute?", with a page. The page is built from Pando's own records: the commit that last changed the lines, the recorded agent session and the prompt that wrote them, the decision in your shared files, the issue that started it. Each record is shown under the sentence that cites it, as Pando has it. If no record explains the code, the page says so.
+
+## Asking
+
+- **Why? on lines.** On a branch's Files changed, or a commit's page, click a line number, shift-click another, and press **Why?**. The question is about those lines, at that commit.
+- **Why? on a commit.** A commit's page has **Why?** beside its sha.
+- **Open as a page.** Under a chat with the assistant, **Open as a page** asks the chat's latest question as a page.
+- **Understand.** `/{owner}/{repository}/understand` lists the repository's pages and has a box to ask any question.
+
+Every member of the repository can open every page, so a link to one can be shared in an issue or a review. Only the person who asked can ask a follow-up.
+
+## How the page is built
+
+1. **Pando's first pass, with no model.** For lines: Pando blames them through its own history (merges included), then reads what those commits name: the recorded sessions on their `Pando-Session` lines (and the turn of each that changed the file), the Cloudflare-run agent that made them, and the issues (`#12`) and shared files (`decisions/0010-rate-limit.md`) named in the commit messages, the prompts and the lines. For a commit: the same from that commit. For a question with no lines: a search of the shared files and the sessions' prompts.
+2. **The assistant.** An agent session (GLM-5.3 Flash on Workers AI) reads what was found, looks further with the same lookups, and writes a few short paragraphs. Each paragraph cites the records it rests on.
+3. **The page.** It fills in live as the lookups land and the paragraphs are written. **How this was found**, at the end, lists every lookup that ran and what it found.
+
+## What you can trust on the page
+
+- **Every record is Pando's.** A commit's author, machine, agent and model, a session's prompt and step, a file's words and version, an issue's title: Pando fills them from its records. The assistant writes only the paragraphs, and the line under the title names its model.
+- **The assistant can cite only what a lookup found.** A paragraph that cites anything else, or nothing, is refused and never reaches the page.
+- **Nothing found means nothing found.** When no record explains the lines, the page says "No record explains these lines" and what was checked, and offers to ask the assistant what the code does instead.
+- **A record that is gone says so.** A deleted session or a removed issue shows as gone, never as the assistant's words.
+
+## Limits
+
+See [Limits](/limits/#understand).

@@ -124,6 +124,14 @@ These are the limits as Pando runs today. Many come from the Cloudflare products
 - **A guided review reads a diff of at most 200,000 characters** (about 50,000 tokens), with up to two Workers AI calls of up to 3 minutes each; it took 24 to 75 seconds when measured. A larger change, or one the model cannot place file by file, gets none and says so; the merge still needs a person.
 - **The comments-and-docs rule** reads `//`, `#`, `/* */` and `<!-- -->` comments by file type, and `.md`, `.mdx` and `.txt` files. A new, deleted or renamed code file, a binary file, a shebang, a file type it does not know, and a hunk that starts inside a comment it cannot see are code. A line inside a multi-line string that looks like a comment is read as one.
 
+## Understand
+
+- **Blame walks at most 200 changes to a file** (and 3,000 commits): each change reads two versions of the file. Lines older than that say so on the page.
+- **A search of the shared files reads at most 2,000 files, each at most 256 KB, and answers the best 20**, so one lookup answers within a second or two. It is a lookup for one page's question, not a search of the repository.
+- **A search of the sessions reads at most 30 sessions' prompts**: the sessions of the commits found first, then the newest.
+- **A page holds at most 40 records, 30 lookups and 24 paragraphs**, each paragraph at most 1,200 characters: a page is read and sent whole.
+- **A question is at most 2,000 characters; Why? on lines takes at most 400 lines.**
+
 ## Hooks
 
 - **5 tries per delivery,** after 10 seconds, 1 minute, 5 minutes and 30 minutes: about 36 minutes in all. Then the delivery is dead until an owner redelivers it or replays the hook.

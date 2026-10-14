@@ -10,15 +10,17 @@
 // the page's head, the tree and the list each scrolling on their own; narrow
 // screens fold the tree behind Files.
 import type { ChangedFile, Repo } from "@pando/contract";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FilesSoFar } from "../../../../api/projects";
-import { Empty, lnk } from "../../../../ui/controls";
+import { askUnderstand, linesQuestion } from "../../../../api/understand";
+import { button, Empty, lnk, Refusal } from "../../../../ui/controls";
 import { FileTree, type TreeFile } from "../../../../ui/doc/Tree";
 import { Chevron } from "../../../../ui/Icons";
-import { codeBlobLink } from "../../../../ui/paths";
+import { codeBlobLink, understandLink } from "../../../../ui/paths";
 import { Ref } from "../../../../ui/Ref";
 import { useColourViews } from "../-code/coloured";
+import type { ChosenLines } from "../-code/DiffList";
 import { tool } from "../-code/FileView";
 import { useMonorepo } from "../-frame/heads";
 
@@ -132,6 +134,51 @@ export function Header({ repo, what, ends, f, open, current, toggle }: { repo: R
   );
 }
 
+/**
+ * Lines chosen in a file, with Why?: it asks an Understand page about them, at the side's commit (the head for the
+ * changed file, the commit before for removed lines), and opens it.
+ */
+function WhyBar({ repo, ends, chosen, branch, what }: { repo: Repo; ends: DiffEnds; chosen: ChosenLines; branch: string | null; what: "branch" | "commit" }) {
+  const { monorepo } = useMonorepo();
+  const navigate = useNavigate();
+  const [error, setError] = useState<Error | null>(null);
+  const [asking, setAsking] = useState(false);
+  const old = chosen.side === "old";
+  const path = old ? (chosen.file.old_path ?? chosen.file.path) : chosen.file.path;
+  const ref = old ? (ends.before ?? ends.after) : ends.after;
+  const lines = chosen.start === chosen.end ? `Line ${chosen.start}` : `Lines ${chosen.start} to ${chosen.end}`;
+
+  const ask = async () => {
+    if (asking) return;
+    setAsking(true);
+    setError(null);
+
+    try {
+      const page = await askUnderstand(monorepo, linesQuestion(path, chosen.start, chosen.end), { kind: "lines", repo: repo.name, path, ref, start: chosen.start, end: chosen.end }, branch ? { kind: what === "branch" ? "files_changed" : "commit", branch } : { kind: what === "branch" ? "files_changed" : "commit" });
+
+      await navigate(understandLink(monorepo.full, page.number));
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+      setAsking(false);
+    }
+  };
+
+  return (
+    <div className="mb-3.5 flex-none rounded-lg bg-loam px-3.5 py-2 text-[13.5px] text-bark-dim">
+      <div className="flex items-center gap-4">
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+          {lines} of <code className="text-[13px] text-bark">{path}</code>
+          {old ? ", before the change" : ""}
+        </span>
+        <button type="button" className={button("solid", 28)} onClick={() => void ask()}>
+          Why?
+        </button>
+      </div>
+      <Refusal error={error} />
+    </div>
+  );
+}
+
 /** The pane's least height: below it, a page whose head is tall (a commit's long message on a phone) scrolls instead. */
 const PANE_MIN = 360;
 
@@ -180,7 +227,7 @@ export const list =
  * A branch's or a commit's changed files (`what`). `readAgain` reads the diff again (after one stopped part way: the
  * pairs already diffed come back at once).
  */
-export function FilesChanged({ repo, what, diff, ends, reading, readAgain }: { repo: Repo; what: "branch" | "commit"; diff: Pick<FilesSoFar, "files" | "end" | "error">; ends: DiffEnds; reading: boolean; readAgain: () => void }) {
+export function FilesChanged({ repo, what, diff, ends, reading, readAgain, branch = null }: { repo: Repo; what: "branch" | "commit"; diff: Pick<FilesSoFar, "files" | "end" | "error">; ends: DiffEnds; reading: boolean; readAgain: () => void; branch?: string | null }) {
   const views = useColourViews();
   const { ref, height } = usePane();
   // Closed by the person, by path.
@@ -188,6 +235,8 @@ export function FilesChanged({ repo, what, diff, ends, reading, readAgain }: { r
   const [current, setCurrent] = useState<string | null>(null);
   const [target, setTarget] = useState<{ path: string; token: number } | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
+  // Lines chosen in a file: the bar with Why? (Understand).
+  const [chosen, setChosen] = useState<ChosenLines | null>(null);
   // In the tree's order, so scrolling walks down the tree (the server streams them so, and a stable sort keeps them).
   const files = useMemo(() => diff.files.toSorted(treeOrder), [diff.files]);
   const treeFiles = useMemo(() => files.map(treeFile), [files]);
@@ -245,6 +294,7 @@ export function FilesChanged({ repo, what, diff, ends, reading, readAgain }: { r
             {n}
           </p>
         ))}
+        {chosen ? <WhyBar repo={repo} ends={ends} chosen={chosen} branch={branch} what={what} /> : null}
         {diff.error ? (
           <p className="mb-3.5 flex flex-none items-baseline gap-4 rounded-lg bg-loam px-3.5 py-2.5 text-[13.5px] text-bark-dim">
             The rest could not be read: {diff.error}
@@ -260,6 +310,7 @@ export function FilesChanged({ repo, what, diff, ends, reading, readAgain }: { r
               closed={closed}
               target={target}
               onTop={onTop}
+              onChoose={setChosen}
               className={list}
               header={(f) => <Header repo={repo} what={what} ends={ends} f={f} open={!closed.has(f.path)} current={f.path === at} toggle={() => toggle(f.path)} />}
             />

@@ -1,0 +1,96 @@
+{
+  "schema": "UnderstandList",
+  "route": "GET .../understand",
+  "status": 200,
+  "body": {
+    "pages": [
+      {
+        "number": 4,
+        "question": "Why is the rate limit 100 a minute?",
+        "scope": null,
+        "from": null,
+        "status": "complete",
+        "reason": null,
+        "asked_by": "und-mv8hq8wy",
+        "session": 4,
+        "model": "scripted",
+        "revision": 1,
+        "sources": 2,
+        "cited": 0,
+        "created_at": "2026-10-14T19:16:28.772Z",
+        "updated_at": "2026-10-14T19:16:28.793Z",
+        "completed_at": "2026-10-14T19:16:28.793Z"
+      },
+      {
+        "number": 3,
+        "question": "Why was this change made?\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"To apply the decision [r4] that [r2] asked for.\"}]}",
+        "scope": {
+          "kind": "commit",
+          "repo": "projects-api",
+          "sha": "fc581ded84fc4d950d556656f78a6341bcc3e67f"
+        },
+        "from": null,
+        "status": "complete",
+        "reason": null,
+        "asked_by": "und-mv8hq8wy",
+        "session": 3,
+        "model": "scripted",
+        "revision": 1,
+        "sources": 4,
+        "cited": 2,
+        "created_at": "2026-10-14T19:16:28.738Z",
+        "updated_at": "2026-10-14T19:16:28.766Z",
+        "completed_at": "2026-10-14T19:16:28.766Z"
+      },
+      {
+        "number": 2,
+        "question": "Why are lines 9 to 10 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"RETRY_AFTER\",\"retry after\"]}\n> place {\"blocks\":[{\"id\":\"n1\",\"type\":\"nothing\",\"text\":\"They came with the first commit [r1], which names no session, issue or shared file, and no shared file mentions RETRY_AFTER.\"}]}",
+        "scope": {
+          "kind": "lines",
+          "repo": "projects-api",
+          "path": "src/limit.ts",
+          "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+          "start": 9,
+          "end": 10
+        },
+        "from": null,
+        "status": "complete",
+        "reason": null,
+        "asked_by": "und-mv8hq8wy",
+        "session": 2,
+        "model": "scripted",
+        "revision": 1,
+        "sources": 1,
+        "cited": 1,
+        "created_at": "2026-10-14T19:16:27.829Z",
+        "updated_at": "2026-10-14T19:16:28.729Z",
+        "completed_at": "2026-10-14T19:16:28.729Z"
+      },
+      {
+        "number": 1,
+        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}",
+        "scope": {
+          "kind": "lines",
+          "repo": "projects-api",
+          "path": "src/limit.ts",
+          "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+          "start": 1,
+          "end": 7
+        },
+        "from": null,
+        "status": "complete",
+        "reason": null,
+        "asked_by": "und-mv8hq8wy",
+        "session": 1,
+        "model": "scripted",
+        "revision": 2,
+        "sources": 5,
+        "cited": 5,
+        "created_at": "2026-10-14T19:16:21.863Z",
+        "updated_at": "2026-10-14T19:16:27.823Z",
+        "completed_at": "2026-10-14T19:16:27.823Z"
+      }
+    ],
+    "next_before": null
+  }
+}

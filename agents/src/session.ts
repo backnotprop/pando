@@ -21,6 +21,7 @@ import { LiveSockets } from "./live";
 import { DEFAULT_MODEL, knownModel, openModels } from "./models";
 import { PandoApi, pandoTools } from "./pando-tools";
 import { Sandbox, workDir } from "./sandbox";
+import { understandTools } from "./understand-tools";
 import type { SessionSpec, SessionState, Status, TranscriptMessage } from "./protocol";
 import { projectEntries } from "./transcript";
 
@@ -185,7 +186,7 @@ export class AgentSession extends DurableObject<Env> {
     const api = new PandoApi(this.env.PANDO, () => this.#spec());
     // A chat works like a task once the person has named its branch.
     const working = spec.branch !== "";
-    const tools = toolsFor(spec.kind, pandoTools(api, () => this.#spec()), working, this.#startBranch());
+    const tools = toolsFor(spec.kind, pandoTools(api, () => this.#spec()), working, this.#startBranch(), spec.kind === "understand" && spec.page ? understandTools(api, spec.page) : []);
 
     // Installing under the same name replaces the extension; Pi reads the registry at each model call.
     this.registry.install({ name: "pando", sections: [{ key: "preamble", render: () => preamble(pub, working), tag: false }], tools });

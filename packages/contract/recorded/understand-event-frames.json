@@ -1,0 +1,83 @@
+{
+  "schema": "MonorepoEventFrame[]",
+  "route": "GET .../events?topics=understand:1 (understand.updated)",
+  "status": 200,
+  "body": [
+    {
+      "type": "event",
+      "seq": 27,
+      "at": "2026-10-14T19:16:27.819Z",
+      "kind": "understand.updated",
+      "collection": "understand",
+      "key": "1",
+      "op": "upsert",
+      "repo": null,
+      "actor": null,
+      "machine": null,
+      "agent": null,
+      "number": 1,
+      "row": {
+        "number": 1,
+        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}",
+        "scope": {
+          "kind": "lines",
+          "repo": "projects-api",
+          "path": "src/limit.ts",
+          "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+          "start": 1,
+          "end": 7
+        },
+        "from": null,
+        "status": "building",
+        "reason": null,
+        "asked_by": "und-mv8hq8wy",
+        "session": 1,
+        "model": "scripted",
+        "revision": 2,
+        "sources": 5,
+        "cited": 5,
+        "created_at": "2026-10-14T19:16:21.863Z",
+        "updated_at": "2026-10-14T19:16:27.819Z",
+        "completed_at": null
+      }
+    },
+    {
+      "type": "event",
+      "seq": 29,
+      "at": "2026-10-14T19:16:27.824Z",
+      "kind": "understand.updated",
+      "collection": "understand",
+      "key": "1",
+      "op": "upsert",
+      "repo": null,
+      "actor": null,
+      "machine": null,
+      "agent": null,
+      "number": 1,
+      "row": {
+        "number": 1,
+        "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}",
+        "scope": {
+          "kind": "lines",
+          "repo": "projects-api",
+          "path": "src/limit.ts",
+          "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+          "start": 1,
+          "end": 7
+        },
+        "from": null,
+        "status": "complete",
+        "reason": null,
+        "asked_by": "und-mv8hq8wy",
+        "session": 1,
+        "model": "scripted",
+        "revision": 2,
+        "sources": 5,
+        "cited": 5,
+        "created_at": "2026-10-14T19:16:21.863Z",
+        "updated_at": "2026-10-14T19:16:27.823Z",
+        "completed_at": "2026-10-14T19:16:27.823Z"
+      }
+    }
+  ]
+}

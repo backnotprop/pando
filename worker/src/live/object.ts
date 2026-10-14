@@ -6,6 +6,7 @@ import { DurableObject } from "cloudflare:workers";
 import type * as Contract from "@pando/contract";
 import { checkBytes, checkPath, checkPointer, MAX_BYTES, type Refusal } from "./rules";
 import { blobKey, parsePointer } from "./blobs";
+import { searchShared, SHARED_FILES_MAX, type SharedFound, type SharedRow } from "../understand/meta-search";
 import { exactBuffer, fromBase64, gitBlobSha, toBase64 } from "./bytes";
 import { gitWriter, type CommitEnv, type FileChange, type GitWriter } from "./commit";
 import { parse as parseToml } from "smol-toml";
@@ -980,6 +981,21 @@ export class MetaLayerObject extends DurableObject<MetaEnv> {
 
   private row(version: number): VersionRow {
     return this.sql.exec<VersionRow>("SELECT * FROM versions WHERE version = ?", version).one();
+  }
+
+  /**
+   * Understand's lookup (understand/meta-search.ts): the current shared files that hold any of `words`, and the
+   * files named by `paths`, with who saved each version. Read only; bounded there.
+   */
+  understandSearch(words: string[], paths: string[]): SharedFound {
+    const rows = this.sql
+      .exec<SharedRow>(
+        "SELECT f.path, f.version, f.sha, v.size, v.author, v.login, v.machine, v.agent, v.at, v.lfs_oid FROM files f JOIN versions v ON v.version = f.version WHERE f.deleted = 0 AND f.sha IS NOT NULL ORDER BY f.path LIMIT ?",
+        SHARED_FILES_MAX,
+      )
+      .toArray();
+
+    return searchShared(rows, (sha) => this.blob(sha), words, paths);
   }
 
   private blob(sha: string): ArrayBuffer {

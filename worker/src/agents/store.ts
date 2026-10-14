@@ -200,7 +200,7 @@ export class AgentStore {
       args.push(...v);
     };
 
-    if (f.chatsOf === null) add("kind != 'chat'");
+    if (f.chatsOf === null) add("kind NOT IN ('chat', 'understand')");
     else add("kind = 'chat' AND launched_by = ?", f.chatsOf);
 
     if (f.issue !== null) add("issue = ?", f.issue);
@@ -286,8 +286,9 @@ export class AgentStore {
   }
 
   private publish(r: AgentRow, actor: string | null): void {
-    // A chat is its person's alone: its updates go only to its own topic, and never carry its words.
-    const chat = r.kind === "chat";
+    // A chat is its person's alone, and an Understand page's session shows only through its page: their updates go
+    // only to their own topic, and never carry their words.
+    const chat = r.kind === "chat" || r.kind === "understand";
     const topics = chat ? [`agent:${r.number}`] : ["agents", `agent:${r.number}`];
 
     if (r.issue !== null) topics.push(`issue:${r.issue}`);

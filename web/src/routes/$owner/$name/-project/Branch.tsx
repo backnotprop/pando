@@ -386,7 +386,7 @@ function FilesTab({ repo, branch }: { repo: Repo; branch: string }) {
   if (diff.data && start) {
     const ends = { after: start.head, before: start.merge_base, files_total: start.files_total, too_many_files: start.too_many_files };
 
-    return <FilesChanged repo={repo} what="branch" diff={diff.data} ends={ends} reading={diff.isFetching} readAgain={() => void diff.refetch()} />;
+    return <FilesChanged repo={repo} what="branch" branch={branch} diff={diff.data} ends={ends} reading={diff.isFetching} readAgain={() => void diff.refetch()} />;
   }
 
 

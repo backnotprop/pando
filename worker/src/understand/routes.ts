@@ -6,11 +6,11 @@
 //   POST /understand/{n}/lookups      {tool, args}: the page's own session only
 //   POST /understand/{n}/blocks       {blocks}: the page's own session only (its place tool)
 //
-// Asking records the page and answers at once. In the background Pando runs
-// the first pass (no model: blame on the lines asked about, the sessions,
+// Asking records the page, runs the first pass (no model: blame on the lines asked about, the sessions,
 // agents, issues and shared files their commits name; for a free question, a
-// search of the shared files and the sessions), then launches an agent
-// session of kind understand with the question and what the first pass found.
+// search of the shared files and the sessions), launches an agent session of
+// kind understand with the question and what the first pass found, and answers
+// the page as it stands; the session builds the rest.
 
 import type { Context, Hono } from "hono";
 import type * as Contract from "@pando/contract";
@@ -23,7 +23,7 @@ import { isRecord, isText, type Json, type JsonObject } from "../parse";
 import { DEFAULT_MODEL } from "../../../agents/src/protocol";
 import { launch } from "../agents/routes";
 import { type LookupCtx, lookupText, type LookupResult, lookBehind, parseLookup, runLookup } from "./lookups";
-import type { Scope } from "./store";
+import type { From, Scope } from "./store";
 
 type C = Context<{ Bindings: Env; Variables: ApiVars }>;
 
@@ -104,11 +104,20 @@ async function scopeOf(c: C, v: Json | undefined): Promise<Scope | null> {
   return bad("scope.kind: lines or commit");
 }
 
+/** Where it was asked, as sent: {kind: files_changed | commit | assistant, branch?}. */
+function fromOf(v: Json | undefined): From | null {
+  if (v === undefined || v === null) return null;
+
+  if (!isRecord(v) || (v.kind !== "files_changed" && v.kind !== "commit" && v.kind !== "assistant")) bad("from: {kind: files_changed, commit or assistant, branch?}");
+
+  return { kind: v.kind, branch: isText(v.branch) && v.branch ? v.branch.slice(0, 200) : null };
+}
+
 /** The context a lookup runs in: the page's project, else the monorepo's only one. */
-async function ctxOf(c: C, scope: Scope | null): Promise<LookupCtx> {
+async function ctxOf(c: C, scope: Scope | null, known: string[] = []): Promise<LookupCtx> {
   const repos = await c.get("stub").listRepos();
 
-  return { env: c.env, m: c.get("m"), stub: c.get("stub"), repo: scope?.repo ?? (repos.length === 1 ? repos[0].name : null) };
+  return { env: c.env, m: c.get("m"), stub: c.get("stub"), repo: scope?.repo ?? (repos.length === 1 ? repos[0].name : null), known };
 }
 
 /** Keeps a lookup on page n; answers the text the model reads. */
@@ -178,7 +187,7 @@ function scopeWords(scope: Scope | null): string {
   return `lines ${scope.start} to ${scope.end} of ${scope.path} in project ${scope.repo}, at commit ${scope.commit}`;
 }
 
-/** The first pass, then the session: in the background, after the page is answered. */
+/** The first pass, then the session. A failure is kept on the page (failed, with why), never thrown. */
 async function build(c: C, n: number, question: string, scope: Scope | null, model: string): Promise<void> {
   const stub = c.get("stub");
 
@@ -196,7 +205,7 @@ async function build(c: C, n: number, question: string, scope: Scope | null, mod
 async function lookup(c: C, n: number, body: JsonObject): Promise<{ text: string; refs: string[] }> {
   const args = parseLookup(body);
   const page = unwrap(await c.get("stub").understandGet(n));
-  const ctx = await ctxOf(c, page.scope);
+  const ctx = await ctxOf(c, page.scope, page.refs.flatMap((r) => (r.card?.kind === "commit" ? [r.card.sha] : [])));
   const sessions = page.refs.flatMap((r) => (r.card?.kind === "session" ? [r.card.id] : []));
 
   return keep(c, n, await runLookup(ctx, args, "assistant", sessions));
@@ -213,9 +222,11 @@ export function understandRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }
 
     if (b.model !== undefined && !isText(b.model)) bad("model: a model id");
     const model = isText(b.model) ? b.model : DEFAULT_MODEL;
-    const row = unwrap(await c.get("stub").understandCreate({ question, scope, model }, c.get("identity")));
+    const row = unwrap(await c.get("stub").understandCreate({ question, scope, from: fromOf(b.from), model }, c.get("identity")));
 
-    c.executionCtx.waitUntil(build(c, row.number, question, scope, model));
+    // The first pass is quick (a second or two) and its records are what the page first shows: it runs before the
+    // answer, then the session is launched and builds the rest.
+    await build(c, row.number, question, scope, model);
 
     return c.json(unwrap(await c.get("stub").understandGet(row.number)) satisfies typeof Contract.UnderstandPage.Encoded, 201);
   });
@@ -248,10 +259,10 @@ export function understandRoutes(api: Hono<{ Bindings: Env; Variables: ApiVars }
     const outline = before.blocks.map((x) => `${x.id} (${x.type}): ${x.text}`).join("\n");
     const prompt = [`Follow-up question: ${question}`, "", "The page's paragraphs now:", outline || "(none)", "", "Look further if you need to, then place paragraphs: the same id replaces one, a new id adds one."].join("\n");
 
+    // The session reports its own states (working, then waiting): a quick answer's waiting can land in the same
+    // millisecond as send's working, so send's answer is not reported again here.
     try {
-      const state = await agents.send(c.get("m"), before.session, prompt);
-
-      await stub.agentReport(state);
+      await agents.send(c.get("m"), before.session, prompt);
     } catch (error) {
       console.error(`pando-agents: ${error instanceof Error ? error.message : String(error)}`);
       unwrap(await stub.understandFail(n, "Cloudflare-run agents cannot be reached right now; try again in a moment"));

@@ -186,6 +186,12 @@ export const sessionsLink = (full: string, search: SessionsSearch = {}) => linkO
 /** A recorded session's page. */
 export const sessionLink = (full: string, id: string) => linkOptions({ to: "/$owner/$name/sessions/$id", params: { ...split(full), id } });
 
+/** The repository's Understand pages, with the ask box. */
+export const understandListLink = (full: string) => linkOptions({ to: "/$owner/$name/understand", params: split(full) });
+
+/** One Understand page. */
+export const understandLink = (full: string, n: number) => linkOptions({ to: "/$owner/$name/understand/$n", params: { ...split(full), n: String(n) } });
+
 /** A person's sessions, in the repositories the viewer can open too. */
 export const personSessionsLink = (login: string) => linkOptions({ to: "/$owner/sessions", params: { owner: login } });
 
@@ -216,6 +222,8 @@ export type AppLink =
   | ReturnType<typeof commitLink>
   | ReturnType<typeof sessionsLink>
   | ReturnType<typeof sessionLink>
+  | ReturnType<typeof understandListLink>
+  | ReturnType<typeof understandLink>
   | ReturnType<typeof personSessionsLink>;
 
 /** A monorepo's own project: the one named after it (projects/pando in ramos/pando); lists put it first and leave its name off. */

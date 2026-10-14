@@ -45,6 +45,8 @@ import { Route as OwnerNameReleasesTagRouteImport } from './routes/$owner/$name/
 import { Route as OwnerNameSessionsIndexRouteImport } from './routes/$owner/$name/sessions/index'
 import { Route as OwnerNameSessionsIdRouteImport } from './routes/$owner/$name/sessions/$id'
 import { Route as OwnerNameTreeSplatRouteImport } from './routes/$owner/$name/tree/$'
+import { Route as OwnerNameUnderstandIndexRouteImport } from './routes/$owner/$name/understand/index'
+import { Route as OwnerNameUnderstandNRouteImport } from './routes/$owner/$name/understand/$n'
 import { Route as OwnerNameCiPipelineIndexRouteImport } from './routes/$owner/$name/ci/$pipeline/index'
 import { Route as OwnerNameCiPipelineNumberRouteImport } from './routes/$owner/$name/ci/$pipeline/$number'
 import { Route as OwnerNameProjectsProjectIndexRouteImport } from './routes/$owner/$name/projects/$project/index'
@@ -238,6 +240,17 @@ const OwnerNameTreeSplatRoute = OwnerNameTreeSplatRouteImport.update({
   path: '/tree/$',
   getParentRoute: () => OwnerNameRouteRoute,
 } as any)
+const OwnerNameUnderstandIndexRoute =
+  OwnerNameUnderstandIndexRouteImport.update({
+    id: '/understand/',
+    path: '/understand/',
+    getParentRoute: () => OwnerNameRouteRoute,
+  } as any)
+const OwnerNameUnderstandNRoute = OwnerNameUnderstandNRouteImport.update({
+  id: '/understand/$n',
+  path: '/understand/$n',
+  getParentRoute: () => OwnerNameRouteRoute,
+} as any)
 const OwnerNameCiPipelineIndexRoute =
   OwnerNameCiPipelineIndexRouteImport.update({
     id: '/ci/$pipeline/',
@@ -336,12 +349,14 @@ export interface FileRoutesByFullPath {
   '/$owner/$name/releases/$tag': typeof OwnerNameReleasesTagRoute
   '/$owner/$name/sessions/$id': typeof OwnerNameSessionsIdRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/understand/$n': typeof OwnerNameUnderstandNRoute
   '/$owner/$name/agents/': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
   '/$owner/$name/releases/': typeof OwnerNameReleasesIndexRoute
   '/$owner/$name/sessions/': typeof OwnerNameSessionsIndexRoute
+  '/$owner/$name/understand/': typeof OwnerNameUnderstandIndexRoute
   '/$owner/$name/ci/$pipeline/$number': typeof OwnerNameCiPipelineNumberRoute
   '/$owner/$name/ci/$pipeline/': typeof OwnerNameCiPipelineIndexRoute
   '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
@@ -381,12 +396,14 @@ export interface FileRoutesByTo {
   '/$owner/$name/releases/$tag': typeof OwnerNameReleasesTagRoute
   '/$owner/$name/sessions/$id': typeof OwnerNameSessionsIdRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/understand/$n': typeof OwnerNameUnderstandNRoute
   '/$owner/$name/agents': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues': typeof OwnerNameIssuesIndexRoute
   '/$owner/$name/releases': typeof OwnerNameReleasesIndexRoute
   '/$owner/$name/sessions': typeof OwnerNameSessionsIndexRoute
+  '/$owner/$name/understand': typeof OwnerNameUnderstandIndexRoute
   '/$owner/$name/ci/$pipeline/$number': typeof OwnerNameCiPipelineNumberRoute
   '/$owner/$name/ci/$pipeline': typeof OwnerNameCiPipelineIndexRoute
   '/$owner/$name/projects/$project': typeof OwnerNameProjectsProjectIndexRoute
@@ -431,12 +448,14 @@ export interface FileRoutesById {
   '/$owner/$name/releases/$tag': typeof OwnerNameReleasesTagRoute
   '/$owner/$name/sessions/$id': typeof OwnerNameSessionsIdRoute
   '/$owner/$name/tree/$': typeof OwnerNameTreeSplatRoute
+  '/$owner/$name/understand/$n': typeof OwnerNameUnderstandNRoute
   '/$owner/$name/agents/': typeof OwnerNameAgentsIndexRoute
   '/$owner/$name/branches/': typeof OwnerNameBranchesIndexRoute
   '/$owner/$name/ci/': typeof OwnerNameCiIndexRoute
   '/$owner/$name/issues/': typeof OwnerNameIssuesIndexRoute
   '/$owner/$name/releases/': typeof OwnerNameReleasesIndexRoute
   '/$owner/$name/sessions/': typeof OwnerNameSessionsIndexRoute
+  '/$owner/$name/understand/': typeof OwnerNameUnderstandIndexRoute
   '/$owner/$name/ci/$pipeline/$number': typeof OwnerNameCiPipelineNumberRoute
   '/$owner/$name/ci/$pipeline/': typeof OwnerNameCiPipelineIndexRoute
   '/$owner/$name/projects/$project/': typeof OwnerNameProjectsProjectIndexRoute
@@ -482,12 +501,14 @@ export interface FileRouteTypes {
     | '/$owner/$name/releases/$tag'
     | '/$owner/$name/sessions/$id'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/understand/$n'
     | '/$owner/$name/agents/'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
     | '/$owner/$name/issues/'
     | '/$owner/$name/releases/'
     | '/$owner/$name/sessions/'
+    | '/$owner/$name/understand/'
     | '/$owner/$name/ci/$pipeline/$number'
     | '/$owner/$name/ci/$pipeline/'
     | '/$owner/$name/projects/$project/'
@@ -527,12 +548,14 @@ export interface FileRouteTypes {
     | '/$owner/$name/releases/$tag'
     | '/$owner/$name/sessions/$id'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/understand/$n'
     | '/$owner/$name/agents'
     | '/$owner/$name/branches'
     | '/$owner/$name/ci'
     | '/$owner/$name/issues'
     | '/$owner/$name/releases'
     | '/$owner/$name/sessions'
+    | '/$owner/$name/understand'
     | '/$owner/$name/ci/$pipeline/$number'
     | '/$owner/$name/ci/$pipeline'
     | '/$owner/$name/projects/$project'
@@ -576,12 +599,14 @@ export interface FileRouteTypes {
     | '/$owner/$name/releases/$tag'
     | '/$owner/$name/sessions/$id'
     | '/$owner/$name/tree/$'
+    | '/$owner/$name/understand/$n'
     | '/$owner/$name/agents/'
     | '/$owner/$name/branches/'
     | '/$owner/$name/ci/'
     | '/$owner/$name/issues/'
     | '/$owner/$name/releases/'
     | '/$owner/$name/sessions/'
+    | '/$owner/$name/understand/'
     | '/$owner/$name/ci/$pipeline/$number'
     | '/$owner/$name/ci/$pipeline/'
     | '/$owner/$name/projects/$project/'
@@ -862,6 +887,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerNameTreeSplatRouteImport
       parentRoute: typeof OwnerNameRouteRoute
     }
+    '/$owner/$name/understand/': {
+      id: '/$owner/$name/understand/'
+      path: '/understand'
+      fullPath: '/$owner/$name/understand/'
+      preLoaderRoute: typeof OwnerNameUnderstandIndexRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
+    '/$owner/$name/understand/$n': {
+      id: '/$owner/$name/understand/$n'
+      path: '/understand/$n'
+      fullPath: '/$owner/$name/understand/$n'
+      preLoaderRoute: typeof OwnerNameUnderstandNRouteImport
+      parentRoute: typeof OwnerNameRouteRoute
+    }
     '/$owner/$name/ci/$pipeline/': {
       id: '/$owner/$name/ci/$pipeline/'
       path: '/ci/$pipeline'
@@ -1013,11 +1052,13 @@ interface OwnerNameRouteRouteChildren {
   OwnerNameIssuesNewRoute: typeof OwnerNameIssuesNewRoute
   OwnerNameSessionsIdRoute: typeof OwnerNameSessionsIdRoute
   OwnerNameTreeSplatRoute: typeof OwnerNameTreeSplatRoute
+  OwnerNameUnderstandNRoute: typeof OwnerNameUnderstandNRoute
   OwnerNameAgentsIndexRoute: typeof OwnerNameAgentsIndexRoute
   OwnerNameBranchesIndexRoute: typeof OwnerNameBranchesIndexRoute
   OwnerNameCiIndexRoute: typeof OwnerNameCiIndexRoute
   OwnerNameIssuesIndexRoute: typeof OwnerNameIssuesIndexRoute
   OwnerNameSessionsIndexRoute: typeof OwnerNameSessionsIndexRoute
+  OwnerNameUnderstandIndexRoute: typeof OwnerNameUnderstandIndexRoute
   OwnerNameCiPipelineNumberRoute: typeof OwnerNameCiPipelineNumberRoute
   OwnerNameCiPipelineIndexRoute: typeof OwnerNameCiPipelineIndexRoute
 }
@@ -1040,11 +1081,13 @@ const OwnerNameRouteRouteChildren: OwnerNameRouteRouteChildren = {
   OwnerNameIssuesNewRoute: OwnerNameIssuesNewRoute,
   OwnerNameSessionsIdRoute: OwnerNameSessionsIdRoute,
   OwnerNameTreeSplatRoute: OwnerNameTreeSplatRoute,
+  OwnerNameUnderstandNRoute: OwnerNameUnderstandNRoute,
   OwnerNameAgentsIndexRoute: OwnerNameAgentsIndexRoute,
   OwnerNameBranchesIndexRoute: OwnerNameBranchesIndexRoute,
   OwnerNameCiIndexRoute: OwnerNameCiIndexRoute,
   OwnerNameIssuesIndexRoute: OwnerNameIssuesIndexRoute,
   OwnerNameSessionsIndexRoute: OwnerNameSessionsIndexRoute,
+  OwnerNameUnderstandIndexRoute: OwnerNameUnderstandIndexRoute,
   OwnerNameCiPipelineNumberRoute: OwnerNameCiPipelineNumberRoute,
   OwnerNameCiPipelineIndexRoute: OwnerNameCiPipelineIndexRoute,
 }

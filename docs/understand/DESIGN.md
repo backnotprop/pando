@@ -58,39 +58,17 @@ this come from", and its output is a document.
 
 ## The page
 
-Top to bottom, one column of about 760 px with a sources rail on the right
-(collapses under 1100 px into a "N sources" row under the header):
-
-1. **Header.** The question as the title, the asker and when, and a scope
-   chip: `api/src/limit.ts · lines 12 to 18 · main@4e1f9a2`. A status line:
-   "Tracing: 3 lookups, 5 sources" while building; "6 sources, 4 cited, 41 s"
-   when complete. A **Copy link** button.
-2. **Answer.** Two to four sentences, the model's, with numbered source chips
-   inline. Labeled "Answer, written by GLM-5.3 Flash from the sources below".
-   While building: a line "Writing the answer when the lookups are done".
-3. **The lines asked about.** The code at that commit, with a blame gutter
-   (short sha and date per run of lines), filled by the server, never by the
-   model. Only for a line scope.
-4. **Lineage trail.** A row of steps from the code outward: `lines 12 to 18 ->
-   commit 4e1f9a2 -> session s_01J... prompt 7 -> decisions/0010-rate-limit.md
-   -> issue #4`. Each step says how it was found, in words: **Direct**
-   (blame on these lines; the commit's own Pando-Session line), **Named** (a
-   source names it: the commit message says `decisions/0010`, the session's
-   prompt says `#4`), **Found by search** (a search of the shared files or
-   sessions matched words of the question).
-5. **Cards.** The sources the model placed, in its order, each with one note
-   line from the model ("Sets the number"), and the provenance line from the
-   server ("Found by blame on lines 12 to 18, 7 of 7 lines").
-6. **Notes.** At most a few callouts: **Why** (the reason, cited), **Risk**
-   (the code goes against a found decision, citing both), **Open question**
-   (what the records do not say).
-7. **How this was found.** Every lookup that ran, with what it found and how
-   long it took; lookups that found nothing are listed too. Server-written.
-8. **Follow-ups.** Up to three suggested questions (the model's), and a
-   composer: "Ask a follow-up. The page updates." Asker only.
-
-Sources rail: every source found, numbered in citation order; "Found, not
-used" below for sources the lookups registered that no block cited.
+The look is the approved mock (research/design/pando-understand-2026-10-14/
+understand-v2.html, owner 2026-10-14) and docs/understand/BRIEF.md: an essay
+with exhibits. One column; the question as the title; one sentence of who
+asked, from where, and which model answered (while building, the latest
+lookup instead); the lines asked about as one code view with the commit that
+last changed each run in the gutter; the answer as paragraphs, each record
+shown under the paragraph that first cites it, with the face it has
+elsewhere in Pando; a disagreement as one sentence of the answer; one
+follow-up field (the asker's); "How this was found" folded at the end. An
+issue is a link in the prose, not a record. The first version of this
+section (rails, labels, numbered chips, callout boxes) was withdrawn.
 
 ### Card faces (all filled by the server from the record)
 
@@ -140,8 +118,8 @@ record.**
 
 1. **Ask.** `POST /v1/monorepos/{owner}/{name}/understand` with
    `{question, scope?, from?, model?}`. Pando records the page (number,
-   status `building`), answers 201 at once, and in the background runs the
-   **first pass** (no model, about a second): blame on the scoped lines, the
+   status `building`) and runs the **first pass** before it answers (a
+   background run was cut short in a browser's request, 2026-10-14) (no model, about a second): blame on the scoped lines, the
    commits found, the sessions their Pando-Session lines name, the issues
    (`#n`) and shared-file paths their messages name. Each finding is a ref and
    a step on the page, so the person reads real sources before the model
@@ -181,24 +159,21 @@ record.**
 The model is the session's (GLM-5.3 Flash on Workers AI by default). The
 scripted model drives the end-to-end test.
 
-### Blocks (the component set)
+### Blocks
 
-All blocks are `{id, type, ...}`; `id` is the model's, stable across
-follow-ups (placing the same id replaces the block). Text is plain text with
-inline cites written `[r3]`, at most 1,200 characters per block.
+All blocks are `{id, type, text, cites, revision}`; `id` is the model's,
+stable across follow-ups (placing the same id replaces the block). Text is
+plain sentences with inline cites written `[r3]`, at most 1,200 characters;
+the page draws each cite as its record's name (a short sha, a path, an
+issue's number and title, a session's prompt).
 
-| Block | Fields | Rule |
-| --- | --- | --- |
-| `answer` | `text`, `cites[]`, `found` | one per page, shown first; `found: false` needs no cite |
-| `trail` | `steps: [{ref, how}]`, 2 to 9 | `how`: direct, named, search |
-| `source` | `ref`, `note?` | the card for the ref; at most one per ref |
-| `note` | `tone` (why, risk, question), `title`, `text`, `cites[]` | at least one cite |
-| `followups` | `questions[]`, 1 to 3, 160 characters each | one per page |
+| Block | Rule |
+| --- | --- |
+| `paragraph` | a part of the answer; cites at least one ref |
+| `nothing` | no record explains what was asked; the page opens it with Pando's sentence "No record explains these lines." |
 
-The lines block and "How this was found" are the server's, not blocks.
-Phase 2 adds `timeline` (dated sources in order, for "what happened to this
-file") and `diagram` (Mermaid, quoted from a found file or drawn by the
-model and labeled as drawn).
+Withdrawn with the first look: answer, trail, source, note and followups
+blocks. Phase 2 may add `timeline` and `diagram`.
 
 ## The record and the live page
 

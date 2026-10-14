@@ -1,0 +1,230 @@
+{
+  "schema": "UnderstandPage",
+  "route": "POST .../understand (lines; building)",
+  "status": 201,
+  "body": {
+    "number": 1,
+    "question": "Why are lines 1 to 7 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"rate limit\"]}\n> search_sessions {\"words\":[\"per machine\"]}\n> place {\"blocks\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"The limit is 100 a minute because of the decision in [r5], after one machine took the API down ([r4]).\"},{\"id\":\"p2\",\"type\":\"paragraph\",\"text\":\"Ana asked for exactly this in [r3], and its edit became [r1].\"},{\"id\":\"p3\",\"type\":\"paragraph\",\"text\":\"One thing does not match: limited() counts every request, and it came with [r2], before the decision.\"},{\"id\":\"made-up\",\"type\":\"paragraph\",\"text\":\"A record nobody found: [r9].\"},{\"id\":\"uncited\",\"type\":\"paragraph\",\"text\":\"A sentence that rests on nothing.\"}]}",
+    "scope": {
+      "kind": "lines",
+      "repo": "projects-api",
+      "path": "src/limit.ts",
+      "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+      "start": 1,
+      "end": 7
+    },
+    "from": null,
+    "status": "building",
+    "reason": null,
+    "asked_by": "und-mv8hq8wy",
+    "session": 1,
+    "model": "scripted",
+    "revision": 1,
+    "sources": 5,
+    "cited": 0,
+    "created_at": "2026-10-14T19:16:21.863Z",
+    "updated_at": "2026-10-14T19:16:27.710Z",
+    "completed_at": null,
+    "lines": {
+      "repo": "projects-api",
+      "path": "src/limit.ts",
+      "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+      "start": 1,
+      "older": null,
+      "lines": [
+        {
+          "n": 1,
+          "text": "// 100 a minute per machine (decisions/0010-rate-limit.md).",
+          "sha": "fc581ded84fc4d950d556656f78a6341bcc3e67f",
+          "at": "2026-10-14T19:16:18.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 2,
+          "text": "export const RATE_LIMIT = 100;",
+          "sha": "fc581ded84fc4d950d556656f78a6341bcc3e67f",
+          "at": "2026-10-14T19:16:18.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 3,
+          "text": "export const WINDOW_MS = 60_000;",
+          "sha": "fc581ded84fc4d950d556656f78a6341bcc3e67f",
+          "at": "2026-10-14T19:16:18.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 4,
+          "text": "",
+          "sha": "fc581ded84fc4d950d556656f78a6341bcc3e67f",
+          "at": "2026-10-14T19:16:18.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 5,
+          "text": "export function limited(count: number) {",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "at": "2026-10-14T19:16:15.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 6,
+          "text": "  return count > 100;",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "at": "2026-10-14T19:16:15.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 7,
+          "text": "}",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "at": "2026-10-14T19:16:15.000Z",
+          "by": "und-mv8hq8wy"
+        }
+      ]
+    },
+    "blocks": [],
+    "refs": [
+      {
+        "id": "r1",
+        "how": "direct",
+        "found_by": "Found by blame on lines 1 to 7: 4 of 7 lines.",
+        "step": 0,
+        "card": {
+          "kind": "commit",
+          "repo": "projects-api",
+          "sha": "fc581ded84fc4d950d556656f78a6341bcc3e67f",
+          "title": "Rate limit: 100 a minute per machine",
+          "body": "Pando-Session: s_101BCJXG5Z5FEKDG8X2EPPFGJ8",
+          "author": {
+            "name": "Tester",
+            "email": "tester@pando.invalid"
+          },
+          "person": "und-mv8hq8wy",
+          "committed_at": "2026-10-14T19:16:18.000Z",
+          "machine": null,
+          "agent": null,
+          "model": "claude-opus-5-5",
+          "sessions": [
+            "s_101BCJXG5Z5FEKDG8X2EPPFGJ8"
+          ]
+        },
+        "gone": null
+      },
+      {
+        "id": "r2",
+        "how": "direct",
+        "found_by": "Found by blame on lines 1 to 7: 3 of 7 lines.",
+        "step": 0,
+        "card": {
+          "kind": "commit",
+          "repo": "projects-api",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "title": "first",
+          "body": "",
+          "author": {
+            "name": "Tester",
+            "email": "tester@pando.invalid"
+          },
+          "person": "und-mv8hq8wy",
+          "committed_at": "2026-10-14T19:16:15.000Z",
+          "machine": null,
+          "agent": null,
+          "model": null,
+          "sessions": []
+        },
+        "gone": null
+      },
+      {
+        "id": "r3",
+        "how": "direct",
+        "found_by": "Named by commit fc581de's Pando-Session line.",
+        "step": 1,
+        "card": {
+          "kind": "session",
+          "id": "s_101BCJXG5Z5FEKDG8X2EPPFGJ8",
+          "program": "pi",
+          "person": "und-mv8hq8wy",
+          "machine": "ana-mbp",
+          "model": "claude-opus-5-5",
+          "prompt": {
+            "number": 1,
+            "at": "2026-10-14T19:14:19.019Z",
+            "text": "Apply decisions/0010-rate-limit.md to the API: 100 a minute per machine, a one-minute window. Put the numbers in src/limit.ts with a comment pointing at the decision. It fixes #1.",
+            "why": "wrote"
+          },
+          "step": {
+            "tool": "edit",
+            "at": "2026-10-14T19:14:23.019Z",
+            "input": "src/limit.ts"
+          }
+        },
+        "gone": null
+      },
+      {
+        "id": "r4",
+        "how": "named",
+        "found_by": "Named in these commits, their sessions or the lines.",
+        "step": 1,
+        "card": {
+          "kind": "issue",
+          "number": 1,
+          "title": "Bursts from the CLI hit 429 and then 502",
+          "state": "open",
+          "author": "und-mv8hq8wy",
+          "created_at": "2026-10-14T19:16:18.015Z",
+          "excerpt": "One machine sent about 400 requests a minute during a sync, and the API answered 502 for everyone."
+        },
+        "gone": null
+      },
+      {
+        "id": "r5",
+        "how": "named",
+        "found_by": "Named in these commits, their sessions or the lines.",
+        "step": 1,
+        "card": {
+          "kind": "meta",
+          "path": "decisions/0010-rate-limit.md",
+          "version": 1,
+          "saved_by": "Ana Lima <tester@pando.invalid>",
+          "login": "und-mv8hq8wy",
+          "machine": "ramos-mbp",
+          "agent": null,
+          "saved_at": "2026-10-14T19:16:17.911Z",
+          "excerpt": {
+            "from": 1,
+            "text": "# 0010: The API's rate limit\n\n## Decision\n\n100 requests a minute per machine, counted over a sliding one-minute window.\nA burst above it gets 429 with Retry-After. Bursts of 400 a minute from one\nmachine took the API down (#1)."
+          }
+        },
+        "gone": null
+      }
+    ],
+    "steps": [
+      {
+        "tool": "blame",
+        "asked": "lines 1 to 7 of src/limit.ts",
+        "found": "2 commits: fc581de (4 lines), 2c33fe3 (3 lines)",
+        "ms": 5837,
+        "by": "first_pass",
+        "error": null,
+        "refs": [
+          "r1",
+          "r2"
+        ]
+      },
+      {
+        "tool": "behind",
+        "asked": "the sessions, issues and shared files those commits name",
+        "found": "1 session, issue #1, decisions/0010-rate-limit.md",
+        "ms": 5,
+        "by": "first_pass",
+        "error": null,
+        "refs": [
+          "r3",
+          "r4",
+          "r5"
+        ]
+      }
+    ]
+  }
+}

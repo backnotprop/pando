@@ -1,0 +1,120 @@
+{
+  "schema": "UnderstandPage",
+  "route": "GET .../understand/{n} (nothing found)",
+  "status": 200,
+  "body": {
+    "number": 2,
+    "question": "Why are lines 9 to 10 of src/limit.ts the way they are?\n> search_shared {\"words\":[\"RETRY_AFTER\",\"retry after\"]}\n> place {\"blocks\":[{\"id\":\"n1\",\"type\":\"nothing\",\"text\":\"They came with the first commit [r1], which names no session, issue or shared file, and no shared file mentions RETRY_AFTER.\"}]}",
+    "scope": {
+      "kind": "lines",
+      "repo": "projects-api",
+      "path": "src/limit.ts",
+      "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+      "start": 9,
+      "end": 10
+    },
+    "from": null,
+    "status": "complete",
+    "reason": null,
+    "asked_by": "und-mv8hq8wy",
+    "session": 2,
+    "model": "scripted",
+    "revision": 1,
+    "sources": 1,
+    "cited": 1,
+    "created_at": "2026-10-14T19:16:27.829Z",
+    "updated_at": "2026-10-14T19:16:28.729Z",
+    "completed_at": "2026-10-14T19:16:28.729Z",
+    "lines": {
+      "repo": "projects-api",
+      "path": "src/limit.ts",
+      "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+      "start": 9,
+      "older": null,
+      "lines": [
+        {
+          "n": 9,
+          "text": "export const RETRY_AFTER = 7;",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "at": "2026-10-14T19:16:15.000Z",
+          "by": "und-mv8hq8wy"
+        },
+        {
+          "n": 10,
+          "text": "export const RETRY_JITTER = 0.3;",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "at": "2026-10-14T19:16:15.000Z",
+          "by": "und-mv8hq8wy"
+        }
+      ]
+    },
+    "blocks": [
+      {
+        "id": "n1",
+        "type": "nothing",
+        "text": "They came with the first commit [r1], which names no session, issue or shared file, and no shared file mentions RETRY_AFTER.",
+        "cites": [
+          "r1"
+        ],
+        "revision": 1
+      }
+    ],
+    "refs": [
+      {
+        "id": "r1",
+        "how": "direct",
+        "found_by": "Found by blame on lines 9 to 10: 2 of 2 lines.",
+        "step": 0,
+        "card": {
+          "kind": "commit",
+          "repo": "projects-api",
+          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "title": "first",
+          "body": "",
+          "author": {
+            "name": "Tester",
+            "email": "tester@pando.invalid"
+          },
+          "person": "und-mv8hq8wy",
+          "committed_at": "2026-10-14T19:16:15.000Z",
+          "machine": null,
+          "agent": null,
+          "model": null,
+          "sessions": []
+        },
+        "gone": null
+      }
+    ],
+    "steps": [
+      {
+        "tool": "blame",
+        "asked": "lines 9 to 10 of src/limit.ts",
+        "found": "1 commit: 2c33fe3 (2 lines)",
+        "ms": 861,
+        "by": "first_pass",
+        "error": null,
+        "refs": [
+          "r1"
+        ]
+      },
+      {
+        "tool": "behind",
+        "asked": "the sessions, issues and shared files those commits name",
+        "found": "nothing",
+        "ms": 0,
+        "by": "first_pass",
+        "error": null,
+        "refs": []
+      },
+      {
+        "tool": "search_shared",
+        "asked": "the shared files for \"retry_after\", \"retry after\"",
+        "found": "nothing in 1 file",
+        "ms": 1,
+        "by": "assistant",
+        "error": null,
+        "refs": []
+      }
+    ]
+  }
+}

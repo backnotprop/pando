@@ -150,6 +150,9 @@ export const UnderstandLines = Schema.Struct({
   older: Schema.NullOr(Schema.String),
 });
 
+/** Where the question was asked: Why? on lines in Files changed (on a branch), Why? on a commit, or the assistant's Open as a page. */
+export const UnderstandFrom = Schema.Struct({ kind: Schema.Literals(["files_changed", "commit", "assistant"]), branch: Schema.NullOr(Schema.String) });
+
 /** building: lookups or the assistant are at work. complete: the session settled. failed: it failed or was stopped (`reason`). */
 export const UnderstandStatus = Schema.Literals(["building", "complete", "failed"]);
 
@@ -158,6 +161,7 @@ export const UnderstandRow = Schema.Struct({
   number: Count,
   question: Schema.String,
   scope: Schema.NullOr(UnderstandScope),
+  from: Schema.NullOr(UnderstandFrom),
   status: UnderstandStatus,
   reason: Schema.NullOr(Schema.String),
   asked_by: Login,

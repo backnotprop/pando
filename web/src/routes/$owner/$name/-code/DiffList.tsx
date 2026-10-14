@@ -69,6 +69,14 @@ function diffOf(f: ChangedFile): FileDiffMetadata {
   return d;
 }
 
+/** Lines chosen in one file (a click on a line number, shift-click for more): the side's lines, first to last. */
+export interface ChosenLines {
+  file: ChangedFile;
+  side: "old" | "new";
+  start: number;
+  end: number;
+}
+
 export interface DiffListProps {
   files: readonly ChangedFile[];
   /** Paths the person closed. */
@@ -79,13 +87,35 @@ export interface DiffListProps {
   target: { path: string; token: number } | null;
   /** The file at the top of the list, as it scrolls. */
   onTop: (path: string) => void;
+  /** Lines chosen, or none (Why? on lines, Understand). */
+  onChoose?: (chosen: ChosenLines | null) => void;
   className?: string;
 }
 
-export default function DiffList({ files, closed, header, target, onTop, className }: DiffListProps) {
+export default function DiffList({ files, closed, header, target, onTop, onChoose, className }: DiffListProps) {
   const handle = useRef<CodeViewHandle<undefined>>(null);
   const items = useRef(new Map<string, CodeViewDiffItem>());
   const byId = useMemo(() => new Map(files.map((f) => [itemId(f), f])), [files]);
+  const choose = useRef(onChoose);
+  const choosing = onChoose !== undefined;
+
+  choose.current = onChoose;
+  // Line selection, when the page asks for it: the chosen lines go to the page with their file and side.
+  const viewOptions = useMemo<CodeViewOptions<undefined>>(() => (choosing ? { ...options, enableLineSelection: true } : options), [choosing]);
+
+  const selected = (sel: { id: string; range: { start: number; end: number; side?: string; endSide?: string } } | null) => {
+    const file = sel ? byId.get(sel.id) : undefined;
+
+    if (!sel || !file) {
+      choose.current?.(null);
+
+      return;
+    }
+
+    const [start, end] = sel.range.start <= sel.range.end ? [sel.range.start, sel.range.end] : [sel.range.end, sel.range.start];
+
+    choose.current?.({ file, side: (sel.range.endSide ?? sel.range.side) === "deletions" ? "old" : "new", start, end });
+  };
 
   // One item per id, kept while its file is listed (a new answer for the same head, or a push that left the
   // file alone, reads it again as a new object): the same item, and the same parsed diff when only its closed
@@ -150,7 +180,8 @@ export default function DiffList({ files, closed, header, target, onTop, classNa
       <CodeView
         ref={handle}
         items={list}
-        options={options}
+        options={viewOptions}
+        onSelectedLinesChange={choosing ? selected : undefined}
         onScroll={scrolled}
         className={className}
         renderCustomHeader={(item) => {

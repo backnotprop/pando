@@ -31,6 +31,8 @@ export interface LookupCtx {
   stub: Stub;
   /** The page's own project (its scope's), else the monorepo's only one; null in a monorepo asked as a whole. */
   repo: string | null;
+  /** The commits the page already has: a short sha the model copies from them reads as the full one. */
+  known: string[];
 }
 
 /** A lookup the assistant (or the first pass) asked for, parsed (parseLookup). */
@@ -121,7 +123,8 @@ function walker(r: RepoRecord) {
 }
 
 async function commitAt(ctx: LookupCtx, r: RepoRecord, w: Walker, ref: string | null): Promise<CommitMeta> {
-  const at = await resolveCommit(ctx.env, w, (b) => ctx.stub.refHead(r.name, b), ref);
+  const full = ref && /^[0-9a-f]{7,39}$/.test(ref) ? ctx.known.find((sha) => sha.startsWith(ref)) : undefined;
+  const at = await resolveCommit(ctx.env, w, (b) => ctx.stub.refHead(r.name, b), full ?? ref);
 
   return at.commit;
 }
@@ -400,7 +403,7 @@ export async function lookShared(ctx: LookupCtx, args: Args<"search_shared">, by
   const found: Found[] = shared.cards.map((card) => ({ key: keyOf(card), how: "search", found_by: `Found by searching the shared files for ${words.map((x) => `"${x}"`).join(", ")}.`, card }));
 
   return {
-    step: { tool: "search_shared", asked: `the shared files for ${words.map((x) => `"${x}"`).join(", ")}`, found: found.length ? `${found.length} ${found.length === 1 ? "file" : "files"}: ${shared.cards.map((c) => c.path).join(", ")}` : `nothing in ${shared.read} files`, ms: Date.now() - t0, by, error: null },
+    step: { tool: "search_shared", asked: `the shared files for ${words.map((x) => `"${x}"`).join(", ")}`, found: found.length ? `${found.length} ${found.length === 1 ? "file" : "files"}: ${shared.cards.map((c) => c.path).join(", ")}` : `nothing in ${shared.read} ${shared.read === 1 ? "file" : "files"}`, ms: Date.now() - t0, by, error: null },
     found,
   };
 }
@@ -420,7 +423,7 @@ export async function lookSessions(ctx: LookupCtx, args: Args<"search_sessions">
   }
 
   return {
-    step: { tool: "search_sessions", asked: `the sessions' prompts for ${words.map((x) => `"${x}"`).join(", ")}`, found: found.length ? `${found.length} ${found.length === 1 ? "prompt" : "prompts"}` : `nothing in ${ids.length} sessions`, ms: Date.now() - t0, by, error: null },
+    step: { tool: "search_sessions", asked: `the sessions' prompts for ${words.map((x) => `"${x}"`).join(", ")}`, found: found.length ? `${found.length} ${found.length === 1 ? "prompt" : "prompts"}` : `nothing in ${ids.length} ${ids.length === 1 ? "session" : "sessions"}`, ms: Date.now() - t0, by, error: null },
     found,
   };
 }

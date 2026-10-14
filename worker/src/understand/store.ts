@@ -13,7 +13,7 @@ import type * as Contract from "@pando/contract";
 export const UNDERSTAND_SCHEMA = `
 CREATE TABLE IF NOT EXISTS understand_pages (
   number INTEGER PRIMARY KEY, question TEXT NOT NULL, scope TEXT, status TEXT NOT NULL, reason TEXT,
-  asked_by TEXT NOT NULL, session INTEGER, model TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+  asked_by TEXT NOT NULL, origin TEXT, session INTEGER, model TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
   lines TEXT, blocks TEXT NOT NULL DEFAULT '[]', refs TEXT NOT NULL DEFAULT '[]', steps TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT);
 CREATE INDEX IF NOT EXISTS understand_session ON understand_pages (session)`;
@@ -35,6 +35,8 @@ export type Card = typeof Contract.UnderstandCard.Encoded;
 export type Step = typeof Contract.UnderstandStep.Encoded;
 
 export type Lines = typeof Contract.UnderstandLines.Encoded;
+
+export type From = typeof Contract.UnderstandFrom.Encoded;
 
 export type Block = typeof Contract.UnderstandBlock.Encoded;
 
@@ -73,6 +75,7 @@ interface PageRow extends Record<string, SqlStorageValue> {
   status: "building" | "complete" | "failed";
   reason: string | null;
   asked_by: string;
+  origin: string | null;
   session: number | null;
   model: string;
   revision: number;
@@ -132,7 +135,7 @@ export class UnderstandStore {
     const cited = new Set(blocks.flatMap((b) => b.cites));
 
     return {
-      number: r.number, question: r.question, scope: parse<Scope | null>(r.scope, null), status: r.status, reason: r.reason, asked_by: r.asked_by,
+      number: r.number, question: r.question, scope: parse<Scope | null>(r.scope, null), from: parse<From | null>(r.origin, null), status: r.status, reason: r.reason, asked_by: r.asked_by,
       session: r.session, model: r.model, revision: r.revision, sources: refs.length, cited: refs.filter((x) => cited.has(x.id)).length,
       created_at: r.created_at, updated_at: r.updated_at, completed_at: r.completed_at,
     };
@@ -154,13 +157,13 @@ export class UnderstandStore {
     return { pages: page.map((r) => this.rowView(r)), next_before: rows.length > limit ? (page.at(-1)?.number ?? null) : null };
   }
 
-  create(input: { question: string; scope: Scope | null; model: string }, login: string): Row {
+  create(input: { question: string; scope: Scope | null; from: From | null; model: string }, login: string): Row {
     const n = (this.sql.exec<{ n: number | null }>("SELECT MAX(number) AS n FROM understand_pages").one().n ?? 0) + 1;
     const at = now();
 
     this.sql.exec(
-      "INSERT INTO understand_pages (number, question, scope, status, asked_by, model, created_at, updated_at) VALUES (?, ?, ?, 'building', ?, ?, ?, ?)",
-      n, input.question, input.scope ? JSON.stringify(input.scope) : null, login, input.model, at, at,
+      "INSERT INTO understand_pages (number, question, scope, origin, status, asked_by, model, created_at, updated_at) VALUES (?, ?, ?, ?, 'building', ?, ?, ?, ?)",
+      n, input.question, input.scope ? JSON.stringify(input.scope) : null, input.from ? JSON.stringify(input.from) : null, login, input.model, at, at,
     );
 
     return this.changed(n, login);
@@ -335,7 +338,7 @@ export class UnderstandStore {
 
     this.host.publish({
       kind: "understand.updated", collection: "understand", key: String(n), op: "upsert", repo: null,
-      actor, number: n, row, topics: ["understand", `understand:${n}`],
+      actor, machine: null, agent: null, number: n, row, topics: ["understand", `understand:${n}`],
     });
 
     return row;

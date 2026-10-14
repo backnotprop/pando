@@ -114,6 +114,8 @@ import {
   OAuthError,
   OAuthToken,
   ProtectedResourceMetadata,
+  UnderstandList,
+  UnderstandPage,
 } from "../src/index.ts";
 
 const Recording = Schema.Struct({
@@ -133,6 +135,8 @@ const decoders = {
   AgentSession: refuses(AgentSession),
   AgentSessionList: refuses(AgentSessionList),
   AgentTranscript: refuses(AgentTranscript),
+  UnderstandPage: refuses(UnderstandPage),
+  UnderstandList: refuses(UnderstandList),
   ErrorBody: refuses(ErrorBody),
   CommitPage: refuses(CommitPage),
   CommitDiffLine: refuses(CommitDiffLine),

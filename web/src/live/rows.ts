@@ -18,6 +18,7 @@ import type { MonorepoRef } from "../api/names";
 import { type CheckRuns, branchDiffQuery, branchQuery, commitsQuery, repoKey, reports } from "../api/projects";
 import { machinesQuery } from "../api/queries";
 import { artifactsKey } from "../api/artifacts";
+import { understandKey } from "../api/understand";
 import { applyIssueFrame, touchLinkedIssues } from "./issues";
 import { keepOpen } from "./socket";
 
@@ -249,6 +250,10 @@ function apply(qc: QueryClient, m: MonorepoRef, f: RowEvent) {
     case "agent.updated":
       // A new session or a moved count: the lists and their counts are read again, after any read already running.
       if (applyAgentRow(qc, m, f.row)) readAgain(qc, { queryKey: agentsKey(m) });
+      break;
+    case "understand.updated":
+      // An Understand page changed (a lookup, a paragraph, done): the page and the list read again, after any read already running.
+      readAgain(qc, { queryKey: understandKey(m) });
       break;
     case "artifact.added":
     case "artifact.versioned":

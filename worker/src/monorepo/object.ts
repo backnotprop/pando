@@ -37,7 +37,7 @@ import { ISSUES_SCHEMA, statements } from "../issues/schema";
 import type { SessionCommitRef } from "../sessions/commits";
 import { SESSIONS_SCHEMA, SessionStore, type PieceReread, type PieceRecord, type RewrittenPiece, type Sender, type SessionFilters, type SessionStart, type TurnMark } from "../sessions/store";
 import { AGENTS_SCHEMA, AgentStore, type AgentFilters, type AgentInput, type AgentView } from "../agents/store";
-import { type BlockInput, type Card, type Found, type Lines, type Scope, type Step, UNDERSTAND_SCHEMA, UnderstandStore } from "../understand/store";
+import { type BlockInput, type Card, type Found, type From, type Lines, type Scope, type Step, UNDERSTAND_SCHEMA, UnderstandStore } from "../understand/store";
 import type { SessionState } from "../../../agents/src/protocol";
 import { commitClosings } from "../issues/commits";
 import { commitReader } from "./graph";
@@ -1317,7 +1317,7 @@ export class MonorepoObject extends DurableObject<Env> {
 
   // ── Understand (understand/store.ts; routes in understand/routes.ts) ───────
 
-  understandCreate(input: { question: string; scope: Scope | null; model: string }, identity: Pick<Identity, "login">) {
+  understandCreate(input: { question: string; scope: Scope | null; from: From | null; model: string }, identity: Pick<Identity, "login">) {
     return this.guard(() => {
       if (input.scope && !this.repoRow(input.scope.repo)) throw new HttpError(400, "bad_request", `no repo ${input.scope.repo}`);
 

@@ -12,8 +12,11 @@
 import { Popover } from "@base-ui/react/popover";
 import type { AgentSession } from "@pando/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { agentModelsQuery, agentQuery, chatsQuery, newChat, sendAgent } from "../../../../api/agents";
+import { askUnderstand, understandQuery } from "../../../../api/understand";
+import { understandLink } from "../../../../ui/paths";
 import { reposQuery } from "../../../../api/queries";
 import { Composer } from "../../../../conversation/Composer";
 import { Conversation } from "../../../../conversation/Conversation";
@@ -29,6 +32,48 @@ import { useMonorepo } from "../-frame/heads";
 import { useMe } from "../-issues/parts";
 
 const HINT = "Acts as you";
+
+/** The open panel's way in from elsewhere on the page: a new chat starting with `prompt`, about `repo`. */
+let opener: ((prompt: string, repo: string | null) => void) | null = null;
+
+/** Opens the assistant with a new chat (an Understand page with nothing found: "Ask the assistant what this code does"). */
+export function askAssistant(prompt: string, repo: string | null): void {
+  opener?.(prompt, repo);
+}
+
+/** The person's latest message in a chat: what Open as a page asks. */
+function lastAsked(messages: ReturnType<typeof useAgentMessages>): string | null {
+  const last = messages?.findLast((x) => x.role === "user");
+
+  return last?.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n").trim() || null;
+}
+
+/** "Open as a page": the chat's latest question asked again as an Understand page, which opens. */
+function OpenAsPage({ question }: { question: string }) {
+  const { monorepo } = useMonorepo();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="cursor-pointer text-[12.5px] text-ash hover:text-bark"
+      onClick={() => {
+        if (busy) return;
+        setBusy(true);
+        void askUnderstand(monorepo, question.slice(0, 2000), null, { kind: "assistant" })
+          .then(async (page) => {
+            qc.setQueryData(understandQuery(monorepo, page.number).queryKey, page);
+            await navigate(understandLink(monorepo.full, page.number));
+          })
+          .finally(() => setBusy(false));
+      }}
+    >
+      Open as a page
+    </button>
+  );
+}
 
 /** A chat in the Chats list, in words: what it did, from its state and branch. */
 function chatWords(s: AgentSession): string {
@@ -101,9 +146,19 @@ function Chat({ chat }: { chat: AgentSession }) {
   const model = models.find((x) => x.id === chat.model)?.name ?? chat.model;
   const items = fromAgent(messages, { person: chat.launched_by, program: "Pi", model, working: chat.status === "working" });
   const { shown, older } = useShownFromEnd(items);
+  const asked = lastAsked(messages);
 
   return (
-    <Thread items={shown} older={older} dock={<div className="p-3"><Composer placeholder="Ask about this repository" hint={HINT} send={async (text) => void (await sendAgent(monorepo, chat.number, text))} /></div>}>
+    <Thread
+      items={shown}
+      older={older}
+      dock={
+        <div className="grid gap-2 p-3">
+          {asked && chat.status === "waiting" ? <OpenAsPage question={asked} /> : null}
+          <Composer placeholder="Ask about this repository" hint={HINT} send={async (text) => void (await sendAgent(monorepo, chat.number, text))} />
+        </div>
+      }
+    >
       <div className="px-4 pt-4">
         <Conversation items={shown} full={monorepo.full} compact />
       </div>
@@ -171,6 +226,22 @@ export function Assistant() {
   // A new chat's project: "" is the whole repository.
   const [project, setProject] = useState("");
   const projects = useProjects();
+
+  // Another part of the page may open the panel with a new chat (askAssistant).
+  useEffect(() => {
+    opener = (prompt, repo) => {
+      setOpen(true);
+      void newChat(monorepo, prompt, repo).then((s) => {
+        qc.setQueryData(agentQuery(monorepo, s.number).queryKey, s);
+        void qc.invalidateQueries({ queryKey: chatsQuery(monorepo).queryKey });
+        setChosen(s.number);
+      });
+    };
+
+    return () => {
+      opener = null;
+    };
+  }, [monorepo, qc]);
 
   if (!me) return null;
 

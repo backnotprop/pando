@@ -4,8 +4,8 @@
   "status": 200,
   "body": {
     "tag": "v0.1.0",
-    "sha": "25a329895820520c88780697b0b6ce474319d542",
-    "markdown": "## Changes\n\n- Add the missing page (`feat-c`) by rel-muw5rrqb, closes #2\n- Speed up the gate (`feat-b`) by rel-muw5rrqb, closes #1\n- Add feature A (`feat-a`) by rel-muw5rrqb\n",
+    "sha": "72e08ba7e3e300c776fc07edb2e756ee5a9f6534",
+    "markdown": "## Changes\n\n- Add the missing page (`feat-c`) by rel-mv7dd86l, closes #2\n- Speed up the gate (`feat-b`) by rel-mv7dd86l, closes #1\n- Add feature A (`feat-a`) by rel-mv7dd86l\n",
     "generated": true,
     "merges": 3,
     "more": 0,

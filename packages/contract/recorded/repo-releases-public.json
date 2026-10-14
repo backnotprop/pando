@@ -3,18 +3,35 @@
   "route": "GET .../repos/{repo} (the switch on)",
   "status": 200,
   "body": {
-    "monorepo": "rel-muw5rrqb/rel-muw5rrqb",
-    "name": "rel-muw5rrqb",
+    "monorepo": "rel-mv7dd86l/rel-mv7dd86l",
+    "name": "rel-mv7dd86l",
     "path": ".",
     "description": null,
     "default_branch": "main",
-    "clone_url": "http://localhost:8867/rel-muw5rrqb/rel-muw5rrqb.git",
+    "clone_url": "http://127.0.0.1:8919/rel-mv7dd86l/rel-mv7dd86l.git",
     "required_checks": [
       "ci"
     ],
     "checks_unknown": null,
-    "created_at": "2026-10-06T04:08:14.787Z",
-    "created_by": "rel-muw5rrqb",
-    "releases_public": true
+    "created_at": "2026-10-14T00:26:21.586Z",
+    "created_by": "rel-mv7dd86l",
+    "releases_public": true,
+    "review": {
+      "enabled": false,
+      "auto_below": 0.35,
+      "human_above": 0.7,
+      "human_for_sensitive": true,
+      "sensitive": [
+        "auth/",
+        "payments/",
+        "billing/",
+        "infra/",
+        ".github/",
+        "migrations/",
+        ".pando/",
+        ".env",
+        "secrets"
+      ]
+    }
   }
 }

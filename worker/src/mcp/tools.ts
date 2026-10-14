@@ -473,7 +473,7 @@ export function buildServer(caller: Caller): McpServer {
     "merge",
     {
       title: "Merge a branch",
-      description: "Merge a branch into its project's default branch with a merge commit, as you. Pando refuses while required checks are failing, pending or missing, or the branch conflicts; force: true merges past red or missing checks (never past conflicts), so only when the person asked. expected_head refuses if the branch moved since you read it. Linked open issues close.",
+      description: "Merge a branch into its project's default branch with a merge commit, as you. Pando refuses while required checks are failing, pending or missing, or the branch conflicts, or its risk calls for a review (review_required: tell the person; risk_pending: retry soon); force: true merges past red or missing checks (never past conflicts), so only when the person asked. expected_head refuses if the branch moved since you read it. Linked open issues close.",
       inputSchema: z.object({
         repository,
         project,

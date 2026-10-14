@@ -3,9 +3,9 @@
   "route": "GET /.well-known/oauth-protected-resource/mcp",
   "status": 200,
   "body": {
-    "resource": "http://127.0.0.1:8909/mcp",
+    "resource": "http://127.0.0.1:8919/mcp",
     "authorization_servers": [
-      "http://127.0.0.1:8909"
+      "http://127.0.0.1:8919"
     ],
     "bearer_methods_supported": [
       "header"

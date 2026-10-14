@@ -3,49 +3,49 @@
   "route": "GET .../repos/{repo}/summary",
   "status": 200,
   "body": {
-    "repo": "rel-muw5rrqb",
+    "repo": "rel-mv7dd86l",
     "main": {
       "branch": "main",
-      "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
+      "sha": "39d29ddaa7fc8c38cb531e50df46d3d4f6854158",
       "title": "Add feature A",
       "state": "success",
       "checks": {
-        "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
+        "sha": "39d29ddaa7fc8c38cb531e50df46d3d4f6854158",
         "state": "success",
         "required": [],
         "missing": [],
         "statuses": [
           {
-            "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
+            "sha": "39d29ddaa7fc8c38cb531e50df46d3d4f6854158",
             "context": "ci",
             "state": "success",
             "target_url": null,
             "description": null,
             "creator": "app:buildkite",
             "app": "buildkite",
-            "created_at": "2026-10-06T04:08:24.457Z"
+            "created_at": "2026-10-14T00:26:34.423Z"
           }
         ],
         "checks_unknown": null
       },
       "build": {
-        "id": "cib_81fa561bb9a63c84",
+        "id": "cib_c83986b6b44a13d3",
         "service": "buildkite",
-        "connection": "m_a5a6877e181b7bd9--cic_8aacd6bfa2e6",
+        "connection": "m_f3eac27a974cad5e--cic_975cd3a1c9bc",
         "pipeline": "p",
         "number": 142,
-        "repo": "rel-muw5rrqb",
+        "repo": "rel-mv7dd86l",
         "repo_path": ".",
-        "sha": "1b04ab826a21f54224a3400302b1e150d692768c",
+        "sha": "39d29ddaa7fc8c38cb531e50df46d3d4f6854158",
         "branch": "main",
         "message": "Merge feat-a: Add feature A",
         "state": "passed",
         "service_state": "passed",
         "web_url": "https://buildkite.com/o/p/builds/142",
-        "pushed_by": "rel-muw5rrqb",
-        "created_at": "2026-10-06T04:07:24.452Z",
-        "started_at": "2026-10-06T04:07:25.452Z",
-        "finished_at": "2026-10-06T04:08:14.452Z",
+        "pushed_by": "rel-mv7dd86l",
+        "created_at": "2026-10-14T00:25:34.418Z",
+        "started_at": "2026-10-14T00:25:35.418Z",
+        "finished_at": "2026-10-14T00:26:24.418Z",
         "duration_s": 49,
         "rebuilt_from": null
       }

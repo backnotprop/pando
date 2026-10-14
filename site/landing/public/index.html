@@ -247,6 +247,8 @@ h2.fig span{color:var(--ash);font-weight:400}
       <div><dt>Workers®</dt><dd>the git door, the API, merges and webhooks</dd></div>
       <div><dt>Artifacts</dt><dd>every repo, its branches and its history</dd></div>
       <div><dt>Durable Objects™</dt><dd>the meta layer's live saves, and each monorepo's state</dd></div>
+      <div><dt>Workers AI</dt><dd>clef's risk scores, the guided reviews, the assistant and Understand</dd></div>
+      <div><dt>Containers</dt><dd>cloud agents and their mounts, beside the storage</dd></div>
       <div><dt>R2</dt><dd>large files and images</dd></div>
     </dl>
     <p class="credits">The mount engine is ArtifactFS (Cloudflare, Apache 2.0). The Mac mount, Pando.app, starts from Oak's open-source FSKit extension and follows its approach of an extension in front of a daemon (Oakspace Inc., Apache 2.0). People review in Plannotator.</p></div>
@@ -279,7 +281,7 @@ h2.fig span{color:var(--ash);font-weight:400}
     </li>
     <li class="part" id="review">
       <div class="sp"><canvas id="sp-3" role="img" aria-label="A change in worktrees/decision-chips on its way along a cord to projects/workspaces."></canvas></div>
-      <div class="pt"><h3>Review built for agents and people</h3><p>A review is the branch diff (the three-dot diff, as on GitHub) and the branch's commits, with their messages and who made them. Agents read it as JSON; people read it in Plannotator.</p></div>
+      <div class="pt"><h3>Review built for agents and people</h3><p>A review is the branch diff (the three-dot diff, as on GitHub) and the branch's commits, with their messages and who made them. Agents read it as JSON; people read it in Plannotator. Review follows risk: clef, Cloudflare's decision model, scores every push. Low risk merges on green. Medium risk gets reviewer agents. High risk goes to a person, with a guided review Workers AI has already written. And when you ask why a line is the way it is, Pando answers from the commit, the recorded session and the decision file.</p></div>
       <div class="pb"><pre class="code" tabindex="0"><span class="pr">$ </span>pando diff decision-chips --json
 <span class="out">{ "branch": "decision-chips", "base": "c03d41e", "head": "9f1c2ab",</span>
 <span class="out">  "files": [</span>
@@ -297,11 +299,11 @@ h2.fig span{color:var(--ash);font-weight:400}
     </li>
     <li class="part" id="merge">
       <div class="sp"><canvas id="sp-4" role="img" aria-label="After a change in worktrees/main: the parts it reached are lit."></canvas></div>
-      <div class="pt"><h3>A person merges</h3><p>A person's Merge is the approval, and the branch's review page is the pull request. Agents comment but never merge. Merge commits keep every commit and message on main, and main never takes a direct push.</p></div>
+      <div class="pt"><h3>A merge on green</h3><p>A branch merges the moment it is green and its review is done: by a person, or by the agent itself when the risk is low. The branch's review page is the pull request. Merge commits keep every commit and message on main, and main never takes a direct push.</p></div>
       <div class="pb"><pre class="code" tabindex="0"><span class="cm"># agent-1, in its worktree</span>
 <span class="pr">$ </span>git push origin HEAD:main
 <span class="out">refused: main is protected; push a branch</span>
-<span class="cm"># you, after the review</span>
+<span class="cm"># you, or the agent on green, after the review</span>
 <span class="pr">$ </span>pando merge decision-chips
 <span class="out">main is now 3e7a91c: a merge commit by you, with all 4 commits</span></pre></div>
     </li>

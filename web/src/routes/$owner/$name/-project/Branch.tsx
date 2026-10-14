@@ -390,6 +390,9 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
   const { monorepo } = useMonorepo();
   const qc = useQueryClient();
 
+  // Whether the check runs were read once more after the socket opened: until then the checks are not known current.
+  const [runsRead, setRunsRead] = useState(false);
+
   // The branch's row, its checks and its jobs come live on the repo's rows (a new head reads its diff again);
   // the record, its runs and its diff are read once more when the socket opens.
   const live = useRows(monorepo, [`repo:${repo.name}`], () => {
@@ -397,9 +400,11 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
     // A diff still streaming in is the head's own: it goes on rather than starting over (a large one takes a while the first time).
     void qc.invalidateQueries({ queryKey: branchDiffQuery(monorepo, repo.name, branch).queryKey, exact: true }, { cancelRefetch: false });
     // Its runs too, keeping any job or build frame that lands while they are read.
-    void rereadRuns(qc, monorepo, repo.name);
+    void rereadRuns(qc, monorepo, repo.name).finally(() => setRunsRead(true));
   });
 
+  // The checks are live once the socket is up and their runs were read again after it opened.
+  const checksLive = live && runsRead;
   const b = useSuspenseQuery({ ...branchQuery(monorepo, repo.name, branch), refetchInterval: fallback(live) }).data;
   const commits = useSuspenseQuery(commitsQuery(monorepo, repo.name, branch)).data;
   const reviews = useSuspenseQuery(reviewsQuery(monorepo, repo.name, branch)).data;
@@ -430,14 +435,14 @@ export function BranchPage({ repo, branch, files, sessions, artifacts }: { repo:
       </TabBar>
       {artifacts ? (
         <Suspense fallback={<div className="min-h-24" />}>
-          <ArtifactsTab repo={repo} b={b} at={artifacts} aside={<Aside repo={repo} b={b} live={live} />} />
+          <ArtifactsTab repo={repo} b={b} at={artifacts} aside={<Aside repo={repo} b={b} live={checksLive} />} />
         </Suspense>
       ) : files ? (
         <FilesTab repo={repo} branch={branch} />
       ) : sessions ? (
         <BranchSessionsTab repo={repo} branch={branch} merged={b.state === "merged"} on={on} commits={commits.commits} />
       ) : (
-        <Overview repo={repo} b={b} commits={commits.commits} total={n} reviews={reviews} live={live} on={on} />
+        <Overview repo={repo} b={b} commits={commits.commits} total={n} reviews={reviews} live={checksLive} on={on} />
       )}
     </>
   );
@@ -466,7 +471,8 @@ function Aside({ repo, b, live }: { repo: Repo; b: Branch; live: boolean }) {
     <aside>
       <MergeBox repo={repo} b={b} />
       <BranchIssues repo={repo} b={b} />
-      <div className="mt-10">
+      {/* Busy until its checks come live (the socket up and the runs read again): what a test waits for before CI reports. */}
+      <div className="mt-10" data-testid="checks" aria-busy={!live}>
         <SectionHead title="Checks" />
         <CheckRows repo={repo} sha={b.head} checks={b.checks} live={live} />
       </div>

@@ -128,9 +128,9 @@ function patchJob(qc: QueryClient, m: MonorepoRef, repo: RepoName | null, buildI
   if (!repo || !job.check) return;
   const check = job.check;
 
-  // Each branch page whose commit this build is of: the job reports its check, if it is the newest.
-  for (const [key, r] of qc.getQueriesData<CheckRuns>({ queryKey: [...repoKey(m, repo), "runs"] })) {
-    if (!r?.builds.has(buildId)) continue;
+  // Each branch page whose commit this build is of: the job reports its check, if it is the newest. A page whose runs
+  // do not have the build yet keeps the patch too: a re-read in flight may bring the build, older than this frame.
+  for (const [key] of qc.getQueriesData<CheckRuns>({ queryKey: [...repoKey(m, repo), "runs"] })) {
     patchRuns(qc, key, (runs) => {
       const build = runs.builds.get(buildId);
 

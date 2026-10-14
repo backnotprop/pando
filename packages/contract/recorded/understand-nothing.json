@@ -9,42 +9,42 @@
       "kind": "lines",
       "repo": "projects-api",
       "path": "src/limit.ts",
-      "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+      "commit": "0f833ffd01278eaeb5d51b38a698e4403fe0e01d",
       "start": 9,
       "end": 10
     },
     "from": null,
     "status": "complete",
     "reason": null,
-    "asked_by": "und-mv8hq8wy",
+    "asked_by": "und-mv8nuxym",
     "session": 2,
     "model": "scripted",
     "revision": 1,
     "sources": 1,
     "cited": 1,
-    "created_at": "2026-10-14T19:16:27.829Z",
-    "updated_at": "2026-10-14T19:16:28.729Z",
-    "completed_at": "2026-10-14T19:16:28.729Z",
+    "created_at": "2026-10-14T22:08:06.123Z",
+    "updated_at": "2026-10-14T22:08:07.496Z",
+    "completed_at": "2026-10-14T22:08:07.496Z",
     "lines": {
       "repo": "projects-api",
       "path": "src/limit.ts",
-      "commit": "f499ae73a8b263bd660f341729bf137452a87260",
+      "commit": "0f833ffd01278eaeb5d51b38a698e4403fe0e01d",
       "start": 9,
       "older": null,
       "lines": [
         {
           "n": 9,
           "text": "export const RETRY_AFTER = 7;",
-          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
-          "at": "2026-10-14T19:16:15.000Z",
-          "by": "und-mv8hq8wy"
+          "sha": "0b100bf75117977367ee5cdcf986bc14160e0bb7",
+          "at": "2026-10-14T22:07:53.000Z",
+          "by": "und-mv8nuxym"
         },
         {
           "n": 10,
           "text": "export const RETRY_JITTER = 0.3;",
-          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
-          "at": "2026-10-14T19:16:15.000Z",
-          "by": "und-mv8hq8wy"
+          "sha": "0b100bf75117977367ee5cdcf986bc14160e0bb7",
+          "at": "2026-10-14T22:07:53.000Z",
+          "by": "und-mv8nuxym"
         }
       ]
     },
@@ -68,15 +68,15 @@
         "card": {
           "kind": "commit",
           "repo": "projects-api",
-          "sha": "2c33fe3a6a8e36758b801e06e3159516465fc580",
+          "sha": "0b100bf75117977367ee5cdcf986bc14160e0bb7",
           "title": "first",
           "body": "",
           "author": {
             "name": "Tester",
             "email": "tester@pando.invalid"
           },
-          "person": "und-mv8hq8wy",
-          "committed_at": "2026-10-14T19:16:15.000Z",
+          "person": "und-mv8nuxym",
+          "committed_at": "2026-10-14T22:07:53.000Z",
           "machine": null,
           "agent": null,
           "model": null,
@@ -89,8 +89,8 @@
       {
         "tool": "blame",
         "asked": "lines 9 to 10 of src/limit.ts",
-        "found": "1 commit: 2c33fe3 (2 lines)",
-        "ms": 861,
+        "found": "1 commit: 0b100bf (2 lines)",
+        "ms": 1322,
         "by": "first_pass",
         "error": null,
         "refs": [
@@ -110,7 +110,7 @@
         "tool": "search_shared",
         "asked": "the shared files for \"retry_after\", \"retry after\"",
         "found": "nothing in 1 file",
-        "ms": 1,
+        "ms": 0,
         "by": "assistant",
         "error": null,
         "refs": []

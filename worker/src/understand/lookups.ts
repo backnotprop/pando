@@ -174,6 +174,9 @@ async function sessionCard(ctx: LookupCtx, id: string, opts: { path?: string | n
 
   if (!got.ok || got.value.state === "deleted") return null;
   const s = got.value;
+
+  // A session recorded from a private agent session's sandbox (a chat's) is its launcher's alone.
+  if (await privateMachine(ctx, s.machine)) return null;
   const entries = (await readEntries(ctx.env, ctx.m, id, 0).catch(() => null))?.entries ?? [];
   let prompt: Extract<Card, { kind: "session" }>["prompt"] = null;
   let step: Extract<Card, { kind: "session" }>["step"] = null;
@@ -196,15 +199,31 @@ async function sessionCard(ctx: LookupCtx, id: string, opts: { path?: string | n
   return { kind: "session", id, program: s.program, person: s.person, machine: s.machine, model, prompt, step };
 }
 
-/** A Cloudflare-run agent session named by a commit's machine (cloud-<n>). */
-async function agentCard(ctx: LookupCtx, machine: string | null): Promise<Extract<Card, { kind: "agent" }> | null> {
+/** The kinds of agent session only their launcher sees (agents/store.ts, agents/routes.ts): never on a page every member reads. */
+const PRIVATE_KINDS = new Set(["chat", "understand"]);
+
+/** The Cloudflare-run agent session a machine name (cloud-<n>) belongs to, unless it is one only its launcher sees. */
+async function sharedAgent(ctx: LookupCtx, machine: string | null) {
   const n = /^cloud-([1-9][0-9]{0,8})$/.exec(machine ?? "")?.[1];
 
   if (!n) return null;
   const got = await ctx.stub.agentGet(Number(n));
 
-  if (!got.ok) return null;
-  const a = got.value;
+  return got.ok && !PRIVATE_KINDS.has(got.value.kind) ? got.value : null;
+}
+
+/** Whether a machine name is a private agent session's sandbox (a chat's, an Understand page's): its records stay off every page. */
+async function privateMachine(ctx: LookupCtx, machine: string | null): Promise<boolean> {
+  if (!/^cloud-[1-9][0-9]{0,8}$/.test(machine ?? "")) return false;
+
+  return (await sharedAgent(ctx, machine)) === null;
+}
+
+/** A Cloudflare-run agent session named by a commit's machine (cloud-<n>); none for a chat or an Understand page's session. */
+async function agentCard(ctx: LookupCtx, machine: string | null): Promise<Extract<Card, { kind: "agent" }> | null> {
+  const a = await sharedAgent(ctx, machine);
+
+  if (!a) return null;
 
   return { kind: "agent", number: a.number, agent_kind: a.kind, launched_by: a.launched_by, model: a.model, status: a.status, branch: a.branch };
 }

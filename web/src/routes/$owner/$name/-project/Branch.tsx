@@ -164,6 +164,7 @@ function Reviews({ reviews }: { reviews: readonly Review[] }) {
                 {r.author}
               </Ref>
               <span className="text-bark-dim">{VERDICT[r.verdict]}</span>
+              {r.session ? <span className="text-ash">by agent #{r.session}</span> : null}
               {r.body ? <span className="overflow-hidden text-[13px] text-ellipsis text-ash">{r.body}</span> : null}
             </span>
             <span className="text-[12.5px] whitespace-nowrap text-ash">{since(r.created_at, clock)}</span>

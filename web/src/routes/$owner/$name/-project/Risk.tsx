@@ -123,7 +123,7 @@ export function ReviewBox({ repo, b }: { repo: Repo; b: Branch }) {
           ))}
         </ul>
       ) : null}
-      {r.why ? <p className="mt-2.5 text-[13px] leading-[19px] text-bark-dim">{r.why[0]?.toUpperCase() + r.why.slice(1)}.</p> : null}
+      {r.why && r.tier === "ai" ? <p className="mt-2.5 text-[13px] leading-[19px] text-bark-dim">{r.why[0]?.toUpperCase() + r.why.slice(1)}.</p> : null}
       {r.approved_by ? (
         <p className="mt-2.5 text-[13px] text-bark-dim">Approved by {r.approved_by}</p>
       ) : (

@@ -3,10 +3,11 @@
 // Merge box held for a person, the Guided review panel opening Plannotator's
 // guide in the Artifacts tab, Approve, and the Settings switch. Real Worker
 // and pando-agents in one wrangler dev (the reviewer agents run in containers
-// on the scripted model), real Workers AI writing the guide; the score comes
-// from the Worker's test switch (/v1/_risk/test, RISK_TEST=1 in
-// worker/.dev.vars with RISK_REVIEW=on), so the tiers are known. Real clef
-// is tested by agents/test/risk-review.mjs.
+// on the scripted model, set through the Worker's test switch /v1/_risk/test,
+// RISK_TEST=1 with RISK_REVIEW=on in worker/.dev.vars), real Workers AI: clef
+// scores the money change and GLM-5.3 Flash writes the guide. The story the
+// films capture: a comment fix merges with no review; a money change waits
+// for a person, with the guide attached.
 //   PANDO_E2E_WORKER_PORT=8919 PANDO_E2E_STANDIN_PORT=8920 PANDO_E2E_INSPECTOR_PORT=9419 npx playwright test -c playwright.agents.config.ts agents-risk
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
@@ -46,29 +47,34 @@ test("risk-based review: the meter, the held merge, the guided review, Approve, 
   const mid: string = made.monorepo.id;
   const url: string = made.repos[0].clone_url;
   const mbp = await Machine.make(page, "ann-mbp", "Ann Lane");
-  const dir = mbp.commit("r", url, "main", { "README.md": "# Shop\n", "payments/charge.ts": "export const charge = (cents: number) => ({ cents });\n" }, "first");
+  const dir = mbp.commit("r", url, "main", { "README.md": "# Shop\n", "payments/charge.ts": "// Charges a card.\nexport const charge = (cents: number) => ({ cents });\n" }, "first");
 
   mbp.push(dir, url, "main");
 
   try {
-    // A low score: the meter says so; the branch merges on green checks.
-    await risk(mid, { score: 0.1 });
-    mbp.commit("r", url, "docs-1", { "README.md": "# Shop\n\nRun it with npm start.\n" }, "docs: how to run");
-    mbp.push(dir, url, "docs-1");
-    await page.goto(`${BASE}/${full}/branches/docs-1`);
-    await expect(page.getByLabel("Risk: Low, auto")).toBeVisible({ timeout: 30_000 });
+    // Low risk is never flagged: a comment fix, even inside payments/, is auto by rule (no model call) and merges.
+    mbp.commit("r", url, "comment-on-charge", { "payments/charge.ts": "// Charges a card, in cents (never a fraction of a cent).\nexport const charge = (cents: number) => ({ cents });\n" }, "payments: say charges are in cents");
+    mbp.push(dir, url, "comment-on-charge");
+    await page.goto(`${BASE}/${full}/branches/comment-on-charge`);
+    await expect(page.getByLabel("Risk: comments and docs only, auto")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Comments and docs only")).toBeVisible();
     await expect(page.getByText("Ready to merge")).toBeVisible();
+    await page.screenshot({ path: "e2e/.state/risk-comment.png" });
+    await page.getByRole("button", { name: "Merge", exact: true }).click();
+    await expect(page.getByText("Merged into main")).toBeVisible();
 
-    // A sensitive change with a high score: human review required, reviewer agents, a guided review.
-    await risk(mid, { score: 0.85, model: "scripted", script: '> post_review {"verdict":"comment","body":"Nothing wrong here."}' });
-    mbp.commit("r", url, "pay-1", { "payments/charge.ts": "export const charge = (cents: number) => {\n  if (cents <= 0) throw new Error('nothing to charge');\n  return { cents };\n};\n" }, "payments: refuse empty charges");
-    mbp.push(dir, url, "pay-1");
+    // A money change: real clef scores it, the sensitive path asks a person; reviewer agents run; a guided review is written.
+    await risk(mid, { model: "scripted", script: '> post_review {"verdict":"comment","body":"The empty-charge guard looks right."}' });
+    mbp.git(dir, "fetch", "-q", url, "main");
+    mbp.git(dir, "checkout", "-q", "-B", "main", "FETCH_HEAD");
+    mbp.commit("r", url, "charge-refuse-empty", { "payments/charge.ts": "// Charges a card, in cents (never a fraction of a cent).\nexport const charge = (cents: number) => {\n  if (cents <= 0) throw new Error('nothing to charge');\n  return { cents };\n};\n" }, "payments: refuse empty charges");
+    mbp.push(dir, url, "charge-refuse-empty");
     await page.goto(`${BASE}/${full}/branches`);
-    const row = page.getByRole("list", { name: "Open branches" }).getByRole("link").filter({ hasText: "pay-1" });
+    const row = page.getByRole("list", { name: "Open branches" }).getByRole("link").filter({ hasText: "charge-refuse-empty" });
 
-    await expect(row.getByText("High", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(row.getByText(/^(High|Medium|Low)$/)).toBeVisible({ timeout: 30_000 });
     await row.click();
-    await expect(page.getByLabel("Risk: High, human review required")).toBeVisible();
+    await expect(page.getByLabel(/^Risk: (High|Medium|Low), human review required$/)).toBeVisible();
     await expect(page.getByText("Human review required", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Risk review")).toContainText("A person's approval is needed on this head.");
 
@@ -76,19 +82,22 @@ test("risk-based review: the meter, the held merge, the guided review, Approve, 
     const guide = page.getByLabel("Guided review");
 
     await expect(guide).toBeVisible();
-    await expect(guide.getByRole("link", { name: "Open the guided review" })).toBeVisible({ timeout: 240_000 });
     await expect(page.getByLabel("Risk review")).toContainText("Security", { timeout: 240_000 });
+    await expect(guide.getByRole("link", { name: "Open the guided review" })).toBeVisible({ timeout: 300_000 });
+    await page.screenshot({ path: "e2e/.state/risk-human.png" });
     await guide.getByRole("link", { name: "Open the guided review" }).click();
     await expect(page).toHaveURL(/tab=artifacts.*artifact=guided-review\.html/);
     await expect(page.locator("iframe").first()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(3_000);
     await page.screenshot({ path: "e2e/.state/risk-guide.png" });
     await page.goBack();
-    await page.screenshot({ path: "e2e/.state/risk-human.png" });
 
-    // A person approves; the merge is ready.
+    // A person approves; the merge goes through.
     await page.getByLabel("Risk review").getByRole("button", { name: "Approve" }).click();
-    await expect(page.getByLabel(`Risk: High, approved by ann-${id}`)).toBeVisible();
+    await expect(page.getByLabel(/^Risk: (High|Medium|Low), approved by ann-/)).toBeVisible();
     await expect(page.getByText("Ready to merge")).toBeVisible();
+    await page.getByRole("button", { name: "Merge", exact: true }).click();
+    await expect(page.getByText("Merged into main")).toBeVisible();
 
     // Settings: the project's switch, off then on.
     await page.goto(`${BASE}/${full}/settings`);
@@ -98,7 +107,7 @@ test("risk-based review: the meter, the held merge, the guided review, Approve, 
     await page.screenshot({ path: "e2e/.state/risk-settings.png", fullPage: true });
     await section.getByRole("switch", { name: /^Risk-based review for/ }).click();
     await expect(section).toContainText("Off");
-    await page.goto(`${BASE}/${full}/branches/pay-1`);
+    await page.goto(`${BASE}/${full}/branches/charge-refuse-empty`);
     await expect(page.locator("[data-risk]")).toHaveCount(0);
     await page.goto(`${BASE}/${full}/settings`);
     await page.getByRole("list", { name: "Risk-based review" }).getByRole("switch", { name: /^Risk-based review for/ }).click();

@@ -2481,7 +2481,7 @@ paths:
     patch:
       operationId: updateRepo
       summary: A project's settings (owners)
-      description: "`releases_public`: the switch \"Anyone can download releases\" (release files only, never code)."
+      description: "`releases_public`: the switch \"Anyone can download releases\" (release files only, never code). `review`: risk-based review's switch and thresholds (docs/risk-review/DESIGN.md); a change counts at once for every open branch. Either or both."
       tags: [repos, releases]
       requestBody:
         required: true
@@ -2489,9 +2489,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [releases_public]
               properties:
                 releases_public: { type: boolean }
+                review:
+                  type: object
+                  description: "Any of: `enabled`, `auto_below` and `human_above` (0 to 1, rounded to hundredths, auto_below not above human_above), `human_for_sensitive`."
+                  properties:
+                    enabled: { type: boolean }
+                    auto_below: { type: number }
+                    human_above: { type: number }
+                    human_for_sensitive: { type: boolean }
       responses:
         "200":
           description: OK
@@ -2881,7 +2888,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "412":
-          description: "`checks_not_green`, with `checks`."
+          description: "`checks_not_green`, with `checks`. `review_required`, with `review`: the head's risk calls for reviewer agents that have not all posted (or one asked for changes), or for a person's approval; an owner's force=1 goes past it, an agent's never. `risk_pending`, with `review`: the head is being scored (about a second); try again."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4986,6 +4993,9 @@ components:
         releases_public:
           type: boolean
           description: The switch "Anyone can download releases" (getRepo only). On, the project's release files download without signing in; never its code.
+        review:
+          type: object
+          description: "Risk-based review (getRepo only): `enabled`, `auto_below` (0.35), `human_above` (0.70), `human_for_sensitive` (true), and `sensitive`, the paths `[review] sensitive` in .pando/pando.toml names as the last scored push read it, else the defaults."
         created_at: { type: string, format: date-time }
         created_by: { type: string }
     Branch:
@@ -5030,9 +5040,12 @@ components:
         merged_machine: { type: [string, "null"], description: "The name of the credential used to merge: the machine or sandbox." }
         merged_agent: { type: [string, "null"], description: "The agent that merged, from X-Pando-Agent, if one said so." }
         pushed_machine: { type: [string, "null"], description: "The name of the credential that last pushed the branch: the machine or sandbox." }
-        forced: { type: [boolean, "null"], description: "True when the merge went past red or missing checks with force=1." }
+        forced: { type: [boolean, "null"], description: "True when the merge went past red or missing checks, or a required review, with force=1." }
         created_at: { type: [string, "null"], format: date-time }
         updated_at: { type: [string, "null"], format: date-time }
+        review:
+          type: [object, "null"]
+          description: "Risk-based review of the head (packages/contract/src/review.ts BranchReview): state (classifying, done), score (0 to 1, null when unknown), level (low, medium, high, unknown), rule (comments_and_docs or null), tier (auto, ai, human), reasons, sensitive_paths, model, tokens, cost_usd, error, reviewers (profile, label, session, state, verdict), guide_state and guide (the artifact guided-review.html), approved_by, passes and why. Null when the project has it off."
     CiState:
       type: string
       enum: [queued, running, blocked, passed, failed, canceled, skipped]
@@ -5364,6 +5377,7 @@ components:
           items: { $ref: "#/components/schemas/ReviewComment" }
         author: { type: string }
         created_at: { type: string, format: date-time }
+        session: { type: [integer, "null"], description: "The agent session that posted it (a reviewer agent, Review with agent); null for a person's." }
     MergeResult:
       type: object
       required: [status, branch, head]

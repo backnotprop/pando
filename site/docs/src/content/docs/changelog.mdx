@@ -9,6 +9,10 @@ What changed in Pando, newest first. Dates are UTC.
 
 ## 2026-10-13
 
+### Risk-based review: comments merge, risky changes wait for a person
+
+Every push to a branch is scored for risk. Comments, docs and blank lines merge on green checks with no review and no model call. Anything else is scored by Cloudflare's clef model on Workers AI: low risk merges as before, medium gets two reviewer agents (Correctness and Security), and high, a sensitive path such as `payments/`, or a change to who can do what waits for a person's approval, with a guided review of the change already on the branch. The branch page shows the risk meter, the reviewers and Approve; owners set the thresholds in Settings. See [Risk-based review](/risk-review/) and [Limits](/limits/#risk-based-review).
+
 ### CI can build a cloud agent's push
 
 A push from an agent that Pando runs on Cloudflare used to send its CI build and web hooks clone and status addresses that only the agent's sandbox could reach, so the build failed at its first `git fetch`. It now sends https://app.gitpando.com, as a push from your machine does. See [Limits](/limits/#hooks).

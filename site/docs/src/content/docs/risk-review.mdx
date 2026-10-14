@@ -23,6 +23,8 @@ Each push to a branch other than main is scored once for its head. A new head is
 
 A person's approval on the head passes any tier. An owner can still **Merge anyway** (recorded as forced); an agent never can.
 
+The review comes before the checks. A merge is refused for risk first (`risk_pending`, then `review_required`), and only then for checks (`checks_not_green`). So in a project whose checks run on merge, a branch waiting for a person or for its reviewer agents starts no build; its build starts on the first merge after the review passes. The reviewer agents run the tests in their own sandboxes and do not wait for CI.
+
 ## On the branch page
 
 - **The risk meter** under the title: the level, the tier and the score, such as **High · human review required 0.94**. Hover it for the reasons: sensitive paths touched, files deleted, the size, and what the model read.

@@ -34,6 +34,8 @@ export const CiBuild = Schema.Struct({
   duration_s: Schema.NullOr(Count),
   /** The service's id of the build this one rebuilt. */
   rebuilt_from: Schema.NullOr(Schema.String),
+  /** The newer head of its branch that Pando cancelled it for (a push superseded it); null otherwise. */
+  superseded_by: Schema.NullOr(Sha),
 });
 
 export interface CiBuild extends Schema.Schema.Type<typeof CiBuild> {}

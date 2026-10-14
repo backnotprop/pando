@@ -51,6 +51,35 @@ export interface HookJob {
 
 export type HookResult = AttemptResult & { ms: number };
 
+/** A superseded build to cancel: the hook that started it and its number in the pipeline. */
+export interface CancelJob {
+  delivery_id: string;
+  hook: HookRow;
+  number: number;
+}
+
+/** canceled; finished (Buildkite had nothing to cancel: it was done); or failed, with why. */
+export interface CancelResult {
+  outcome: "canceled" | "finished" | "failed";
+  error: string | null;
+}
+
+/** A build cancelled for a newer push: what the object marks (the build's row, the old head's checks). */
+export interface Superseded {
+  delivery_id: string;
+  repo: string;
+  /** The head the build was for, and the newer head that replaced it. */
+  head: string;
+  by: string;
+  number: number;
+}
+
+/** A newer push on a branch looks back this far for builds to cancel (owner limit: a build older than a day has finished). */
+const SUPERSEDE_LOOKBACK_MS = 24 * 3600_000;
+
+/** At most this many earlier deliveries are looked at per push (the burst a branch can have in flight). */
+const SUPERSEDE_MAX = 50;
+
 /** Due rows handed out in one step, and the lease they carry. */
 interface Taken {
   jobs: HookJob[];
@@ -74,9 +103,19 @@ export class HooksOut {
     private repoOf: (name: string) => { artifacts_name: string } | null,
     private mainOf: (repo: string) => string | null,
     private keptAttempts: number,
+    /** A build was cancelled for a newer push: the object marks its row and the old head's checks. */
+    private onSuperseded: (s: Superseded) => void,
+    /** A build Pando knows finished (a CI connection's webhooks said so): nothing to cancel. */
+    private buildFinished: (deliveryId: string) => boolean,
   ) {}
 
-  /** `tries`: the tries in the current round (attempts counts them all). */
+  /**
+   * `tries`: the tries in the current round (attempts counts them all).
+   * A Buildkite delivery keeps the build it made (`build_number`); a newer
+   * push sets `superseded_by` and `cancel`: waiting (its answer is not in
+   * yet), pending, sending (leased at `cancel_at`), canceled, finished
+   * (Buildkite had nothing to cancel) or failed: <why>.
+   */
   ensureSchema(): void {
     const cols = this.rows<{ name: string }>("PRAGMA table_info(deliveries)").map((c) => c.name);
 
@@ -85,6 +124,50 @@ export class HooksOut {
       // Rows the queue was retrying keep their place in the schedule.
       this.sql.exec("UPDATE deliveries SET tries = attempts WHERE status = 'retrying'");
     }
+
+    for (const [col, type] of [["build_number", "INTEGER"], ["superseded_by", "TEXT"], ["cancel", "TEXT"], ["cancel_at", "TEXT"]]) {
+      if (!cols.includes(col)) this.sql.exec(`ALTER TABLE deliveries ADD COLUMN ${col} ${type}`);
+    }
+  }
+
+  /**
+   * A new head on a branch: the hook's earlier builds of the branch are
+   * superseded. One not sent yet is never sent; one in flight is cancelled
+   * when its answer names its build; one Buildkite took is cancelled now,
+   * unless Pando knows it finished. Answers whether one of them was a build
+   * a merge asked for (on_merge: the merge still waits, so the new head builds).
+   */
+  supersede(hookId: string, repo: string, branch: string, head: string): boolean {
+    const since = new Date(Date.now() - SUPERSEDE_LOOKBACK_MS).toISOString();
+
+    const earlier = this.rows<{ id: string; status: string; sent_at: string | null; build_number: number | null; for_merge: number | null }>(
+      `SELECT id, status, sent_at, build_number, json_extract(payload, '$.for_merge') AS for_merge FROM deliveries
+       WHERE hook_id = ? AND repo = ? AND event IN ('push', 'branch.opened') AND superseded_by IS NULL
+         AND status IN ('queued', 'retrying', 'delivered') AND created_at > ?
+         AND json_extract(payload, '$.branch') = ? AND json_extract(payload, '$.head') != ?
+       ORDER BY created_at DESC LIMIT ?`,
+      hookId, repo, since, branch, head, SUPERSEDE_MAX,
+    );
+
+    let forMerge = false;
+    let cancels = false;
+
+    for (const d of earlier) {
+      if (d.status !== "delivered" && d.sent_at === null) {
+        this.sql.exec("UPDATE deliveries SET status = 'superseded', superseded_by = ?, next_attempt_at = NULL WHERE id = ?", head, d.id);
+      } else if (d.status !== "delivered") {
+        this.sql.exec("UPDATE deliveries SET superseded_by = ?, cancel = 'waiting' WHERE id = ?", head, d.id);
+      } else if (d.build_number !== null && !this.buildFinished(d.id)) {
+        this.sql.exec("UPDATE deliveries SET superseded_by = ?, cancel = 'pending' WHERE id = ?", head, d.id);
+        cancels = true;
+      } else continue; // finished, or no build number to cancel by
+
+      if (d.for_merge === 1) forMerge = true;
+    }
+
+    if (cancels) this.kick();
+
+    return forMerge;
   }
 
   private rows<T extends Row>(q: string, ...args: SqlStorageValue[]): T[] {
@@ -120,7 +203,8 @@ export class HooksOut {
     const at = now();
 
     for (const id of ids) {
-      this.sql.exec("UPDATE deliveries SET status = 'queued', tries = 0, next_attempt_at = ?, sent_at = NULL WHERE id = ?", at, id);
+      // Asked for again: no longer superseded.
+      this.sql.exec("UPDATE deliveries SET status = 'queued', tries = 0, next_attempt_at = ?, sent_at = NULL, superseded_by = NULL, cancel = NULL WHERE id = ?", at, id);
     }
 
     if (ids.length) this.kick();
@@ -133,6 +217,12 @@ export class HooksOut {
 
     if (!m) return { jobs: [], lease };
     const expired = new Date(Date.now() - this.lease()).toISOString();
+    // A row superseded while in flight whose answer never came: not sent again.
+    this.sql.exec(
+      `UPDATE deliveries SET status = 'superseded', cancel = NULL, next_attempt_at = NULL, sent_at = NULL
+       WHERE status IN ('queued', 'retrying') AND superseded_by IS NOT NULL AND (sent_at IS NULL OR sent_at <= ?)`,
+      expired,
+    );
 
     const due = this.rows<{ id: string; hook_id: string; repo: string; payload: string; tries: number; created_at: string; next_attempt_at: string | null }>(
       `SELECT id, hook_id, repo, payload, tries, created_at, next_attempt_at FROM deliveries
@@ -171,18 +261,69 @@ export class HooksOut {
     return { jobs, lease };
   }
 
-  /** Hand out every due row, one per call, CALLS_AT_ONCE side by side. Never rejects. */
+  /** Hand out every due row, one per call, CALLS_AT_ONCE side by side; then the cancels due. Never rejects. */
   async sendDue(): Promise<void> {
     try {
       for (let round = 0; round < 20; round++) {
         const { jobs, lease } = this.take(ROUND_MAX);
 
-        if (!jobs.length) return;
+        if (!jobs.length) break;
         await pool(jobs, CALLS_AT_ONCE, (j) => this.drain([j], lease));
       }
+
+      await this.sendCancels();
     } catch (err) {
       console.error("hooks: draining the outbox failed; the alarm retries:", err instanceof Error ? (err.stack ?? err.message) : String(err));
     }
+  }
+
+  /**
+   * Cancel the superseded builds due: one try each (a lost cancel costs one
+   * build, never a wrong check). A row leased and not answered within the
+   * lease is sent again by the alarm.
+   */
+  private async sendCancels(): Promise<void> {
+    const lease = now();
+    const expired = new Date(Date.now() - this.lease()).toISOString();
+
+    const due = this.rows<{ id: string; hook_id: string; repo: string; build_number: number; superseded_by: string; head: string }>(
+      `SELECT id, hook_id, repo, build_number, superseded_by, json_extract(payload, '$.head') AS head FROM deliveries
+       WHERE cancel = 'pending' OR (cancel = 'sending' AND cancel_at <= ?) LIMIT ?`,
+      expired, ROUND_MAX,
+    );
+
+    const jobs: CancelJob[] = [];
+
+    for (const d of due) {
+      const hook = this.rows<HookRow>("SELECT * FROM hooks WHERE id = ?", d.hook_id)[0];
+
+      if (!hook) {
+        this.sql.exec("UPDATE deliveries SET cancel = 'failed: its hook was deleted' WHERE id = ?", d.id);
+        continue;
+      }
+
+      this.sql.exec("UPDATE deliveries SET cancel = 'sending', cancel_at = ? WHERE id = ?", lease, d.id);
+      jobs.push({ delivery_id: d.id, hook, number: d.build_number });
+    }
+
+    if (!jobs.length) return;
+    this.armAt(Date.now() + this.lease() + 1_000);
+    let results: CancelResult[];
+
+    try {
+      results = released(await this.ctx.exports.HooksDrain.cancel(jobs));
+    } catch (err) {
+      results = jobs.map(() => ({ outcome: "failed", error: `the cancel call failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300) }));
+    }
+
+    jobs.forEach((j, i) => {
+      const r = results[i] ?? { outcome: "failed", error: "no answer" };
+      const d = due.find((x) => x.id === j.delivery_id)!;
+      const word = r.outcome === "failed" ? `failed: ${r.error ?? "unknown"}`.slice(0, 300) : r.outcome;
+      const changed = this.sql.exec("UPDATE deliveries SET cancel = ? WHERE id = ? AND cancel = 'sending' AND cancel_at = ?", word, j.delivery_id, lease).rowsWritten;
+
+      if (changed && r.outcome === "canceled") this.onSuperseded({ delivery_id: d.id, repo: d.repo, head: d.head, by: d.superseded_by, number: d.build_number });
+    });
   }
 
   private async drain(jobs: HookJob[], lease: string): Promise<void> {
@@ -221,17 +362,24 @@ export class HooksOut {
        (SELECT rowid FROM delivery_attempts WHERE delivery_id = ? ORDER BY rowid DESC LIMIT ?)`,
       j.delivery_id, j.delivery_id, this.keptAttempts,
     );
-    const retryIn = r.ok ? null : (this.delays()[j.attempt - 1] ?? null);
-    const status = r.ok ? "delivered" : retryIn === null ? "dead" : "retrying";
+    // A newer push came while this one was in flight: a failure is not tried again, and a build it made is cancelled.
+    const superseded = this.rows<{ superseded_by: string | null }>("SELECT superseded_by FROM deliveries WHERE id = ?", j.delivery_id)[0]?.superseded_by ?? null;
+    const retryIn = r.ok || superseded ? null : (this.delays()[j.attempt - 1] ?? null);
+    const status = r.ok ? "delivered" : superseded ? "superseded" : retryIn === null ? "dead" : "retrying";
     const next = retryIn === null ? null : Date.now() + retryIn * 1000;
+    const cancel = superseded ? (r.ok && r.build_number != null ? "pending" : null) : undefined;
     // Only while the lease is ours: a redeliver meanwhile starts its own round.
     this.sql.exec(
       `UPDATE deliveries SET status = ?, attempts = attempts + 1, tries = ?, response_code = ?, error = ?, last_attempt_at = ?,
-         next_attempt_at = ?, sent_at = NULL WHERE id = ? AND sent_at = ?`,
-      status, j.attempt, r.code, r.ok ? null : r.error, at, next === null ? null : new Date(next).toISOString(), j.delivery_id, lease,
+         next_attempt_at = ?, sent_at = NULL, build_number = COALESCE(?, build_number), cancel = CASE WHEN ? THEN ? ELSE cancel END
+       WHERE id = ? AND sent_at = ?`,
+      status, j.attempt, r.code, r.ok ? null : r.error, at, next === null ? null : new Date(next).toISOString(), r.build_number ?? null,
+      cancel === undefined ? 0 : 1, cancel ?? null, j.delivery_id, lease,
     );
 
     if (next !== null) this.armAt(next);
+
+    if (cancel === "pending") this.kick();
   }
 
   /** The object's alarm: send what is due (retries, expired leases), then arm for the next. */

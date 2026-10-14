@@ -1,0 +1,21 @@
+{
+  "schema": "Repo",
+  "route": "PATCH .../repos/{repo} {ci_policy: on_merge}",
+  "status": 200,
+  "body": {
+    "monorepo": "cost-mv7al4yu/cost-mv7al4yu",
+    "name": "cost-mv7al4yu",
+    "path": ".",
+    "description": null,
+    "default_branch": "main",
+    "clone_url": "http://localhost:8917/cost-mv7al4yu/cost-mv7al4yu.git",
+    "required_checks": [
+      "ci"
+    ],
+    "checks_unknown": null,
+    "ci_policy": "on_merge",
+    "created_at": "2026-10-13T23:08:32.097Z",
+    "created_by": "cost-mv7al4yu",
+    "releases_public": false
+  }
+}

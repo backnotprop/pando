@@ -5,36 +5,36 @@
   "body": {
     "releases": [
       {
-        "repo": "rel-mv7dd86l",
+        "repo": "rel-mv7ankp5",
         "tag": "v0.3.0",
-        "sha": "fd75fb5f1c5ce204c3b65de2b679b318d6bd7669",
+        "sha": "44ec29e6a9285edb3dd7792e557f9f89bb412ccf",
         "title": "v0.3.0",
         "notes": "",
         "draft": false,
         "forced": true,
-        "created_by": "rel-mv7dd86l",
-        "created_at": "2026-10-14T00:26:59.345Z",
-        "updated_at": "2026-10-14T00:26:59.973Z",
-        "published_by": "rel-mv7dd86l",
-        "published_at": "2026-10-14T00:26:59.973Z",
+        "created_by": "rel-mv7ankp5",
+        "created_at": "2026-10-13T23:11:02.047Z",
+        "updated_at": "2026-10-13T23:11:02.633Z",
+        "published_by": "rel-mv7ankp5",
+        "published_at": "2026-10-13T23:11:02.633Z",
         "files": []
       },
       {
-        "repo": "rel-mv7dd86l",
+        "repo": "rel-mv7ankp5",
         "tag": "v0.2.0",
-        "sha": "0d773e5267b833a64a86f5fab89d06a07e117409",
+        "sha": "0cbd56062760505511f0d0a5c69bd3683f986a25",
         "title": "v0.2.0",
-        "notes": "## Changes since v0.1.0\n\n- Add release notes (`feat-d`) by rel-mv7dd86l\n",
+        "notes": "## Changes since v0.1.0\n\n- Add release notes (`feat-d`) by rel-mv7ankp5\n",
         "draft": false,
         "forced": false,
-        "created_by": "rel-b-mv7dd86l",
-        "created_at": "2026-10-14T00:26:54.672Z",
-        "updated_at": "2026-10-14T00:26:55.172Z",
-        "published_by": "rel-b-mv7dd86l",
-        "published_at": "2026-10-14T00:26:55.172Z",
+        "created_by": "rel-b-mv7ankp5",
+        "created_at": "2026-10-13T23:10:56.935Z",
+        "updated_at": "2026-10-13T23:10:57.462Z",
+        "published_by": "rel-b-mv7ankp5",
+        "published_at": "2026-10-13T23:10:57.462Z",
         "files": []
       }
     ],
-    "next_cursor": "MjAyNi0xMC0xNFQwMDoyNjo1NS4xNzJaIHJlbF83ZTRmZWY1YzUwN2MzYzE2"
+    "next_cursor": "MjAyNi0xMC0xM1QyMzoxMDo1Ny40NjJaIHJlbF9jNDBmMzU4MTlkODIxNjJh"
   }
 }

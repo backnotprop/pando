@@ -146,10 +146,11 @@ func decodeError(status int, data []byte) error {
 			Message string   `json:"message"`
 			Paths   []string `json:"paths"`
 			Checks  *Checks  `json:"checks"`
+			Started bool     `json:"checks_started"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(data, &e) == nil {
-		ae.Code, ae.Message, ae.Paths, ae.Checks = e.Error.Code, e.Error.Message, e.Error.Paths, e.Error.Checks
+		ae.Code, ae.Message, ae.Paths, ae.Checks, ae.ChecksStarted = e.Error.Code, e.Error.Message, e.Error.Paths, e.Error.Checks, e.Error.Started
 	} else if s := strings.TrimSpace(string(data)); s != "" && len(s) < 300 {
 		ae.Message = s
 	}

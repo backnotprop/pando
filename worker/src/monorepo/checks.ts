@@ -79,11 +79,13 @@ export function combine(sha: string | null, req: Required, all: StatusRecord[]):
 
   for (const s of all) latest.set(s.context, s); // `all` is oldest first
   const statuses = [...latest.values()];
+  // A superseded check (its build was cancelled for a newer push) never finished: it counts as not reported.
+  const reported = statuses.filter((s) => s.state !== "superseded");
   const required = req.list;
 
   if (required === null) return { sha, state: "unknown", required: null, missing: [], statuses, checks_unknown: req.unknown };
-  const missing = required.filter((c) => !latest.has(c));
-  const considered = required.length ? statuses.filter((s) => required.includes(s.context)) : statuses;
+  const missing = required.filter((c) => !reported.some((s) => s.context === c));
+  const considered = required.length ? reported.filter((s) => required.includes(s.context)) : reported;
   let state: Checks["state"] = "success";
 
   if (considered.some((s) => s.state === "failure")) state = "failure";
@@ -104,7 +106,7 @@ export type BuildState = Checks["state"] | "not_built";
  * with no CI still merges as before.
  */
 export function buildState(c: Checks): BuildState {
-  return c.state === "success" && c.statuses.length === 0 ? "not_built" : c.state;
+  return c.state === "success" && c.statuses.every((s) => s.state === "superseded") ? "not_built" : c.state;
 }
 
 /**

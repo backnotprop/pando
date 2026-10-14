@@ -3,15 +3,15 @@
   "route": "POST .../repos/{repo}/deployments",
   "status": 201,
   "body": {
-    "id": "dep_9a88bbda8fb3763a",
-    "repo": "rel-mv7dd86l",
+    "id": "dep_ecbea0ca72833cc7",
+    "repo": "rel-mv7ankp5",
     "environment": "pando-dev",
-    "sha": "0d773e5267b833a64a86f5fab89d06a07e117409",
+    "sha": "0cbd56062760505511f0d0a5c69bd3683f986a25",
     "release": "v0.2.0",
     "state": "success",
     "url": "https://pando-dev.example.invalid",
     "description": "deploy.sh",
-    "created_by": "rel-b-mv7dd86l",
-    "created_at": "2026-10-14T00:27:06.308Z"
+    "created_by": "rel-b-mv7ankp5",
+    "created_at": "2026-10-13T23:11:10.701Z"
   }
 }

@@ -3,34 +3,34 @@
   "route": "GET .../releases/latest",
   "status": 200,
   "body": {
-    "repo": "rel-mv7dd86l",
+    "repo": "rel-mv7ankp5",
     "tag": "v0.1.0",
-    "sha": "72e08ba7e3e300c776fc07edb2e756ee5a9f6534",
+    "sha": "b9c977bdff5548e4066a86977471088f855605de",
     "title": "The first release",
-    "notes": "## Changes\n\n- Add the missing page (`feat-c`) by rel-mv7dd86l, closes #2\n- Speed up the gate (`feat-b`) by rel-mv7dd86l, closes #1\n- Add feature A (`feat-a`) by rel-mv7dd86l\n",
+    "notes": "## Changes\n\n- Add the missing page (`feat-c`) by rel-mv7ankp5, closes #2\n- Speed up the gate (`feat-b`) by rel-mv7ankp5, closes #1\n- Add feature A (`feat-a`) by rel-mv7ankp5\n",
     "draft": false,
     "forced": false,
-    "created_by": "rel-mv7dd86l",
-    "created_at": "2026-10-14T00:26:48.234Z",
-    "updated_at": "2026-10-14T00:26:50.533Z",
-    "published_by": "rel-b-mv7dd86l",
-    "published_at": "2026-10-14T00:26:49.040Z",
+    "created_by": "rel-mv7ankp5",
+    "created_at": "2026-10-13T23:10:50.090Z",
+    "updated_at": "2026-10-13T23:10:52.932Z",
+    "published_by": "rel-b-mv7ankp5",
+    "published_at": "2026-10-13T23:10:51.389Z",
     "files": [],
     "checks": {
-      "sha": "72e08ba7e3e300c776fc07edb2e756ee5a9f6534",
+      "sha": "b9c977bdff5548e4066a86977471088f855605de",
       "state": "success",
       "required": [],
       "missing": [],
       "statuses": [
         {
-          "sha": "72e08ba7e3e300c776fc07edb2e756ee5a9f6534",
+          "sha": "b9c977bdff5548e4066a86977471088f855605de",
           "context": "ci",
           "state": "success",
           "target_url": null,
           "description": null,
-          "creator": "rel-mv7dd86l",
+          "creator": "rel-mv7ankp5",
           "app": null,
-          "created_at": "2026-10-14T00:26:48.536Z"
+          "created_at": "2026-10-13T23:10:50.846Z"
         }
       ],
       "checks_unknown": null

@@ -7,7 +7,7 @@
 # engine in a VM, for the containers and FUSE; never FUSE on the Mac), runs
 # the local server on PORT, INSPECTOR and STATE (defaults 8863, 9363,
 # agents/.state), then session.mjs, the same session after a full restart,
-# launch.mjs, existing-branch.mjs, tools.mjs, scope.mjs, issue.mjs, live.mjs, continue.mjs, review.mjs, assistant.mjs and sync.mjs; then risk-review.mjs on the same server restarted with RISK_REVIEW=on and RISK_TEST=1; then Pando's Worker alone (serve.sh start-alone) for absent.mjs. Afterwards it stops the server, stops Colima only if it
+# launch.mjs, existing-branch.mjs, tools.mjs, merge-on-merge.mjs, scope.mjs, issue.mjs, live.mjs, continue.mjs, review.mjs, assistant.mjs and sync.mjs; then risk-review.mjs on the same server restarted with RISK_REVIEW=on and RISK_TEST=1; then Pando's Worker alone (serve.sh start-alone) for absent.mjs. Afterwards it stops the server, stops Colima only if it
 # started it, and puts the Docker context back. One line per suite; exit 1
 # when any failed. Logs: $STATE/gate-*.log and $STATE/wrangler.log.
 set -uo pipefail
@@ -57,6 +57,7 @@ fi
 suite "launch (stage 2)" launch node "$here/test/launch.mjs"
 suite "existing branch" existing node "$here/test/existing-branch.mjs"
 suite "tools (stage 3)" tools node "$here/test/tools.mjs"
+suite "merge when checks run on merge" on-merge node "$here/test/merge-on-merge.mjs"
 suite "credential scope" scope node "$here/test/scope.mjs"
 suite "address an issue (stage 4)" issue node "$here/test/issue.mjs"
 suite "live view (stage 5)" live node "$here/test/live.mjs"

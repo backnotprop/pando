@@ -1,0 +1,24 @@
+{
+  "schema": "ErrorBody",
+  "route": "POST .../branches/{branch}/merge (on_merge: 412 checks_not_green, checks_started)",
+  "status": 412,
+  "body": {
+    "error": {
+      "code": "checks_not_green",
+      "message": "checks started for this merge on e90694fc400d; they are running. Merge again when they are green",
+      "checks": {
+        "sha": "e90694fc400d1e97792b2fac02b6277469a30d83",
+        "state": "missing",
+        "required": [
+          "ci"
+        ],
+        "missing": [
+          "ci"
+        ],
+        "statuses": [],
+        "checks_unknown": null
+      },
+      "checks_started": true
+    }
+  }
+}

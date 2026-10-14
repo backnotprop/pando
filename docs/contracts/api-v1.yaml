@@ -2481,8 +2481,19 @@ paths:
     patch:
       operationId: updateRepo
       summary: A project's settings (owners)
-      description: "`releases_public`: the switch \"Anyone can download releases\" (release files only, never code). `review`: risk-based review's switch and thresholds (docs/risk-review/DESIGN.md); a change counts at once for every open branch. Either or both."
-      tags: [repos, releases]
+      description: |
+        Any of them. `releases_public`: the switch "Anyone can download
+        releases" (release files only, never code). `ci_policy`: when the
+        project's CI builds run. `every_push` (the default) builds each push to
+        a branch; a newer push cancels the build of the branch's old head.
+        `on_merge` builds nothing on push: the first unforced merge of a head
+        starts its build and answers 412 `checks_not_green` with
+        `checks_started`, and the merge lands once the required checks are
+        green. `main_only` never builds a branch. Main's merge commit builds
+        under all three, and is never cancelled. `review`: risk-based review's
+        switch and thresholds (docs/risk-review/DESIGN.md); a change counts at
+        once for every open branch.
+      tags: [repos, releases, ci]
       requestBody:
         required: true
         content:
@@ -2491,6 +2502,7 @@ paths:
               type: object
               properties:
                 releases_public: { type: boolean }
+                ci_policy: { $ref: "#/components/schemas/CiPolicy" }
                 review:
                   type: object
                   description: "Any of: `enabled`, `auto_below` and `human_above` (0 to 1, rounded to hundredths, auto_below not above human_above), `human_for_sensitive`."
@@ -2888,7 +2900,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "412":
-          description: "`checks_not_green`, with `checks`. `review_required`, with `review`: the head's risk calls for reviewer agents that have not all posted (or one asked for changes), or for a person's approval; an owner's force=1 goes past it, an agent's never. `risk_pending`, with `review`: the head is being scored (about a second); try again."
+          description: "In this order: `risk_pending`, then `review_required` (risk-based review: a held head starts no build), then `checks_not_green`, with `checks` (and `checks_started` when this merge started them under on_merge). `review_required`, with `review`: the head's risk calls for reviewer agents that have not all posted (or one asked for changes), or for a person's approval; an owner's force=1 goes past it, an agent's never. `risk_pending`, with `review`: the head is being scored (about a second); try again."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -3078,7 +3090,7 @@ paths:
               type: object
               required: [state]
               properties:
-                state: { $ref: "#/components/schemas/StatusState" }
+                state: { type: string, enum: [pending, success, failure, error], description: "GitHub's four; `superseded` is Pando's own." }
                 context: { type: string, default: default }
                 target_url: { type: string }
                 description: { type: string }
@@ -4571,6 +4583,8 @@ components:
               type: array
               items: { type: string }
             checks: { $ref: "#/components/schemas/Checks" }
+            checks_started: { type: boolean, description: "A refused merge started the branch's checks (the project's ci_policy is on_merge)." }
+            review: { type: object, description: "412 review_required and risk_pending: the head's risk-based review (Branch.review's shape)." }
     Monorepo:
       type: object
       required: [id, owner, name, full_name, kind, created_at]
@@ -4993,6 +5007,7 @@ components:
         releases_public:
           type: boolean
           description: The switch "Anyone can download releases" (getRepo only). On, the project's release files download without signing in; never its code.
+        ci_policy: { $ref: "#/components/schemas/CiPolicy" }
         review:
           type: object
           description: "Risk-based review (getRepo only): `enabled`, `auto_below` (0.35), `human_above` (0.70), `human_for_sensitive` (true), and `sensitive`, the paths `[review] sensitive` in .pando/pando.toml names as the last scored push read it, else the defaults."
@@ -5119,6 +5134,7 @@ components:
         finished_at: { type: [string, "null"], format: date-time }
         duration_s: { type: [integer, "null"] }
         rebuilt_from: { type: [string, "null"], description: The service's id of the build this one rebuilt. }
+        superseded_by: { type: [string, "null"], description: "The newer head of its branch that Pando cancelled it for (a push superseded it)." }
     CiJob:
       type: object
       required: [id, build, type, state, service_state, check]
@@ -5162,7 +5178,12 @@ components:
         state: { type: [string, "null"] }
     StatusState:
       type: string
-      enum: [pending, success, failure, error]
+      enum: [pending, success, failure, error, superseded]
+      description: "GitHub's four, and `superseded`: written by Pando when a newer push cancelled the build reporting the check. A superseded check counts as not reported."
+    CiPolicy:
+      type: string
+      enum: [every_push, on_merge, main_only]
+      description: "When a project's CI builds run (updateRepo). In the repo list and getRepo."
     Status:
       type: object
       required: [sha, context, state, created_at]

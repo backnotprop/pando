@@ -12,6 +12,9 @@ What changed in Pando, newest first. Dates are UTC.
 ### Risk-based review: comments merge, risky changes wait for a person
 
 Every push to a branch is scored for risk. Comments, docs and blank lines merge on green checks with no review and no model call. Anything else is scored by Cloudflare's clef model on Workers AI: low risk merges as before, medium gets two reviewer agents (Correctness and Security), and high, a sensitive path such as `payments/`, or a change to who can do what waits for a person's approval, with a guided review of the change already on the branch. The branch page shows the risk meter, the reviewers and Approve; owners set the thresholds in Settings. See [Risk-based review](/risk-review/) and [Limits](/limits/#risk-based-review).
+### CI costs: a newer push cancels the old build, and each project chooses when checks run
+
+A push to a branch whose previous commit is still building now cancels that build in Buildkite and builds the new commit; the old commit's checks read superseded, not failed, and the CI page says which commit replaced it. Main's merge commit builds are never cancelled. An owner can also set, per project in Settings, when checks run: every push (as before), on merge (a push builds nothing; Merge, `pando merge` or an agent's merge tool starts the build and waits for green), or main only. For one agent pushing 1,000 times a day with 10-minute builds, that is 1,000 builds at every push, about 100 when its pushes come in bursts of ten, and one per merge on merge. See [When checks run](/ci/#when-checks-run-and-what-ci-costs) and [Limits](/limits/#ci-with-buildkite).
 
 ### CI can build a cloud agent's push
 

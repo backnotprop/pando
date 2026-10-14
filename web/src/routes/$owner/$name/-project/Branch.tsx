@@ -181,6 +181,8 @@ interface Answer {
   code: string;
   message: string;
   paths: readonly string[];
+  /** The refusal started the branch's checks (the project's checks run on merge). */
+  started: boolean;
 }
 
 /** The Merge box: ready, conflicting, failing, waiting, merged; and what a refused Merge said. */
@@ -195,7 +197,7 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
   const landing = useMutation({
     mutationFn: (force: boolean) => merge(monorepo, repo.name, b.name, b.head, force),
     onSuccess: async (out) => {
-      if (out.refused) setAnswer({ head: b.head, code: out.refused.error.code, message: out.refused.error.message, paths: out.refused.error.paths ?? [] });
+      if (out.refused) setAnswer({ head: b.head, code: out.refused.error.code, message: out.refused.error.message, paths: out.refused.error.paths ?? [], started: out.refused.error.checks_started === true });
 
       await refresh();
     },
@@ -276,13 +278,28 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
       </>
     );
   } else {
-    // Risk-based review holds the merge until its review is done (Risk.tsx): an owner can still merge anyway.
+    // Risk-based review holds the merge until its review is done (Risk.tsx), before any check starts: an owner can still merge anyway.
     const held = b.review && !b.review.passes ? b.review : null;
-    const force = s.tone !== "ready" || !!held;
     const heldWord = held?.state === "classifying" ? "Risk score pending" : held?.tier === "human" ? "Human review required" : "Waiting for review";
     const reviewSaid = said && (said.code === "review_required" || said.code === "risk_pending") ? said.message : null;
+    // Checks run on merge and none has reported: Merge starts them (not a forced merge), once per head.
+    const startsChecks = !held && repo.ci_policy === "on_merge" && b.checks.statuses.every((x) => x.state === "superseded") && !said;
+    const started = said?.started === true && b.checks.statuses.every((x) => x.state === "superseded");
+    const force = (s.tone !== "ready" && !startsChecks) || !!held;
 
-    const heading = failed ? (
+    const heading = started ? (
+      <p key="started" className={`${big} text-bark-dim ${arrives}`}>
+        Checks started for this merge
+      </p>
+    ) : held ? (
+      <p key={line} className={`${big} ${held.tier === "human" ? "text-rust" : "text-bark-dim"} ${arrives}`}>
+        {heldWord}
+      </p>
+    ) : startsChecks && !failed ? (
+      <p key="on-merge" className={`${big} text-bark-dim ${arrives}`}>
+        Checks run when you merge
+      </p>
+    ) : failed ? (
       <p key={line} className={`${big} text-rust ${arrives}`}>
         {failed.app === "buildkite" ? <CheckMark height={12} big /> : null}
         {failed.context} failed
@@ -302,10 +319,6 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
           </>
         )}
       </p>
-    ) : held ? (
-      <p key={line} className={`${big} ${held.tier === "human" ? "text-rust" : "text-bark-dim"} ${arrives}`}>
-        {heldWord}
-      </p>
     ) : (
       <p key={line} className={`${big} ${arrives}`}>
         Ready to merge
@@ -317,7 +330,7 @@ function MergeBox({ repo, b }: { repo: Repo; b: Branch }) {
         {heading}
         {/* While pando.toml cannot be read, why: after the heading, which says it when nothing else comes first. */}
         {b.checks.state === "unknown" ? <p className={`${q} mt-1.5`}>{s.text === "checks unknown" ? b.checks.checks_unknown : unknownWhy(b)}</p> : null}
-        {reviewSaid ? <p className={`${q} mt-1.5`}>{reviewSaid}</p> : held?.why && !failed && s.tone === "ready" ? <p className={`${q} mt-1.5`}>{held.why[0]?.toUpperCase() + held.why.slice(1)}</p> : null}
+        {reviewSaid ? <p className={`${q} mt-1.5`}>{reviewSaid}</p> : held?.why ? <p className={`${q} mt-1.5`}>{held.why[0]?.toUpperCase() + held.why.slice(1)}</p> : null}
         {moved ? (
           <p className={`${q} mt-1.5`}>
             Moved to <code className="text-[12.5px] text-bark">{b.head.slice(0, 7)}</code>

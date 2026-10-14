@@ -3,14 +3,14 @@
   "route": "GET .../repos/{repo}/summary (nothing reported)",
   "status": 200,
   "body": {
-    "repo": "rel-mv7dd86l",
+    "repo": "rel-mv7ankp5",
     "main": {
       "branch": "main",
-      "sha": "001933d8fae7c129155d7451e2a86975a88b1d36",
-      "title": "first",
+      "sha": "45fa01658668c3e1c6611d5ce151d5910db2422b",
+      "title": null,
       "state": "not_built",
       "checks": {
-        "sha": "001933d8fae7c129155d7451e2a86975a88b1d36",
+        "sha": "45fa01658668c3e1c6611d5ce151d5910db2422b",
         "state": "success",
         "required": [],
         "missing": [],

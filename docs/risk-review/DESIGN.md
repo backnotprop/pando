@@ -95,6 +95,14 @@ know which profile said what.
 - Any tier: a person's approval on this head passes it. An owner's force
   (`?force=1`, not from an agent session) passes it and is recorded as
   forced. Agents never force.
+- Order in mergeNow (since ci-cost, 2026-10-13): risk first, then checks.
+  `risk_pending`, then `review_required`, then `checks_not_green` (with
+  `checks_started` when an on_merge project's merge starts the build). A
+  head that waits for a person or its reviewer agents starts no build it
+  may never merge, which is the point of on_merge; the reviewer agents run
+  the tests in their own sandboxes and wait on no CI. The cost: under
+  on_merge a human-tier branch waits for its build after the approval, not
+  during it.
 - No row yet (classifying): 412 `risk_pending` (shaped as checks_not_green, shown as a wait), retried by the agents'
   merge tool (2 s, 5 s, 10 s). A row missing for 60 s counts as `unknown`
   (`human`).
